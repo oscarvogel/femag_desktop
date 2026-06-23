@@ -8,8 +8,10 @@ def smoke_check() -> str:
     load_settings()
     configure_logging()
     from app.models import ALL_MODELS
+    from app.ui.dashboard import future_module_message
 
     assert ALL_MODELS
+    assert future_module_message()
     return "FEMAG smoke OK"
 
 
