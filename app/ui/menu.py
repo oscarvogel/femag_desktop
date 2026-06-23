@@ -1,13 +1,16 @@
 from dataclasses import dataclass
 
 from app.models.security import User
-from app.services.permission_service import MENU, PermissionService
+from app.services.menu_service import MenuNode, MenuService, PLACEHOLDER_MESSAGE
 
 
 @dataclass(frozen=True)
 class MenuItemView:
     title: str
     placeholder: bool = False
+    action_key: str | None = None
+    route_key: str | None = None
+    children: list["MenuItemView"] | None = None
 
 
 @dataclass(frozen=True)
@@ -16,26 +19,30 @@ class MenuSectionView:
     items: list[MenuItemView]
 
 
-FUTURE_MODULES = {
-    "Remitos",
-    "Generar F150",
-    "Hoja resumen / sobre de carga",
-    "Clientes con saldo",
-    "Movimientos",
-    "Registrar pago",
-    "Recibos",
-    "Anulación de pagos",
-    "Importación",
-}
+@dataclass(frozen=True)
+class SidebarTreeSpec:
+    sections: list[MenuSectionView]
+    placeholder_message: str = PLACEHOLDER_MESSAGE
 
 
 def build_menu(user: User) -> list[MenuSectionView]:
-    permission_service = PermissionService()
-    sections = []
-    for section, titles in MENU.items():
-        visible_items = []
-        for title in titles:
-            if permission_service.has_permission(user, section, "ver", title=title):
-                visible_items.append(MenuItemView(title=title, placeholder=title in FUTURE_MODULES))
-        sections.append(MenuSectionView(title=section, items=visible_items))
-    return sections
+    tree = MenuService().get_menu_tree_for_user(user)
+    return [_to_section(node) for node in tree]
+
+
+def build_sidebar_tree_spec(user: User) -> SidebarTreeSpec:
+    return SidebarTreeSpec(sections=build_menu(user))
+
+
+def _to_section(node: MenuNode) -> MenuSectionView:
+    return MenuSectionView(title=node.title, items=[_to_item(child) for child in node.children])
+
+
+def _to_item(node: MenuNode) -> MenuItemView:
+    return MenuItemView(
+        title=node.title,
+        placeholder=node.is_placeholder,
+        action_key=node.action_key,
+        route_key=node.route_key,
+        children=[_to_item(child) for child in node.children],
+    )

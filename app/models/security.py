@@ -1,4 +1,4 @@
-from peewee import BooleanField, CharField, ForeignKeyField, TextField
+from peewee import BooleanField, CharField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
 
@@ -16,12 +16,23 @@ class User(BaseModel):
 
 
 class MenuItem(BaseModel):
-    section = CharField()
+    parent = ForeignKeyField("self", backref="children", null=True)
+    section = CharField(null=True)
     title = CharField()
-    sort_order = CharField(default="000")
+    icon = CharField(null=True)
+    action_key = CharField(null=True, unique=True)
+    route_key = CharField(null=True)
+    module = CharField(null=True)
+    sort_order = IntegerField(default=0)
+    is_active = BooleanField(default=True)
+    is_placeholder = BooleanField(default=False)
+    requires_permission = BooleanField(default=True)
 
     class Meta:
-        indexes = ((("section", "title"), True),)
+        indexes = (
+            (("parent", "title"), True),
+            (("section", "title"), False),
+        )
 
 
 class Permission(BaseModel):
