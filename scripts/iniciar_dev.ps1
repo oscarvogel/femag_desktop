@@ -18,7 +18,7 @@ function Show-Help {
     Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\iniciar_dev.ps1"
     Write-Host ""
     Write-Host "Opciones utiles:"
-    Write-Host "  -CreateDatabase              Crea la base MySQL y el usuario definidos en .env usando mysql.exe"
+    Write-Host "  -CreateDatabase              Crea la base MySQL y el usuario definidos en .env usando PyMySQL"
     Write-Host "  -MysqlAdminUser root          Usuario admin de MySQL para crear DB/usuario"
     Write-Host "  -MysqlAdminPassword clave     Clave admin de MySQL"
     Write-Host "  -AdminPassword clave          Crea el usuario FEMAG admin si no existe"
@@ -69,30 +69,93 @@ function Invoke-Python {
     }
 }
 
-function Invoke-Mysql {
+function Invoke-MySqlAdminSql {
     param(
-        [string]$Sql,
+        [string]$PythonExe,
         [hashtable]$Env
     )
-    $mysql = Get-Command mysql -ErrorAction SilentlyContinue
-    if (-not $mysql) {
-        throw "No encontre mysql.exe en PATH. Instala el cliente MySQL o crea la base manualmente."
-    }
 
-    $args = @(
-        "-h", $Env["DB_HOST"],
-        "-P", $Env["DB_PORT"],
-        "-u", $MysqlAdminUser
-    )
-    if ($MysqlAdminPassword -ne "") {
-        $args += "-p$MysqlAdminPassword"
-    }
-    $args += "-e"
-    $args += $Sql
+    $adminScript = @'
+import os
+import pymysql
 
-    & $mysql.Source @args
-    if ($LASTEXITCODE -ne 0) {
-        throw "Fallo mysql.exe al preparar la base."
+
+def quote_identifier(value):
+    return "`" + value.replace("`", "``") + "`"
+
+
+host = os.environ["FEMAG_DB_HOST"]
+port = int(os.environ["FEMAG_DB_PORT"])
+admin_user = os.environ["FEMAG_MYSQL_ADMIN_USER"]
+admin_password = os.environ["FEMAG_MYSQL_ADMIN_PASSWORD"]
+db_name = os.environ["FEMAG_DB_NAME"]
+db_user = os.environ["FEMAG_DB_USER"]
+db_password = os.environ["FEMAG_DB_PASSWORD"]
+
+conn = pymysql.connect(
+    host=host,
+    port=port,
+    user=admin_user,
+    password=admin_password,
+    autocommit=True,
+    charset="utf8mb4",
+)
+
+try:
+    with conn.cursor() as cursor:
+        escaped_db_password = conn.escape_string(db_password)
+        cursor.execute(
+            f"CREATE DATABASE IF NOT EXISTS {quote_identifier(db_name)} "
+            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        )
+        for host_pattern in ("%", "localhost"):
+            escaped_host = conn.escape_string(host_pattern)
+            escaped_user = conn.escape_string(db_user)
+            cursor.execute(
+                f"CREATE USER IF NOT EXISTS '{escaped_user}'@'{escaped_host}' "
+                f"IDENTIFIED BY '{escaped_db_password}'"
+            )
+            cursor.execute(
+                f"GRANT ALL PRIVILEGES ON {quote_identifier(db_name)}.* "
+                f"TO '{escaped_user}'@'{escaped_host}'"
+            )
+        cursor.execute("FLUSH PRIVILEGES")
+finally:
+    conn.close()
+'@
+    $adminFile = Join-Path $env:TEMP "femag_prepare_db.py"
+    Set-Content -LiteralPath $adminFile -Value $adminScript -Encoding UTF8
+
+    $oldDbHost = [Environment]::GetEnvironmentVariable("FEMAG_DB_HOST", "Process")
+    $oldDbPort = [Environment]::GetEnvironmentVariable("FEMAG_DB_PORT", "Process")
+    $oldDbName = [Environment]::GetEnvironmentVariable("FEMAG_DB_NAME", "Process")
+    $oldDbUser = [Environment]::GetEnvironmentVariable("FEMAG_DB_USER", "Process")
+    $oldDbPassword = [Environment]::GetEnvironmentVariable("FEMAG_DB_PASSWORD", "Process")
+    $oldAdminUser = [Environment]::GetEnvironmentVariable("FEMAG_MYSQL_ADMIN_USER", "Process")
+    $oldAdminPassword = [Environment]::GetEnvironmentVariable("FEMAG_MYSQL_ADMIN_PASSWORD", "Process")
+
+    $env:FEMAG_DB_HOST = $Env["DB_HOST"]
+    $env:FEMAG_DB_PORT = $Env["DB_PORT"]
+    $env:FEMAG_DB_NAME = $Env["DB_NAME"]
+    $env:FEMAG_DB_USER = $Env["DB_USER"]
+    $env:FEMAG_DB_PASSWORD = $Env["DB_PASSWORD"]
+    $env:FEMAG_MYSQL_ADMIN_USER = $MysqlAdminUser
+    $env:FEMAG_MYSQL_ADMIN_PASSWORD = $MysqlAdminPassword
+
+    & $PythonExe $adminFile
+    $exitCode = $LASTEXITCODE
+    Remove-Item -LiteralPath $adminFile -Force
+
+    $env:FEMAG_DB_HOST = $oldDbHost
+    $env:FEMAG_DB_PORT = $oldDbPort
+    $env:FEMAG_DB_NAME = $oldDbName
+    $env:FEMAG_DB_USER = $oldDbUser
+    $env:FEMAG_DB_PASSWORD = $oldDbPassword
+    $env:FEMAG_MYSQL_ADMIN_USER = $oldAdminUser
+    $env:FEMAG_MYSQL_ADMIN_PASSWORD = $oldAdminPassword
+
+    if ($exitCode -ne 0) {
+        throw "Fallo PyMySQL al preparar la base."
     }
 }
 
@@ -200,18 +263,8 @@ if (-not $SkipInstall) {
 
 if ($CreateDatabase) {
     $dbName = $envValues["DB_NAME"]
-    $dbUser = $envValues["DB_USER"]
-    $dbPassword = $envValues["DB_PASSWORD"]
-    $sql = @"
-CREATE DATABASE IF NOT EXISTS ``$dbName`` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$dbUser'@'%' IDENTIFIED BY '$dbPassword';
-CREATE USER IF NOT EXISTS '$dbUser'@'localhost' IDENTIFIED BY '$dbPassword';
-GRANT ALL PRIVILEGES ON ``$dbName``.* TO '$dbUser'@'%';
-GRANT ALL PRIVILEGES ON ``$dbName``.* TO '$dbUser'@'localhost';
-FLUSH PRIVILEGES;
-"@
     Write-Host "Preparando base MySQL $dbName..."
-    Invoke-Mysql -Sql $sql -Env $envValues
+    Invoke-MySqlAdminSql -PythonExe $venvPython -Env $envValues
 }
 
 Write-Host "Inicializando tablas y seed..."
