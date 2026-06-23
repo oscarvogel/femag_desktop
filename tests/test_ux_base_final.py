@@ -118,3 +118,37 @@ def test_generate_ux_screenshots_creates_expected_pngs(tmp_path):
     assert len(paths) == 12
     assert all(Path(path).exists() for path in paths)
     assert any(path.name == "02_dashboard_datos_demo.png" for path in paths)
+
+
+def test_run_desktop_app_without_demo_does_not_seed_uninitialized_database(monkeypatch):
+    import app.ui.desktop_app as desktop_app
+
+    class NoDatabasePermissionService:
+        def seed_defaults(self):
+            raise AssertionError("No debe sembrar permisos sin base inicializada.")
+
+    class FakeApplication:
+        def __init__(self, args):
+            self.args = args
+
+        @staticmethod
+        def instance():
+            return None
+
+        def exec_(self):
+            return 0
+
+    class FakeWindow:
+        def __init__(self, *, user, demo_mode):
+            self.user = user
+            self.demo_mode = demo_mode
+
+        def show(self):
+            return None
+
+    monkeypatch.setattr(desktop_app, "PermissionService", NoDatabasePermissionService)
+    monkeypatch.setattr(desktop_app, "QApplication", FakeApplication)
+    monkeypatch.setattr(desktop_app, "FemagDesktopWindow", FakeWindow)
+    monkeypatch.setattr(desktop_app, "_prepare_database", lambda *, demo_mode: None)
+
+    assert desktop_app.run_desktop_app(demo_mode=False) == 0

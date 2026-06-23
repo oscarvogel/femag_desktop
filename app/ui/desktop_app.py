@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from peewee import SqliteDatabase
+from peewee import InterfaceError, OperationalError, SqliteDatabase
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication,
@@ -21,7 +19,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from app.config.database import bind_database
+from app.config.database import bind_database, initialize_runtime_database
 from app.models.masters import Client, Driver, Product
 from app.services.auth_service import AuthService
 from app.services.permission_service import PermissionService
@@ -32,20 +30,34 @@ from scripts.seed_demo_data import DEMO_DB_PATH, seed_demo_data
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
+    database = _prepare_database(demo_mode=demo_mode)
+    if database is not None:
+        PermissionService().seed_defaults()
+        user = _demo_user()
+    else:
+        user = None
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
+    window.show()
+    result = app.exec_()
+    if database is not None and not database.is_closed():
+        database.close()
+    return result
+
+
+def _prepare_database(*, demo_mode: bool):
     if demo_mode:
         seed_demo_data()
         database = SqliteDatabase(DEMO_DB_PATH)
         bind_database(database)
         database.connect(reuse_if_open=True)
-    PermissionService().seed_defaults()
-    user = _demo_user()
-    app = QApplication.instance() or QApplication([])
-    window = FemagDesktopWindow(user=user, demo_mode=demo_mode)
-    window.show()
-    result = app.exec_()
-    if demo_mode:
-        database.close()
-    return result
+        return database
+    try:
+        database = initialize_runtime_database()
+        database.connect(reuse_if_open=True)
+        return database
+    except Exception:
+        return None
 
 
 class FemagDesktopWindow(QMainWindow):
@@ -232,18 +244,27 @@ def _demo_user():
 
 
 def _client_rows() -> list[list[str]]:
-    return [[client.name, client.cuit, "Activo" if client.active else "Inactivo"] for client in Client.select().limit(20)]
+    try:
+        return [[client.name, client.cuit, "Activo" if client.active else "Inactivo"] for client in Client.select().limit(20)]
+    except (InterfaceError, OperationalError):
+        return []
 
 
 def _product_rows() -> list[list[str]]:
-    return [[product.name, product.unit, "Activo" if product.active else "Inactivo"] for product in Product.select().limit(20)]
+    try:
+        return [[product.name, product.unit, "Activo" if product.active else "Inactivo"] for product in Product.select().limit(20)]
+    except (InterfaceError, OperationalError):
+        return []
 
 
 def _driver_rows() -> list[list[str]]:
-    return [
-        [driver.name, driver.phone or "", "Disponible" if driver.available else "Ocupado"]
-        for driver in Driver.select().limit(20)
-    ]
+    try:
+        return [
+            [driver.name, driver.phone or "", "Disponible" if driver.available else "Ocupado"]
+            for driver in Driver.select().limit(20)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
 
 
 STYLES = """

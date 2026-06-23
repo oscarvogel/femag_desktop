@@ -3,4 +3,5 @@ PyMySQL>=1.1
 python-dotenv>=1.0
 pytest>=8.0
 PyQt5>=5.15
+Pillow>=10.0
 pyqt5libs @ git+https://github.com/oscarvogel/pyqt5libs.git@master
