@@ -8,20 +8,11 @@ PLACEHOLDER_MESSAGE = "Funcionalidad prevista para una próxima entrega."
 
 REAL_MODULES = {
     "Dashboard": "dashboard",
-    "Pendientes": "pending",
     "Órdenes de carga": "load_orders",
     "Clientes": "clients",
-    "Domicilios": "addresses",
     "Productos": "products",
     "Choferes": "drivers",
     "Transportistas": "carriers",
-    "Camiones": "trucks",
-    "Tipos de pallets": "pallet_types",
-    "Usuarios": "users",
-    "Perfiles": "profiles",
-    "Permisos": "permissions",
-    "Backups": "backups",
-    "Auditoría": "audit",
 }
 
 

@@ -18,11 +18,19 @@ ACTIONS = [
 
 
 MENU = {
-    "Inicio": ["Dashboard", "Pendientes"],
-    "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
-    "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
-    "Maestros": ["Clientes", "Domicilios", "Productos", "Choferes", "Transportistas", "Camiones", "Tipos de pallets"],
-    "Sistema": ["Usuarios", "Perfiles", "Permisos", "Backups", "Auditoría"],
+    "Operaciones": [
+        "Dashboard",
+        "Órdenes de carga",
+        "Remitos",
+        "F150",
+        "Clientes",
+        "Choferes",
+        "Transportistas",
+        "Productos",
+        "Cuenta corriente",
+        "Reportes",
+        "Configuración",
+    ],
 }
 
 PROFILE_ACTIONS = {
@@ -66,6 +74,23 @@ class PermissionService:
                             action=action,
                             defaults={"allowed": allowed},
                         )
+        self._seed_legacy_permissions(profiles)
+
+    def _seed_legacy_permissions(self, profiles: dict[str, UserProfile]) -> None:
+        legacy_items = (
+            ("Sistema", "Configuración", lambda profile_name, action: profile_name == "Administrador"),
+            ("Maestros", "Clientes", lambda profile_name, action: action in PROFILE_ACTIONS[profile_name]),
+        )
+        for section, title, allow_rule in legacy_items:
+            item, _ = MenuItem.get_or_create(section=section, title=title, defaults={"sort_order": "000"})
+            for profile_name, profile in profiles.items():
+                for action in ACTIONS:
+                    Permission.get_or_create(
+                        profile=profile,
+                        menu_item=item,
+                        action=action,
+                        defaults={"allowed": allow_rule(profile_name, action)},
+                    )
 
     def has_permission(self, user: User, section: str, action: str, title: str | None = None) -> bool:
         query = (

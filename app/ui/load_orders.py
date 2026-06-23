@@ -19,6 +19,18 @@ class LoadOrderFormSpec:
     driver_status_messages: dict[str, str]
 
 
+@dataclass(frozen=True)
+class LoadOrderWorkspaceSpec:
+    title: str
+    subtitle: str
+    kpis: tuple[str, ...]
+    toolbar_actions: tuple[str, ...]
+    table_columns: tuple[str, ...]
+    detail_fields: tuple[str, ...]
+    detail_actions: tuple[str, ...]
+    status_labels: tuple[str, ...]
+
+
 def build_load_order_view_spec() -> ABMViewSpec:
     return build_abm_spec(
         entity="ordenes_carga",
@@ -38,6 +50,41 @@ def build_load_order_view_spec() -> ABMViewSpec:
         ),
         table_columns=("Número", "Fecha", "Cliente", "Destino", "Chofer", "Estado"),
         actions=("ver", "crear", "modificar", "imprimir", "reimprimir", "anular", "cerrar"),
+    )
+
+
+def build_load_order_workspace_spec() -> LoadOrderWorkspaceSpec:
+    return LoadOrderWorkspaceSpec(
+        title="Órdenes de carga",
+        subtitle="Gestione y controle las órdenes de carga del sistema",
+        kpis=("Pendientes", "Emitidas hoy", "Camiones en carga", "Entregas del día"),
+        toolbar_actions=("Nuevo", "Editar", "Emitir", "Imprimir", "Anular", "Buscar"),
+        table_columns=(
+            "N° orden",
+            "Fecha",
+            "Cliente",
+            "Entrega",
+            "Producto",
+            "Pallets",
+            "Chofer",
+            "Transportista",
+            "Estado",
+        ),
+        detail_fields=(
+            "Fecha de orden",
+            "Cliente",
+            "Entrega programada",
+            "Dirección de entrega",
+            "Producto",
+            "Cantidad (Pallets)",
+            "Peso estimado",
+            "Chofer asignado",
+            "Transportista",
+            "Camión / Acoplado",
+            "Observaciones",
+        ),
+        detail_actions=("Editar", "Historial"),
+        status_labels=("Pendiente", "Emitida", "En carga", "Entregada", "Anulada"),
     )
 
 

@@ -70,19 +70,15 @@ def test_menu_marks_load_orders_as_real_module(db):
         for item in section.items
         if item.title == "Órdenes de carga"
     )
-    remittance_item = next(
-        item for section in build_menu(user) for item in section.items if item.title == "Remitos"
-    )
-    summary_item = next(
+    f150_item = next(
         item
         for section in build_menu(user)
         for item in section.items
-        if item.title == "Hoja resumen / sobre de carga"
+        if item.title == "F150"
     )
 
     assert load_order_item.placeholder is False
-    assert remittance_item.placeholder is True
-    assert summary_item.placeholder is True
+    assert f150_item.placeholder is True
 
 
 def test_app_smoke_command_runs():
@@ -98,7 +94,7 @@ def test_app_smoke_command_runs():
 
 
 def test_desktop_load_orders_page_is_functional_and_data_backed(db, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
 
@@ -137,14 +133,22 @@ def test_desktop_load_orders_page_is_functional_and_data_backed(db, monkeypatch)
     window = FemagDesktopWindow(user=user, demo_mode=True)
     page = window.findChild(type(window.stack), None).widget(window._route_indexes["load_orders"])
     table = page.findChild(QTableWidget, "loadOrdersTable")
+    detail = page.findChild(QLabel, "detailOrderNumber")
     buttons = {button.objectName() for button in page.findChildren(QPushButton)}
-    fields = {field.objectName() for field in page.findChildren(QLineEdit)}
-    combos = {combo.objectName() for combo in page.findChildren(QComboBox)}
 
     assert app is not None
     assert table.rowCount() == 1
     assert table.item(0, 2).text() == "Cliente UI"
     assert table.item(0, 4).text() == "Fecula UI"
-    assert {"saveLoadOrderButton", "issueLoadOrderButton", "annulLoadOrderButton", "printLoadOrderButton"} <= buttons
-    assert {"orderNumberInput", "quantityInput", "observationsInput"} <= fields
-    assert {"clientCombo", "productCombo", "driverCombo", "carrierCombo", "truckCombo", "statusCombo"} <= combos
+    assert table.item(0, 7).text() == "Transporte UI"
+    assert detail.text() == table.item(0, 0).text()
+    assert {
+        "newLoadOrderButton",
+        "editLoadOrderButton",
+        "issueLoadOrderButton",
+        "printLoadOrderButton",
+        "annulLoadOrderButton",
+        "searchLoadOrderButton",
+        "detailEditButton",
+        "detailHistoryButton",
+    } <= buttons

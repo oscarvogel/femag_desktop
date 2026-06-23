@@ -74,7 +74,7 @@ class DashboardService:
             QuickActionSpec("Buscar orden", "load_orders.search", True),
             QuickActionSpec("Nuevo cliente", "clients.new", True),
             QuickActionSpec("Registrar remito", None, False, future_module_message()),
-            QuickActionSpec("Generar F150", None, False, future_module_message()),
+            QuickActionSpec("F150", None, False, future_module_message()),
             QuickActionSpec("Registrar pago", None, False, future_module_message()),
             QuickActionSpec("Cuenta corriente", None, False, future_module_message()),
         )

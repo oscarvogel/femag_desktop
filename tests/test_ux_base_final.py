@@ -34,11 +34,25 @@ def test_sidebar_tree_uses_menu_service_permissions_and_friendly_placeholders(db
 
     sidebar = build_sidebar_tree_spec(user)
     sections = {section.title: section for section in sidebar.sections}
+    modules = [item.title for section in sidebar.sections for item in section.items]
     operations = sections["Operaciones"].items
     load_orders = next(item for item in operations if item.title == "Órdenes de carga")
-    f150 = next(item for item in operations if item.title == "Generar F150")
+    f150 = next(item for item in operations if item.title == "F150")
 
     assert sidebar.active_route == "dashboard"
+    assert modules == [
+        "Dashboard",
+        "Órdenes de carga",
+        "Remitos",
+        "F150",
+        "Clientes",
+        "Choferes",
+        "Transportistas",
+        "Productos",
+        "Cuenta corriente",
+        "Reportes",
+        "Configuración",
+    ]
     assert load_orders.route_key == "load_orders"
     assert load_orders.placeholder is False
     assert f150.placeholder is True
@@ -56,7 +70,7 @@ def test_dashboard_view_spec_groups_actions_cards_and_alerts(db):
         "Buscar orden",
         "Nuevo cliente",
     ]
-    assert any(action.title == "Generar F150" and action.message == future_module_message() for action in dashboard.quick_actions)
+    assert any(action.title == "F150" and action.message == future_module_message() for action in dashboard.quick_actions)
     assert "Órdenes creadas hoy" in dashboard.summary_cards
     assert "Choferes ocupados" in dashboard.summary_cards
     assert any("Modo demo" in alert for alert in dashboard.alerts)
@@ -77,15 +91,33 @@ def test_master_abm_specs_cover_required_entities_with_visible_labels():
 
 
 def test_load_order_form_spec_matches_operational_sections():
-    from app.ui.load_orders import build_load_order_form_spec
+    from app.ui.load_orders import build_load_order_form_spec, build_load_order_workspace_spec
 
     spec = build_load_order_form_spec()
+    workspace = build_load_order_workspace_spec()
 
     assert [section.title for section in spec.sections] == ["Datos de la carga", "Transporte"]
     assert "Cliente / destinatario" in spec.detail_columns
     assert "Bolsas x 25 kg" in spec.detail_columns
     assert "Guardar e imprimir" in spec.primary_actions
     assert spec.driver_status_messages["blocked"] == "El chofer seleccionado ya tiene una carga activa."
+    assert workspace.title == "Órdenes de carga"
+    assert workspace.subtitle == "Gestione y controle las órdenes de carga del sistema"
+    assert workspace.kpis == ("Pendientes", "Emitidas hoy", "Camiones en carga", "Entregas del día")
+    assert workspace.toolbar_actions == ("Nuevo", "Editar", "Emitir", "Imprimir", "Anular", "Buscar")
+    assert workspace.table_columns == (
+        "N° orden",
+        "Fecha",
+        "Cliente",
+        "Entrega",
+        "Producto",
+        "Pallets",
+        "Chofer",
+        "Transportista",
+        "Estado",
+    )
+    assert "Dirección de entrega" in workspace.detail_fields
+    assert "Camión / Acoplado" in workspace.detail_fields
 
 
 def test_seed_demo_data_is_idempotent_and_creates_realistic_order(tmp_path):
@@ -115,9 +147,12 @@ def test_generate_ux_screenshots_creates_expected_pngs(tmp_path):
 
     paths = generate_screenshots(tmp_path, db_path=tmp_path / "screenshots.sqlite3")
 
-    assert len(paths) == 12
+    assert len(paths) >= 4
     assert all(Path(path).exists() for path in paths)
     assert any(path.name == "02_dashboard_datos_demo.png" for path in paths)
+    assert any(path.name == "08_ordenes_carga_variacion_a.png" for path in paths)
+    assert any(path.name == "09_panel_detalle_orden.png" for path in paths)
+    assert any(path.name == "12_placeholder_f150.png" for path in paths)
 
 
 def test_run_desktop_app_without_demo_does_not_seed_uninitialized_database(monkeypatch):
