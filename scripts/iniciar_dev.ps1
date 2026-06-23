@@ -91,6 +91,7 @@ admin_password = os.environ["FEMAG_MYSQL_ADMIN_PASSWORD"]
 db_name = os.environ["FEMAG_DB_NAME"]
 db_user = os.environ["FEMAG_DB_USER"]
 db_password = os.environ["FEMAG_DB_PASSWORD"]
+same_admin_and_app_user = db_user.lower() == admin_user.lower()
 
 conn = pymysql.connect(
     host=host,
@@ -108,6 +109,12 @@ try:
             f"CREATE DATABASE IF NOT EXISTS {quote_identifier(db_name)} "
             "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
+        if same_admin_and_app_user:
+            print(
+                "DB_USER coincide con el usuario admin de MySQL; "
+                "omito CREATE USER/GRANT para evitar tocar cuentas administrativas."
+            )
+            raise SystemExit(0)
         for host_pattern in ("%", "localhost"):
             escaped_host = conn.escape_string(host_pattern)
             escaped_user = conn.escape_string(db_user)
