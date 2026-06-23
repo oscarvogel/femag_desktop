@@ -2,6 +2,7 @@ import argparse
 
 from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
+from app.ui.desktop_app import run_desktop_app
 
 
 def smoke_check() -> str:
@@ -25,8 +26,9 @@ def main(argv: list[str] | None = None) -> int:
         print(smoke_check())
         return 0
 
-    print("FEMAG Desktop UI requires a workstation session.")
-    return 0
+    load_settings()
+    configure_logging()
+    return run_desktop_app()
 
 
 if __name__ == "__main__":
