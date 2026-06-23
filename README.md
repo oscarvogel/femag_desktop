@@ -109,7 +109,9 @@ Proyecto en etapa inicial. La fuente de planificacion es `plan_implementacion.md
 pip install -r requirements.txt
 ```
 
-`pyqt5libs` es una dependencia externa del proyecto FEMAG y se instala desde [oscarvogel/pyqt5libs](https://github.com/oscarvogel/pyqt5libs). No se modifica dentro de este repositorio.
+FEMAG Desktop usa PyQt5 para la interfaz grafica. La UI funcional debe apoyarse en `pyqt5libs` para ABM, tablas, botones, formularios y vistas reutilizables.
+
+`pyqt5libs` es una dependencia externa del proyecto FEMAG y se instala desde [oscarvogel/pyqt5libs](https://github.com/oscarvogel/pyqt5libs). No se modifica dentro de este repositorio. Si hace falta mejorar el ABM generico o componentes reutilizables, ese cambio corresponde al repo `oscarvogel/pyqt5libs`, no a `femag_desktop`.
 
 3. Copiar `.env.example` a `.env` y completar los datos de MySQL.
 4. Crear tablas iniciales:
