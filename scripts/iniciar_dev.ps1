@@ -96,6 +96,51 @@ function Invoke-Mysql {
     }
 }
 
+function Test-FemagDatabaseConnection {
+    param([string]$PythonExe)
+
+    $checkScript = @"
+from app.config.database import initialize_runtime_database
+
+try:
+    db = initialize_runtime_database()
+    db.connect(reuse_if_open=True)
+    db.close()
+except Exception as exc:
+    print(exc)
+    raise SystemExit(1)
+"@
+    $checkFile = Join-Path $env:TEMP "femag_check_db.py"
+    Set-Content -LiteralPath $checkFile -Value $checkScript -Encoding UTF8
+    $output = & $PythonExe $checkFile 2>&1
+    $exitCode = $LASTEXITCODE
+    Remove-Item -LiteralPath $checkFile -Force
+
+    if ($exitCode -ne 0) {
+        Write-Host ""
+        Write-Host "No pude conectar a MySQL con los datos de .env:"
+        Write-Host "  DB_HOST=$($envValues["DB_HOST"])"
+        Write-Host "  DB_PORT=$($envValues["DB_PORT"])"
+        Write-Host "  DB_NAME=$($envValues["DB_NAME"])"
+        Write-Host "  DB_USER=$($envValues["DB_USER"])"
+        if ($envValues["DB_PASSWORD"] -eq "") {
+            Write-Host "  DB_PASSWORD=(vacio)"
+            Write-Host ""
+            Write-Host "MySQL rechazo al usuario sin clave. Edita .env y completa DB_PASSWORD,"
+            Write-Host "o ejecuta el script con -CreateDatabase usando un usuario admin de MySQL:"
+            Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\iniciar_dev.ps1 -CreateDatabase -MysqlAdminUser root -MysqlAdminPassword TU_CLAVE"
+        } else {
+            Write-Host "  DB_PASSWORD=(configurado)"
+            Write-Host ""
+            Write-Host "Revisa que la base exista y que el usuario tenga permisos."
+        }
+        Write-Host ""
+        Write-Host "Detalle MySQL:"
+        Write-Host "  $output"
+        throw "No se pudo conectar a la base FEMAG."
+    }
+}
+
 if ($Help) {
     Show-Help
     exit 0
@@ -170,6 +215,7 @@ FLUSH PRIVILEGES;
 }
 
 Write-Host "Inicializando tablas y seed..."
+Test-FemagDatabaseConnection $venvPython
 Invoke-Python $venvPython @("scripts/init_db.py")
 
 if ($AdminPassword -ne "") {
