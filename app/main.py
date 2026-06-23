@@ -9,9 +9,11 @@ def smoke_check() -> str:
     configure_logging()
     from app.models import ALL_MODELS
     from app.ui.dashboard import future_module_message
+    from app.ui.framework import get_ui_framework
 
     assert ALL_MODELS
     assert future_module_message()
+    assert get_ui_framework().name == "pyqt5libs"
     return "FEMAG smoke OK"
 
 

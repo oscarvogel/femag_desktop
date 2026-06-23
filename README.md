@@ -26,7 +26,8 @@ Fuera de esta etapa quedan nube, portal web, pedidos online, stock avanzado, bal
 ## Stack tecnico
 
 - Python 3.
-- PyQt o PySide para la interfaz de escritorio.
+- PyQt5 como binding Qt.
+- `pyqt5libs` como libreria reutilizable de interfaz para ABM, tablas, botones, formularios y vistas.
 - MySQL como base de datos central.
 - Peewee como ORM.
 - Reportes imprimibles en PDF o formato apto para impresion.
@@ -108,6 +109,8 @@ Proyecto en etapa inicial. La fuente de planificacion es `plan_implementacion.md
 pip install -r requirements.txt
 ```
 
+`pyqt5libs` es una dependencia externa del proyecto FEMAG y se instala desde [oscarvogel/pyqt5libs](https://github.com/oscarvogel/pyqt5libs). No se modifica dentro de este repositorio.
+
 3. Copiar `.env.example` a `.env` y completar los datos de MySQL.
 4. Crear tablas iniciales:
 
@@ -130,6 +133,8 @@ python -m pytest
 python -m compileall app
 python -m app.main --smoke
 ```
+
+El smoke test valida que la base UI apunte a `pyqt5libs`, pero no importa componentes graficos pesados ni abre ventanas. Esto permite ejecutar validaciones en entornos headless aunque la libreria privada todavia no este instalada.
 
 ## Backups
 
