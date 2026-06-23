@@ -59,16 +59,22 @@ class LoadOrderPrintService:
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Orden de carga</title>
+<title>Orden de despacho de fécula de mandioca</title>
 <style>
 @page {{ size: A4; margin: 16mm; }}
-body {{ font-family: Arial, sans-serif; color: #202124; font-size: 12px; }}
-h1 {{ font-size: 20px; margin: 0 0 10px; }}
-h2 {{ font-size: 16px; margin: 18px 0 8px; }}
+body {{ font-family: Arial, sans-serif; color: #202124; font-size: 11px; }}
+h1 {{ font-size: 20px; margin: 0; text-transform: uppercase; }}
+h2 {{ font-size: 14px; margin: 16px 0 8px; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }}
 table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
-th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
-.meta {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }}
+th, td {{ border: 1px solid #94a3b8; padding: 5px; text-align: left; vertical-align: top; }}
+th {{ background: #e2e8f0; font-weight: bold; }}
+.header {{ display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 10px; margin-bottom: 12px; }}
+.company {{ font-size: 18px; font-weight: bold; }}
+.meta {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin-bottom: 10px; }}
 .label {{ font-weight: bold; }}
+.totals {{ margin-top: 10px; font-weight: bold; }}
+.signature {{ margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }}
+.signature div {{ border-top: 1px solid #1f2937; padding-top: 6px; text-align: center; }}
 .page-break {{ page-break-before: always; }}
 </style>
 </head>
@@ -76,19 +82,23 @@ th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
 </html>"""
 
     def _order_body(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        flag = "<p><strong>Reimpresion</strong></p>" if reprint else ""
+        flag = "<p><strong>Reimpresión</strong></p>" if reprint else ""
         return f"""
-<h1>Orden de carga Nro. {order.order_number}</h1>
+<section class="header">
+<div><div class="company">FEMAG</div><div>Gestión operativa local</div></div>
+<div><h1>Orden de despacho de fécula de mandioca</h1><div>Nro. {order.order_number}</div></div>
+</section>
 {flag}
 {self._meta(order)}
-{self._products(order)}
-{self._pallets(order)}
+{self._dispatch_table(order)}
+{self._totals(order)}
 <h2>Observaciones</h2>
 <p>{escape(order.observations or "")}</p>
+<section class="signature"><div>Firma responsable FEMAG</div><div>Firma transporte</div></section>
 """
 
     def _summary_body(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        flag = "<p><strong>Reimpresion</strong></p>" if reprint else ""
+        flag = "<p><strong>Reimpresión</strong></p>" if reprint else ""
         return f"""
 <h1>Orden de carga Nro. {order.order_number}</h1>
 <h2>Hoja resumen / sobre de carga</h2>
@@ -105,13 +115,48 @@ th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
 <section class="meta">
 <div><span class="label">Fecha:</span> {order.date:%d/%m/%Y}</div>
 <div><span class="label">Estado:</span> {escape(order.status)}</div>
-<div><span class="label">Cliente:</span> {escape(order.client.name)}</div>
-<div><span class="label">Domicilio:</span> {escape(order.delivery_address.address)}</div>
+<div><span class="label">Cliente cabecera:</span> {escape(order.client.name)}</div>
+<div><span class="label">Destino general:</span> {escape(order.delivery_address.city)} - {escape(order.delivery_address.province)}</div>
 <div><span class="label">Transportista:</span> {escape(order.carrier.name)}</div>
 <div><span class="label">Chofer:</span> {escape(order.driver.name)}</div>
-<div><span class="label">Camion:</span> {escape(order.truck.domain)}</div>
+<div><span class="label">Camión:</span> {escape(order.truck.domain)}</div>
+<div><span class="label">Vehículo limpio y apto:</span> Sí</div>
 </section>
 """
+
+    def _dispatch_table(self, order: LoadOrder) -> str:
+        rows = "".join(self._dispatch_row(order, item) for item in order.products)
+        if not rows:
+            rows = "<tr><td colspan=\"8\">No hay renglones de despacho cargados.</td></tr>"
+        return (
+            "<h2>Detalle de despacho</h2>"
+            "<table><tr><th>Destinatario / cliente / localidad</th><th>Bolsas x 25 kg</th>"
+            "<th>Bolsas x 10 kg</th><th>Pack</th><th>Pallet</th><th>Detalle</th>"
+            "<th>Número de lote</th><th>Fecha de elaboración</th></tr>"
+            f"{rows}</table>"
+        )
+
+    def _dispatch_row(self, order: LoadOrder, item) -> str:
+        destination = f"{order.client.name} / {order.delivery_address.city}"
+        unit = item.unit.lower()
+        bags_25 = item.quantity if "25" in unit else ""
+        bags_10 = item.quantity if "10" in unit else ""
+        pack = item.quantity if "pack" in unit else ""
+        detail = f"{item.product.name} - {item.quantity:g} {item.unit}"
+        lot = item.observations or ""
+        return (
+            f"<tr><td>{escape(destination)}</td><td>{bags_25}</td><td>{bags_10}</td><td>{pack}</td>"
+            f"<td>{self._pallet_quantity(order)}</td><td>{escape(detail)}</td>"
+            f"<td>{escape(lot)}</td><td>{order.date:%d/%m/%Y}</td></tr>"
+        )
+
+    def _pallet_quantity(self, order: LoadOrder) -> int:
+        return sum(item.quantity for item in order.pallets)
+
+    def _totals(self, order: LoadOrder) -> str:
+        total_products = sum(item.quantity for item in order.products)
+        total_pallets = self._pallet_quantity(order)
+        return f"<p class=\"totals\">Totales: {total_products:g} unidades declaradas - {total_pallets} pallets</p>"
 
     def _products(self, order: LoadOrder) -> str:
         rows = "".join(

@@ -29,8 +29,10 @@ def test_abm_view_spec_prepares_future_pyqt5libs_views():
     assert spec.entity == "clientes"
     assert spec.title == "Clientes"
     assert spec.permissions_menu == "Maestros"
-    assert "name" in spec.fields
-    assert "cuit" in spec.fields
+    assert "Nombre" in spec.fields
+    assert "CUIT" in spec.fields
+    assert spec.search_placeholder == "Buscar en clientes..."
+    assert "Datos fiscales" in spec.form_groups
     assert spec.actions == ("ver", "crear", "modificar")
 
 
@@ -43,8 +45,9 @@ def test_load_order_view_spec_uses_pyqt5libs_abm_contract():
     assert spec.entity == "ordenes_carga"
     assert spec.title == "Órdenes de carga"
     assert spec.permissions_menu == "Operaciones"
-    assert "products" in spec.fields
-    assert "pallets" in spec.fields
+    assert "Detalle de despacho" in spec.fields
+    assert "Chofer" in spec.fields
+    assert "Número" in spec.table_columns
     assert spec.actions == (
         "ver",
         "crear",

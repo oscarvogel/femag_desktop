@@ -18,12 +18,11 @@ ACTIONS = [
 
 
 MENU = {
-    "Inicio": ["Dashboard", "Pendientes", "Accesos rápidos"],
+    "Inicio": ["Dashboard", "Pendientes"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
-    "Maestros": ["Clientes", "Domicilios", "Productos", "Pallets / tipos de pallet", "Choferes", "Transportistas", "Camiones"],
-    "Importación": ["Importación"],
-    "Sistema": ["Usuarios", "Perfiles", "Permisos por menú", "Parámetros", "Backups", "Auditoría"],
+    "Maestros": ["Clientes", "Domicilios", "Productos", "Choferes", "Transportistas", "Camiones", "Tipos de pallets"],
+    "Sistema": ["Usuarios", "Perfiles", "Permisos", "Backups", "Auditoría"],
 }
 
 PROFILE_ACTIONS = {

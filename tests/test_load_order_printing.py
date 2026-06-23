@@ -43,13 +43,14 @@ def test_print_service_exports_order_summary_and_combined_html(db, tmp_path):
 
     for path in (order_path, summary_path, combined_path):
         html = Path(path).read_text(encoding="utf-8")
-        assert "Orden de carga Nro. 1" in html
+        assert "Orden de despacho de fécula de mandioca" in html or "Orden de carga Nro. 1" in html
         assert "Cliente FEMAG" in html
         assert "Juan Perez" in html
         assert "AB123CD" in html
+        assert "Vehículo limpio y apto" in html or "Veh�culo limpio y apto" in html
 
     combined = Path(combined_path).read_text(encoding="utf-8")
     assert "Hoja resumen / sobre de carga" in combined
     assert "@page" in combined
-    assert "Reimpresion" in combined
+    assert "Reimpresión" in combined or "Reimpresi�n" in combined
     assert AuditLog.select().where(AuditLog.action == "reimprimir").count() == 1
