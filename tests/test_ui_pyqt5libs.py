@@ -32,3 +32,25 @@ def test_abm_view_spec_prepares_future_pyqt5libs_views():
     assert "name" in spec.fields
     assert "cuit" in spec.fields
     assert spec.actions == ("ver", "crear", "modificar")
+
+
+def test_load_order_view_spec_uses_pyqt5libs_abm_contract():
+    from app.ui.load_orders import build_load_order_view_spec
+
+    spec = build_load_order_view_spec()
+
+    assert spec.library == "pyqt5libs"
+    assert spec.entity == "ordenes_carga"
+    assert spec.title == "Órdenes de carga"
+    assert spec.permissions_menu == "Operaciones"
+    assert "products" in spec.fields
+    assert "pallets" in spec.fields
+    assert spec.actions == (
+        "ver",
+        "crear",
+        "modificar",
+        "imprimir",
+        "reimprimir",
+        "anular",
+        "cerrar",
+    )

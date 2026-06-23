@@ -11,6 +11,7 @@ ACTIONS = [
     "eliminar",
     "imprimir",
     "reimprimir",
+    "cerrar",
     "importar",
     "configurar",
 ]
@@ -27,10 +28,10 @@ MENU = {
 
 PROFILE_ACTIONS = {
     "Administrador": set(ACTIONS),
-    "Secretaria": {"ver", "crear", "modificar", "imprimir", "reimprimir"},
-    "Secretaría": {"ver", "crear", "modificar", "imprimir", "reimprimir"},
-    "Administracion": {"ver", "crear", "modificar", "imprimir", "reimprimir"},
-    "Administración": {"ver", "crear", "modificar", "imprimir", "reimprimir"},
+    "Secretaria": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
+    "Secretaría": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
+    "Administracion": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
+    "Administración": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
     "Solo consulta": {"ver", "reimprimir"},
 }
 

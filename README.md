@@ -30,7 +30,7 @@ Fuera de esta etapa quedan nube, portal web, pedidos online, stock avanzado, bal
 - `pyqt5libs` como libreria reutilizable de interfaz para ABM, tablas, botones, formularios y vistas.
 - MySQL como base de datos central.
 - Peewee como ORM.
-- Reportes imprimibles en PDF o formato apto para impresion.
+- Reportes imprimibles en HTML A4 o formato apto para impresion.
 - Arquitectura local para 5/6 puestos en red interna.
 
 ## Principios de producto
@@ -98,7 +98,7 @@ El proyecto debe incorporar en los primeros issues:
 
 ## Estado del proyecto
 
-Proyecto en etapa inicial. La fuente de planificacion es `plan_implementacion.md`.
+Entrega 1 completada y Entrega 2 en implementacion: ordenes de carga, bloqueo de chofer, dashboard operativo e impresion HTML A4. La fuente de planificacion general es `plan_implementacion.md`.
 
 ## Puesta en marcha tecnica
 
@@ -128,7 +128,7 @@ python scripts/create_admin_user.py admin <clave>
 
 ## Validaciones
 
-Antes de cerrar cambios de Entrega 1 ejecutar:
+Antes de cerrar cambios ejecutar:
 
 ```bash
 python -m pytest
@@ -137,6 +137,21 @@ python -m app.main --smoke
 ```
 
 El smoke test valida que la base UI apunte a `pyqt5libs`, pero no importa componentes graficos pesados ni abre ventanas. Esto permite ejecutar validaciones en entornos headless aunque la libreria privada todavia no este instalada.
+
+## Ordenes de carga
+
+La Entrega 2 agrega modelos y servicios para:
+
+- Cabecera de orden con cliente, domicilio, transportista, chofer, camion, estado y auditoria de usuarios.
+- Detalle de productos por orden.
+- Detalle de pallets por orden.
+- Bloqueo de chofer mientras tenga una orden pendiente o emitida.
+- Liberacion de chofer al cerrar o anular la orden.
+- Impresion y reimpresion HTML A4 de orden, hoja resumen y salida conjunta.
+
+La logica vive en servicios (`LoadOrderService`, `DriverAvailabilityService`, `LoadOrderPrintService`) y la UI declara su contrato en `app/ui/load_orders.py` sobre la base local `app/ui/abm.py` orientada a `pyqt5libs`.
+
+La guia operativa esta en `docs/guia_usuario_entrega_2.md`.
 
 ## Backups
 

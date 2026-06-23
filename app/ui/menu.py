@@ -17,7 +17,6 @@ class MenuSectionView:
 
 
 FUTURE_MODULES = {
-    "Órdenes de carga",
     "Remitos",
     "Generar F150",
     "Hoja resumen / sobre de carga",
