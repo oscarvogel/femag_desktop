@@ -21,8 +21,10 @@ Las altas y cambios quedan auditados.
 
 ## Accesos futuros
 
-Ordenes de carga, remitos, F150, pagos, recibos y cuenta corriente quedan visibles como accesos previstos para una proxima entrega.
+Remitos, F150, pagos, recibos y cuenta corriente quedan visibles como accesos previstos para una proxima entrega.
 Al usarlos se informa: `Funcionalidad prevista para una próxima entrega.`
+
+Ordenes de carga pasan a estar cubiertas por la guia de usuario de Entrega 2.
 
 ## Auditoria
 

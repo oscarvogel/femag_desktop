@@ -9,6 +9,7 @@ from app.models.masters import (
     Product,
     Truck,
 )
+from app.models.load_orders import LoadOrder, LoadOrderPallet, LoadOrderProduct, LoadOrderStatusHistory
 from app.models.security import MenuItem, Permission, User, UserProfile
 from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
 
@@ -27,6 +28,10 @@ ALL_MODELS = [
     Truck,
     PalletType,
     OperationalService,
+    LoadOrder,
+    LoadOrderProduct,
+    LoadOrderPallet,
+    LoadOrderStatusHistory,
     AppParameter,
     NumberSequence,
     ImportBatch,
