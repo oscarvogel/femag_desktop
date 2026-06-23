@@ -1,0 +1,1 @@
+"""FEMAG Desktop application package."""
