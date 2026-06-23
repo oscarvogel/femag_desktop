@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orden de carga</title>
+<style>
+@page { size: A4; margin: 16mm; }
+body { font-family: Arial, sans-serif; color: #202124; font-size: 12px; }
+h1 { font-size: 20px; margin: 0 0 10px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { border: 1px solid #9aa0a6; padding: 6px; text-align: left; }
+.meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.label { font-weight: bold; }
+.page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+<h1>Orden de carga Nro. 1</h1>
+<h2>Hoja resumen / sobre de carga</h2>
+<p><strong>Reimpresion</strong></p>
+
+<section class="meta">
+<div><span class="label">Fecha:</span> 23/06/2026</div>
+<div><span class="label">Estado:</span> Pendiente</div>
+<div><span class="label">Cliente:</span> Supermercados Andresito SRL</div>
+<div><span class="label">Domicilio:</span> Depósito Ruta 12 km 8</div>
+<div><span class="label">Transportista:</span> Transporte Guaraní</div>
+<div><span class="label">Chofer:</span> Juan Pérez</div>
+<div><span class="label">Camion:</span> AB123CD</div>
+</section>
+
+<h2>Productos</h2><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr><tr><td>Fécula de mandioca</td><td>1200</td><td>kg</td><td></td></tr><tr><td>Fécula de maíz</td><td>600</td><td>kg</td><td></td></tr></table>
+<h2>Pallets</h2><table><tr><th>Tipo</th><th>Medida</th><th>Peso</th><th>Cantidad</th><th>Obs.</th></tr><tr><td>Pallet estándar</td><td>1,00 x 1,20 m</td><td>18</td><td>12</td><td></td></tr></table>
+<h2>Observaciones</h2>
+<p>Demo: orden activa para verificar bloqueo de chofer.</p>
+</body>
+</html>
