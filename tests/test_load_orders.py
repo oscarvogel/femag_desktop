@@ -62,7 +62,7 @@ def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     refreshed_driver = type(data["driver"]).get_by_id(data["driver"].id)
 
     assert order.order_number == 1
-    assert order.status == LoadOrder.STATUS_PENDING
+    assert order.status == LoadOrder.STATUS_DRAFT
     assert order.created_by == "admin"
     assert refreshed_driver.available is False
     assert LoadOrder.select().count() == 1
@@ -187,3 +187,159 @@ def test_reopening_closed_order_requires_driver_availability(db):
 
     with pytest.raises(ValueError, match="chofer.*bloqueado"):
         service.change_status(first, LoadOrder.STATUS_PENDING)
+
+
+def test_create_order_validates_required_business_fields(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+
+    with pytest.raises(ValueError, match="cliente"):
+        service.create_order(
+            client=None,
+            delivery_address=data["address"],
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            products=[{"product": data["product"], "quantity": 100}],
+            pallets=[],
+        )
+
+    with pytest.raises(ValueError, match="producto"):
+        service.create_order(
+            client=data["client"],
+            delivery_address=data["address"],
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            products=[{"product": None, "quantity": 100}],
+            pallets=[],
+        )
+
+    with pytest.raises(ValueError, match="mayor a cero"):
+        service.create_order(
+            client=data["client"],
+            delivery_address=data["address"],
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            products=[{"product": data["product"], "quantity": 0}],
+            pallets=[],
+        )
+
+    with pytest.raises(ValueError, match="fecha"):
+        service.create_order(
+            client=data["client"],
+            delivery_address=data["address"],
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            products=[{"product": data["product"], "quantity": 100}],
+            pallets=[],
+            order_date=None,
+            require_order_date=True,
+        )
+
+
+def test_emit_order_requires_complete_order_and_records_status(db):
+    from app.models.load_orders import LoadOrder, LoadOrderStatusHistory
+    from app.models.masters import Driver
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    available_driver = Driver.create(name="Chofer disponible")
+    service = LoadOrderService(current_user="admin")
+    incomplete = LoadOrder.create(
+        order_number=77,
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        status=LoadOrder.STATUS_DRAFT,
+    )
+
+    with pytest.raises(ValueError, match="producto"):
+        service.change_status(incomplete, LoadOrder.STATUS_ISSUED)
+
+    complete = service.create_order(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=available_driver,
+        truck=data["truck"],
+        products=[{"product": data["product"], "quantity": 100}],
+        pallets=[],
+    )
+
+    issued = service.change_status(complete, LoadOrder.STATUS_ISSUED, reason="Lista para despacho")
+
+    assert issued.status == LoadOrder.STATUS_ISSUED
+    assert (
+        LoadOrderStatusHistory.select()
+        .where(
+            (LoadOrderStatusHistory.order == complete)
+            & (LoadOrderStatusHistory.new_status == LoadOrder.STATUS_ISSUED)
+        )
+        .count()
+        == 1
+    )
+
+
+def test_update_order_replaces_basic_fields_products_and_pallets(db):
+    from app.models.load_orders import LoadOrderPallet, LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        products=[{"product": data["product"], "quantity": 100}],
+        pallets=[],
+    )
+
+    updated = service.update_order(
+        order,
+        products=[{"product": data["other_product"], "quantity": 25, "unit": "bolsa"}],
+        pallets=[{"pallet_type": data["pallet"], "quantity": 4}],
+        observations="Editada desde pantalla",
+    )
+
+    product_line = LoadOrderProduct.get(LoadOrderProduct.order == updated)
+    pallet_line = LoadOrderPallet.get(LoadOrderPallet.order == updated)
+
+    assert updated.observations == "Editada desde pantalla"
+    assert product_line.product.id == data["other_product"].id
+    assert product_line.quantity == 25
+    assert pallet_line.quantity == 4
+
+
+def test_list_orders_returns_rows_for_consultation(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        products=[{"product": data["product"], "quantity": 100}],
+        pallets=[],
+        observations="Consulta rápida",
+    )
+
+    rows = service.list_orders()
+
+    assert rows[0]["id"] == order.id
+    assert rows[0]["numero"] == order.order_number
+    assert rows[0]["cliente"] == "Cliente FEMAG"
+    assert rows[0]["producto"] == "Fecula de mandioca"
+    assert rows[0]["cantidad"] == 100
+    assert rows[0]["estado"] == "Borrador"

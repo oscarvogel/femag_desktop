@@ -95,3 +95,56 @@ def test_app_smoke_command_runs():
 
     assert completed.returncode == 0, completed.stderr
     assert "FEMAG smoke OK" in completed.stdout
+
+
+def test_desktop_load_orders_page_is_functional_and_data_backed(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton, QTableWidget
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.auth_service import AuthService
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("operador_ui", "clave", "Administrador")
+    client = Client.create(name="Cliente UI", cuit="30999999991", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12 km 7",
+        is_primary=True,
+    )
+    carrier = Carrier.create(name="Transporte UI")
+    driver = Driver.create(name="Chofer UI")
+    truck = Truck.create(domain="UI123AA", carrier=carrier)
+    product = Product.create(name="Fecula UI", unit="kg")
+    LoadOrderService(current_user="admin").create_order(
+        client=client,
+        delivery_address=address,
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        products=[{"product": product, "quantity": 500}],
+        pallets=[],
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    page = window.findChild(type(window.stack), None).widget(window._route_indexes["load_orders"])
+    table = page.findChild(QTableWidget, "loadOrdersTable")
+    buttons = {button.objectName() for button in page.findChildren(QPushButton)}
+    fields = {field.objectName() for field in page.findChildren(QLineEdit)}
+    combos = {combo.objectName() for combo in page.findChildren(QComboBox)}
+
+    assert app is not None
+    assert table.rowCount() == 1
+    assert table.item(0, 2).text() == "Cliente UI"
+    assert table.item(0, 4).text() == "Fecula UI"
+    assert {"saveLoadOrderButton", "issueLoadOrderButton", "annulLoadOrderButton", "printLoadOrderButton"} <= buttons
+    assert {"orderNumberInput", "quantityInput", "observationsInput"} <= fields
+    assert {"clientCombo", "productCombo", "driverCombo", "carrierCombo", "truckCombo", "statusCombo"} <= combos

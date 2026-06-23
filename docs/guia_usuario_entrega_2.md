@@ -5,12 +5,14 @@
 1. Entrar en Operaciones > Ordenes de carga.
 2. Elegir cliente y domicilio de entrega.
 3. Seleccionar transportista, chofer y camion.
-4. Cargar observaciones si hacen falta.
-5. Agregar uno o mas productos con cantidad, unidad y observaciones.
-6. Agregar el detalle de pallets con tipo, medida, peso, cantidad y observaciones.
+4. Cargar producto, cantidad y pallets si corresponde.
+5. Cargar observaciones si hacen falta.
+6. Elegir estado Borrador, Emitida o Anulada segun corresponda.
 7. Guardar la orden.
 
 Cada orden corresponde a un solo camion. Si una carga tiene varios productos, se cargan como detalles de la misma orden.
+
+La primera pantalla funcional permite alta, edicion basica, consulta, listado, emision, anulacion e impresion A4. Los detalles multiples quedan preparados en el servicio y se ampliaran en la UI cuando se avance con Remitos.
 
 ## Bloqueo de chofer
 
@@ -27,12 +29,12 @@ Si se intenta usar un chofer bloqueado, el sistema rechaza la operacion con un m
 
 Los estados disponibles son:
 
-- Pendiente.
+- Borrador.
 - Emitida.
 - Cerrada.
 - Anulada.
 
-Cerrar una orden deja liberado el chofer. Anular una orden requiere permiso de anulacion.
+Emitir una orden exige datos completos: fecha, cliente, producto y cantidad mayor a cero. Cerrar una orden deja liberado el chofer. Anular una orden requiere permiso de anulacion.
 
 ## Impresion y reimpresion
 
@@ -45,6 +47,15 @@ Desde la orden se puede generar:
 La salida actual se genera como HTML imprimible en A4 desde `LoadOrderPrintService`. El servicio esta desacoplado de la pantalla para poder reemplazar el motor de reportes por PDF u otro formato mas adelante sin cambiar la logica de negocio.
 
 La reimpresion no pide clave de administrador. La impresion y reimpresion quedan auditadas.
+
+## Fuera de alcance actual
+
+Quedan pendientes para entregas posteriores:
+
+- Remito real.
+- Generacion F150 real.
+- Importacion DBF/MySQL incremental.
+- Integracion contable o cuenta corriente desde ordenes.
 
 ## Auditoria
 

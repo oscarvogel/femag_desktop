@@ -32,14 +32,26 @@ class LoadOrderService:
         pallets: list[dict],
         observations: str | None = None,
         order_date: date | None = None,
+        require_order_date: bool = False,
     ) -> LoadOrder:
-        if not products:
-            raise ValueError("La orden debe tener al menos un producto.")
+        effective_date = order_date or date.today()
+        if require_order_date and order_date is None:
+            raise ValueError("La fecha de la orden es obligatoria.")
+        self._validate_header(
+            client=client,
+            delivery_address=delivery_address,
+            carrier=carrier,
+            driver=driver,
+            truck=truck,
+            order_date=effective_date,
+        )
+        self._validate_products(products)
+        self._validate_pallets(pallets)
         self.driver_availability.ensure_available(driver)
         with database_proxy.atomic():
             order = LoadOrder.create(
                 order_number=self._next_order_number(),
-                date=order_date or date.today(),
+                date=effective_date,
                 client=client,
                 delivery_address=delivery_address,
                 carrier=carrier,
@@ -71,20 +83,41 @@ class LoadOrderService:
     def update_order(self, order: LoadOrder, **changes) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
         old_snapshot = self._snapshot(order)
+        products = changes.pop("products", None)
+        pallets = changes.pop("pallets", None)
+        if "order_date" in changes:
+            changes["date"] = changes.pop("order_date")
+        self._validate_header(
+            client=changes.get("client", order.client),
+            delivery_address=changes.get("delivery_address", order.delivery_address),
+            carrier=changes.get("carrier", order.carrier),
+            driver=changes.get("driver", order.driver),
+            truck=changes.get("truck", order.truck),
+            order_date=changes.get("date", order.date),
+        )
+        if products is not None:
+            self._validate_products(products)
+        if pallets is not None:
+            self._validate_pallets(pallets)
         new_driver = changes.get("driver")
         if new_driver is not None and new_driver.id != order.driver.id and order.is_active:
             self.driver_availability.ensure_available(new_driver, excluding_order=order)
             previous_driver = order.driver
         else:
             previous_driver = None
-        for field, value in changes.items():
-            if hasattr(order, field):
-                setattr(order, field, value)
-        order.updated_by = self.current_user
-        order.save()
-        if previous_driver is not None:
-            self.driver_availability.release_driver(previous_driver, order)
-            self.driver_availability.lock_driver(order.driver, order)
+        with database_proxy.atomic():
+            for field, value in changes.items():
+                if hasattr(order, field):
+                    setattr(order, field, value)
+            order.updated_by = self.current_user
+            order.save()
+            if products is not None:
+                self._replace_products(order, products)
+            if pallets is not None:
+                self._replace_pallets(order, pallets)
+            if previous_driver is not None:
+                self.driver_availability.release_driver(previous_driver, order)
+                self.driver_availability.lock_driver(order.driver, order)
         self.audit_service.record(
             user=self.current_user,
             module="Ordenes de carga",
@@ -102,6 +135,8 @@ class LoadOrderService:
         old_status = order.status
         if old_status == status:
             return order
+        if status == LoadOrder.STATUS_ISSUED:
+            self._ensure_complete_for_issue(order)
         if old_status in LoadOrder.FINAL_STATUSES and status in LoadOrder.ACTIVE_STATUSES:
             self.driver_availability.ensure_available(order.driver, excluding_order=order)
         order.status = status
@@ -150,6 +185,14 @@ class LoadOrderService:
     def blocked_driver_count(self) -> int:
         return Driver.select().where(Driver.available == False).count()  # noqa: E712
 
+    def list_orders(self, *, limit: int = 100) -> list[dict]:
+        query = (
+            LoadOrder.select()
+            .order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc())
+            .limit(limit)
+        )
+        return [self._row(order) for order in query]
+
     def _replace_products(self, order: LoadOrder, products: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
         for item in products:
@@ -174,6 +217,86 @@ class LoadOrderService:
                 quantity=item["quantity"],
                 observations=item.get("observations"),
             )
+
+    def _validate_header(
+        self,
+        *,
+        client: Client | None,
+        delivery_address: ClientAddress | None,
+        carrier: Carrier | None,
+        driver: Driver | None,
+        truck: Truck | None,
+        order_date: date | None,
+    ) -> None:
+        if client is None:
+            raise ValueError("El cliente es obligatorio.")
+        if delivery_address is None:
+            raise ValueError("El domicilio de entrega es obligatorio.")
+        if carrier is None:
+            raise ValueError("El transportista es obligatorio.")
+        if driver is None:
+            raise ValueError("El chofer es obligatorio.")
+        if truck is None:
+            raise ValueError("El camion/patente es obligatorio.")
+        if order_date is None:
+            raise ValueError("La fecha de la orden es obligatoria.")
+
+    def _validate_products(self, products: list[dict] | None) -> None:
+        if not products:
+            raise ValueError("La orden debe tener al menos un producto.")
+        for item in products:
+            product = item.get("product")
+            if product is None:
+                raise ValueError("El producto es obligatorio.")
+            if float(item.get("quantity") or 0) <= 0:
+                raise ValueError("La cantidad/pallets debe ser mayor a cero.")
+
+    def _validate_pallets(self, pallets: list[dict] | None) -> None:
+        for item in pallets or []:
+            if item.get("pallet_type") is None:
+                raise ValueError("El tipo de pallet es obligatorio.")
+            if int(item.get("quantity") or 0) <= 0:
+                raise ValueError("La cantidad/pallets debe ser mayor a cero.")
+
+    def _ensure_complete_for_issue(self, order: LoadOrder) -> None:
+        self._validate_header(
+            client=order.client,
+            delivery_address=order.delivery_address,
+            carrier=order.carrier,
+            driver=order.driver,
+            truck=order.truck,
+            order_date=order.date,
+        )
+        products = [
+            {"product": item.product, "quantity": item.quantity}
+            for item in LoadOrderProduct.select().where(LoadOrderProduct.order == order)
+        ]
+        self._validate_products(products)
+
+    def _row(self, order: LoadOrder) -> dict:
+        first_product = (
+            LoadOrderProduct.select()
+            .where(LoadOrderProduct.order == order)
+            .order_by(LoadOrderProduct.id)
+            .first()
+        )
+        pallet_count = sum(item.quantity for item in order.pallets)
+        return {
+            "id": order.id,
+            "numero": order.order_number,
+            "fecha": order.date,
+            "cliente": order.client.name,
+            "domicilio_entrega": order.delivery_address.address,
+            "destino": f"{order.delivery_address.city}, {order.delivery_address.province}",
+            "producto": first_product.product.name if first_product else "",
+            "cantidad": first_product.quantity if first_product else 0,
+            "pallets": pallet_count,
+            "chofer": order.driver.name,
+            "transportista": order.carrier.name,
+            "camion": order.truck.domain,
+            "observaciones": order.observations or "",
+            "estado": order.status,
+        }
 
     def _snapshot(self, order: LoadOrder) -> dict:
         return {

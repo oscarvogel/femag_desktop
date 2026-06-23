@@ -147,22 +147,33 @@ def _draw_abm(path: Path, title: str, rows: list[str]) -> Path:
 def _draw_load_order(path: Path, *, occupied: bool, rows: bool = False) -> Path:
     image, draw = _base("Nueva orden de carga")
     spec = build_load_order_form_spec()
-    draw.text((290, 160), spec.sections[0].title, fill="#0f172a", font=_font(22, bold=True))
-    _field(draw, 290, 205, "Cliente cabecera / VARIOS", "VARIOS")
-    _field(draw, 700, 205, "Destino general", "Corrientes / Buenos Aires")
-    draw.text((290, 325), spec.sections[1].title, fill="#0f172a", font=_font(22, bold=True))
-    _field(draw, 290, 370, "Transportista", "GLIENKE EZEQUIEL")
-    _field(draw, 700, 370, "Camión", "RIA609 / CIE907")
+    draw.rounded_rectangle((290, 155, 1310, 345), radius=8, fill="#ffffff", outline="#cbd5e1")
+    for i, column in enumerate(("Número", "Fecha", "Cliente", "Producto", "Cantidad", "Chofer", "Estado")):
+        draw.text((310 + i * 135, 178), column, fill="#334155", font=_font(13, bold=True))
+    table_rows = (
+        ("9001", "23/06/2026", "CANTERO FLAVIA", "Fécula 25 kg", "320", "GLIENKE", "Borrador"),
+        ("9002", "23/06/2026", "GALEANO", "Fécula 10 kg", "140", "PEREZ", "Emitida"),
+    )
+    for r, row in enumerate(table_rows if rows else table_rows[:1]):
+        y = 225 + r * 46
+        draw.line((305, y - 12, 1295, y - 12), fill="#e2e8f0")
+        for c, value in enumerate(row):
+            draw.text((310 + c * 135, y), value, fill="#111827", font=_font(13))
+
+    draw.text((290, 380), spec.sections[0].title, fill="#0f172a", font=_font(20, bold=True))
+    _field(draw, 290, 420, "Cliente", "CANTERO FLAVIA")
+    _field(draw, 700, 420, "Domicilio entrega", "Ruta nacional 117")
+    _field(draw, 1040, 420, "Estado", "Borrador")
+    draw.text((290, 540), spec.sections[1].title, fill="#0f172a", font=_font(20, bold=True))
+    _field(draw, 290, 580, "Transportista", "GLIENKE EZEQUIEL")
+    _field(draw, 700, 580, "Camión / patente", "RIA609 / CIE907")
     status = spec.driver_status_messages["blocked" if occupied else "available"]
-    draw.text((290, 470), status, fill="#b91c1c" if occupied else "#047857", font=_font(18, bold=True))
-    draw.rounded_rectangle((290, 520, 1310, 735), radius=8, fill="#ffffff", outline="#cbd5e1")
-    for i, column in enumerate(spec.detail_columns[:6]):
-        draw.text((305 + i * 158, 545), column, fill="#334155", font=_font(12, bold=True))
-    if rows:
-        for r, name in enumerate(("CANTERO FLAVIA", "GALEANO", "TRIGOS DEL OESTE")):
-            draw.text((305, 595 + r * 40), name, fill="#111827", font=_font(14))
-            draw.text((620, 595 + r * 40), "Fécula de mandioca", fill="#111827", font=_font(14))
-            draw.text((930, 595 + r * 40), "L-2606", fill="#111827", font=_font(14))
+    draw.text((290, 690), status, fill="#b91c1c" if occupied else "#047857", font=_font(17, bold=True))
+    for i, action in enumerate(("Nueva", "Guardar", "Emitir", "Anular", "Imprimir A4")):
+        left = 290 + i * 145
+        fill = "#1d4ed8" if action not in {"Anular"} else "#475569"
+        draw.rounded_rectangle((left, 745, left + 125, 790), radius=6, fill=fill)
+        draw.text((left + 20, 758), action, fill="#ffffff", font=_font(14, bold=True))
     image.save(path)
     return path
 

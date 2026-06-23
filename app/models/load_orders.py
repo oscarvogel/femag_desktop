@@ -7,7 +7,8 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletTyp
 
 
 class LoadOrder(BaseModel):
-    STATUS_PENDING = "Pendiente"
+    STATUS_DRAFT = "Borrador"
+    STATUS_PENDING = STATUS_DRAFT
     STATUS_ISSUED = "Emitida"
     STATUS_CLOSED = "Cerrada"
     STATUS_ANNULLED = "Anulada"

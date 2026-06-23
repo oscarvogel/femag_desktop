@@ -98,7 +98,7 @@ El proyecto debe incorporar en los primeros issues:
 
 ## Estado del proyecto
 
-Entrega 1 completada y Entrega 2 en implementacion: ordenes de carga, bloqueo de chofer, dashboard operativo e impresion HTML A4. La fuente de planificacion general es `plan_implementacion.md`.
+Entrega 1 completada y Entrega 2 en implementacion: ordenes de carga funcionales sobre la UX profesional base, bloqueo de chofer, dashboard operativo e impresion HTML A4. La fuente de planificacion general es `plan_implementacion.md`.
 
 ## Puesta en marcha tecnica
 
@@ -140,16 +140,20 @@ El smoke test valida que la base UI apunte a `pyqt5libs`, pero no importa compon
 
 ## Ordenes de carga
 
-La Entrega 2 agrega modelos y servicios para:
+La Entrega 2 agrega modelos, servicios y una primera pantalla funcional para:
 
-- Cabecera de orden con cliente, domicilio, transportista, chofer, camion, estado y auditoria de usuarios.
-- Detalle de productos por orden.
-- Detalle de pallets por orden.
+- Alta, edicion basica, consulta y listado de ordenes.
+- Cabecera de orden con numero, fecha, cliente, domicilio de entrega, transportista, chofer, camion/patente, estado y auditoria de usuarios.
+- Detalle minimo de producto y cantidad.
+- Detalle opcional de pallets.
 - Bloqueo de chofer mientras tenga una orden pendiente o emitida.
 - Liberacion de chofer al cerrar o anular la orden.
 - Impresion y reimpresion HTML A4 de orden, hoja resumen y salida conjunta.
+- Validaciones de cliente, producto, fecha y cantidades mayores a cero.
 
 La logica vive en servicios (`LoadOrderService`, `DriverAvailabilityService`, `LoadOrderPrintService`) y la UI declara su contrato en `app/ui/load_orders.py` sobre la base local `app/ui/abm.py` orientada a `pyqt5libs`.
+
+Quedan pendientes para entregas posteriores: Remito real, F150 real, integracion DBF/MySQL incremental y flujos contables asociados.
 
 La guia operativa esta en `docs/guia_usuario_entrega_2.md`.
 
