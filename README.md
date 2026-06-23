@@ -98,3 +98,45 @@ El proyecto debe incorporar en los primeros issues:
 ## Estado del proyecto
 
 Proyecto en etapa inicial. La fuente de planificacion es `plan_implementacion.md`.
+
+## Puesta en marcha tecnica
+
+1. Crear y activar un entorno virtual de Python.
+2. Instalar dependencias:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Copiar `.env.example` a `.env` y completar los datos de MySQL.
+4. Crear tablas iniciales:
+
+```bash
+python scripts/init_db.py
+```
+
+5. Crear usuario administrador:
+
+```bash
+python scripts/create_admin_user.py admin <clave>
+```
+
+## Validaciones
+
+Antes de cerrar cambios de Entrega 1 ejecutar:
+
+```bash
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+```
+
+## Backups
+
+El backup manual se ejecuta con:
+
+```bash
+python scripts/run_backup.py --user admin
+```
+
+`BACKUP_DIR` define la carpeta principal y `BACKUP_EXTRA_DIR` permite una copia adicional en otra PC o recurso compartido.
