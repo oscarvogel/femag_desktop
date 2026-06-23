@@ -103,6 +103,12 @@ if ($Help) {
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location -LiteralPath $projectRoot
+$previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+if ($previousPythonPath) {
+    $env:PYTHONPATH = "$projectRoot;$previousPythonPath"
+} else {
+    $env:PYTHONPATH = "$projectRoot"
+}
 
 Write-Host "== FEMAG Desktop dev =="
 Write-Host "Proyecto: $projectRoot"
