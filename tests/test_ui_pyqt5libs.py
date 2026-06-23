@@ -43,8 +43,11 @@ def test_load_order_view_spec_uses_pyqt5libs_abm_contract():
     assert spec.entity == "ordenes_carga"
     assert spec.title == "Órdenes de carga"
     assert spec.permissions_menu == "Operaciones"
-    assert "products" in spec.fields
-    assert "pallets" in spec.fields
+    assert "header_client" in spec.fields
+    assert "header_client_text" in spec.fields
+    assert "destination" in spec.fields
+    assert "vehicle_clean_and_suitable" in spec.fields
+    assert "lines" in spec.fields
     assert spec.actions == (
         "ver",
         "crear",

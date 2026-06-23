@@ -1,9 +1,9 @@
 from datetime import date
 
-from peewee import CharField, DateField, FloatField, ForeignKeyField, IntegerField, TextField
+from peewee import BooleanField, CharField, DateField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+from app.models.masters import Carrier, Client, Driver, Product, Truck
 
 
 class LoadOrder(BaseModel):
@@ -16,11 +16,13 @@ class LoadOrder(BaseModel):
 
     order_number = IntegerField(unique=True)
     date = DateField(default=date.today)
-    client = ForeignKeyField(Client, backref="load_orders")
-    delivery_address = ForeignKeyField(ClientAddress, backref="load_orders")
+    header_client = ForeignKeyField(Client, backref="load_orders", null=True)
+    header_client_text = CharField(null=True)
+    destination = CharField()
     carrier = ForeignKeyField(Carrier, backref="load_orders")
     driver = ForeignKeyField(Driver, backref="load_orders")
     truck = ForeignKeyField(Truck, backref="load_orders")
+    vehicle_clean_and_suitable = BooleanField(default=True)
     status = CharField(default=STATUS_PENDING)
     observations = TextField(null=True)
     created_by = CharField(null=True)
@@ -31,20 +33,19 @@ class LoadOrder(BaseModel):
         return self.status in self.ACTIVE_STATUSES
 
 
-class LoadOrderProduct(BaseModel):
-    order = ForeignKeyField(LoadOrder, backref="products", on_delete="CASCADE")
-    product = ForeignKeyField(Product, backref="load_order_details")
-    quantity = FloatField()
-    unit = CharField()
-    observations = TextField(null=True)
-
-
-class LoadOrderPallet(BaseModel):
-    order = ForeignKeyField(LoadOrder, backref="pallets", on_delete="CASCADE")
-    pallet_type = ForeignKeyField(PalletType, backref="load_order_details")
-    measure = CharField()
-    weight = FloatField()
-    quantity = IntegerField()
+class LoadOrderLine(BaseModel):
+    order = ForeignKeyField(LoadOrder, backref="lines", on_delete="CASCADE")
+    client = ForeignKeyField(Client, backref="load_order_lines", null=True)
+    recipient_text = CharField(null=True)
+    destination_text = CharField(null=True)
+    product = ForeignKeyField(Product, backref="load_order_lines", null=True)
+    product_detail = CharField(null=True)
+    bags_25kg = IntegerField(default=0)
+    bags_10kg = IntegerField(default=0)
+    pack = IntegerField(default=0)
+    pallet = IntegerField(default=0)
+    lot_number = CharField(null=True)
+    production_date = DateField(null=True)
     observations = TextField(null=True)
 
 

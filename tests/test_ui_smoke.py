@@ -17,32 +17,24 @@ def test_menu_filters_items_by_permission(db):
 
 
 def test_dashboard_counts_and_future_placeholder(db):
-    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.models.masters import Carrier, Client, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
     from app.ui.dashboard import DashboardService, future_module_message
 
     Client.create(name="Cliente", cuit="30222222229", iva_condition="RI")
     Product.create(name="Fecula", unit="kg")
     client = Client.create(name="Cliente orden", cuit="30333333339", iva_condition="RI")
-    address = ClientAddress.create(
-        client=client,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta 12",
-    )
     product = Product.create(name="Almidon", unit="kg")
     carrier = Carrier.create(name="Transporte Norte")
     driver = Driver.create(name="Juan Perez")
     truck = Truck.create(domain="AB123CD", carrier=carrier)
     LoadOrderService(current_user="admin").create_order(
-        client=client,
-        delivery_address=address,
+        header_client_text="VARIOS",
+        destination="Corrientes",
         carrier=carrier,
         driver=driver,
         truck=truck,
-        products=[{"product": product, "quantity": 100}],
-        pallets=[],
+        lines=[{"client": client, "recipient_text": client.name, "product": product, "bags_25kg": 4}],
     )
 
     summary = DashboardService().summary()
@@ -83,6 +75,16 @@ def test_menu_marks_load_orders_as_real_module(db):
     assert load_order_item.placeholder is False
     assert remittance_item.placeholder is True
     assert summary_item.placeholder is True
+
+
+def test_delivery_two_does_not_activate_out_of_scope_modules(db):
+    from app.ui.menu import FUTURE_MODULES
+
+    assert "Remitos" in FUTURE_MODULES
+    assert "Generar F150" in FUTURE_MODULES
+    assert "Registrar pago" in FUTURE_MODULES
+    assert "Clientes con saldo" in FUTURE_MODULES
+    assert "Movimientos" in FUTURE_MODULES
 
 
 def test_app_smoke_command_runs():

@@ -383,30 +383,39 @@ Una orden de carga corresponde a:
 
 * Un camión.
 * Un chofer.
-* Uno o más productos.
-* Uno o más detalles de pallets.
+* Un transporte.
+* Uno o más renglones de despacho para distintos clientes/destinatarios y productos.
 
 Una orden NO se divide en más de un camión.
 
-La orden puede tener más de un producto.
+La orden puede tener varios renglones de despacho. Cada renglón puede corresponder a un destinatario distinto y contener cantidades por presentación, lote y fecha de elaboración.
 
 Campos de cabecera:
 
 * Número.
 * Fecha.
-* Cliente.
-* Domicilio de entrega.
+* Cliente de cabecera opcional o texto de cabecera.
+* Destino general.
 * Transportista.
 * Chofer.
 * Camión.
+* Vehículo limpio y apto.
 * Estado.
 * Observaciones.
 
-Detalle de productos:
+Detalle de renglones:
 
-* Producto.
-* Cantidad.
-* Unidad.
+* Cliente asociado opcional.
+* Destinatario / cliente texto.
+* Localidad / destino texto.
+* Producto asociado opcional.
+* Detalle del producto o presentación.
+* Bolsas x 25 kg.
+* Bolsas x 10 kg.
+* Pack.
+* Pallet.
+* Número de lote.
+* Fecha de elaboración.
 * Observaciones.
 
 Detalle de pallets:
@@ -1134,8 +1143,9 @@ Detalle pallets:
 Criterios de aceptación:
 
 * Se puede crear orden de carga.
-* Se pueden agregar varios productos.
-* Se pueden agregar detalles de pallets.
+* Se puede cargar destino general.
+* Se pueden agregar varios renglones de despacho.
+* Cada renglón puede tener destinatario/localidad diferente, cantidades por presentación, lote y fecha de elaboración.
 * No se permite asignar chofer bloqueado.
 * Al crear carga activa, el chofer queda bloqueado.
 * Se puede cerrar/anular según permisos.

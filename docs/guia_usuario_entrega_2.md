@@ -3,14 +3,16 @@
 ## Ordenes de carga
 
 1. Entrar en Operaciones > Ordenes de carga.
-2. Elegir cliente y domicilio de entrega.
-3. Seleccionar transportista, chofer y camion.
-4. Cargar observaciones si hacen falta.
-5. Agregar uno o mas productos con cantidad, unidad y observaciones.
-6. Agregar el detalle de pallets con tipo, medida, peso, cantidad y observaciones.
+2. Cargar cliente de cabecera o texto de cabecera, por ejemplo "VARIOS".
+3. Cargar destino general.
+4. Seleccionar transportista, chofer y camion.
+5. Cargar observaciones si hacen falta.
+6. Agregar uno o mas renglones de despacho con destinatario/localidad, cantidades por presentacion, lote y fecha de elaboracion.
 7. Guardar la orden.
 
-Cada orden corresponde a un solo camion. Si una carga tiene varios productos, se cargan como detalles de la misma orden.
+Cada orden corresponde a un camion, un chofer y un transporte, pudiendo contener uno o varios renglones de despacho para distintos clientes/destinatarios y productos.
+
+Una orden puede tener varios renglones de despacho. Cada renglon puede corresponder a un destinatario distinto y contener cantidades por presentacion, lote y fecha de elaboracion.
 
 ## Bloqueo de chofer
 

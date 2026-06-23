@@ -2,30 +2,49 @@ from pathlib import Path
 
 
 def _order():
-    from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+    from app.models.masters import Carrier, Client, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
 
     client = Client.create(name="Cliente FEMAG", cuit="30712345678", iva_condition="RI")
-    address = ClientAddress.create(
-        client=client,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta 12",
-    )
+    other_client = Client.create(name="Cliente Sur", cuit="30712345679", iva_condition="RI")
     carrier = Carrier.create(name="Transporte Norte")
     driver = Driver.create(name="Juan Perez")
     truck = Truck.create(domain="AB123CD", carrier=carrier)
-    product = Product.create(name="Fecula", unit="kg")
-    pallet = PalletType.create(type="Comun", measure="1x1", weight=12.5)
+    product = Product.create(name="Fecula", unit="bolsa")
     return LoadOrderService(current_user="admin").create_order(
-        client=client,
-        delivery_address=address,
+        header_client_text="VARIOS",
+        destination="Corrientes - Entre Rios - Buenos Aires",
         carrier=carrier,
         driver=driver,
         truck=truck,
-        products=[{"product": product, "quantity": 1000}],
-        pallets=[{"pallet_type": pallet, "measure": "1x1", "weight": 12.5, "quantity": 8}],
+        vehicle_clean_and_suitable=True,
+        lines=[
+            {
+                "client": client,
+                "recipient_text": "Graef Hermanos",
+                "destination_text": "Corrientes",
+                "product": product,
+                "product_detail": "Fecula x 25 kg",
+                "bags_25kg": 20,
+                "bags_10kg": 5,
+                "pack": 2,
+                "pallet": 1,
+                "lot_number": "L-001",
+                "production_date": "2026-06-01",
+            },
+            {
+                "client": other_client,
+                "recipient_text": "Cliente Sur",
+                "destination_text": "Buenos Aires",
+                "product_detail": "Pack mixto",
+                "bags_25kg": 10,
+                "bags_10kg": 7,
+                "pack": 8,
+                "pallet": 2,
+                "lot_number": "L-002",
+                "production_date": "2026-06-02",
+            },
+        ],
         observations="Imprimir con hoja resumen",
     )
 
@@ -43,10 +62,25 @@ def test_print_service_exports_order_summary_and_combined_html(db, tmp_path):
 
     for path in (order_path, summary_path, combined_path):
         html = Path(path).read_text(encoding="utf-8")
-        assert "Orden de carga Nro. 1" in html
-        assert "Cliente FEMAG" in html
+        assert "Orden de despacho de fecula de mandioca" in html
+        assert "VARIOS" in html
+        assert "Corrientes - Entre Rios - Buenos Aires" in html
+        assert "Graef Hermanos" in html
+        assert "Cliente Sur" in html
+        assert "Bolsas x 25 kg" in html
+        assert "Bolsas x 10 kg" in html
+        assert "L-001" in html
+        assert "01/06/2026" in html
+        assert "Totales" in html
+        assert ">30<" in html
+        assert ">12<" in html
+        assert ">10<" in html
+        assert ">3<" in html
+        assert "Vehiculo limpio y apto" in html
+        assert "Si" in html
         assert "Juan Perez" in html
         assert "AB123CD" in html
+        assert "Firma del encargado de carga" in html
 
     combined = Path(combined_path).read_text(encoding="utf-8")
     assert "Hoja resumen / sobre de carga" in combined
