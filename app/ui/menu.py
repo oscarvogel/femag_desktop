@@ -19,6 +19,7 @@ class MenuSectionView:
 FUTURE_MODULES = {
     "Remitos",
     "Generar F150",
+    "Hoja resumen / sobre de carga",
     "Clientes con saldo",
     "Movimientos",
     "Registrar pago",

@@ -102,6 +102,8 @@ class LoadOrderService:
         old_status = order.status
         if old_status == status:
             return order
+        if old_status in LoadOrder.FINAL_STATUSES and status in LoadOrder.ACTIVE_STATUSES:
+            self.driver_availability.ensure_available(order.driver, excluding_order=order)
         order.status = status
         order.updated_by = self.current_user
         order.save()

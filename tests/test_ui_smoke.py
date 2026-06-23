@@ -73,9 +73,16 @@ def test_menu_marks_load_orders_as_real_module(db):
     remittance_item = next(
         item for section in build_menu(user) for item in section.items if item.title == "Remitos"
     )
+    summary_item = next(
+        item
+        for section in build_menu(user)
+        for item in section.items
+        if item.title == "Hoja resumen / sobre de carga"
+    )
 
     assert load_order_item.placeholder is False
     assert remittance_item.placeholder is True
+    assert summary_item.placeholder is True
 
 
 def test_app_smoke_command_runs():

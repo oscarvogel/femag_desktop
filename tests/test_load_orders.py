@@ -157,3 +157,33 @@ def test_available_drivers_excludes_blocked_active_drivers(db):
 
     assert free_driver.name in names
     assert data["driver"].name not in names
+
+
+def test_reopening_closed_order_requires_driver_availability(db):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    first = service.create_order(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        products=[{"product": data["product"], "quantity": 100}],
+        pallets=[],
+    )
+    service.change_status(first, LoadOrder.STATUS_CLOSED)
+    service.create_order(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        products=[{"product": data["product"], "quantity": 50}],
+        pallets=[],
+    )
+
+    with pytest.raises(ValueError, match="chofer.*bloqueado"):
+        service.change_status(first, LoadOrder.STATUS_PENDING)
