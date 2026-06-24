@@ -33,7 +33,7 @@ def test_dashboard_counts_and_future_placeholder(db):
     )
     product = Product.create(name="Almidon", unit="kg")
     carrier = Carrier.create(name="Transporte Norte")
-    driver = Driver.create(name="Juan Perez")
+    driver = Driver.create(name="Juan Perez", carrier=carrier)
     truck = Truck.create(domain="AB123CD", carrier=carrier)
     LoadOrderService(current_user="admin").create_order(
         client=client,

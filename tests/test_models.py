@@ -17,12 +17,13 @@ def test_base_models_create_expected_records(db):
 
 
 def test_unique_business_keys_are_enforced(db):
-    from app.models.masters import Client, Truck
+    from app.models.masters import Carrier, Client, Truck
 
     Client.create(name="Cliente A", cuit="30111111110", iva_condition="RI")
-    Truck.create(domain="AA123BB")
+    carrier = Carrier.create(name="Transporte Norte")
+    Truck.create(domain="AA123BB", carrier=carrier)
 
     with pytest.raises(IntegrityError):
         Client.create(name="Duplicado", cuit="30111111110", iva_condition="RI")
     with pytest.raises(IntegrityError):
-        Truck.create(domain="AA123BB")
+        Truck.create(domain="AA123BB", carrier=carrier)

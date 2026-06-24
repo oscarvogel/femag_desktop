@@ -14,7 +14,7 @@ def _master_data():
         is_primary=True,
     )
     carrier = Carrier.create(name="Transporte Norte", cuit="30777777770")
-    driver = Driver.create(name="Juan Perez", document="123")
+    driver = Driver.create(name="Juan Perez", carrier=carrier, document="123")
     truck = Truck.create(domain="AB123CD", carrier=carrier)
     product = Product.create(name="Fecula de mandioca", unit="kg")
     other_product = Product.create(name="Almidon", unit="bolsa")
@@ -120,7 +120,7 @@ def test_change_active_order_to_blocked_driver_is_rejected(db):
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
-    other_driver = Driver.create(name="Pedro Gomez", available=False)
+    other_driver = Driver.create(name="Pedro Gomez", carrier=data["carrier"], available=False)
     service = LoadOrderService(current_user="admin")
     order = service.create_order(
         client=data["client"],
@@ -142,7 +142,7 @@ def test_available_drivers_excludes_blocked_active_drivers(db):
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
-    free_driver = Driver.create(name="Chofer libre")
+    free_driver = Driver.create(name="Chofer libre", carrier=data["carrier"])
     LoadOrderService(current_user="admin").create_order(
         client=data["client"],
         delivery_address=data["address"],

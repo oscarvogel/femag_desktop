@@ -14,7 +14,7 @@ def _order():
         address="Ruta 12",
     )
     carrier = Carrier.create(name="Transporte Norte")
-    driver = Driver.create(name="Juan Perez")
+    driver = Driver.create(name="Juan Perez", carrier=carrier)
     truck = Truck.create(domain="AB123CD", carrier=carrier)
     product = Product.create(name="Fecula", unit="kg")
     pallet = PalletType.create(type="Comun", measure="1x1", weight=12.5)
