@@ -138,6 +138,28 @@ python -m app.main --smoke
 
 El smoke test valida que la base UI apunte a `pyqt5libs`, pero no importa componentes graficos pesados ni abre ventanas. Esto permite ejecutar validaciones en entornos headless aunque la libreria privada todavia no este instalada.
 
+## Ejecucion de la UI de escritorio
+
+Para abrir una ventana real de FEMAG Desktop en una sesion de workstation con la configuracion local:
+
+```bash
+py -3.12 -m app.main --ui
+```
+
+Para revisiones visuales sin depender de MySQL ni crear datos productivos, usar la pantalla demo aprobada:
+
+```bash
+py -3.12 -m app.main --demo-ui
+```
+
+La ventana usa el titulo `FEMAG Desktop` para que herramientas de validacion visual como Computer Use puedan detectarla. El modo demo abre el dashboard aprobado con usuario `demo_visual`, menu lateral plano, buscador superior y contadores vacios.
+
+El comando headless de smoke sigue siendo:
+
+```bash
+py -3.12 -m app.main --smoke
+```
+
 ## Ordenes de carga
 
 La Entrega 2 agrega modelos y servicios para:

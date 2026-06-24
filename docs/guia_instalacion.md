@@ -25,6 +25,20 @@ python -m compileall app
 python -m app.main --smoke
 ```
 
+Para validar visualmente la aplicacion en un puesto de escritorio, abrir la UI real con:
+
+```bash
+py -3.12 -m app.main --ui
+```
+
+Si se necesita una revision visual sin depender de MySQL ni crear datos productivos, abrir la pantalla demo aprobada con:
+
+```bash
+py -3.12 -m app.main --demo-ui
+```
+
+La ventana debe mostrarse con el titulo `FEMAG Desktop`, que permite identificarla desde herramientas de revision visual como Computer Use. Estos comandos requieren una sesion grafica de Windows y PyQt5 instalado.
+
 ## Backups
 
 Configurar `BACKUP_DIR` y, si corresponde, `BACKUP_EXTRA_DIR`.

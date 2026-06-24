@@ -95,3 +95,47 @@ def test_app_smoke_command_runs():
 
     assert completed.returncode == 0, completed.stderr
     assert "FEMAG smoke OK" in completed.stdout
+
+
+def test_app_ui_flag_runs_ui_launcher(monkeypatch):
+    from app import main as app_main
+
+    calls = []
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        calls.append(demo_mode)
+        return 0
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--ui"]) == 0
+    assert calls == [False]
+
+
+def test_app_demo_ui_flag_runs_ui_launcher_with_demo_data(monkeypatch):
+    from app import main as app_main
+
+    calls = []
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        calls.append(demo_mode)
+        return 0
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--demo-ui"]) == 0
+    assert calls == [True]
+
+
+def test_app_ui_flag_reports_launch_error(monkeypatch, capsys):
+    from app import main as app_main
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        raise RuntimeError("PyQt5 no esta instalado")
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--ui"]) == 1
+    captured = capsys.readouterr()
+    assert "No se pudo abrir FEMAG Desktop UI" in captured.err
+    assert "PyQt5 no esta instalado" in captured.err
