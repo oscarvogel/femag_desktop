@@ -29,14 +29,6 @@ class Product(BaseModel):
     active = BooleanField(default=True)
 
 
-class Driver(BaseModel):
-    name = CharField(unique=True)
-    document = CharField(null=True)
-    phone = CharField(null=True)
-    active = BooleanField(default=True)
-    available = BooleanField(default=True)
-
-
 class Carrier(BaseModel):
     name = CharField(unique=True)
     cuit = CharField(null=True)
@@ -44,9 +36,18 @@ class Carrier(BaseModel):
     active = BooleanField(default=True)
 
 
+class Driver(BaseModel):
+    name = CharField(unique=True)
+    carrier = ForeignKeyField(Carrier, backref="drivers")
+    document = CharField(null=True)
+    phone = CharField(null=True)
+    active = BooleanField(default=True)
+    available = BooleanField(default=True)
+
+
 class Truck(BaseModel):
     domain = CharField(unique=True)
-    carrier = ForeignKeyField(Carrier, backref="trucks", null=True)
+    carrier = ForeignKeyField(Carrier, backref="trucks")
     active = BooleanField(default=True)
 
 

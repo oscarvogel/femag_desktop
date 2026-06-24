@@ -21,9 +21,18 @@ class MasterService:
         self._record("Product", row, {"name": name, "unit": unit})
         return row
 
-    def create_driver(self, name: str, document: str | None = None, phone: str | None = None) -> Driver:
-        row = Driver.create(name=name, document=document, phone=phone)
-        self._record("Driver", row, {"name": name})
+    def create_driver(
+        self,
+        name: str,
+        *,
+        carrier: Carrier | None,
+        document: str | None = None,
+        phone: str | None = None,
+    ) -> Driver:
+        if carrier is None:
+            raise ValueError("El chofer debe estar asociado a un transportista.")
+        row = Driver.create(name=name, carrier=carrier, document=document, phone=phone)
+        self._record("Driver", row, {"name": name, "carrier_id": carrier.id})
         return row
 
     def create_carrier(self, name: str, cuit: str | None = None, phone: str | None = None) -> Carrier:
@@ -31,10 +40,31 @@ class MasterService:
         self._record("Carrier", row, {"name": name, "cuit": cuit})
         return row
 
-    def create_truck(self, domain: str, carrier: Carrier | None = None) -> Truck:
+    def create_truck(self, domain: str, carrier: Carrier | None) -> Truck:
+        if carrier is None:
+            raise ValueError("El camion debe estar asociado a un transportista.")
         row = Truck.create(domain=domain, carrier=carrier)
-        self._record("Truck", row, {"domain": domain, "carrier_id": carrier.id if carrier else None})
+        self._record("Truck", row, {"domain": domain, "carrier_id": carrier.id})
         return row
+
+    def valid_drivers_for_carrier(self, carrier: Carrier) -> list[Driver]:
+        return list(
+            Driver.select()
+            .where(
+                Driver.carrier == carrier,
+                Driver.active == True,  # noqa: E712
+            )
+            .order_by(Driver.name)
+        )
+
+    def valid_drivers_for_truck(self, truck: Truck) -> list[Driver]:
+        return self.valid_drivers_for_carrier(truck.carrier)
+
+    def is_driver_valid_for_carrier(self, driver: Driver, carrier: Carrier) -> bool:
+        return bool(driver.active and driver.carrier.id == carrier.id)
+
+    def is_driver_valid_for_truck(self, driver: Driver, truck: Truck) -> bool:
+        return self.is_driver_valid_for_carrier(driver, truck.carrier)
 
     def create_pallet_type(self, type: str, measure: str, weight: float) -> PalletType:
         row = PalletType.create(type=type, measure=measure, weight=weight)
