@@ -101,6 +101,8 @@ python scripts/generate_ux_screenshots.py
 
 Screenshots o evidencia visual: obligatorios cuando hay cambios de pantalla, layout, navegacion o estados visuales. Revisar estados vacio, con datos, error y sin permiso cuando apliquen.
 
+Antes de codificar una pantalla nueva, completar el checklist UX previo de `docs/LOOP_ENGINEERING.md`. Para cambios solo documentales del loop UX, no ejecutar screenshots.
+
 ### Impresion / reportes
 
 Ejecutar:

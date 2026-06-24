@@ -56,6 +56,8 @@ Usar este checklist para abrir, revisar, marcar ready, mergear y cerrar PRs de F
 
 ## UX y screenshots
 
+- [ ] Si el PR agrega o cambia una pantalla, existe checklist UX previo completo.
+- [ ] La pantalla tiene objetivo, usuario principal, permisos, datos minimos, acciones y estados definidos antes de codificar.
 - [ ] Si cambia UX, se generaron screenshots con `python scripts/generate_ux_screenshots.py`.
 - [ ] Si no cambia UX, no se ejecutaron screenshots y se documento el motivo.
 - [ ] Las capturas muestran estados relevantes: normal, vacio, error o permisos, segun aplique.

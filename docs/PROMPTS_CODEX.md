@@ -253,3 +253,116 @@ Entrega:
 - Fixes minimos si el issue lo permite.
 - Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```
+
+## Analizar UX antes de codificar
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Completar el loop UX previo para la pantalla <PANTALLA> antes de codificar.
+
+Alcance:
+- No modificar codigo funcional.
+- No implementar pantalla.
+- Definir objetivo, usuario principal, permisos y datos minimos.
+- Definir acciones principales y secundarias.
+- Definir estados: vacio, con datos, cargando, error, sin permiso y sin conexion/error de base si aplica.
+- Definir validaciones manuales, criterios visuales y fuera de alcance.
+- Mantener el estilo profesional ya aprobado.
+
+Entrega:
+- Checklist UX previo completo.
+- Riesgos o indefiniciones.
+- Decision: lista para implementacion / no lista.
+```
+
+## Convertir checklist UX en issue tecnico
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Convertir el checklist UX de <PANTALLA> en un issue tecnico chico y revisable.
+
+Alcance:
+- Separar implementacion minima de mejoras futuras.
+- Declarar alcance incluido y fuera de alcance.
+- Mantener fuera remitos reales, F150 real, importacion DBF/MySQL y logica pesada salvo pedido explicito.
+- Definir validaciones y evidencia esperada.
+
+Entrega:
+- Titulo de issue.
+- Contexto.
+- Comportamiento esperado.
+- Archivos o areas probables.
+- Criterios de aceptacion.
+- Riesgos/dependencias.
+```
+
+## Revisar si una pantalla esta lista
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Revisar si la pantalla <PANTALLA> esta lista para implementacion.
+
+Checklist:
+- Objetivo claro.
+- Usuario principal claro.
+- Permisos definidos.
+- Datos minimos definidos.
+- Acciones principales y secundarias separadas.
+- Estados vacio, con datos, cargando, error, sin permiso y sin conexion/error de base definidos.
+- Validaciones manuales definidas.
+- Criterios visuales definidos.
+- Fuera de alcance declarado.
+
+Entrega:
+- Resultado: lista / no lista.
+- Puntos faltantes.
+- Recomendacion concreta para el proximo PR.
+```
+
+## Pedir mockup textual antes de codigo
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Crear un mockup textual de la pantalla <PANTALLA> antes de tocar codigo.
+
+Alcance:
+- Describir estructura de pantalla, secciones, acciones y estados.
+- Priorizar lectura clara para secretarias/administracion.
+- Evitar pantallas saturadas.
+- No generar codigo ni screenshots.
+
+Entrega:
+- Mockup textual.
+- Acciones principales visibles.
+- Acciones secundarias.
+- Estados previstos.
+- Riesgos de UX.
+```
+
+## Validar screenshots UX
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Validar screenshots del cambio UX del PR <NUMERO>.
+
+Alcance:
+- Ejecutar o revisar screenshots solo si hubo cambio UX.
+- Revisar estados vacio, con datos, cargando, error y sin permiso cuando apliquen.
+- Revisar permisos, acciones principales, acciones secundarias, textos cortados y saturacion visual.
+- No agregar features nuevas.
+
+Entrega:
+- Capturas revisadas.
+- Hallazgos por severidad.
+- Decision: listo / requiere ajustes.
+```
