@@ -362,7 +362,7 @@ Issue relacionado:
 
 Estas pantallas deben pasar por checklist UX antes de implementarse o ampliarse. Esta lista no implica implementacion en este issue.
 
-- Ordenes de carga.
+- Ordenes de carga: ver `docs/ux/ordenes_carga.md`.
 - Remitos.
 - Sobres / hoja resumen.
 - Cuenta corriente clientes.
