@@ -69,11 +69,15 @@ Todo PR debe incluir:
 
 - Resumen claro del cambio.
 - Issue relacionado.
+- Alcance incluido.
+- Fuera de alcance.
 - Archivos agregados o modificados.
 - Validaciones ejecutadas.
 - Riesgos conocidos.
 - Capturas si cambia UX.
 - Nota explicita si no se pudieron ejecutar tests o smoke checks.
+- Comentario final de revision antes de mergear.
+- Limpieza post-merge: rama remota, rama local, `git fetch --prune origin` y `git status -sb`.
 
 ## Validacion minima
 

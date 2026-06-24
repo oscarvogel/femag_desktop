@@ -156,37 +156,94 @@ Agregar `python -m pytest` y smoke checks cuando el cambio toque codigo o arranq
 
 ### Cuando usarlo
 
-Usar este loop antes de pedir revision humana o al revisar feedback de un PR.
+Usar este loop para preparar, revisar, marcar ready, mergear y cerrar PRs de FEMAG Desktop.
 
 ### Entrada esperada
 
-- PR abierto.
-- Diff actualizado.
-- Validaciones ejecutadas o limitaciones documentadas.
+- Issue chico con objetivo y criterio de aceptacion.
+- Rama especifica del issue.
+- Diff actualizado y enfocado.
+- Validaciones ejecutadas o limitaciones documentadas con resultado real.
 
 ### Pasos
 
-1. Comparar el diff contra el issue.
-2. Verificar que no haya archivos fuera de alcance.
-3. Revisar riesgos de negocio.
-4. Revisar checklist de PR.
-5. Aplicar cambios de review en commits chicos.
-6. Actualizar descripcion del PR si cambian validaciones o riesgos.
+1. Antes de abrir el PR, declarar objetivo, alcance incluido y fuera de alcance.
+2. Verificar que la rama sea especifica del issue.
+3. Comparar el diff contra el issue.
+4. Confirmar que no se mezclen UX, logica, docs, datos reales o refactors fuera de alcance.
+5. Revisar que el PR no prometa features inexistentes.
+6. Ejecutar validaciones frescas segun el tipo de cambio.
+7. Generar evidencia visual solo si hubo cambios UX.
+8. Actualizar documentacion si el cambio modifica flujo, alcance, validaciones o decisiones.
+9. Completar descripcion del PR con resumen, issue, alcance, fuera de alcance, archivos, validaciones, screenshots y riesgos.
+10. Dejar comentario final de revision con decision: listo para merge o requiere cambios.
+11. Mergear solo si GitHub reporta el PR como mergeable y apunta a `main`.
+12. Despues del merge, limpiar ramas, ejecutar `git fetch --prune origin` y confirmar `git status -sb`.
 
 ### Salida esperada
 
 - PR revisable, chico y alineado al issue.
-- Feedback resuelto o preguntas claras.
+- Validaciones frescas registradas.
+- Fuera de alcance declarado.
+- Issue cerrado o trazabilidad clara.
+- Limpieza post-merge documentada.
 
 ### Validaciones minimas
 
 ```bash
 git diff --check
+git diff --cached --check
 python -m pytest
 python -m compileall app
+python -m app.main --smoke
+python -m app.main --demo --smoke
 ```
 
-Ajustar segun el tipo de cambio.
+Ajustar segun el tipo de cambio. No ejecutar screenshots si el PR no modifica UX.
+
+### Plantilla de comentario final
+
+```md
+## Revision final
+
+Resultado: aprobado / requiere cambios
+
+### Alcance revisado
+- ...
+
+### Fuera de alcance confirmado
+- ...
+
+### Validaciones ejecutadas
+- `python -m pytest` -> ...
+- `python -m compileall app` -> ...
+- `python -m app.main --smoke` -> ...
+- `python -m app.main --demo --smoke` -> ...
+
+### Evidencia visual
+- Screenshots ejecutados: si/no
+- Motivo: ...
+
+### Riesgos / notas
+- ...
+
+### Decision
+Listo para merge / No mergear todavia
+```
+
+### Plantilla post-merge
+
+```md
+PR mergeado:
+- PR:
+- Merge commit:
+- Issue cerrado:
+- Rama remota borrada:
+- Rama local borrada:
+- Estado final de `main`:
+- No trackeados restantes:
+- Validaciones previas al merge:
+```
 
 ## UX loop
 

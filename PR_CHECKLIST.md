@@ -1,24 +1,46 @@
 # PR Checklist - FEMAG Desktop
 
-Usar este checklist antes de abrir o marcar listo un PR.
+Usar este checklist para abrir, revisar, marcar ready, mergear y cerrar PRs de FEMAG Desktop.
 
-## Alcance contra issue
+## Antes de abrir el PR
 
-- [ ] El PR tiene un issue relacionado.
-- [ ] El PR indica que loop se uso: bug, tests, documentacion, review, UX o release futuro.
-- [ ] El cambio resuelve el comportamiento esperado del issue.
-- [ ] La descripcion separa alcance incluido y fuera de alcance.
-- [ ] No mezcla bugs, features, refactors y documentacion fuera de alcance.
-- [ ] No modifica remitos reales, F150 real, importacion DBF/MySQL ni logica pesada si el issue no lo pide.
-- [ ] No toca modelos, migraciones, pantallas, tests o datos demo fuera del alcance.
+- [ ] El trabajo parte de un issue chico, con objetivo y criterio de aceptacion.
+- [ ] La rama es especifica del issue, por ejemplo `codex/issue-45-loop-pr`.
+- [ ] El objetivo del PR esta declarado en una o dos frases.
+- [ ] El alcance incluido esta declarado.
+- [ ] El fuera de alcance esta declarado.
+- [ ] No mezcla UX, logica, docs, datos reales y refactors si el issue no lo pide.
+- [ ] No toca remitos reales, F150 real, importacion DBF/MySQL ni logica pesada sin issue explicito.
+- [ ] No incluye archivos generados, temporales, secretos o no trackeados ajenos.
+
+## Durante el PR
+
+- [ ] Los cambios se mantienen enfocados en el issue.
+- [ ] Se actualiza documentacion si el cambio modifica flujo, alcance, validaciones o decisiones.
+- [ ] Se ejecutan validaciones segun el tipo de cambio.
+- [ ] La evidencia visual se genera solo si hay cambios UX o screenshots pedidos por el issue.
+- [ ] Si no hay cambio UX, se deja escrito: "No se ejecutaron screenshots porque el PR solo modifica documentacion/codigo sin cambios visuales."
+- [ ] No se incorporan `.codegraph/`, `.cursor/`, `.github/` ni otros no trackeados fuera de alcance.
+
+## Descripcion del PR
+
+- [ ] Resumen claro del cambio.
+- [ ] Issue relacionado, con `Closes #NN` si el PR lo cierra.
+- [ ] Alcance incluido.
+- [ ] Fuera de alcance.
+- [ ] Archivos principales modificados.
+- [ ] Validaciones ejecutadas con resultados reales y frescos.
+- [ ] Screenshots o nota de que no aplican.
+- [ ] Riesgos, notas o limitaciones.
 
 ## Tests y validaciones
 
+- [ ] Se ejecuto `git diff --check`.
+- [ ] Se ejecuto `git diff --cached --check` antes de commitear.
 - [ ] Se ejecuto `python -m pytest` o se documento por que no aplica.
 - [ ] Se ejecuto `python -m compileall app` o se documento por que no aplica.
 - [ ] Se ejecuto `python -m app.main --smoke` si aplica.
 - [ ] Se ejecuto `python -m app.main --demo --smoke` si aplica.
-- [ ] Se ejecuto `git diff --check`.
 - [ ] Los resultados reales quedaron documentados en la descripcion del PR.
 
 ## Smoke app y demo
@@ -32,8 +54,18 @@ Usar este checklist antes de abrir o marcar listo un PR.
 ## UX y screenshots
 
 - [ ] Si cambia UX, se generaron screenshots con `python scripts/generate_ux_screenshots.py`.
+- [ ] Si no cambia UX, no se ejecutaron screenshots y se documento el motivo.
 - [ ] Las capturas muestran estados relevantes: normal, vacio, error o permisos, segun aplique.
 - [ ] No hay textos cortados, botones sin feedback ni navegacion rota.
+
+## Revision
+
+- [ ] El diff no contiene cambios fuera de alcance.
+- [ ] El PR no promete features inexistentes ni estados no implementados.
+- [ ] Las validaciones son frescas y corresponden al cambio.
+- [ ] La documentacion queda alineada con el comportamiento real.
+- [ ] El PR cierra el issue o lo referencia con trazabilidad clara.
+- [ ] El comentario final de revision indica decision: listo para merge o requiere cambios.
 
 ## Compatibilidad PyQt
 
@@ -60,3 +92,62 @@ Usar este checklist antes de abrir o marcar listo un PR.
 - [ ] Se reviso `git status --short`.
 - [ ] No quedan archivos generados, temporales, secretos o capturas fuera de alcance.
 - [ ] Los archivos nuevos del PR son intencionales.
+
+## Merge y limpieza
+
+- [ ] El PR apunta a `main`.
+- [ ] GitHub reporta el PR como mergeable.
+- [ ] No hay conflictos.
+- [ ] Se confirma que el alcance final sigue alineado al issue.
+- [ ] Se mergea contra `main`.
+- [ ] Se cambia a `main`.
+- [ ] Se ejecuta `git pull --ff-only origin main`.
+- [ ] Se borra la rama remota.
+- [ ] Se borra la rama local si existe.
+- [ ] Se ejecuta `git fetch --prune origin`.
+- [ ] Se confirma `git status -sb`.
+- [ ] Se informan no trackeados fuera de alcance si aparecen.
+
+## Plantilla de comentario final de revision
+
+```md
+## Revision final
+
+Resultado: aprobado / requiere cambios
+
+### Alcance revisado
+- ...
+
+### Fuera de alcance confirmado
+- ...
+
+### Validaciones ejecutadas
+- `python -m pytest` -> ...
+- `python -m compileall app` -> ...
+- `python -m app.main --smoke` -> ...
+- `python -m app.main --demo --smoke` -> ...
+
+### Evidencia visual
+- Screenshots ejecutados: si/no
+- Motivo: ...
+
+### Riesgos / notas
+- ...
+
+### Decision
+Listo para merge / No mergear todavia
+```
+
+## Plantilla de resumen post-merge
+
+```md
+PR mergeado:
+- PR:
+- Merge commit:
+- Issue cerrado:
+- Rama remota borrada:
+- Rama local borrada:
+- Estado final de `main`:
+- No trackeados restantes:
+- Validaciones previas al merge:
+```
