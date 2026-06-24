@@ -253,29 +253,39 @@ PR mergeado:
 
 ### Cuando usarlo
 
-Usar este loop antes de codificar nuevas pantallas y cuando el issue cambia pantallas, navegacion, permisos visibles, textos, estados o layout.
+Usar este loop antes de codificar nuevas pantallas y cuando el issue cambia pantallas, navegacion, permisos visibles, textos, estados o layout. No codificar una pantalla si el flujo, permisos, datos minimos, estados y acciones no estan definidos.
 
 ### Entrada esperada
 
 - Flujo de usuario afectado.
-- Estados a revisar.
+- Objetivo de la pantalla.
+- Usuario principal.
+- Permisos necesarios.
+- Datos minimos necesarios.
+- Acciones principales y secundarias.
+- Estados visuales a revisar.
 - Criterios visuales o capturas esperadas.
+- Fuera de alcance.
+- Evidencia esperada antes de implementar.
 
 ### Pasos
 
-1. Identificar la pantalla, permisos y flujo antes de codificar.
-2. Definir estados normal, vacio, error y sin permisos cuando apliquen.
-3. Implementar solo el alcance aprobado.
-4. Generar screenshots si hubo cambio visual.
-5. Revisar textos cortados, botones sin feedback y navegacion.
-6. Corregir solo lo necesario para el issue.
-7. Adjuntar o mencionar capturas en el PR.
+1. Identificar objetivo, usuario principal y permisos.
+2. Definir datos minimos, acciones principales y acciones secundarias.
+3. Definir estados visuales: vacio, con datos, cargando, error, sin permiso y sin conexion o error de base si aplica.
+4. Definir validaciones manuales y criterios visuales minimos.
+5. Separar alcance incluido y fuera de alcance.
+6. Confirmar evidencia esperada antes de implementar: checklist completo, mockup textual, wireframe o screenshots si ya existen.
+7. Recien despues, pasar a implementacion en un issue o PR separado.
+8. Si hubo cambio visual real, generar screenshots y revisar textos cortados, botones sin feedback y navegacion.
 
 ### Salida esperada
 
-- UX validada visualmente.
-- Capturas disponibles si el cambio lo requiere.
-- Riesgos de PyQt documentados.
+- Checklist UX previo completo.
+- Pantalla marcada como lista o no lista para implementacion.
+- Estados y permisos definidos.
+- Riesgos de UX/PyQt documentados antes de tocar codigo.
+- Capturas disponibles solo si hubo cambio visual o el issue lo pide.
 
 ### Validaciones minimas
 
@@ -285,6 +295,83 @@ git diff --check
 ```
 
 Documentar TODO si algun comando no existe o falla. Agregar validaciones demo solo cuando exista soporte explicito.
+
+### Checklist UX previo
+
+```md
+## Checklist UX previo
+
+Pantalla:
+Issue relacionado:
+
+### Objetivo
+-
+
+### Usuario principal
+-
+
+### Permisos
+-
+
+### Datos minimos
+-
+
+### Acciones principales
+-
+
+### Acciones secundarias
+-
+
+### Estados requeridos
+- [ ] Vacio
+- [ ] Con datos
+- [ ] Cargando
+- [ ] Error
+- [ ] Sin permiso
+- [ ] Sin conexion / error de base si aplica
+
+### Validaciones manuales
+-
+
+### Criterios visuales
+-
+
+### Fuera de alcance
+-
+
+### Lista para implementacion
+- [ ] Si
+- [ ] No, falta definir:
+```
+
+### Reglas UX para FEMAG Desktop
+
+- Mantener el estilo profesional ya aprobado.
+- Priorizar lectura clara para secretarias y administracion.
+- Evitar pantallas saturadas.
+- No usar demasiadas acciones primarias.
+- Mantener acciones principales visibles.
+- Mover acciones secundarias a menu o zona menos prominente.
+- Respetar permisos en menu y acciones.
+- Prever impresion si la pantalla genera documentos.
+- Prever busqueda y filtros si la pantalla lista datos.
+- Prever estados vacios utiles, no pantallas muertas.
+- No codificar una pantalla si no esta claro el flujo.
+
+### Pantallas candidatas para loop UX
+
+Estas pantallas deben pasar por checklist UX antes de implementarse o ampliarse. Esta lista no implica implementacion en este issue.
+
+- Ordenes de carga.
+- Remitos.
+- Sobres / hoja resumen.
+- Cuenta corriente clientes.
+- Ingresos de pago.
+- Choferes.
+- Transportistas.
+- Clientes.
+- Productos.
+- Importacion de saldos/datos iniciales.
 
 ## Release loop futuro
 
