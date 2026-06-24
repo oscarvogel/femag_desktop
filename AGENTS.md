@@ -31,6 +31,7 @@ Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop. 
 - Cada cambio debe partir de un issue chico y revisable.
 - Cada issue debe elegir un loop principal: bug, tests, documentacion, revision de PR, UX o release futuro.
 - Cada PR debe incluir validaciones ejecutadas y resultados reales.
+- Cada PR debe elegir validaciones desde la matriz de `VALIDATION.md` segun el tipo de cambio.
 - Cada PR debe diferenciar alcance incluido y fuera de alcance.
 - Cada merge debe cerrar el issue relacionado o dejar trazabilidad clara.
 - No avanzar a features pesadas sin dividirlas en etapas chicas.

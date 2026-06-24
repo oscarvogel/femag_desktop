@@ -54,6 +54,73 @@ Entrega:
 - Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```
 
+## Validar PR segun tipo de cambio
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Validar el PR <NUMERO> segun su tipo de cambio.
+
+Tipo de cambio:
+- documentacion / logica funcional / UX-PyQt / impresion-reportes / datos demo-seed / importacion DBF-MySQL
+
+Alcance:
+- Usar la matriz de VALIDATION.md.
+- Ejecutar solo comandos existentes en main.
+- No ejecutar `python -m app.main --demo --smoke` salvo que exista soporte explicito.
+- No ejecutar screenshots salvo cambios UX o pedido explicito.
+- No tocar codigo funcional durante la validacion.
+
+Entrega:
+- Comandos ejecutados y resultado.
+- Validaciones no ejecutadas y motivo.
+- Diferencia entre validacion automatica y manual.
+- Recomendacion: listo para ready / requiere cambios.
+```
+
+## Revisar matriz de validaciones
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Revisar que la matriz de VALIDATION.md siga alineada con main.
+
+Alcance:
+- Ejecutar o inspeccionar `python -m pytest --collect-only -q`.
+- Confirmar cantidad actual de tests colectados.
+- Detectar comandos inexistentes antes de documentarlos.
+- Verificar que screenshots solo sean obligatorios para UX.
+- No modificar tests ni codigo funcional.
+
+Entrega:
+- Tests actuales detectados.
+- Comandos validos actuales.
+- Comandos futuros/opcionales, si existen.
+- Ajustes documentales recomendados.
+```
+
+## Preparar evidencia de validacion
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Preparar evidencia de validacion para el PR <NUMERO>.
+
+Alcance:
+- Registrar comandos ejecutados.
+- Registrar salida relevante o resumen verificable.
+- Indicar si la validacion es automatica o manual.
+- Indicar si hubo screenshots y por que.
+- No usar datos reales, remitos reales, F150 real ni bases DBF/MySQL reales.
+
+Entrega:
+- Bloque listo para pegar en la descripcion o comentario final del PR.
+- Riesgos o validaciones pendientes claramente marcados.
+```
+
 ## Documentacion
 
 ```text

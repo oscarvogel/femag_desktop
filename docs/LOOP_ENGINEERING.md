@@ -54,27 +54,30 @@ Agregar smoke checks si el bug afecta arranque o navegacion. Validaciones demo s
 
 ### Cuando usarlo
 
-Usar este loop cuando el issue pide cobertura, estabilizar pruebas o proteger una logica ya existente.
+Usar este loop cuando el issue pide cobertura, estabilizar pruebas, proteger una logica existente o definir que validaciones corresponden segun el tipo de cambio.
 
 ### Entrada esperada
 
 - Comportamiento a cubrir.
 - Archivos o modulo objetivo.
 - Criterios de aceptacion verificables.
+- Tipo de cambio: documentacion, logica, UX/PyQt, impresion/reportes, datos demo/seed o importacion.
 
 ### Pasos
 
-1. Leer la logica existente.
-2. Definir casos normales, vacios y de error.
-3. Agregar tests chicos y especificos.
-4. Ejecutar tests focalizados si existen.
-5. Ejecutar validacion general.
-6. Documentar cobertura y limites.
+1. Leer la logica o documentacion existente.
+2. Elegir la fila de la matriz de `VALIDATION.md`.
+3. Definir casos normales, vacios y de error cuando haya comportamiento a cubrir.
+4. Agregar tests chicos y especificos solo si el issue lo pide.
+5. Ejecutar tests focalizados del modulo si existen.
+6. Ejecutar validacion general.
+7. Documentar cobertura, validaciones manuales y limites.
 
 ### Salida esperada
 
 - Tests relevantes agregados o corregidos.
 - Sin cambios funcionales fuera del issue.
+- Matriz de validacion aplicada y resultados reales registrados.
 
 ### Validaciones minimas
 
@@ -83,6 +86,8 @@ python -m pytest
 python -m compileall app
 git diff --check
 ```
+
+No exigir `python -m app.main --demo --smoke` mientras `--demo` no exista en `app.main`. Screenshots solo son obligatorios para cambios UX/PyQt o cuando el issue pida evidencia visual.
 
 ## Docs loop
 

@@ -35,6 +35,8 @@ Usar este checklist para abrir, revisar, marcar ready, mergear y cerrar PRs de F
 
 ## Tests y validaciones
 
+- [ ] Se identifico el tipo de cambio: documentacion, logica, UX/PyQt, impresion/reportes, datos demo/seed o importacion.
+- [ ] Se uso la matriz de `VALIDATION.md` para elegir comandos.
 - [ ] Se ejecuto `git diff --check`.
 - [ ] Se ejecuto `git diff --cached --check` antes de commitear.
 - [ ] Se ejecuto `python -m pytest` o se documento por que no aplica.
@@ -42,6 +44,7 @@ Usar este checklist para abrir, revisar, marcar ready, mergear y cerrar PRs de F
 - [ ] Se ejecuto `python -m app.main --smoke` si aplica.
 - [ ] Se documento cualquier validacion futura u opcional que no exista todavia, sin exigirla como obligatoria.
 - [ ] Los resultados reales quedaron documentados en la descripcion del PR.
+- [ ] Se separo validacion automatica de validacion manual cuando correspondia.
 
 ## Smoke app y demo
 
