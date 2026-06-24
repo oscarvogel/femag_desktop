@@ -71,6 +71,8 @@ class LoadOrderService:
             return order
 
     def update_order(self, order: LoadOrder, **changes) -> LoadOrder:
+        if "status" in changes:
+            raise ValueError("El estado de la orden debe cambiarse con change_status o annul_order.")
         order = LoadOrder.get_by_id(order.id)
         old_snapshot = self._snapshot(order)
         new_driver = changes.get("driver")

@@ -222,6 +222,20 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(client=data["client"]) == [second, first]
 
 
+def test_update_order_rejects_direct_status_changes(db):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    with pytest.raises(ValueError, match="estado"):
+        service.update_order(order, status=LoadOrder.STATUS_ANNULLED)
+
+    assert type(order).get_by_id(order.id).status == LoadOrder.STATUS_PENDING
+
+
 def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService
