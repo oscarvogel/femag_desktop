@@ -1,106 +1,178 @@
-# AGENTS.md - FEMAG Desktop
+Estamos en el repo `femag_desktop`.
 
-Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop. Loop Engineering es una metodologia de trabajo para ordenar issues, ramas, PRs y validaciones; no es una feature productiva del sistema.
+Quiero trabajar FEMAG con un loop operativo repetible, no con prompts aislados.
 
-## Principios de trabajo
+A partir de ahora, para cada issue técnico del proyecto usá este flujo estándar:
 
-- Antes de modificar archivos, entender el pedido, el issue y el area afectada.
-- Todo cambio debe entrar por un issue con alcance, contexto y criterio de aceptacion.
-- Cada issue debe tener una rama propia. No reutilizar ramas para trabajos no relacionados.
-- Cada rama debe abrir un PR, aunque el cambio sea chico.
-- No mezclar bugs, features, refactors y documentacion en el mismo PR salvo que el issue lo pida explicitamente.
-- Mantener PRs chicos, revisables y con una sola intencion.
-- No modificar archivos no relacionados con la tarea.
-- No borrar codigo, pantallas, modelos, migraciones, scripts o datos demo sin justificarlo en el issue y en el PR.
-- Preferir soluciones simples, explicitas y faciles de validar.
+# LOOP FEMAG — Issue → PR → Validación → Merge
 
-## Flujo obligatorio
+## Principios generales
 
-1. Leer el issue o pedido completo.
-2. Identificar archivos y modulos involucrados.
-3. Proponer un plan breve antes de tocar archivos.
-4. Crear o cambiar a una rama propia del issue.
-5. Implementar el cambio minimo necesario.
-6. Agregar o actualizar tests solo cuando correspondan al alcance.
-7. Ejecutar validaciones antes de cerrar el trabajo.
-8. Revisar `git diff` y archivos no trackeados.
-9. Abrir PR chico con resumen, validaciones y riesgos.
+* Trabajar siempre desde `main` actualizado.
+* Crear una rama por issue.
+* Mantener cambios chicos, revisables y testeables.
+* No mezclar issues.
+* No implementar fuera de alcance.
+* No tocar no trackeados fuera de alcance:
 
-## Como usar este workflow en FEMAG
+  * `.codegraph/`
+  * `.cursor/`
+  * `.github/`
+* Si el issue es de documentación, no modificar código funcional.
+* Si el issue es de modelo/servicio, no implementar UI.
+* Si el issue es de UI, reutilizar servicios existentes y no duplicar reglas de negocio.
+* Si el issue es de documento/impresión, no modificar flujo de carga salvo que sea estrictamente necesario.
+* Todo PR debe abrirse primero como draft.
+* No mergear si hay tests rotos, conflicto real o validación visual pendiente cuando aplique.
 
-- Cada cambio debe partir de un issue chico y revisable.
-- Cada issue debe elegir un loop principal: bug, tests, documentacion, revision de PR, UX o release futuro.
-- Cada PR debe incluir validaciones ejecutadas y resultados reales.
-- Cada PR debe elegir validaciones desde la matriz de `VALIDATION.md` segun el tipo de cambio.
-- Cada pantalla nueva debe pasar por el checklist UX previo antes de codificarse.
-- Cada PR debe diferenciar alcance incluido y fuera de alcance.
-- Cada merge debe cerrar el issue relacionado o dejar trazabilidad clara.
-- No avanzar a features pesadas sin dividirlas en etapas chicas.
+## Antes de empezar cada issue
 
-## Areas protegidas
+1. Verificar estado local:
+   `git status -sb`
 
-No tocar estas areas si el issue no lo pide de forma explicita:
+2. Confirmar rama actual:
+   `main`
 
-- Remitos reales.
-- F150 real.
-- Importacion DBF/MySQL.
-- Logica pesada de liquidaciones.
-- Integracion con sistemas legacy o sistema anterior.
-- Datos demo usados para validacion.
-- Modelos, migraciones o estructura de base de datos.
-- Pantallas existentes fuera del flujo pedido.
+3. Actualizar main:
+   `git fetch --prune origin`
+   `git pull --ff-only origin main`
 
-Si un issue toca una de estas areas, documentar el riesgo de negocio, definir validaciones concretas y evitar cambios colaterales.
+4. Confirmar que `main` está alineado con `origin/main`.
 
-## Issues
+5. Revisar el issue asignado y sus dependencias.
 
-Cada issue debe incluir:
+6. Si depende de otro issue/PR no mergeado, frenar y reportar.
 
-- Contexto del problema o necesidad.
-- Comportamiento actual.
-- Comportamiento esperado.
-- Archivos o areas probablemente involucradas.
-- Criterios de aceptacion.
-- Validaciones requeridas.
-- Riesgos o dependencias.
-- Prioridad.
+7. Crear rama con formato:
+   `codex/issue-NN-descripcion-corta`
 
-## Pull requests
+## Implementación
 
-Todo PR debe incluir:
+1. Revisar modelos, servicios, tests y documentación relacionada.
+2. Implementar sólo lo necesario para el issue.
+3. Agregar tests o actualizar los existentes.
+4. Mantener commits chicos.
+5. Evitar refactors grandes no pedidos.
+6. No cambiar UX aprobada salvo que el issue lo pida.
+7. No introducir datos productivos reales.
+8. No tocar archivos fuera de alcance.
 
-- Resumen claro del cambio.
-- Issue relacionado.
-- Alcance incluido.
-- Fuera de alcance.
-- Archivos agregados o modificados.
-- Validaciones ejecutadas.
-- Riesgos conocidos.
-- Capturas si cambia UX.
-- Nota explicita si no se pudieron ejecutar tests o smoke checks.
-- Comentario final de revision antes de mergear.
-- Limpieza post-merge: rama remota, rama local, `git fetch --prune origin` y `git status -sb`.
+## Validaciones obligatorias
 
-## Validacion minima
+Ejecutar siempre:
 
-Antes de cerrar un PR, intentar ejecutar lo que aplique:
+* `git diff --check`
+* `git diff --cached --check`
+* `py -3.12 -m pytest`
+* `py -3.12 -m compileall app`
+* `py -3.12 -m app.main --smoke`
 
-```bash
-git diff --check
-python -m pytest
-python -m compileall app
-python -m app.main --smoke
-python scripts/generate_ux_screenshots.py
-```
+Si el issue toca UI, ejecutar además:
 
-Si un comando no existe o falla por una causa conocida, documentarlo como TODO o riesgo en el PR. No inventar resultados. Validaciones futuras, como un smoke demo, solo deben agregarse cuando exista soporte explicito en el proyecto.
+* `py -3.12 -m app.main --demo-ui`
 
-## Criterio de listo
+Y validar con Computer Use:
 
-Un cambio esta listo cuando:
+* abrir ventana `FEMAG Desktop`
+* navegar a la pantalla modificada
+* tomar screenshots reales
+* documentar evidencia
 
-- Resuelve el issue.
-- Mantiene el alcance chico.
-- No toca areas protegidas sin permiso.
-- Tiene validacion automatica o manual razonable.
-- El PR deja claro que se cambio, como se valido y que riesgo queda.
+## Evidencia visual para issues UI
+
+Si el issue modifica o agrega pantallas, crear carpeta:
+
+`docs/screenshots/<nombre_issue>/`
+
+Agregar:
+
+* PNGs reales tomados con Computer Use
+* `README.md` explicando capturas
+* reporte visual si corresponde:
+  `docs/<NOMBRE_ISSUE>_VISUAL_REVIEW.md`
+
+El reporte debe incluir:
+
+* fecha
+* rama/commit validado
+* comandos ejecutados
+* resultado de tests
+* flujo probado
+* screenshots
+* hallazgos
+* veredicto:
+
+  * aprobado visualmente
+  * aprobado con observaciones
+  * no aprobado
+
+No aprobar visualmente una pantalla si:
+
+* no se pudo abrir la app
+* Computer Use no pudo targetear la ventana
+* hay tracebacks visibles
+* hay errores técnicos para usuario final
+* no hay screenshots reales
+
+## PR
+
+Abrir PR draft contra `main`.
+
+La descripción del PR debe incluir:
+
+* Issue relacionado con `Closes #NN`
+* Objetivo
+* Cambios realizados
+* Archivos principales modificados
+* Tests agregados o actualizados
+* Validaciones ejecutadas
+* Evidencia visual si aplica
+* Fuera de alcance
+* Riesgos o pendientes
+
+## Revisión final del PR
+
+Antes de pasar a ready:
+
+1. Actualizar rama con `main` si hace falta.
+2. Revisar diff completo contra `main`.
+3. Confirmar que el alcance coincide con el issue.
+4. Repetir validaciones obligatorias.
+5. Si es UI, repetir validación visual con Computer Use.
+6. Corregir errores reales con commits chicos.
+7. Si todo está OK, pasar PR a ready.
+
+## Merge
+
+Sólo mergear si:
+
+* PR está limpio.
+* Checks pasan.
+* Validaciones locales pasan.
+* No hay conflictos.
+* El issue está correctamente referenciado.
+* En UI, hay evidencia visual real.
+
+Después de mergear:
+
+1. Verificar que el issue se cerró automáticamente.
+2. Si no se cerró, cerrarlo manualmente indicando el PR.
+3. Actualizar `main` local.
+4. Borrar rama local y remota si corresponde.
+5. Ejecutar `git status -sb`.
+6. Reportar estado final.
+
+## Reporte final esperado
+
+Al terminar cada issue, reportar:
+
+* Issue trabajado.
+* PR creado o mergeado.
+* Estado del PR.
+* Merge commit si aplica.
+* Estado del issue.
+* Archivos modificados.
+* Validaciones ejecutadas.
+* Evidencia visual si aplica.
+* Estado local final.
+* Siguiente issue recomendado.
