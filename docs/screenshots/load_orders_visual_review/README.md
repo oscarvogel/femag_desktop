@@ -1,12 +1,24 @@
 # Evidencia - revision visual Ordenes de carga
 
 Fecha: 2026-06-24
+Comando usado:
 
-No hay screenshots PNG en esta carpeta porque la revision visual quedo bloqueada antes de abrir la pantalla:
+```powershell
+py -3.12 -m app.main --demo-ui
+```
 
-- Computer Use se conecto correctamente al escritorio.
-- No encontro una ventana FEMAG abierta o targeteable.
-- `py -3.12 -m app.main` no abre UI; imprime `FEMAG Desktop UI requires a workstation session.` y finaliza.
-- En esta rama no existe `scripts/generate_ux_screenshots.py`.
+Esta carpeta contiene PNGs reales capturados desde una ventana `FEMAG Desktop` abierta en modo demo visual.
 
-La ausencia de capturas se documenta como evidencia del bloqueo en `docs/LOAD_ORDERS_VISUAL_REVIEW.md`.
+## Archivos
+
+- `01_dashboard_base_demo_ui.png`: dashboard/demo UI base con buscador superior, sidebar, acciones principales, contadores en 0 y estado `Sin registros`.
+- `02_topbar_sidebar_demo_ui.png`: recorte de la misma ventana para evidenciar titulo, buscador, sidebar y dashboard inicial.
+
+## Resultado
+
+- Computer Use detecto y targeteo la ventana `FEMAG Desktop`.
+- La app abrio sin tracebacks ni errores tecnicos visibles.
+- La UI base coincide con la pantalla aprobada para dashboard/demo.
+- Los accesos `Avisos`, `Ayuda`, `Config` y el usuario `demo_visual / Administrador` fueron confirmados por accesibilidad de Computer Use.
+
+Pendiente explicito: validar la pantalla operativa de Ordenes de carga cuando #56 este implementado.
