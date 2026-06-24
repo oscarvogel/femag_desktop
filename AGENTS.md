@@ -1,6 +1,6 @@
 # AGENTS.md - FEMAG Desktop
 
-Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop.
+Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop. Loop Engineering es una metodologia de trabajo para ordenar issues, ramas, PRs y validaciones; no es una feature productiva del sistema.
 
 ## Principios de trabajo
 
@@ -25,6 +25,15 @@ Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop.
 7. Ejecutar validaciones antes de cerrar el trabajo.
 8. Revisar `git diff` y archivos no trackeados.
 9. Abrir PR chico con resumen, validaciones y riesgos.
+
+## Como usar este workflow en FEMAG
+
+- Cada cambio debe partir de un issue chico y revisable.
+- Cada issue debe elegir un loop principal: bug, tests, documentacion, revision de PR, UX o release futuro.
+- Cada PR debe incluir validaciones ejecutadas y resultados reales.
+- Cada PR debe diferenciar alcance incluido y fuera de alcance.
+- Cada merge debe cerrar el issue relacionado o dejar trazabilidad clara.
+- No avanzar a features pesadas sin dividirlas en etapas chicas.
 
 ## Areas protegidas
 

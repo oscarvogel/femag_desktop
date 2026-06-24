@@ -1,6 +1,16 @@
 # Loop Engineering - FEMAG Desktop
 
-Este documento define loops de trabajo para ordenar futuras intervenciones con Codex y otros agentes.
+Este documento define loops de trabajo para ordenar futuras intervenciones con Codex y otros agentes. Loop Engineering es una metodologia de trabajo para FEMAG Desktop; no agrega funcionalidad productiva por si misma.
+
+## Como usar este workflow en FEMAG
+
+1. Crear o elegir un issue chico.
+2. Definir el loop principal del issue: bug, tests, documentacion, revision de PR, UX o release futuro.
+3. Separar alcance incluido y fuera de alcance antes de modificar archivos.
+4. Trabajar en una rama propia y abrir un PR chico.
+5. Registrar validaciones ejecutadas con resultados reales.
+6. Hacer merge solo si el PR cierra el issue o deja trazabilidad clara.
+7. Dividir features pesadas en etapas chicas antes de avanzar.
 
 ## Bug loop
 
@@ -21,13 +31,14 @@ Usar este loop cuando un issue describe un error reproducible, una regresion o u
 3. Agregar o ajustar test si el bug es cubrible.
 4. Implementar el fix minimo.
 5. Ejecutar validaciones.
-6. Documentar riesgo y resultado en el PR.
+6. Documentar riesgo, validacion manual si aplica y resultado en el PR.
 
 ### Salida esperada
 
 - Bug corregido.
 - PR chico con explicacion del fix.
 - Validaciones reales registradas.
+- Issue cerrado o trazabilidad clara para el cierre.
 
 ### Validaciones minimas
 
@@ -107,6 +118,40 @@ git diff --check
 
 Ejecutar tests adicionales si el PR tambien toca codigo, scripts o configuracion.
 
+## Validacion manual loop
+
+### Cuando usarlo
+
+Usar este loop cuando el cambio requiere revisar un flujo que no queda cubierto por tests, compileall o smoke automatico.
+
+### Entrada esperada
+
+- Issue con flujo a validar.
+- Modo de validacion definido: normal, demo o dato controlado.
+- Resultado esperado.
+
+### Pasos
+
+1. Definir el caso manual antes de validar.
+2. Usar datos demo o controlados.
+3. Evitar remitos reales, F150 real, importacion DBF/MySQL y logica pesada salvo pedido explicito.
+4. Registrar pasos ejecutados y resultado observado.
+5. Documentar limitaciones en el PR.
+
+### Salida esperada
+
+- Evidencia manual clara y reproducible.
+- Riesgo residual documentado.
+
+### Validaciones minimas
+
+```bash
+git diff --check
+python -m compileall app
+```
+
+Agregar `python -m pytest` y smoke checks cuando el cambio toque codigo o arranque.
+
 ## PR review loop
 
 ### Cuando usarlo
@@ -147,7 +192,7 @@ Ajustar segun el tipo de cambio.
 
 ### Cuando usarlo
 
-Usar este loop cuando el issue cambia pantallas, navegacion, permisos visibles, textos, estados o layout.
+Usar este loop antes de codificar nuevas pantallas y cuando el issue cambia pantallas, navegacion, permisos visibles, textos, estados o layout.
 
 ### Entrada esperada
 
@@ -157,12 +202,13 @@ Usar este loop cuando el issue cambia pantallas, navegacion, permisos visibles, 
 
 ### Pasos
 
-1. Identificar la pantalla y permisos involucrados.
-2. Validar estados normal, vacio, error y sin permisos cuando apliquen.
-3. Generar screenshots.
-4. Revisar textos cortados, botones sin feedback y navegacion.
-5. Corregir solo lo necesario para el issue.
-6. Adjuntar o mencionar capturas en el PR.
+1. Identificar la pantalla, permisos y flujo antes de codificar.
+2. Definir estados normal, vacio, error y sin permisos cuando apliquen.
+3. Implementar solo el alcance aprobado.
+4. Generar screenshots si hubo cambio visual.
+5. Revisar textos cortados, botones sin feedback y navegacion.
+6. Corregir solo lo necesario para el issue.
+7. Adjuntar o mencionar capturas en el PR.
 
 ### Salida esperada
 

@@ -58,3 +58,14 @@ Si un comando no existe, falla o no aplica:
 - Registrar el resultado real.
 - Explicar si queda como TODO, riesgo o validacion no aplicable.
 - No reemplazarlo por una validacion equivalente sin aclararlo.
+
+## Validacion manual
+
+Cuando un issue no quede cubierto por tests, compileall o smoke checks, documentar una validacion manual concreta:
+
+- Que pantalla, comando o flujo se reviso.
+- Con que modo se valido: normal, demo o dato controlado.
+- Que resultado se esperaba.
+- Que resultado se obtuvo.
+
+No usar remitos reales, F150 real, importacion DBF/MySQL ni logica pesada como validacion manual salvo que el issue lo pida explicitamente.

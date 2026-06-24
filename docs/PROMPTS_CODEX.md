@@ -26,6 +26,7 @@ Entrega:
 - Rama propia del issue.
 - Commit claro.
 - PR draft con resumen, validaciones y riesgos.
+- Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```
 
 ## Tests
@@ -49,6 +50,7 @@ Validaciones:
 Entrega:
 - Explicar que comportamiento queda cubierto.
 - Documentar cualquier limite de cobertura.
+- Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```
 
 ## Documentacion
@@ -71,6 +73,7 @@ Validaciones:
 Entrega:
 - PR chico con archivos agregados o modificados.
 - Resumen, validaciones y riesgos.
+- Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```
 
 ## Revision de PR
@@ -98,7 +101,7 @@ Formato:
 Trabaja en FEMAG Desktop.
 
 Objetivo:
-Revisar UX y screenshots del flujo <FLUJO> para el issue <NUMERO>.
+Aplicar loop UX antes de codificar o revisar screenshots del flujo <FLUJO> para el issue <NUMERO>.
 
 Alcance:
 - Validar navegacion, permisos visibles, textos, estados y layout.
@@ -115,4 +118,5 @@ Entrega:
 - Capturas o rutas de capturas generadas.
 - Lista corta de problemas encontrados.
 - Fixes minimos si el issue lo permite.
+- Indicar alcance incluido, fuera de alcance y cierre o trazabilidad del issue.
 ```

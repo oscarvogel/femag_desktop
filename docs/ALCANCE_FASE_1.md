@@ -9,7 +9,7 @@ Este documento delimita el alcance actual para evitar mezclar trabajo explorator
 - Dashboard operativo.
 - Specs ABM.
 - Pantalla base de ordenes de carga.
-- Impresion A4 base si ya existe en la rama.
+- Impresion A4 base.
 - Seed demo.
 - Screenshots UX.
 
@@ -35,3 +35,5 @@ Si un issue necesita mover algo fuera de alcance, debe decirlo explicitamente y 
 ## Uso para PRs
 
 Antes de abrir un PR, comparar el diff contra este documento. Si el PR toca una area fuera de alcance sin issue especifico, separarlo o frenarlo.
+
+Loop Engineering se usa para ordenar el trabajo dentro de este alcance. No habilita por si solo remitos reales, F150 real, importacion DBF/MySQL, logica pesada ni integraciones futuras.

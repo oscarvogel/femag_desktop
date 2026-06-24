@@ -5,7 +5,9 @@ Usar este checklist antes de abrir o marcar listo un PR.
 ## Alcance contra issue
 
 - [ ] El PR tiene un issue relacionado.
+- [ ] El PR indica que loop se uso: bug, tests, documentacion, review, UX o release futuro.
 - [ ] El cambio resuelve el comportamiento esperado del issue.
+- [ ] La descripcion separa alcance incluido y fuera de alcance.
 - [ ] No mezcla bugs, features, refactors y documentacion fuera de alcance.
 - [ ] No modifica remitos reales, F150 real, importacion DBF/MySQL ni logica pesada si el issue no lo pide.
 - [ ] No toca modelos, migraciones, pantallas, tests o datos demo fuera del alcance.
@@ -24,6 +26,7 @@ Usar este checklist antes de abrir o marcar listo un PR.
 - [ ] La app inicia en modo normal cuando el cambio lo requiere.
 - [ ] La app inicia en modo demo cuando el cambio lo requiere.
 - [ ] El flujo afectado puede abrirse sin error visible.
+- [ ] Si no hay smoke automatico suficiente, se documento una validacion manual concreta.
 - [ ] No se usaron remitos reales ni F150 real para validar cambios no autorizados.
 
 ## UX y screenshots
@@ -50,6 +53,7 @@ Usar este checklist antes de abrir o marcar listo un PR.
 - [ ] Se actualizo documentacion cuando cambio el flujo de trabajo.
 - [ ] El PR explica validaciones no ejecutadas como TODO real, no como resultado inventado.
 - [ ] Las decisiones tecnicas nuevas quedaron registradas si afectan trabajos futuros.
+- [ ] El merge cierra el issue o deja trazabilidad clara.
 
 ## Archivos no trackeados
 
