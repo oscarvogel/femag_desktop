@@ -20,7 +20,8 @@ Validaciones:
 - git diff --check
 - python -m pytest
 - python -m compileall app
-- smoke app o demo smoke si aplica
+- python -m app.main --smoke si aplica
+- validaciones opcionales solo si el proyecto las soporta explicitamente
 
 Entrega:
 - Rama propia del issue.
@@ -95,6 +96,72 @@ Formato:
 - Resumen breve al final.
 ```
 
+## Preparar PR para ready
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Revisar y dejar listo para ready el PR <NUMERO>, relacionado con el issue <NUMERO>.
+
+Alcance:
+- Confirmar que el PR apunta a main.
+- Confirmar que el diff coincide con el issue.
+- Confirmar alcance incluido y fuera de alcance.
+- Confirmar que no se prometen features inexistentes.
+- Confirmar que no se tocaron remitos reales, F150 real, importacion DBF/MySQL ni logica pesada salvo pedido explicito.
+- Mantener fuera del commit no trackeados ajenos.
+
+Validaciones:
+- git diff --check
+- git diff --cached --check si hubo cambios staged
+- python -m pytest
+- python -m compileall app
+- python -m app.main --smoke
+- validaciones demo solo si el proyecto las soporta explicitamente
+- screenshots solo si hubo cambios UX
+
+Entrega:
+- Actualizar descripcion del PR con resumen, issue, alcance incluido, fuera de alcance, archivos, validaciones, screenshots y riesgos.
+- Dejar comentario final de revision.
+- Marcar ready solo si esta validado.
+```
+
+## Mergear PR y limpiar ramas
+
+```text
+Estamos en el repo femag_desktop.
+
+Objetivo:
+Mergear el PR <NUMERO> contra main y limpiar ramas.
+
+Alcance:
+- Confirmar que GitHub reporta el PR como mergeable.
+- Confirmar que no hay conflictos.
+- Confirmar que el alcance final sigue alineado al issue.
+- Mergear contra main.
+- Cambiar a main.
+- Ejecutar git pull --ff-only origin main.
+- Borrar rama remota.
+- Borrar rama local si existe.
+- Ejecutar git fetch --prune origin.
+- Confirmar git status -sb.
+
+No hacer:
+- No tocar codigo funcional.
+- No ejecutar screenshots.
+- No crear issues nuevos salvo pedido explicito.
+
+Entrega:
+- PR mergeado.
+- Merge commit.
+- Issue cerrado o trazabilidad.
+- Rama remota borrada.
+- Rama local borrada.
+- Estado final de main.
+- No trackeados restantes.
+```
+
 ## UX / screenshot review
 
 ```text
@@ -111,7 +178,6 @@ Alcance:
 
 Validaciones:
 - python scripts/generate_ux_screenshots.py
-- python -m app.main --demo --smoke
 - git diff --check
 
 Entrega:

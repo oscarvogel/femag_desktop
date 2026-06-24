@@ -69,11 +69,15 @@ Todo PR debe incluir:
 
 - Resumen claro del cambio.
 - Issue relacionado.
+- Alcance incluido.
+- Fuera de alcance.
 - Archivos agregados o modificados.
 - Validaciones ejecutadas.
 - Riesgos conocidos.
 - Capturas si cambia UX.
 - Nota explicita si no se pudieron ejecutar tests o smoke checks.
+- Comentario final de revision antes de mergear.
+- Limpieza post-merge: rama remota, rama local, `git fetch --prune origin` y `git status -sb`.
 
 ## Validacion minima
 
@@ -84,11 +88,10 @@ git diff --check
 python -m pytest
 python -m compileall app
 python -m app.main --smoke
-python -m app.main --demo --smoke
 python scripts/generate_ux_screenshots.py
 ```
 
-Si un comando no existe o falla por una causa conocida, documentarlo como TODO o riesgo en el PR. No inventar resultados.
+Si un comando no existe o falla por una causa conocida, documentarlo como TODO o riesgo en el PR. No inventar resultados. Validaciones futuras, como un smoke demo, solo deben agregarse cuando exista soporte explicito en el proyecto.
 
 ## Criterio de listo
 

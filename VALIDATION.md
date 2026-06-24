@@ -32,13 +32,9 @@ Smoke check de la app en modo normal.
 
 TODO: confirmar en cada PR si este comando existe y si no requiere configuracion local adicional.
 
-```bash
-python -m app.main --demo --smoke
-```
+## Validaciones futuras u opcionales
 
-Smoke check de la app en modo demo.
-
-TODO: confirmar en cada PR si este comando existe y si no requiere configuracion local adicional.
+No listar comandos inexistentes como obligatorios. Si en una rama futura existe soporte explicito para modo demo, documentar el comando exacto en el PR y en este archivo junto con su resultado real.
 
 ## Screenshots UX
 
@@ -69,3 +65,37 @@ Cuando un issue no quede cubierto por tests, compileall o smoke checks, document
 - Que resultado se obtuvo.
 
 No usar remitos reales, F150 real, importacion DBF/MySQL ni logica pesada como validacion manual salvo que el issue lo pida explicitamente.
+
+## Validaciones para cierre de PR
+
+Antes de marcar un PR como ready o mergearlo, usar resultados frescos. No reutilizar salidas antiguas si hubo commits posteriores.
+
+Validacion documental:
+
+```bash
+git diff --check
+git diff --cached --check
+```
+
+Validacion general recomendada:
+
+```bash
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+```
+
+Screenshots:
+
+- Ejecutar `python scripts/generate_ux_screenshots.py` solo si hay cambios UX, pantallas o estados visuales.
+- No ejecutar screenshots en PRs solo documentales.
+- Si no se ejecutan, dejar el motivo en la descripcion del PR y en el comentario final de revision.
+
+Limpieza:
+
+```bash
+git status -sb
+git fetch --prune origin
+```
+
+Despues del merge, confirmar que `main` esta actualizado con `origin/main` y que no quedan cambios pendientes fuera de no trackeados explicitamente informados.
