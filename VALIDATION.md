@@ -36,6 +36,107 @@ TODO: confirmar en cada PR si este comando existe y si no requiere configuracion
 
 No listar comandos inexistentes como obligatorios. Si en una rama futura existe soporte explicito para modo demo, documentar el comando exacto en el PR y en este archivo junto con su resultado real.
 
+## Tests actuales detectados
+
+En `main` actual, `python -m pytest --collect-only -q` detecta 25 tests:
+
+- `tests/test_audit.py`: 1 test.
+- `tests/test_backup.py`: 1 test.
+- `tests/test_clients.py`: 2 tests.
+- `tests/test_config.py`: 2 tests.
+- `tests/test_load_order_printing.py`: 1 test.
+- `tests/test_load_orders.py`: 5 tests.
+- `tests/test_masters.py`: 1 test.
+- `tests/test_models.py`: 2 tests.
+- `tests/test_permissions.py`: 2 tests.
+- `tests/test_ui_pyqt5libs.py`: 4 tests.
+- `tests/test_ui_smoke.py`: 4 tests.
+
+No asumir que hay 38 tests en `main`. Si cambia la suite, actualizar esta seccion con una nueva corrida de collect-only.
+
+## Matriz de validaciones por tipo de cambio
+
+Usar esta matriz para elegir validaciones antes de abrir, marcar ready o mergear un PR. Siempre registrar los comandos ejecutados y su resultado real.
+
+### Solo documentacion
+
+Ejecutar:
+
+```bash
+git diff --check
+git diff --cached --check
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+```
+
+Screenshots: no. Dejar escrito que no se ejecutaron porque el PR solo modifica documentacion.
+
+### Logica funcional
+
+Ejecutar:
+
+```bash
+git diff --check
+git diff --cached --check
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+```
+
+Agregar tests enfocados del modulo si existen. Screenshots solo si el cambio tambien afecta UX.
+
+### UX / PyQt
+
+Ejecutar:
+
+```bash
+git diff --check
+git diff --cached --check
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+python scripts/generate_ux_screenshots.py
+```
+
+Screenshots o evidencia visual: obligatorios cuando hay cambios de pantalla, layout, navegacion o estados visuales. Revisar estados vacio, con datos, error y sin permiso cuando apliquen.
+
+### Impresion / reportes
+
+Ejecutar:
+
+```bash
+git diff --check
+git diff --cached --check
+python -m pytest
+python -m compileall app
+```
+
+Agregar test o smoke enfocado si existe. Adjuntar evidencia de salida A4, PDF o preview cuando aplique. Screenshots o archivos de evidencia solo si ayudan a revisar el resultado.
+
+### Datos demo / seed
+
+Ejecutar:
+
+```bash
+git diff --check
+git diff --cached --check
+python -m pytest
+python -m compileall app
+python -m app.main --smoke
+```
+
+Agregar validacion idempotente si existe. Confirmar explicitamente que no se usaron datos reales.
+
+### Importacion DBF/MySQL
+
+No implementar importacion DBF/MySQL dentro de issues documentales o loops de validacion. Cuando exista un issue especifico para importacion:
+
+- Usar fixtures demo o sinteticos.
+- Nunca usar bases reales dentro del repo.
+- Validar mapeos, encoding, duplicados y errores de lectura.
+- Documentar riesgos de compatibilidad legacy.
+
 ## Screenshots UX
 
 ```bash
@@ -99,3 +200,14 @@ git fetch --prune origin
 ```
 
 Despues del merge, confirmar que `main` esta actualizado con `origin/main` y que no quedan cambios pendientes fuera de no trackeados explicitamente informados.
+
+## Validaciones minimas por PR
+
+Cada PR debe informar:
+
+- Comandos ejecutados.
+- Resultado de cada comando.
+- Validaciones no ejecutadas y motivo.
+- Validacion automatica y validacion manual, si corresponde.
+- Si hubo screenshots o por que no aplican.
+- Si se uso alguna validacion futura/opcional, el soporte explicito que la habilita.
