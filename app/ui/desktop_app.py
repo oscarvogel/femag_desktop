@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from peewee import InterfaceError, OperationalError, SqliteDatabase
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, QTimer, Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
     QDateEdit,
+    QDoubleSpinBox,
     QFrame,
-    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -31,11 +29,14 @@ from app.models import ALL_MODELS
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.services.auth_service import AuthService
-from app.services.load_order_print_service import LoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.ui.dashboard import DashboardService, future_module_message
-from app.ui.load_orders import build_load_order_workspace_spec
+from app.ui.load_orders import (
+    build_load_order_screen_state,
+    build_load_order_workspace_spec,
+    create_load_order_from_screen,
+)
 from app.ui.main_window import MainWindow as ShellBuilder
 
 
@@ -61,6 +62,7 @@ def _prepare_database(*, demo_mode: bool):
         bind_database(database)
         database.connect(reuse_if_open=True)
         database.create_tables(ALL_MODELS, safe=True)
+        _seed_demo_operational_data()
         return database
     try:
         database = initialize_runtime_database()
@@ -68,6 +70,33 @@ def _prepare_database(*, demo_mode: bool):
         return database
     except Exception:
         return None
+
+
+def _seed_demo_operational_data() -> None:
+    client = Client.create(name="FEMAG Demo", cuit="30700000001", iva_condition="RI")
+    ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12 km 8",
+        is_primary=True,
+    )
+    ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Parque Industrial",
+    )
+    carrier = Carrier.create(name="Transporte Norte Demo", cuit="30700000002")
+    Truck.create(domain="AB123CD", carrier=carrier)
+    Truck.create(domain="AC456EF", carrier=carrier)
+    Driver.create(name="Juan Perez", carrier=carrier)
+    Driver.create(name="Maria Gomez", carrier=carrier)
+    Product.create(name="Fecula de mandioca", unit="kg")
+    Product.create(name="Almidon", unit="kg")
+    PalletType.create(type="Pallet comun", measure="1x1", weight=12.5)
 
 
 class FemagDesktopWindow(QMainWindow):
@@ -110,6 +139,8 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
+        self.nav.setFocus()
+        QTimer.singleShot(0, self.nav.setFocus)
 
     def _topbar(self) -> QWidget:
         bar = QFrame()
@@ -122,6 +153,7 @@ class FemagDesktopWindow(QMainWindow):
         search = QLineEdit()
         search.setObjectName("globalSearch")
         search.setPlaceholderText("Buscar en FEMAG...")
+        search.setFocusPolicy(Qt.ClickFocus)
         search.setMinimumWidth(360)
         search.setMaximumWidth(520)
         notifications = QPushButton("Avisos")
@@ -221,19 +253,42 @@ class FemagDesktopWindow(QMainWindow):
         page.setObjectName("loadOrdersPage")
         layout = page.layout()
         service = LoadOrderService(current_user=self.shell.username)
-        print_service = LoadOrderPrintService(current_user=self.shell.username)
         selected_order_id: dict[str, int | None] = {"value": None}
 
         kpi_grid = QGridLayout()
         kpi_grid.setSpacing(16)
         for index, (label, value, helper) in enumerate(_load_order_kpis(service)):
-            kpi_grid.addWidget(_kpi_card(label, value, helper), 0, index)
+            kpi_grid.addWidget(_kpi_card(label, value, helper), index // 2, index % 2)
         layout.addLayout(kpi_grid)
 
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
 
-        workspace = QHBoxLayout()
+        filters = QHBoxLayout()
+        filters.setSpacing(8)
+        date_filter = QDateEdit()
+        date_filter.setObjectName("loadOrderDateFilter")
+        date_filter.setCalendarPopup(True)
+        date_filter.setDisplayFormat("dd/MM/yyyy")
+        date_filter.setSpecialValueText("")
+        date_filter.setDate(QDate.currentDate())
+        client_filter = QComboBox()
+        client_filter.setObjectName("loadOrderClientFilter")
+        status_filter = QComboBox()
+        status_filter.setObjectName("loadOrderStatusFilter")
+        filter_button = _action_button("filterLoadOrdersButton", "Buscar", secondary=True)
+        clear_filter_button = _action_button("clearLoadOrderFiltersButton", "Limpiar", secondary=True)
+        filters.addWidget(QLabel("Fecha"))
+        filters.addWidget(date_filter)
+        filters.addWidget(QLabel("Cliente"))
+        filters.addWidget(client_filter, 1)
+        filters.addWidget(QLabel("Estado"))
+        filters.addWidget(status_filter)
+        filters.addWidget(filter_button)
+        filters.addWidget(clear_filter_button)
+        layout.addLayout(filters)
+
+        workspace = QVBoxLayout()
         workspace.setSpacing(8)
         left_panel = QFrame()
         left_panel.setObjectName("contentPanel")
@@ -245,12 +300,9 @@ class FemagDesktopWindow(QMainWindow):
         actions.setContentsMargins(10, 10, 10, 10)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
-        edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
-        print_button = _action_button("printLoadOrderButton", "Imprimir")
-        search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, edit_button, issue_button, print_button, annul_button, search_button):
+        for button in (new_button, issue_button, annul_button):
             actions.addWidget(button)
         actions.addStretch(1)
         left_layout.addLayout(actions)
@@ -266,36 +318,147 @@ class FemagDesktopWindow(QMainWindow):
         left_layout.addWidget(table, 1)
         left_layout.addWidget(feedback)
 
-        detail = _detail_panel(spec)
-        detail_labels: dict[str, QLabel] = detail.property("detailLabels")
-        detail_actions = detail.property("detailActions")
+        form_panel = QFrame()
+        form_panel.setObjectName("detailPanel")
+        form_layout = QVBoxLayout(form_panel)
+        form_layout.setContentsMargins(16, 16, 16, 12)
+        form_title = QLabel("Nueva orden")
+        form_title.setObjectName("detailTitle")
+        form_layout.addWidget(form_title)
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(6)
+        order_date = QDateEdit()
+        order_date.setObjectName("loadOrderDateInput")
+        order_date.setCalendarPopup(True)
+        order_date.setDisplayFormat("dd/MM/yyyy")
+        order_date.setDate(QDate.currentDate())
+        client_combo = QComboBox()
+        client_combo.setObjectName("loadOrderClientInput")
+        address_combo = QComboBox()
+        address_combo.setObjectName("loadOrderAddressInput")
+        carrier_combo = QComboBox()
+        carrier_combo.setObjectName("loadOrderCarrierInput")
+        truck_combo = QComboBox()
+        truck_combo.setObjectName("loadOrderTruckInput")
+        driver_combo = QComboBox()
+        driver_combo.setObjectName("loadOrderDriverInput")
+        product_combo = QComboBox()
+        product_combo.setObjectName("loadOrderProductInput")
+        quantity_input = QDoubleSpinBox()
+        quantity_input.setObjectName("loadOrderQuantityInput")
+        quantity_input.setRange(0, 999999)
+        quantity_input.setDecimals(2)
+        quantity_input.setSuffix(" kg")
+        observations_input = QLineEdit()
+        observations_input.setObjectName("loadOrderObservationsInput")
+        for field in (
+            order_date,
+            client_combo,
+            address_combo,
+            carrier_combo,
+            truck_combo,
+            driver_combo,
+            product_combo,
+        ):
+            field.setMaximumWidth(230)
+        quantity_input.setMaximumWidth(160)
+        observations_input.setMaximumWidth(360)
+        form.addWidget(QLabel("Fecha"), 0, 0)
+        form.addWidget(order_date, 0, 1)
+        form.addWidget(QLabel("Transportista"), 0, 2)
+        form.addWidget(carrier_combo, 0, 3)
+        form.addWidget(QLabel("Cliente"), 1, 0)
+        form.addWidget(client_combo, 1, 1)
+        form.addWidget(QLabel("Camión"), 1, 2)
+        form.addWidget(truck_combo, 1, 3)
+        form.addWidget(QLabel("Domicilio entrega"), 2, 0)
+        form.addWidget(address_combo, 2, 1)
+        form.addWidget(QLabel("Chofer"), 2, 2)
+        form.addWidget(driver_combo, 2, 3)
+        form.addWidget(QLabel("Producto"), 3, 0)
+        form.addWidget(product_combo, 3, 1)
+        form.addWidget(QLabel("Cantidad"), 3, 2)
+        form.addWidget(quantity_input, 3, 3)
+        form.addWidget(QLabel("Observaciones"), 4, 0)
+        form.addWidget(observations_input, 4, 1, 1, 2)
+        save_button = _action_button("saveLoadOrderButton", "Guardar orden")
+        form_layout.addLayout(form)
+        form_layout.addWidget(save_button)
+        form_layout.addStretch(1)
+        workspace.addWidget(form_panel, 0)
         workspace.addWidget(left_panel, 1)
-        workspace.addWidget(detail, 0)
         layout.addLayout(workspace, 1)
 
+        def load_state(*, keep_filters: bool = True):
+            client_filter_id = _combo_data(client_filter) if keep_filters else None
+            status = status_filter.currentData() if keep_filters else None
+            day = date_filter.date().toPyDate() if keep_filters else None
+            return build_load_order_screen_state(
+                current_user=self.shell.username,
+                selected_client_id=_combo_data(client_combo),
+                selected_carrier_id=_combo_data(carrier_combo),
+                selected_truck_id=_combo_data(truck_combo),
+                filter_client_id=client_filter_id,
+                filter_status=status,
+                filter_date=day,
+            )
+
+        def populate_filters() -> None:
+            state = build_load_order_screen_state(current_user=self.shell.username)
+            _fill_combo(client_filter, state.clients, include_empty=True)
+            _fill_text_combo(status_filter, state.statuses)
+
+        def populate_form_options() -> None:
+            selected_client = _combo_data(client_combo)
+            selected_address = _combo_data(address_combo)
+            selected_carrier = _combo_data(carrier_combo)
+            selected_truck = _combo_data(truck_combo)
+            selected_driver = _combo_data(driver_combo)
+            selected_product = _combo_data(product_combo)
+            state = load_state(keep_filters=False)
+            _fill_combo(client_combo, state.clients, include_empty=True, selected=selected_client)
+            _fill_combo(address_combo, state.delivery_addresses, include_empty=True, selected=selected_address)
+            _fill_combo(carrier_combo, state.carriers, include_empty=True, selected=selected_carrier)
+            _fill_combo(truck_combo, state.trucks, include_empty=True, selected=selected_truck)
+            _fill_combo(driver_combo, state.drivers, include_empty=True, selected=selected_driver)
+            _fill_combo(product_combo, state.products, include_empty=True, selected=selected_product)
+
         def refresh() -> None:
-            rows = service.list_orders() if hasattr(service, "list_orders") else []
-            if not hasattr(service, "list_orders"):
-                feedback.setText("Listado operativo pendiente de la capa funcional correspondiente.")
+            state = load_state()
+            rows = state.rows
             table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
-                table.setItem(row_index, 0, QTableWidgetItem(_format_order_number(row["numero"])))
-                table.setItem(row_index, 1, QTableWidgetItem(row["fecha"].strftime("%d/%m/%Y")))
-                table.setItem(row_index, 2, QTableWidgetItem(row["cliente"]))
-                table.setItem(row_index, 3, QTableWidgetItem(row["destino"]))
-                table.setItem(row_index, 4, QTableWidgetItem(row["producto"]))
-                table.setItem(row_index, 5, QTableWidgetItem(str(row["pallets"])))
-                table.setItem(row_index, 6, QTableWidgetItem(row["chofer"]))
-                table.setItem(row_index, 7, QTableWidgetItem(row["transportista"]))
-                table.setItem(row_index, 8, QTableWidgetItem(_display_status(row["estado"])))
-                table.item(row_index, 0).setData(Qt.UserRole, row["id"])
-                table.item(row_index, 8).setForeground(_status_color(row["estado"]))
+                values = (
+                    row.number,
+                    row.date,
+                    row.client,
+                    row.delivery,
+                    row.product,
+                    row.quantity,
+                    row.driver,
+                    row.carrier,
+                    row.status,
+                )
+                for column, value in enumerate(values):
+                    table.setItem(row_index, column, QTableWidgetItem(value))
+                table.item(row_index, 0).setData(Qt.UserRole, row.id)
+                table.item(row_index, 8).setForeground(_status_color(row.status))
             if rows and selected_order_id["value"] is None:
                 table.setCurrentCell(0, 0)
+            if not rows:
+                feedback.setText(state.empty_message)
+            elif not feedback.text():
+                feedback.setText(f"{len(rows)} orden(es) en pantalla.")
 
         def clear_form() -> None:
             selected_order_id["value"] = None
-            feedback.setText("Nuevo: use el flujo completo de orden en la próxima iteración funcional.")
+            form_title.setText("Nueva orden")
+            order_date.setDate(QDate.currentDate())
+            quantity_input.setValue(0)
+            observations_input.clear()
+            populate_form_options()
+            feedback.setText("Complete los datos obligatorios y guarde la orden.")
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
@@ -310,24 +473,30 @@ class FemagDesktopWindow(QMainWindow):
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
             selected_order_id["value"] = order.id
-            first_product = order.products.first()
-            first_pallet = order.pallets.first()
-            detail_labels["number"].setText(_format_order_number(order.order_number))
-            detail_labels["status"].setText(_display_status(order.status))
-            detail_labels["status"].setObjectName(f"badge{_status_key(order.status)}")
-            detail_labels["Fecha de orden"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Cliente"].setText(order.client.name)
-            detail_labels["Entrega programada"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Dirección de entrega"].setText(
-                f"{order.delivery_address.address}, {order.delivery_address.city}"
-            )
-            detail_labels["Producto"].setText(first_product.product.name if first_product else "")
-            detail_labels["Cantidad (Pallets)"].setText(str(first_pallet.quantity if first_pallet else 0))
-            detail_labels["Peso estimado"].setText(_estimated_weight(first_pallet))
-            detail_labels["Chofer asignado"].setText(order.driver.name)
-            detail_labels["Transportista"].setText(order.carrier.name)
-            detail_labels["Camión / Acoplado"].setText(order.truck.domain)
-            detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
+            form_title.setText(f"Orden {_format_order_number(order.order_number)}")
+            feedback.setText(f"Orden seleccionada: {_format_order_number(order.order_number)}.")
+
+        def save() -> None:
+            try:
+                order = create_load_order_from_screen(
+                    current_user=self.shell.username,
+                    client_id=_combo_data(client_combo),
+                    delivery_address_id=_combo_data(address_combo),
+                    carrier_id=_combo_data(carrier_combo),
+                    truck_id=_combo_data(truck_combo),
+                    driver_id=_combo_data(driver_combo),
+                    product_id=_combo_data(product_combo),
+                    quantity=quantity_input.value(),
+                    observations=observations_input.text().strip() or None,
+                    order_date=order_date.date().toPyDate(),
+                )
+                selected_order_id["value"] = order.id
+                feedback.setText(f"Orden {_format_order_number(order.order_number)} guardada.")
+                populate_filters()
+                populate_form_options()
+                refresh()
+            except Exception as exc:
+                feedback.setText(str(exc))
 
         def issue() -> None:
             order = selected_order()
@@ -355,23 +524,18 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.setText(str(exc))
 
-        def print_order() -> None:
-            order = selected_order()
-            if order is None:
-                feedback.setText("Seleccione una orden para imprimir.")
-                return
-            path = print_service.export_combined(order, Path("docs") / "prints")
-            feedback.setText(f"Vista A4 generada: {path}")
-
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
+        client_combo.currentIndexChanged.connect(lambda _index: populate_form_options())
+        carrier_combo.currentIndexChanged.connect(lambda _index: populate_form_options())
+        truck_combo.currentIndexChanged.connect(lambda _index: populate_form_options())
         new_button.clicked.connect(clear_form)
-        edit_button.clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
-        detail_actions["edit"].clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
-        detail_actions["history"].clicked.connect(lambda: feedback.setText("Historial: disponible en auditoría de la orden."))
-        search_button.clicked.connect(lambda: feedback.setText("Buscar: use el buscador global o filtre desde el listado."))
+        save_button.clicked.connect(save)
+        filter_button.clicked.connect(refresh)
+        clear_filter_button.clicked.connect(lambda: (populate_filters(), refresh()))
         issue_button.clicked.connect(issue)
         annul_button.clicked.connect(annul)
-        print_button.clicked.connect(print_order)
+        populate_filters()
+        populate_form_options()
         refresh()
         return page
 
@@ -531,6 +695,38 @@ def _set_combo(combo: QComboBox, value: object) -> None:
     index = combo.findData(value)
     if index >= 0:
         combo.setCurrentIndex(index)
+
+
+def _combo_data(combo: QComboBox):
+    return combo.currentData()
+
+
+def _fill_combo(combo: QComboBox, options, *, include_empty: bool = False, selected=None) -> None:
+    previous = selected if selected is not None else combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    if include_empty:
+        combo.addItem("", None)
+    for option in options:
+        combo.addItem(option.label, option.id)
+    index = combo.findData(previous)
+    if index >= 0:
+        combo.setCurrentIndex(index)
+    elif combo.count() > 0:
+        combo.setCurrentIndex(0)
+    combo.blockSignals(False)
+
+
+def _fill_text_combo(combo: QComboBox, values: tuple[str, ...]) -> None:
+    previous = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    for value in values:
+        combo.addItem(value, value or None)
+    index = combo.findData(previous)
+    if index >= 0:
+        combo.setCurrentIndex(index)
+    combo.blockSignals(False)
 
 
 def _client_options() -> list[tuple[int, str]]:
