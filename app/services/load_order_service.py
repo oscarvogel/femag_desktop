@@ -2,10 +2,11 @@ from datetime import date
 
 from app.config.database import database_proxy
 from app.models.load_orders import LoadOrder, LoadOrderPallet, LoadOrderProduct, LoadOrderStatusHistory
-from app.models.masters import Carrier, Client, ClientAddress, Driver, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.driver_availability_service import DriverAvailabilityService
+from app.services.master_service import MasterService
 
 
 class LoadOrderService:
@@ -33,8 +34,9 @@ class LoadOrderService:
         observations: str | None = None,
         order_date: date | None = None,
     ) -> LoadOrder:
-        if not products:
-            raise ValueError("La orden debe tener al menos un producto.")
+        self._validate_header(client, delivery_address, carrier, driver, truck)
+        normalized_products = self._validate_products(products)
+        normalized_pallets = self._validate_pallets(pallets)
         self.driver_availability.ensure_available(driver)
         with database_proxy.atomic():
             order = LoadOrder.create(
@@ -49,8 +51,8 @@ class LoadOrderService:
                 created_by=self.current_user,
                 updated_by=self.current_user,
             )
-            self._replace_products(order, products)
-            self._replace_pallets(order, pallets)
+            self._replace_products(order, normalized_products)
+            self._replace_pallets(order, normalized_pallets)
             LoadOrderStatusHistory.create(
                 order=order,
                 old_status=None,
@@ -72,6 +74,18 @@ class LoadOrderService:
         order = LoadOrder.get_by_id(order.id)
         old_snapshot = self._snapshot(order)
         new_driver = changes.get("driver")
+        candidate_client = changes.get("client", order.client)
+        candidate_address = changes.get("delivery_address", order.delivery_address)
+        candidate_carrier = changes.get("carrier", order.carrier)
+        candidate_driver = changes.get("driver", order.driver)
+        candidate_truck = changes.get("truck", order.truck)
+        self._validate_header(
+            candidate_client,
+            candidate_address,
+            candidate_carrier,
+            candidate_driver,
+            candidate_truck,
+        )
         if new_driver is not None and new_driver.id != order.driver.id and order.is_active:
             self.driver_availability.ensure_available(new_driver, excluding_order=order)
             previous_driver = order.driver
@@ -149,6 +163,94 @@ class LoadOrderService:
 
     def blocked_driver_count(self) -> int:
         return Driver.select().where(Driver.available == False).count()  # noqa: E712
+
+    def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        client: Client | None = None,
+        day: date | None = None,
+    ) -> list[LoadOrder]:
+        query = LoadOrder.select()
+        if status is not None:
+            query = query.where(LoadOrder.status == status)
+        if client is not None:
+            client = self._require_instance(client, Client, "cliente")
+            query = query.where(LoadOrder.client == client)
+        if day is not None:
+            query = query.where(LoadOrder.date == day)
+        return list(query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc()))
+
+    def _validate_header(
+        self,
+        client: Client,
+        delivery_address: ClientAddress,
+        carrier: Carrier,
+        driver: Driver,
+        truck: Truck,
+    ) -> None:
+        client = self._require_instance(client, Client, "cliente")
+        delivery_address = self._require_instance(delivery_address, ClientAddress, "lugar de entrega")
+        carrier = self._require_instance(carrier, Carrier, "transportista")
+        driver = self._require_instance(driver, Driver, "chofer")
+        truck = self._require_instance(truck, Truck, "camion")
+        if delivery_address.client.id != client.id:
+            raise ValueError("El lugar de entrega debe pertenecer al cliente seleccionado.")
+        if truck.carrier.id != carrier.id:
+            raise ValueError("El camion debe pertenecer al transportista seleccionado.")
+        master_service = MasterService(current_user=self.current_user, audit_service=self.audit_service)
+        if not master_service.is_driver_valid_for_carrier(driver, carrier):
+            raise ValueError("El chofer debe pertenecer al transportista seleccionado.")
+        if not master_service.is_driver_valid_for_truck(driver, truck):
+            raise ValueError("El chofer debe ser valido para el camion seleccionado.")
+
+    def _validate_products(self, products: list[dict]) -> list[dict]:
+        if not products:
+            raise ValueError("La orden debe tener al menos un producto.")
+        normalized = []
+        for item in products:
+            if not isinstance(item, dict):
+                raise ValueError("Cada producto de la orden debe ser un detalle valido.")
+            product = self._require_instance(item.get("product"), Product, "producto")
+            quantity = item.get("quantity")
+            if quantity is None or quantity <= 0:
+                raise ValueError("La cantidad de producto debe ser mayor a cero.")
+            normalized.append(
+                {
+                    **item,
+                    "product": product,
+                    "quantity": quantity,
+                }
+            )
+        return normalized
+
+    def _validate_pallets(self, pallets: list[dict]) -> list[dict]:
+        normalized = []
+        for item in pallets or []:
+            if not isinstance(item, dict):
+                raise ValueError("Cada pallet de la orden debe ser un detalle valido.")
+            pallet_type = self._require_instance(item.get("pallet_type"), PalletType, "pallet")
+            quantity = item.get("quantity")
+            if quantity is None or quantity <= 0:
+                raise ValueError("La cantidad de pallet debe ser mayor a cero.")
+            normalized.append(
+                {
+                    **item,
+                    "pallet_type": pallet_type,
+                    "quantity": quantity,
+                }
+            )
+        return normalized
+
+    def _require_instance(self, value, model_class, label: str):
+        if value is None:
+            raise ValueError(f"El {label} es obligatorio.")
+        if not isinstance(value, model_class) or value.id is None:
+            raise ValueError(f"El {label} no es valido.")
+        try:
+            return model_class.get_by_id(value.id)
+        except model_class.DoesNotExist as exc:
+            raise ValueError(f"El {label} no existe.") from exc
 
     def _replace_products(self, order: LoadOrder, products: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
