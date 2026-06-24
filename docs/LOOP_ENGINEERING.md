@@ -48,7 +48,7 @@ python -m pytest
 python -m compileall app
 ```
 
-Agregar smoke checks si el bug afecta arranque, navegacion o modo demo.
+Agregar smoke checks si el bug afecta arranque o navegacion. Validaciones demo solo aplican cuando exista soporte explicito para ese flujo.
 
 ## Test loop
 
@@ -196,10 +196,9 @@ git diff --cached --check
 python -m pytest
 python -m compileall app
 python -m app.main --smoke
-python -m app.main --demo --smoke
 ```
 
-Ajustar segun el tipo de cambio. No ejecutar screenshots si el PR no modifica UX.
+Ajustar segun el tipo de cambio. No exigir comandos inexistentes; validaciones demo son futuras/opcionales hasta que el proyecto las soporte. No ejecutar screenshots si el PR no modifica UX.
 
 ### Plantilla de comentario final
 
@@ -218,7 +217,7 @@ Resultado: aprobado / requiere cambios
 - `python -m pytest` -> ...
 - `python -m compileall app` -> ...
 - `python -m app.main --smoke` -> ...
-- `python -m app.main --demo --smoke` -> ...
+- Validaciones opcionales/futuras -> no aplican / ...
 
 ### Evidencia visual
 - Screenshots ejecutados: si/no
@@ -277,11 +276,10 @@ Usar este loop antes de codificar nuevas pantallas y cuando el issue cambia pant
 
 ```bash
 python scripts/generate_ux_screenshots.py
-python -m app.main --demo --smoke
 git diff --check
 ```
 
-Documentar TODO si algun comando no existe o falla.
+Documentar TODO si algun comando no existe o falla. Agregar validaciones demo solo cuando exista soporte explicito.
 
 ## Release loop futuro
 
@@ -318,7 +316,6 @@ git diff --check
 python -m pytest
 python -m compileall app
 python -m app.main --smoke
-python -m app.main --demo --smoke
 ```
 
 Agregar validaciones de instalador cuando existan.

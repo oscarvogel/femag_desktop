@@ -20,7 +20,8 @@ Validaciones:
 - git diff --check
 - python -m pytest
 - python -m compileall app
-- smoke app o demo smoke si aplica
+- python -m app.main --smoke si aplica
+- validaciones opcionales solo si el proyecto las soporta explicitamente
 
 Entrega:
 - Rama propia del issue.
@@ -117,7 +118,7 @@ Validaciones:
 - python -m pytest
 - python -m compileall app
 - python -m app.main --smoke
-- python -m app.main --demo --smoke
+- validaciones demo solo si el proyecto las soporta explicitamente
 - screenshots solo si hubo cambios UX
 
 Entrega:
@@ -177,7 +178,6 @@ Alcance:
 
 Validaciones:
 - python scripts/generate_ux_screenshots.py
-- python -m app.main --demo --smoke
 - git diff --check
 
 Entrega:

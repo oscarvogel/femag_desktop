@@ -88,11 +88,10 @@ git diff --check
 python -m pytest
 python -m compileall app
 python -m app.main --smoke
-python -m app.main --demo --smoke
 python scripts/generate_ux_screenshots.py
 ```
 
-Si un comando no existe o falla por una causa conocida, documentarlo como TODO o riesgo en el PR. No inventar resultados.
+Si un comando no existe o falla por una causa conocida, documentarlo como TODO o riesgo en el PR. No inventar resultados. Validaciones futuras, como un smoke demo, solo deben agregarse cuando exista soporte explicito en el proyecto.
 
 ## Criterio de listo
 

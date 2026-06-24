@@ -32,13 +32,9 @@ Smoke check de la app en modo normal.
 
 TODO: confirmar en cada PR si este comando existe y si no requiere configuracion local adicional.
 
-```bash
-python -m app.main --demo --smoke
-```
+## Validaciones futuras u opcionales
 
-Smoke check de la app en modo demo.
-
-TODO: confirmar en cada PR si este comando existe y si no requiere configuracion local adicional.
+No listar comandos inexistentes como obligatorios. Si en una rama futura existe soporte explicito para modo demo, documentar el comando exacto en el PR y en este archivo junto con su resultado real.
 
 ## Screenshots UX
 
@@ -87,7 +83,6 @@ Validacion general recomendada:
 python -m pytest
 python -m compileall app
 python -m app.main --smoke
-python -m app.main --demo --smoke
 ```
 
 Screenshots:

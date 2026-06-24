@@ -40,13 +40,13 @@ Usar este checklist para abrir, revisar, marcar ready, mergear y cerrar PRs de F
 - [ ] Se ejecuto `python -m pytest` o se documento por que no aplica.
 - [ ] Se ejecuto `python -m compileall app` o se documento por que no aplica.
 - [ ] Se ejecuto `python -m app.main --smoke` si aplica.
-- [ ] Se ejecuto `python -m app.main --demo --smoke` si aplica.
+- [ ] Se documento cualquier validacion futura u opcional que no exista todavia, sin exigirla como obligatoria.
 - [ ] Los resultados reales quedaron documentados en la descripcion del PR.
 
 ## Smoke app y demo
 
 - [ ] La app inicia en modo normal cuando el cambio lo requiere.
-- [ ] La app inicia en modo demo cuando el cambio lo requiere.
+- [ ] La app inicia en modo demo solo si existe soporte explicito para ese comando o flujo.
 - [ ] El flujo afectado puede abrirse sin error visible.
 - [ ] Si no hay smoke automatico suficiente, se documento una validacion manual concreta.
 - [ ] No se usaron remitos reales ni F150 real para validar cambios no autorizados.
@@ -125,7 +125,7 @@ Resultado: aprobado / requiere cambios
 - `python -m pytest` -> ...
 - `python -m compileall app` -> ...
 - `python -m app.main --smoke` -> ...
-- `python -m app.main --demo --smoke` -> ...
+- Validaciones opcionales/futuras -> no aplican / ...
 
 ### Evidencia visual
 - Screenshots ejecutados: si/no
