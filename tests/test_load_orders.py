@@ -31,6 +31,37 @@ def _master_data():
     }
 
 
+def _multi_client_data():
+    from app.models.masters import Client, ClientAddress, Product
+
+    data = _master_data()
+    other_client = Client.create(name="Cliente Sur", cuit="30999999999", iva_condition="RI")
+    other_address = ClientAddress.create(
+        client=other_client,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta 14",
+    )
+    other_destination = ClientAddress.create(
+        client=data["client"],
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta 12 km 1540",
+    )
+    third_product = Product.create(name="Glucosa", unit="bidon")
+    data.update(
+        {
+            "other_client": other_client,
+            "other_address": other_address,
+            "other_destination": other_destination,
+            "third_product": third_product,
+        }
+    )
+    return data
+
+
 def _valid_order_payload(data):
     return {
         "client": data["client"],
@@ -81,6 +112,128 @@ def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 2
     assert LoadOrderPallet.select().where(LoadOrderPallet.order == order).count() == 1
     assert AuditLog.select().where(AuditLog.module == "Ordenes de carga").count() >= 2
+
+
+def test_create_load_order_with_one_client_and_multiple_products_in_destination(db):
+    from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [
+                    {"product": data["product"], "quantity": 1000},
+                    {"product": data["other_product"], "quantity": 25, "unit": "bolsa"},
+                ],
+            }
+        ],
+        pallets=[],
+    )
+
+    destination = LoadOrderDestination.get(LoadOrderDestination.order == order)
+    products = list(LoadOrderProduct.select().where(LoadOrderProduct.destination == destination))
+
+    assert order.client is None
+    assert order.delivery_address is None
+    assert destination.client == data["client"]
+    assert destination.delivery_address == data["address"]
+    assert [item.product.name for item in products] == ["Fecula de mandioca", "Almidon"]
+
+
+def test_create_load_order_with_multiple_clients_destinations_and_products(db):
+    from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _multi_client_data()
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["product"], "quantity": 1000}],
+            },
+            {
+                "client": data["other_client"],
+                "delivery_address": data["other_address"],
+                "products": [
+                    {"product": data["other_product"], "quantity": 40},
+                    {"product": data["third_product"], "quantity": 6},
+                ],
+            },
+        ],
+        pallets=[],
+    )
+
+    destinations = list(LoadOrderDestination.select().where(LoadOrderDestination.order == order))
+
+    assert [destination.client.name for destination in destinations] == ["Cliente FEMAG", "Cliente Sur"]
+    assert [destination.delivery_address.city for destination in destinations] == ["Posadas", "Obera"]
+    assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 3
+
+
+def test_create_load_order_allows_same_client_with_multiple_delivery_places(db):
+    from app.models.load_orders import LoadOrderDestination
+    from app.services.load_order_service import LoadOrderService
+
+    data = _multi_client_data()
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["product"], "quantity": 1000}],
+            },
+            {
+                "client": data["client"],
+                "delivery_address": data["other_destination"],
+                "products": [{"product": data["other_product"], "quantity": 40}],
+            },
+        ],
+        pallets=[],
+    )
+
+    cities = [
+        destination.delivery_address.city
+        for destination in LoadOrderDestination.select().where(LoadOrderDestination.order == order)
+    ]
+
+    assert cities == ["Posadas", "Eldorado"]
+
+
+def test_create_load_order_rejects_destination_without_products(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+
+    with pytest.raises(ValueError, match="cliente.*producto"):
+        LoadOrderService(current_user="admin").create_order(
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            destinations=[
+                {
+                    "client": data["client"],
+                    "delivery_address": data["address"],
+                    "products": [],
+                }
+            ],
+            pallets=[],
+        )
 
 
 @pytest.mark.parametrize(

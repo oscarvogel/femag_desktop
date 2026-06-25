@@ -65,6 +65,7 @@ class LoadOrderPrintService:
 body {{ font-family: Arial, sans-serif; color: #202124; font-size: 12px; }}
 h1 {{ font-size: 20px; margin: 0 0 10px; }}
 h2 {{ font-size: 16px; margin: 18px 0 8px; }}
+h3 {{ font-size: 14px; margin: 14px 0 4px; }}
 table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
 th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
 .meta {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }}
@@ -81,7 +82,7 @@ th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
 <h1>Orden de carga Nro. {order.order_number}</h1>
 {flag}
 {self._meta(order)}
-{self._products(order)}
+{self._destinations(order)}
 {self._pallets(order)}
 <h2>Observaciones</h2>
 <p>{escape(order.observations or "")}</p>
@@ -94,7 +95,7 @@ th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
 <h2>Hoja resumen / sobre de carga</h2>
 {flag}
 {self._meta(order)}
-{self._products(order)}
+{self._destinations(order)}
 {self._pallets(order)}
 <h2>Observaciones</h2>
 <p>{escape(order.observations or "")}</p>
@@ -103,23 +104,48 @@ th, td {{ border: 1px solid #9aa0a6; padding: 6px; text-align: left; }}
     def _meta(self, order: LoadOrder) -> str:
         return f"""
 <section class="meta">
+<h2>Cabecera logística</h2>
 <div><span class="label">Fecha:</span> {order.date:%d/%m/%Y}</div>
 <div><span class="label">Estado:</span> {escape(order.status)}</div>
-<div><span class="label">Cliente:</span> {escape(order.client.name)}</div>
-<div><span class="label">Domicilio:</span> {escape(order.delivery_address.address)}</div>
 <div><span class="label">Transportista:</span> {escape(order.carrier.name)}</div>
 <div><span class="label">Chofer:</span> {escape(order.driver.name)}</div>
 <div><span class="label">Camion:</span> {escape(order.truck.domain)}</div>
 </section>
 """
 
-    def _products(self, order: LoadOrder) -> str:
+    def _destinations(self, order: LoadOrder) -> str:
+        sections = []
+        destinations = list(order.destinations.order_by())
+        if not destinations:
+            return self._legacy_products(order)
+        for destination in destinations:
+            rows = "".join(
+                f"<tr><td>{escape(item.product.name)}</td><td>{item.quantity:g}</td>"
+                f"<td>{escape(item.unit)}</td><td>{escape(item.observations or '')}</td></tr>"
+                for item in destination.products
+            )
+            title = (
+                f"{escape(destination.client.name)} - "
+                f"{escape(destination.delivery_address.address)}, {escape(destination.delivery_address.city)}"
+            )
+            sections.append(
+                f"<h3>{title}</h3>"
+                "<table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>"
+                f"{rows}</table>"
+            )
+        return f"<h2>Detalle por cliente / destino</h2>{''.join(sections)}"
+
+    def _legacy_products(self, order: LoadOrder) -> str:
         rows = "".join(
             f"<tr><td>{escape(item.product.name)}</td><td>{item.quantity:g}</td>"
             f"<td>{escape(item.unit)}</td><td>{escape(item.observations or '')}</td></tr>"
             for item in order.products
         )
-        return f"<h2>Productos</h2><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>{rows}</table>"
+        return (
+            "<h2>Detalle por cliente / destino</h2>"
+            "<table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>"
+            f"{rows}</table>"
+        )
 
     def _pallets(self, order: LoadOrder) -> str:
         rows = "".join(

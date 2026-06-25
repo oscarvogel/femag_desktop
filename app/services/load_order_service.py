@@ -1,7 +1,13 @@
 from datetime import date
 
 from app.config.database import database_proxy
-from app.models.load_orders import LoadOrder, LoadOrderPallet, LoadOrderProduct, LoadOrderStatusHistory
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderPallet,
+    LoadOrderProduct,
+    LoadOrderStatusHistory,
+)
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
@@ -24,26 +30,32 @@ class LoadOrderService:
     def create_order(
         self,
         *,
-        client: Client,
-        delivery_address: ClientAddress,
+        client: Client | None = None,
+        delivery_address: ClientAddress | None = None,
         carrier: Carrier,
         driver: Driver,
         truck: Truck,
-        products: list[dict],
-        pallets: list[dict],
+        products: list[dict] | None = None,
+        destinations: list[dict] | None = None,
+        pallets: list[dict] | None = None,
         observations: str | None = None,
         order_date: date | None = None,
     ) -> LoadOrder:
-        self._validate_header(client, delivery_address, carrier, driver, truck)
-        normalized_products = self._validate_products(products)
+        carrier, driver, truck = self._validate_logistic_header(carrier, driver, truck)
+        normalized_destinations = self._validate_destinations(
+            destinations,
+            legacy_client=client,
+            legacy_delivery_address=delivery_address,
+            legacy_products=products,
+        )
         normalized_pallets = self._validate_pallets(pallets)
         self.driver_availability.ensure_available(driver)
         with database_proxy.atomic():
             order = LoadOrder.create(
                 order_number=self._next_order_number(),
                 date=order_date or date.today(),
-                client=client,
-                delivery_address=delivery_address,
+                client=None,
+                delivery_address=None,
                 carrier=carrier,
                 driver=driver,
                 truck=truck,
@@ -51,7 +63,7 @@ class LoadOrderService:
                 created_by=self.current_user,
                 updated_by=self.current_user,
             )
-            self._replace_products(order, normalized_products)
+            self._replace_destinations(order, normalized_destinations)
             self._replace_pallets(order, normalized_pallets)
             LoadOrderStatusHistory.create(
                 order=order,
@@ -76,18 +88,10 @@ class LoadOrderService:
         order = LoadOrder.get_by_id(order.id)
         old_snapshot = self._snapshot(order)
         new_driver = changes.get("driver")
-        candidate_client = changes.get("client", order.client)
-        candidate_address = changes.get("delivery_address", order.delivery_address)
         candidate_carrier = changes.get("carrier", order.carrier)
         candidate_driver = changes.get("driver", order.driver)
         candidate_truck = changes.get("truck", order.truck)
-        self._validate_header(
-            candidate_client,
-            candidate_address,
-            candidate_carrier,
-            candidate_driver,
-            candidate_truck,
-        )
+        self._validate_logistic_header(candidate_carrier, candidate_driver, candidate_truck)
         if new_driver is not None and new_driver.id != order.driver.id and order.is_active:
             self.driver_availability.ensure_available(new_driver, excluding_order=order)
             previous_driver = order.driver
@@ -178,26 +182,23 @@ class LoadOrderService:
             query = query.where(LoadOrder.status == status)
         if client is not None:
             client = self._require_instance(client, Client, "cliente")
-            query = query.where(LoadOrder.client == client)
+            destination_orders = LoadOrderDestination.select(LoadOrderDestination.order).where(
+                LoadOrderDestination.client == client
+            )
+            query = query.where((LoadOrder.client == client) | (LoadOrder.id.in_(destination_orders)))
         if day is not None:
             query = query.where(LoadOrder.date == day)
         return list(query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc()))
 
-    def _validate_header(
+    def _validate_logistic_header(
         self,
-        client: Client,
-        delivery_address: ClientAddress,
         carrier: Carrier,
         driver: Driver,
         truck: Truck,
-    ) -> None:
-        client = self._require_instance(client, Client, "cliente")
-        delivery_address = self._require_instance(delivery_address, ClientAddress, "lugar de entrega")
+    ) -> tuple[Carrier, Driver, Truck]:
         carrier = self._require_instance(carrier, Carrier, "transportista")
         driver = self._require_instance(driver, Driver, "chofer")
         truck = self._require_instance(truck, Truck, "camion")
-        if delivery_address.client.id != client.id:
-            raise ValueError("El lugar de entrega debe pertenecer al cliente seleccionado.")
         if truck.carrier.id != carrier.id:
             raise ValueError("El camion debe pertenecer al transportista seleccionado.")
         master_service = MasterService(current_user=self.current_user, audit_service=self.audit_service)
@@ -205,6 +206,47 @@ class LoadOrderService:
             raise ValueError("El chofer debe pertenecer al transportista seleccionado.")
         if not master_service.is_driver_valid_for_truck(driver, truck):
             raise ValueError("El chofer debe ser valido para el camion seleccionado.")
+        return carrier, driver, truck
+
+    def _validate_destinations(
+        self,
+        destinations: list[dict] | None,
+        *,
+        legacy_client: Client | None,
+        legacy_delivery_address: ClientAddress | None,
+        legacy_products: list[dict] | None,
+    ) -> list[dict]:
+        if destinations is None:
+            destinations = [
+                {
+                    "client": legacy_client,
+                    "delivery_address": legacy_delivery_address,
+                    "products": legacy_products or [],
+                }
+            ]
+        if not destinations:
+            raise ValueError("La orden debe tener al menos un cliente con productos.")
+        normalized = []
+        for index, item in enumerate(destinations, start=1):
+            if not isinstance(item, dict):
+                raise ValueError("Cada cliente de la orden debe ser un detalle valido.")
+            client = self._require_instance(item.get("client"), Client, "cliente")
+            delivery_address = self._require_instance(item.get("delivery_address"), ClientAddress, "lugar de entrega")
+            if delivery_address.client.id != client.id:
+                raise ValueError("El lugar de entrega debe pertenecer al cliente seleccionado.")
+            products = item.get("products") or []
+            if not products:
+                raise ValueError("Cada cliente de la orden debe tener al menos un producto.")
+            normalized.append(
+                {
+                    "client": client,
+                    "delivery_address": delivery_address,
+                    "sequence": item.get("sequence") or index,
+                    "observations": item.get("observations"),
+                    "products": self._validate_products(products),
+                }
+            )
+        return normalized
 
     def _validate_products(self, products: list[dict]) -> list[dict]:
         if not products:
@@ -266,6 +308,28 @@ class LoadOrderService:
                 observations=item.get("observations"),
             )
 
+    def _replace_destinations(self, order: LoadOrder, destinations: list[dict]) -> None:
+        LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
+        LoadOrderDestination.delete().where(LoadOrderDestination.order == order).execute()
+        for item in destinations:
+            destination = LoadOrderDestination.create(
+                order=order,
+                client=item["client"],
+                delivery_address=item["delivery_address"],
+                sequence=item["sequence"],
+                observations=item.get("observations"),
+            )
+            for product_item in item["products"]:
+                product = product_item["product"]
+                LoadOrderProduct.create(
+                    order=order,
+                    destination=destination,
+                    product=product,
+                    quantity=product_item["quantity"],
+                    unit=product_item.get("unit") or product.unit,
+                    observations=product_item.get("observations"),
+                )
+
     def _replace_pallets(self, order: LoadOrder, pallets: list[dict]) -> None:
         LoadOrderPallet.delete().where(LoadOrderPallet.order == order).execute()
         for item in pallets:
@@ -283,7 +347,7 @@ class LoadOrderService:
         return {
             "order_number": order.order_number,
             "status": order.status,
-            "client_id": order.client.id,
+            "client_ids": [destination.client.id for destination in order.destinations],
             "driver_id": order.driver.id,
             "truck_id": order.truck.id,
         }
