@@ -20,17 +20,23 @@ def ensure_runtime_schema(database) -> None:
 
 def _ensure_model_columns(database, model) -> None:
     table_name = model._meta.table_name
-    existing_columns = {column.name for column in database.get_columns(table_name)}
+    existing_columns = {column.name: column for column in database.get_columns(table_name)}
     for field in model._meta.sorted_fields:
         if field.primary_key:
             continue
         column_name = field.column_name
-        if column_name in existing_columns:
+        existing_column = existing_columns.get(column_name)
+        if existing_column is None:
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"ADD COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
+            )
             continue
-        database.execute_sql(
-            f"ALTER TABLE `{_escape_identifier(table_name)}` "
-            f"ADD COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
-        )
+        if field.null and existing_column.null is False and _supports_modify_column(database):
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
+            )
 
 
 def _field_sql(field) -> str:
@@ -55,3 +61,7 @@ def _field_sql(field) -> str:
 
 def _escape_identifier(value: str) -> str:
     return value.replace("`", "``")
+
+
+def _supports_modify_column(database) -> bool:
+    return database.__class__.__name__ == "MySQLDatabase"
