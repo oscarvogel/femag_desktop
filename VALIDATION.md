@@ -38,18 +38,20 @@ No listar comandos inexistentes como obligatorios. Si en una rama futura existe 
 
 ## Tests actuales detectados
 
-En esta rama, `py -3 -m pytest --collect-only -q` detecta 56 tests:
+En esta rama, `py -3 -m pytest --collect-only -q` detecta 61 tests:
 
 - `tests/test_audit.py`: 1 test.
 - `tests/test_backup.py`: 1 test.
 - `tests/test_clients.py`: 2 tests.
 - `tests/test_config.py`: 2 tests.
+- `tests/test_load_order_desktop_ui.py`: 3 tests.
 - `tests/test_load_order_multi_client_ui.py`: 3 tests.
 - `tests/test_load_order_printing.py`: 2 tests.
 - `tests/test_load_orders.py`: 27 tests.
 - `tests/test_masters.py`: 3 tests.
 - `tests/test_models.py`: 2 tests.
 - `tests/test_permissions.py`: 2 tests.
+- `tests/test_schema.py`: 2 tests.
 - `tests/test_ui_pyqt5libs.py`: 4 tests.
 - `tests/test_ui_smoke.py`: 7 tests.
 
