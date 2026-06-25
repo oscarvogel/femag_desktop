@@ -4,13 +4,15 @@ Archivo:
 
 - `01_load_orders_multi_client.png`
 - `02_load_orders_operational_form.png`
+- `03_load_orders_modal_main.png`
+- `04_load_order_entry_dialog.png`
 
 Validacion:
 
 - Captura generada con PyQt5 en modo `QT_QPA_PLATFORM=offscreen`.
 - Datos sinteticos: dos clientes, dos destinos, dos productos y un transporte demo.
-- La pantalla corresponde al modulo `Ordenes de carga` con acciones visibles para agregar/quitar cliente, agregar/quitar producto, guardar, emitir e imprimir.
-- La segunda captura separa las acciones de listado de la carga del formulario operativo de alta.
+- Las primeras capturas documentan el contrato multi-cliente original y el formulario operativo inicial.
+- Las capturas `03` y `04` documentan la correccion UX posterior: la pantalla principal queda enfocada en listado/detalle y el alta de orden se realiza desde un modal con cabecera logistica, bloque cliente/destino y grilla de productos del destino seleccionado.
 
 Nota:
 

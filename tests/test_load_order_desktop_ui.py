@@ -9,16 +9,15 @@ def _set_combo(combo, value):
     combo.setCurrentIndex(index)
 
 
-def test_load_order_desktop_ui_creates_order_from_visible_form(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox, QPushButton, QTableWidget
+def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
 
     from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
-    from app.services.auth_service import AuthService
-    from app.ui.desktop_app import FemagDesktopWindow
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
 
     app = QApplication.instance() or QApplication([])
-    user = AuthService().create_user("ui_issue65", "demo", "Administrador")
     carrier = Carrier.create(name="Transporte UI")
     driver = Driver.create(name="Chofer UI", carrier=carrier)
     truck = Truck.create(domain="UI123AA", carrier=carrier)
@@ -32,23 +31,32 @@ def test_load_order_desktop_ui_creates_order_from_visible_form(db):
     )
     product = Product.create(name="Producto UI", unit="kg")
 
-    window = FemagDesktopWindow(user=user, demo_mode=True)
-    window.stack.setCurrentIndex(window._route_indexes["load_orders"])
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue65"), "ui_issue65")
     app.processEvents()
 
-    _set_combo(window.findChild(QComboBox, "loadOrderCarrierInput"), carrier.id)
-    _set_combo(window.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
-    _set_combo(window.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
-    _set_combo(window.findChild(QComboBox, "loadOrderClientInput"), client.id)
-    _set_combo(window.findChild(QComboBox, "loadOrderAddressInput"), address.id)
-    _set_combo(window.findChild(QComboBox, "loadOrderProductInput"), product.id)
-    window.findChild(QDoubleSpinBox, "loadOrderQuantityInput").setValue(125)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderCarrierInput"), carrier.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
 
-    window.findChild(QPushButton, "addLoadOrderClientButton").click()
-    window.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(0, 0)
-    window.findChild(QPushButton, "addLoadOrderProductButton").click()
-    window.findChild(QPushButton, "saveLoadOrderButton").click()
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+    dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(0, 0)
 
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 125,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    dialog.findChild(QPushButton, "saveLoadOrderButton").click()
+
+    assert dialog.created_order is not None
     assert LoadOrder.select().count() == 1
     assert LoadOrderDestination.select().count() == 1
     assert LoadOrderProduct.select().count() == 1
