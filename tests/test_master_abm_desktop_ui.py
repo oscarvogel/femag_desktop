@@ -134,12 +134,31 @@ def test_desktop_exposes_minimal_master_abm_pages(db):
 
     expected_buttons = (
         "newClientButton",
+        "editClientButton",
         "newAddressButton",
+        "editAddressButton",
         "newProductButton",
+        "editProductButton",
         "newDriverButton",
+        "editDriverButton",
         "newCarrierButton",
+        "editCarrierButton",
         "newTruckButton",
+        "editTruckButton",
     )
 
     for object_name in expected_buttons:
-        assert window.findChild(QPushButton, object_name) is not None
+        button = window.findChild(QPushButton, object_name)
+        assert button is not None
+        assert button.isEnabled()
+
+    readonly_profile = UserProfile.get(UserProfile.name == "Solo consulta")
+    readonly_user = User.create(username="readonly_issue70", password_hash="x", profile=readonly_profile)
+    readonly_window = FemagDesktopWindow(user=readonly_user, demo_mode=True)
+    app.processEvents()
+
+    assert readonly_window.findChild(QPushButton, "newClientButton").isEnabled() is False
+    assert readonly_window.findChild(QPushButton, "editClientButton").isEnabled() is False
+    assert readonly_window.findChild(QPushButton, "newTruckButton").isEnabled() is False
+    assert readonly_window.findChild(QPushButton, "editTruckButton").isEnabled() is False
+    assert readonly_window._route_indexes["load_orders"] >= 0

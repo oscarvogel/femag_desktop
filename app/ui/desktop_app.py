@@ -297,6 +297,14 @@ class FemagDesktopWindow(QMainWindow):
         actions = QHBoxLayout()
         new_button = _action_button(new_button_name, "Nuevo")
         edit_button = _action_button(edit_button_name, "Editar", secondary=True)
+        can_create = _can_use_menu_action(self.user, "Maestros", "crear", title)
+        can_modify = _can_use_menu_action(self.user, "Maestros", "modificar", title)
+        new_button.setEnabled(can_create)
+        edit_button.setEnabled(can_modify)
+        if not can_create:
+            new_button.setToolTip("El perfil actual no permite crear este maestro.")
+        if not can_modify:
+            edit_button.setToolTip("El perfil actual no permite modificar este maestro.")
         actions.addWidget(new_button)
         actions.addWidget(edit_button)
         actions.addStretch(1)
@@ -329,12 +337,18 @@ class FemagDesktopWindow(QMainWindow):
             return item.data(Qt.UserRole)
 
         def open_new() -> None:
+            if not can_create:
+                feedback.setText("El perfil actual no permite crear este maestro.")
+                return
             dialog = dialog_class(current_user=self.shell.username, parent=self)
             if dialog.exec_() == QDialog.Accepted:
                 refresh()
                 feedback.setText("Registro guardado.")
 
         def open_edit() -> None:
+            if not can_modify:
+                feedback.setText("El perfil actual no permite modificar este maestro.")
+                return
             row_id = selected_id()
             if row_id is None:
                 feedback.setText("Seleccione un registro para editar.")
@@ -1447,6 +1461,15 @@ def _can_annul_load_orders(user) -> bool:
         return False
     try:
         return PermissionService().has_permission(user, "Operaciones", "anular", "Órdenes de carga")
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(user, section, action, title)
     except (InterfaceError, OperationalError):
         return False
 
