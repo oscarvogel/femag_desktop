@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config.database import initialize_runtime_database
-from app.models import ALL_MODELS
+from app.config.schema import ensure_runtime_schema
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.models.security import User
 from app.services.auth_service import AuthService
@@ -80,7 +80,7 @@ def main() -> int:
     run_id = datetime.now().strftime("%y%m%d%H%M%S")
     db = initialize_runtime_database()
     db.connect(reuse_if_open=True)
-    db.create_tables(ALL_MODELS, safe=True)
+    ensure_runtime_schema(db)
     PermissionService().seed_defaults()
     _create_user(args.username, args.password)
     order = _create_demo_order(args.username, run_id)
