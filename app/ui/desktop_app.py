@@ -588,13 +588,18 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.currentCellChanged.connect(
             lambda row, _column, _previous_row, _previous_column: self._render_products(row)
         )
+        self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
 
     def _populate_options(self) -> None:
         _fill_combo(self.carrier_combo, _carrier_options())
         _fill_combo(self.truck_combo, _truck_options())
         _fill_combo(self.driver_combo, _driver_options())
         _fill_combo(self.client_combo, _client_options())
-        _fill_combo(self.address_combo, _address_options())
+        self._refresh_address_options()
+
+    def _refresh_address_options(self) -> None:
+        client_id = self.client_combo.currentData()
+        _fill_combo(self.address_combo, _address_options(client_id=client_id))
 
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
@@ -910,11 +915,14 @@ def _client_options() -> list[tuple[int, str]]:
         return []
 
 
-def _address_options() -> list[tuple[int, str]]:
+def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
     try:
+        query = ClientAddress.select().join(Client)
+        if client_id is not None:
+            query = query.where(ClientAddress.client == client_id)
         return [
             (address.id, f"{address.client.name} - {address.address}, {address.city}")
-            for address in ClientAddress.select().join(Client).order_by(Client.name, ClientAddress.city)
+            for address in query.order_by(Client.name, ClientAddress.city)
         ]
     except (InterfaceError, OperationalError):
         return []

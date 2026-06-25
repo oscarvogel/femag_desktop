@@ -60,3 +60,44 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrder.select().count() == 1
     assert LoadOrderDestination.select().count() == 1
     assert LoadOrderProduct.select().count() == 1
+
+
+def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    client_a = Client.create(name="Cliente A UI", cuit="30700000001", iva_condition="RI")
+    client_b = Client.create(name="Cliente B UI", cuit="30700000002", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta A",
+    )
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta B",
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue65"), "ui_issue65")
+    app.processEvents()
+
+    client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    _set_combo(client_combo, client_a.id)
+
+    assert address_combo.findData(address_a.id) >= 0
+    assert address_combo.findData(address_b.id) == -1
+
+    _set_combo(client_combo, client_b.id)
+
+    assert address_combo.findData(address_a.id) == -1
+    assert address_combo.findData(address_b.id) >= 0
