@@ -2,6 +2,18 @@
 
 ## Ordenes de carga
 
+### Prueba real contra base de datos
+
+Para validar la pantalla con una base MySQL de prueba, configurar `.env` o `FEMAG_ENV_FILE` con los datos de esa base y ejecutar:
+
+```bash
+py -3 scripts/init_db.py
+py -3 scripts/seed_issue_65_load_order_demo.py
+py -3 -m app.main --ui
+```
+
+El seed crea datos sinteticos con prefijo `ISSUE65`, un usuario `issue65_demo` con clave `demo`, una orden multi-cliente y una salida HTML A4 en `docs/prints/issue_65_demo/`. No usar este seed contra una base productiva con datos reales.
+
 1. Entrar en Operaciones > Ordenes de carga.
 2. Cargar la cabecera logistica: fecha, transportista, chofer, camion, estado y observaciones.
 3. Agregar uno o mas clientes/destinos dentro de la carga.
