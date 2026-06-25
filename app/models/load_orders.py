@@ -16,8 +16,8 @@ class LoadOrder(BaseModel):
 
     order_number = IntegerField(unique=True)
     date = DateField(default=date.today)
-    client = ForeignKeyField(Client, backref="load_orders")
-    delivery_address = ForeignKeyField(ClientAddress, backref="load_orders")
+    client = ForeignKeyField(Client, backref="load_orders", null=True)
+    delivery_address = ForeignKeyField(ClientAddress, backref="load_orders", null=True)
     carrier = ForeignKeyField(Carrier, backref="load_orders")
     driver = ForeignKeyField(Driver, backref="load_orders")
     truck = ForeignKeyField(Truck, backref="load_orders")
@@ -31,8 +31,17 @@ class LoadOrder(BaseModel):
         return self.status in self.ACTIVE_STATUSES
 
 
+class LoadOrderDestination(BaseModel):
+    order = ForeignKeyField(LoadOrder, backref="destinations", on_delete="CASCADE")
+    client = ForeignKeyField(Client, backref="load_order_destinations")
+    delivery_address = ForeignKeyField(ClientAddress, backref="load_order_destinations")
+    sequence = IntegerField(default=1)
+    observations = TextField(null=True)
+
+
 class LoadOrderProduct(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="products", on_delete="CASCADE")
+    destination = ForeignKeyField(LoadOrderDestination, backref="products", on_delete="CASCADE", null=True)
     product = ForeignKeyField(Product, backref="load_order_details")
     quantity = FloatField()
     unit = CharField()

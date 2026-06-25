@@ -245,12 +245,28 @@ class FemagDesktopWindow(QMainWindow):
         actions.setContentsMargins(10, 10, 10, 10)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
+        add_client_button = _action_button("addLoadOrderClientButton", "Agregar cliente")
+        remove_client_button = _action_button("removeLoadOrderClientButton", "Quitar cliente", secondary=True)
+        add_product_button = _action_button("addLoadOrderProductButton", "Agregar producto")
+        remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
+        save_button = _action_button("saveLoadOrderButton", "Guardar orden")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, edit_button, issue_button, print_button, annul_button, search_button):
+        for button in (
+            new_button,
+            add_client_button,
+            remove_client_button,
+            add_product_button,
+            remove_product_button,
+            save_button,
+            issue_button,
+            print_button,
+            annul_button,
+            search_button,
+        ):
             actions.addWidget(button)
         actions.addStretch(1)
         left_layout.addLayout(actions)
@@ -278,18 +294,22 @@ class FemagDesktopWindow(QMainWindow):
             if not hasattr(service, "list_orders"):
                 feedback.setText("Listado operativo pendiente de la capa funcional correspondiente.")
             table.setRowCount(len(rows))
-            for row_index, row in enumerate(rows):
-                table.setItem(row_index, 0, QTableWidgetItem(_format_order_number(row["numero"])))
-                table.setItem(row_index, 1, QTableWidgetItem(row["fecha"].strftime("%d/%m/%Y")))
-                table.setItem(row_index, 2, QTableWidgetItem(row["cliente"]))
-                table.setItem(row_index, 3, QTableWidgetItem(row["destino"]))
-                table.setItem(row_index, 4, QTableWidgetItem(row["producto"]))
-                table.setItem(row_index, 5, QTableWidgetItem(str(row["pallets"])))
-                table.setItem(row_index, 6, QTableWidgetItem(row["chofer"]))
-                table.setItem(row_index, 7, QTableWidgetItem(row["transportista"]))
-                table.setItem(row_index, 8, QTableWidgetItem(_display_status(row["estado"])))
-                table.item(row_index, 0).setData(Qt.UserRole, row["id"])
-                table.item(row_index, 8).setForeground(_status_color(row["estado"]))
+            for row_index, order in enumerate(rows):
+                values = (
+                    _format_order_number(order.order_number),
+                    order.date.strftime("%d/%m/%Y"),
+                    _summarize_order_clients(order),
+                    _summarize_order_deliveries(order),
+                    _summarize_order_products(order),
+                    str(sum(pallet.quantity for pallet in order.pallets)),
+                    order.driver.name,
+                    order.carrier.name,
+                    _display_status(order.status),
+                )
+                for column, value in enumerate(values):
+                    table.setItem(row_index, column, QTableWidgetItem(value))
+                table.item(row_index, 0).setData(Qt.UserRole, order.id)
+                table.item(row_index, 8).setForeground(_status_color(order.status))
             if rows and selected_order_id["value"] is None:
                 table.setCurrentCell(0, 0)
 
@@ -316,12 +336,8 @@ class FemagDesktopWindow(QMainWindow):
             detail_labels["status"].setText(_display_status(order.status))
             detail_labels["status"].setObjectName(f"badge{_status_key(order.status)}")
             detail_labels["Fecha de orden"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Cliente"].setText(order.client.name)
-            detail_labels["Entrega programada"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Dirección de entrega"].setText(
-                f"{order.delivery_address.address}, {order.delivery_address.city}"
-            )
-            detail_labels["Producto"].setText(first_product.product.name if first_product else "")
+            detail_labels["Clientes / destinos"].setText(_order_destinations_text(order))
+            detail_labels["Detalle de productos"].setText(_order_products_text(order))
             detail_labels["Cantidad (Pallets)"].setText(str(first_pallet.quantity if first_pallet else 0))
             detail_labels["Peso estimado"].setText(_estimated_weight(first_pallet))
             detail_labels["Chofer asignado"].setText(order.driver.name)
@@ -365,6 +381,21 @@ class FemagDesktopWindow(QMainWindow):
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(clear_form)
+        add_client_button.clicked.connect(
+            lambda: feedback.setText("Agregue un bloque de cliente/destino en el detalle de la carga.")
+        )
+        remove_client_button.clicked.connect(
+            lambda: feedback.setText("Seleccione un bloque de cliente/destino para quitarlo de la carga.")
+        )
+        add_product_button.clicked.connect(
+            lambda: feedback.setText("Agregue productos dentro del cliente/destino seleccionado.")
+        )
+        remove_product_button.clicked.connect(
+            lambda: feedback.setText("Seleccione un producto del bloque actual para quitarlo.")
+        )
+        save_button.clicked.connect(
+            lambda: feedback.setText("Guardar orden usa el detalle multi-cliente preparado para el alta funcional.")
+        )
         edit_button.clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
         detail_actions["edit"].clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
         detail_actions["history"].clicked.connect(lambda: feedback.setText("Historial: disponible en auditoría de la orden."))
@@ -515,6 +546,55 @@ def _estimated_weight(pallet) -> str:
     if pallet is None:
         return "-"
     return f"{pallet.weight * pallet.quantity:g} kg"
+
+
+def _summarize_order_clients(order: LoadOrder) -> str:
+    names = []
+    for destination in order.destinations:
+        if destination.client.name not in names:
+            names.append(destination.client.name)
+    if not names and order.client is not None:
+        names.append(order.client.name)
+    if len(names) > 1:
+        return f"VARIOS ({len(names)})"
+    return names[0] if names else ""
+
+
+def _summarize_order_deliveries(order: LoadOrder) -> str:
+    cities = []
+    for destination in order.destinations:
+        if destination.delivery_address.city not in cities:
+            cities.append(destination.delivery_address.city)
+    if not cities and order.delivery_address is not None:
+        cities.append(order.delivery_address.city)
+    return "; ".join(cities)
+
+
+def _summarize_order_products(order: LoadOrder) -> str:
+    products = list(order.products)
+    if not products:
+        return ""
+    if len(products) == 1:
+        return products[0].product.name
+    return f"{len(products)} productos"
+
+
+def _order_destinations_text(order: LoadOrder) -> str:
+    parts = [
+        f"{destination.client.name}: {destination.delivery_address.address}, {destination.delivery_address.city}"
+        for destination in order.destinations
+    ]
+    if not parts and order.client is not None and order.delivery_address is not None:
+        parts.append(f"{order.client.name}: {order.delivery_address.address}, {order.delivery_address.city}")
+    return "\n".join(parts) or "-"
+
+
+def _order_products_text(order: LoadOrder) -> str:
+    parts = [
+        f"{item.destination.client.name if item.destination else ''}: {item.product.name} x {item.quantity:g} {item.unit}"
+        for item in order.products
+    ]
+    return "\n".join(parts) or "-"
 
 
 def _combo(object_name: str, options: list[tuple[object, str]], *, include_empty: bool = False) -> QComboBox:

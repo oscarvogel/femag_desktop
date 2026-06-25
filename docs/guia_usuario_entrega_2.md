@@ -3,14 +3,14 @@
 ## Ordenes de carga
 
 1. Entrar en Operaciones > Ordenes de carga.
-2. Elegir cliente y domicilio de entrega.
-3. Seleccionar transportista, chofer y camion.
+2. Cargar la cabecera logistica: fecha, transportista, chofer, camion, estado y observaciones.
+3. Agregar uno o mas clientes/destinos dentro de la carga.
 4. Cargar observaciones si hacen falta.
-5. Agregar uno o mas productos con cantidad, unidad y observaciones.
+5. Dentro de cada cliente/destino, agregar uno o mas productos con cantidad, unidad y observaciones.
 6. Agregar el detalle de pallets con tipo, medida, peso, cantidad y observaciones.
 7. Guardar la orden.
 
-Cada orden corresponde a un solo camion. Si una carga tiene varios productos, se cargan como detalles de la misma orden.
+Cada orden corresponde a una carga logistica de camion o viaje. Una misma carga puede incluir varios clientes, varios lugares de entrega y varios productos por cliente/destino. La cabecera no obliga a elegir un unico cliente, domicilio o producto para toda la orden.
 
 ## Bloqueo de chofer
 
@@ -43,6 +43,8 @@ Desde la orden se puede generar:
 - Impresion conjunta de orden + hoja resumen.
 
 La salida actual se genera como HTML imprimible en A4 desde `LoadOrderPrintService`. El servicio esta desacoplado de la pantalla para poder reemplazar el motor de reportes por PDF u otro formato mas adelante sin cambiar la logica de negocio.
+
+La impresion muestra una cabecera logistica y el detalle agrupado por cliente/destino para evitar confundir una carga multi-cliente con una operacion monocliente.
 
 La reimpresion no pide clave de administrador. La impresion y reimpresion quedan auditadas.
 
