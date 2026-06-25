@@ -8,8 +8,8 @@ from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
     QDateEdit,
+    QDoubleSpinBox,
     QFrame,
-    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -245,28 +245,11 @@ class FemagDesktopWindow(QMainWindow):
         actions.setContentsMargins(10, 10, 10, 10)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
-        add_client_button = _action_button("addLoadOrderClientButton", "Agregar cliente")
-        remove_client_button = _action_button("removeLoadOrderClientButton", "Quitar cliente", secondary=True)
-        add_product_button = _action_button("addLoadOrderProductButton", "Agregar producto")
-        remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
-        save_button = _action_button("saveLoadOrderButton", "Guardar orden")
-        edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (
-            new_button,
-            add_client_button,
-            remove_client_button,
-            add_product_button,
-            remove_product_button,
-            save_button,
-            issue_button,
-            print_button,
-            annul_button,
-            search_button,
-        ):
+        for button in (new_button, issue_button, print_button, annul_button, search_button):
             actions.addWidget(button)
         actions.addStretch(1)
         left_layout.addLayout(actions)
@@ -282,12 +265,162 @@ class FemagDesktopWindow(QMainWindow):
         left_layout.addWidget(table, 1)
         left_layout.addWidget(feedback)
 
-        detail = _detail_panel(spec)
-        detail_labels: dict[str, QLabel] = detail.property("detailLabels")
-        detail_actions = detail.property("detailActions")
+        form_panel = QFrame()
+        form_panel.setObjectName("loadOrderFormPanel")
+        form_panel.setMinimumWidth(460)
+        form_layout = QVBoxLayout(form_panel)
+        form_layout.setContentsMargins(14, 14, 14, 12)
+        form_layout.setSpacing(10)
+        form_title = QLabel("Nueva orden")
+        form_title.setObjectName("detailTitle")
+        form_layout.addWidget(form_title)
+        selected_summary = QLabel("Complete la cabecera y cargue clientes/destinos.")
+        selected_summary.setObjectName("formHint")
+        selected_summary.setWordWrap(True)
+        form_layout.addWidget(selected_summary)
+
+        form_grid = QGridLayout()
+        form_grid.setHorizontalSpacing(8)
+        form_grid.setVerticalSpacing(6)
+        order_date_input = QDateEdit()
+        order_date_input.setObjectName("loadOrderDateInput")
+        order_date_input.setCalendarPopup(True)
+        order_date_input.setDisplayFormat("dd/MM/yyyy")
+        order_date_input.setDate(QDate.currentDate())
+        carrier_combo = QComboBox()
+        carrier_combo.setObjectName("loadOrderCarrierInput")
+        truck_combo = QComboBox()
+        truck_combo.setObjectName("loadOrderTruckInput")
+        driver_combo = QComboBox()
+        driver_combo.setObjectName("loadOrderDriverInput")
+        observations_input = QLineEdit()
+        observations_input.setObjectName("loadOrderObservationsInput")
+        observations_input.setPlaceholderText("Observaciones generales de la carga")
+        form_grid.addWidget(QLabel("Fecha"), 0, 0)
+        form_grid.addWidget(order_date_input, 0, 1)
+        form_grid.addWidget(QLabel("Transportista"), 1, 0)
+        form_grid.addWidget(carrier_combo, 1, 1)
+        form_grid.addWidget(QLabel("Camion"), 2, 0)
+        form_grid.addWidget(truck_combo, 2, 1)
+        form_grid.addWidget(QLabel("Chofer"), 3, 0)
+        form_grid.addWidget(driver_combo, 3, 1)
+        form_grid.addWidget(QLabel("Observaciones"), 4, 0)
+        form_grid.addWidget(observations_input, 4, 1)
+        form_layout.addLayout(form_grid)
+
+        destination_box = QFrame()
+        destination_box.setObjectName("formSection")
+        destination_layout = QVBoxLayout(destination_box)
+        destination_layout.setContentsMargins(10, 10, 10, 10)
+        destination_layout.setSpacing(8)
+        destination_layout.addWidget(QLabel("Clientes y destinos"))
+        destination_inputs = QGridLayout()
+        client_combo = QComboBox()
+        client_combo.setObjectName("loadOrderClientInput")
+        address_combo = QComboBox()
+        address_combo.setObjectName("loadOrderAddressInput")
+        add_client_button = _action_button("addLoadOrderClientButton", "Agregar cliente")
+        remove_client_button = _action_button("removeLoadOrderClientButton", "Quitar cliente", secondary=True)
+        destination_inputs.addWidget(QLabel("Cliente"), 0, 0)
+        destination_inputs.addWidget(client_combo, 0, 1)
+        destination_inputs.addWidget(QLabel("Destino"), 1, 0)
+        destination_inputs.addWidget(address_combo, 1, 1)
+        destination_inputs.addWidget(add_client_button, 2, 0)
+        destination_inputs.addWidget(remove_client_button, 2, 1)
+        destination_layout.addLayout(destination_inputs)
+        destination_table = QTableWidget(0, 3)
+        destination_table.setObjectName("loadOrderDestinationDraftTable")
+        destination_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Productos"))
+        destination_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        destination_table.verticalHeader().setVisible(False)
+        destination_table.setSelectionBehavior(QTableWidget.SelectRows)
+        destination_layout.addWidget(destination_table)
+        form_layout.addWidget(destination_box)
+
+        product_box = QFrame()
+        product_box.setObjectName("formSection")
+        product_layout = QVBoxLayout(product_box)
+        product_layout.setContentsMargins(10, 10, 10, 10)
+        product_layout.setSpacing(8)
+        product_layout.addWidget(QLabel("Productos del cliente seleccionado"))
+        product_inputs = QGridLayout()
+        product_combo = QComboBox()
+        product_combo.setObjectName("loadOrderProductInput")
+        quantity_input = QDoubleSpinBox()
+        quantity_input.setObjectName("loadOrderQuantityInput")
+        quantity_input.setRange(0, 999999)
+        quantity_input.setDecimals(2)
+        quantity_input.setValue(0)
+        add_product_button = _action_button("addLoadOrderProductButton", "Agregar producto")
+        remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
+        product_inputs.addWidget(QLabel("Producto"), 0, 0)
+        product_inputs.addWidget(product_combo, 0, 1)
+        product_inputs.addWidget(QLabel("Cantidad"), 1, 0)
+        product_inputs.addWidget(quantity_input, 1, 1)
+        product_inputs.addWidget(add_product_button, 2, 0)
+        product_inputs.addWidget(remove_product_button, 2, 1)
+        product_layout.addLayout(product_inputs)
+        product_table = QTableWidget(0, 3)
+        product_table.setObjectName("loadOrderProductDraftTable")
+        product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad"))
+        product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        product_table.verticalHeader().setVisible(False)
+        product_table.setSelectionBehavior(QTableWidget.SelectRows)
+        product_layout.addWidget(product_table)
+        form_layout.addWidget(product_box)
+
+        save_button = _action_button("saveLoadOrderButton", "Guardar orden")
+        form_layout.addWidget(save_button)
+        form_layout.addStretch(1)
+        draft_destinations: list[dict] = []
+
         workspace.addWidget(left_panel, 1)
-        workspace.addWidget(detail, 0)
+        workspace.addWidget(form_panel, 0)
         layout.addLayout(workspace, 1)
+
+        def fill_combo(combo: QComboBox, options: list[tuple[int, str]], *, include_empty: bool = True) -> None:
+            combo.clear()
+            if include_empty:
+                combo.addItem("", None)
+            for value, label in options:
+                combo.addItem(label, value)
+
+        def combo_data(combo: QComboBox):
+            return combo.currentData()
+
+        def populate_form_options() -> None:
+            fill_combo(carrier_combo, _carrier_options())
+            fill_combo(truck_combo, _truck_options())
+            fill_combo(driver_combo, _driver_options())
+            fill_combo(client_combo, _client_options())
+            fill_combo(address_combo, _address_options())
+            fill_combo(product_combo, _product_options())
+
+        def render_draft_tables() -> None:
+            destination_table.setRowCount(len(draft_destinations))
+            for row_index, destination in enumerate(draft_destinations):
+                values = (
+                    destination["client_label"],
+                    destination["address_label"],
+                    str(len(destination["products"])),
+                )
+                for column, value in enumerate(values):
+                    destination_table.setItem(row_index, column, QTableWidgetItem(value))
+            selected_row = destination_table.currentRow()
+            if selected_row < 0 and draft_destinations:
+                selected_row = 0
+                destination_table.setCurrentCell(0, 0)
+            render_product_table(selected_row)
+
+        def render_product_table(destination_index: int) -> None:
+            products = []
+            if 0 <= destination_index < len(draft_destinations):
+                products = draft_destinations[destination_index]["products"]
+            product_table.setRowCount(len(products))
+            for row_index, product in enumerate(products):
+                values = (product["product_label"], f"{product['quantity']:g}", product["unit"])
+                for column, value in enumerate(values):
+                    product_table.setItem(row_index, column, QTableWidgetItem(value))
 
         def refresh() -> None:
             rows = service.list_orders() if hasattr(service, "list_orders") else []
@@ -315,7 +448,14 @@ class FemagDesktopWindow(QMainWindow):
 
         def clear_form() -> None:
             selected_order_id["value"] = None
-            feedback.setText("Nuevo: use el flujo completo de orden en la próxima iteración funcional.")
+            form_title.setText("Nueva orden")
+            selected_summary.setText("Complete la cabecera y cargue clientes/destinos.")
+            order_date_input.setDate(QDate.currentDate())
+            observations_input.clear()
+            quantity_input.setValue(0)
+            draft_destinations.clear()
+            render_draft_tables()
+            feedback.setText("Nueva orden lista para cargar.")
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
@@ -330,20 +470,119 @@ class FemagDesktopWindow(QMainWindow):
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
             selected_order_id["value"] = order.id
-            first_product = order.products.first()
-            first_pallet = order.pallets.first()
-            detail_labels["number"].setText(_format_order_number(order.order_number))
-            detail_labels["status"].setText(_display_status(order.status))
-            detail_labels["status"].setObjectName(f"badge{_status_key(order.status)}")
-            detail_labels["Fecha de orden"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Clientes / destinos"].setText(_order_destinations_text(order))
-            detail_labels["Detalle de productos"].setText(_order_products_text(order))
-            detail_labels["Cantidad (Pallets)"].setText(str(first_pallet.quantity if first_pallet else 0))
-            detail_labels["Peso estimado"].setText(_estimated_weight(first_pallet))
-            detail_labels["Chofer asignado"].setText(order.driver.name)
-            detail_labels["Transportista"].setText(order.carrier.name)
-            detail_labels["Camión / Acoplado"].setText(order.truck.domain)
-            detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
+            form_title.setText(f"Orden {_format_order_number(order.order_number)}")
+            selected_summary.setText(
+                f"{_display_status(order.status)} - {_summarize_order_clients(order)} - "
+                f"{_summarize_order_deliveries(order)}"
+            )
+
+        def add_destination() -> None:
+            client_id = combo_data(client_combo)
+            address_id = combo_data(address_combo)
+            if client_id is None or address_id is None:
+                feedback.setText("Seleccione cliente y destino antes de agregar.")
+                return
+            address = ClientAddress.get_by_id(address_id)
+            if address.client.id != client_id:
+                feedback.setText("El destino seleccionado no pertenece al cliente.")
+                return
+            draft_destinations.append(
+                {
+                    "client_id": client_id,
+                    "address_id": address_id,
+                    "client_label": client_combo.currentText(),
+                    "address_label": address_combo.currentText(),
+                    "products": [],
+                }
+            )
+            render_draft_tables()
+            feedback.setText("Cliente/destino agregado. Ahora cargue sus productos.")
+
+        def remove_destination() -> None:
+            row = destination_table.currentRow()
+            if row < 0 or row >= len(draft_destinations):
+                feedback.setText("Seleccione un cliente/destino para quitar.")
+                return
+            draft_destinations.pop(row)
+            render_draft_tables()
+            feedback.setText("Cliente/destino quitado del borrador.")
+
+        def add_product() -> None:
+            destination_row = destination_table.currentRow()
+            product_id = combo_data(product_combo)
+            quantity = quantity_input.value()
+            if destination_row < 0 or destination_row >= len(draft_destinations):
+                feedback.setText("Seleccione un cliente/destino antes de agregar productos.")
+                return
+            if product_id is None:
+                feedback.setText("Seleccione un producto.")
+                return
+            if quantity <= 0:
+                feedback.setText("La cantidad debe ser mayor a cero.")
+                return
+            product = Product.get_by_id(product_id)
+            draft_destinations[destination_row]["products"].append(
+                {
+                    "product_id": product_id,
+                    "product_label": product.name,
+                    "quantity": quantity,
+                    "unit": product.unit,
+                }
+            )
+            render_product_table(destination_row)
+            render_draft_tables()
+            destination_table.setCurrentCell(destination_row, 0)
+            quantity_input.setValue(0)
+            feedback.setText("Producto agregado al cliente/destino seleccionado.")
+
+        def remove_product() -> None:
+            destination_row = destination_table.currentRow()
+            product_row = product_table.currentRow()
+            if destination_row < 0 or destination_row >= len(draft_destinations):
+                feedback.setText("Seleccione un cliente/destino.")
+                return
+            products = draft_destinations[destination_row]["products"]
+            if product_row < 0 or product_row >= len(products):
+                feedback.setText("Seleccione un producto para quitar.")
+                return
+            products.pop(product_row)
+            render_product_table(destination_row)
+            render_draft_tables()
+            destination_table.setCurrentCell(destination_row, 0)
+            feedback.setText("Producto quitado del borrador.")
+
+        def save_order() -> None:
+            try:
+                destinations = []
+                for destination in draft_destinations:
+                    destinations.append(
+                        {
+                            "client": Client.get_by_id(destination["client_id"]),
+                            "delivery_address": ClientAddress.get_by_id(destination["address_id"]),
+                            "products": [
+                                {
+                                    "product": Product.get_by_id(product["product_id"]),
+                                    "quantity": product["quantity"],
+                                }
+                                for product in destination["products"]
+                            ],
+                        }
+                    )
+                order = service.create_order(
+                    carrier=Carrier.get_by_id(combo_data(carrier_combo)),
+                    driver=Driver.get_by_id(combo_data(driver_combo)),
+                    truck=Truck.get_by_id(combo_data(truck_combo)),
+                    destinations=destinations,
+                    pallets=[],
+                    observations=observations_input.text().strip() or None,
+                    order_date=order_date_input.date().toPyDate(),
+                )
+                selected_order_id["value"] = order.id
+                clear_form()
+                refresh()
+                feedback.setText(f"Orden {_format_order_number(order.order_number)} guardada.")
+            except Exception as exc:
+                feedback.setText(str(exc))
 
         def issue() -> None:
             order = selected_order()
@@ -380,29 +619,20 @@ class FemagDesktopWindow(QMainWindow):
             feedback.setText(f"Vista A4 generada: {path}")
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
+        destination_table.currentCellChanged.connect(
+            lambda row, _column, _previous_row, _previous_column: render_product_table(row)
+        )
         new_button.clicked.connect(clear_form)
-        add_client_button.clicked.connect(
-            lambda: feedback.setText("Agregue un bloque de cliente/destino en el detalle de la carga.")
-        )
-        remove_client_button.clicked.connect(
-            lambda: feedback.setText("Seleccione un bloque de cliente/destino para quitarlo de la carga.")
-        )
-        add_product_button.clicked.connect(
-            lambda: feedback.setText("Agregue productos dentro del cliente/destino seleccionado.")
-        )
-        remove_product_button.clicked.connect(
-            lambda: feedback.setText("Seleccione un producto del bloque actual para quitarlo.")
-        )
-        save_button.clicked.connect(
-            lambda: feedback.setText("Guardar orden usa el detalle multi-cliente preparado para el alta funcional.")
-        )
-        edit_button.clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
-        detail_actions["edit"].clicked.connect(lambda: feedback.setText("Editar: seleccione la orden y use el flujo completo."))
-        detail_actions["history"].clicked.connect(lambda: feedback.setText("Historial: disponible en auditoría de la orden."))
+        add_client_button.clicked.connect(add_destination)
+        remove_client_button.clicked.connect(remove_destination)
+        add_product_button.clicked.connect(add_product)
+        remove_product_button.clicked.connect(remove_product)
+        save_button.clicked.connect(save_order)
         search_button.clicked.connect(lambda: feedback.setText("Buscar: use el buscador global o filtre desde el listado."))
         issue_button.clicked.connect(issue)
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_order)
+        populate_form_options()
         refresh()
         return page
 
@@ -722,12 +952,17 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 #statusbar { background: #ffffff; color: #64748b; border-top: 1px solid #d9e1ec; }
 #heading { font-size: 25px; font-weight: 700; margin-bottom: 0; color: #111827; }
 #subheading { color: #526174; margin-bottom: 6px; }
-#card, #kpiCard, #contentPanel, #detailPanel { background: #ffffff; border: 1px solid #d9e1ec; border-radius: 8px; }
+#card, #kpiCard, #contentPanel, #detailPanel, #loadOrderFormPanel, #formSection {
+    background: #ffffff; border: 1px solid #d9e1ec; border-radius: 8px;
+}
 #card { min-height: 88px; }
 #cardValue, #kpiValue { font-size: 28px; font-weight: 700; color: #111827; }
 #kpiCard { min-height: 96px; }
 #kpiHelper { color: #64748b; font-size: 12px; }
 #detailPanel { margin-left: 8px; }
+#loadOrderFormPanel { margin-left: 8px; }
+#formSection { margin-top: 2px; }
+#formHint { color: #526174; font-size: 12px; }
 #detailTitle { font-size: 16px; font-weight: 700; color: #111827; }
 #detailOrderNumber { color: #0b6fdc; font-size: 20px; font-weight: 700; margin-top: 6px; }
 #detailLabel { color: #64748b; font-size: 12px; margin-top: 7px; }

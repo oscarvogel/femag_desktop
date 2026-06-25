@@ -3,12 +3,14 @@
 Archivo:
 
 - `01_load_orders_multi_client.png`
+- `02_load_orders_operational_form.png`
 
 Validacion:
 
 - Captura generada con PyQt5 en modo `QT_QPA_PLATFORM=offscreen`.
 - Datos sinteticos: dos clientes, dos destinos, dos productos y un transporte demo.
 - La pantalla corresponde al modulo `Ordenes de carga` con acciones visibles para agregar/quitar cliente, agregar/quitar producto, guardar, emitir e imprimir.
+- La segunda captura separa las acciones de listado de la carga del formulario operativo de alta.
 
 Nota:
 
