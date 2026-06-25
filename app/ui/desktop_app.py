@@ -32,12 +32,15 @@ from app.models import ALL_MODELS
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.services.auth_service import AuthService
-from app.services.load_order_print_service import LoadOrderPrintService
+from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.main_window import MainWindow as ShellBuilder
+
+
+LOAD_ORDER_PRINTS_DIR = Path("docs") / "prints"
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
@@ -74,6 +77,7 @@ def _prepare_database(*, demo_mode: bool):
 class FemagDesktopWindow(QMainWindow):
     def __init__(self, *, user, demo_mode: bool):
         super().__init__()
+        self.user = user
         self.shell = ShellBuilder(user=user, demo_mode=demo_mode).shell_spec
         self.setWindowTitle("FEMAG Desktop")
         self.resize(1280, 820)
@@ -222,7 +226,10 @@ class FemagDesktopWindow(QMainWindow):
         page.setObjectName("loadOrdersPage")
         layout = page.layout()
         service = LoadOrderService(current_user=self.shell.username)
-        print_service = LoadOrderPrintService(current_user=self.shell.username)
+        operation_service = LoadOrderOperationService(
+            current_user=self.shell.username,
+            prints_dir=LOAD_ORDER_PRINTS_DIR,
+        )
         selected_order_id: dict[str, int | None] = {"value": None}
 
         kpi_grid = QGridLayout()
@@ -249,8 +256,9 @@ class FemagDesktopWindow(QMainWindow):
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
+        reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, issue_button, print_button, annul_button, search_button):
+        for button in (new_button, issue_button, print_button, reprint_button, annul_button, search_button):
             actions.addWidget(button)
         actions.addStretch(1)
         left_layout.addLayout(actions)
@@ -293,8 +301,16 @@ class FemagDesktopWindow(QMainWindow):
                     table.setItem(row_index, column, QTableWidgetItem(value))
                 table.item(row_index, 0).setData(Qt.UserRole, order.id)
                 table.item(row_index, 8).setForeground(_status_color(order.status))
-            if rows and selected_order_id["value"] is None:
-                table.setCurrentCell(0, 0)
+            if rows:
+                selected_row = 0
+                if selected_order_id["value"] is not None:
+                    for row_index in range(table.rowCount()):
+                        item = table.item(row_index, 0)
+                        if item is not None and item.data(Qt.UserRole) == selected_order_id["value"]:
+                            selected_row = row_index
+                            break
+                table.setCurrentCell(selected_row, 0)
+                load_selected(selected_row)
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
@@ -312,7 +328,7 @@ class FemagDesktopWindow(QMainWindow):
             first_pallet = order.pallets.first()
             detail_labels["number"].setText(_format_order_number(order.order_number))
             detail_labels["status"].setText(_display_status(order.status))
-            detail_labels["status"].setObjectName(f"badge{_status_key(order.status)}")
+            detail_labels["status"].setProperty("statusKey", _status_key(order.status))
             detail_labels["Fecha de orden"].setText(order.date.strftime("%d/%m/%Y"))
             detail_labels["Clientes / destinos"].setText(_order_destinations_text(order))
             detail_labels["Detalle de productos"].setText(_order_products_text(order))
@@ -336,9 +352,9 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.setText("Seleccione una orden para emitir.")
                 return
             try:
-                service.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
-                feedback.setText(f"Orden {order.order_number} emitida.")
-                selected_order_id["value"] = order.id
+                issued = operation_service.issue(order)
+                feedback.setText(f"Orden {_format_order_number(issued.order_number)} emitida.")
+                selected_order_id["value"] = issued.id
                 refresh()
             except Exception as exc:
                 feedback.setText(str(exc))
@@ -349,9 +365,9 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.setText("Seleccione una orden para anular.")
                 return
             try:
-                service.annul_order(order, can_annul=True, reason="Anulada desde pantalla")
-                feedback.setText(f"Orden {order.order_number} anulada.")
-                selected_order_id["value"] = order.id
+                annulled = operation_service.annul(order, can_annul=_can_annul_load_orders(self.user))
+                feedback.setText(f"Orden {_format_order_number(annulled.order_number)} anulada.")
+                selected_order_id["value"] = annulled.id
                 refresh()
             except Exception as exc:
                 feedback.setText(str(exc))
@@ -361,8 +377,22 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.setText("Seleccione una orden para imprimir.")
                 return
-            path = print_service.export_combined(order, Path("docs") / "prints")
-            feedback.setText(f"Vista A4 generada: {path}")
+            try:
+                path = operation_service.print_order(order)
+                feedback.setText(f"Vista A4 generada: {path}")
+            except Exception as exc:
+                feedback.setText(str(exc))
+
+        def reprint_order() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para reimprimir.")
+                return
+            try:
+                path = operation_service.reprint_order(order)
+                feedback.setText(f"Reimpresion A4 generada: {path}")
+            except Exception as exc:
+                feedback.setText(str(exc))
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
@@ -370,6 +400,7 @@ class FemagDesktopWindow(QMainWindow):
         issue_button.clicked.connect(issue)
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_order)
+        reprint_button.clicked.connect(reprint_order)
         refresh()
         return page
 
@@ -439,7 +470,7 @@ def _detail_panel(spec) -> QFrame:
     number = QLabel("OC-000000")
     number.setObjectName("detailOrderNumber")
     status = QLabel("Pendiente")
-    status.setObjectName("badgePendiente")
+    status.setObjectName("detailOrderStatus")
     layout.addWidget(title)
     layout.addWidget(number)
     layout.addWidget(status)
@@ -854,6 +885,15 @@ def _estimated_weight(pallet) -> str:
     if pallet is None:
         return "-"
     return f"{pallet.weight * pallet.quantity:g} kg"
+
+
+def _can_annul_load_orders(user) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(user, "Operaciones", "anular", "Órdenes de carga")
+    except (InterfaceError, OperationalError):
+        return False
 
 
 def _summarize_order_clients(order: LoadOrder) -> str:

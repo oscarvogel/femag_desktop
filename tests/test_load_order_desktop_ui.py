@@ -137,3 +137,106 @@ def test_load_order_dialog_selects_carrier_and_trucks_from_selected_driver(db):
     assert carrier_combo.currentData() == carrier_a.id
     assert truck_combo.findData(truck_a.id) >= 0
     assert truck_combo.findData(truck_b.id) == -1
+
+
+def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte UI")
+    driver = Driver.create(name="Chofer UI", carrier=carrier)
+    truck = Truck.create(domain="UI123AA", carrier=carrier)
+    client = Client.create(name="Cliente UI", cuit="30712345678", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta UI",
+    )
+    product = Product.create(name="Producto UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    feedback = window.findChild(QLabel, "loadOrderFeedback")
+    status = window.findChild(QLabel, "detailOrderStatus")
+    table.setCurrentCell(0, 0)
+
+    window.findChild(QPushButton, "issueLoadOrderButton").click()
+    app.processEvents()
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
+    assert "emitida" in feedback.text().lower()
+    assert status.text() == "Emitida"
+
+    window.findChild(QPushButton, "reprintLoadOrderButton").click()
+    app.processEvents()
+    assert "reimpresion" in feedback.text().lower()
+    assert list(tmp_path.glob("orden_y_resumen_*.html"))
+
+    window.findChild(QPushButton, "annulLoadOrderButton").click()
+    app.processEvents()
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
+    assert status.text() == "Anulada"
+
+
+def test_load_order_page_blocks_annul_without_permission(db):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Secretaria")
+    user = User.create(username="secretaria_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte UI")
+    driver = Driver.create(name="Chofer UI", carrier=carrier)
+    truck = Truck.create(domain="UI123AA", carrier=carrier)
+    client = Client.create(name="Cliente UI", cuit="30712345678", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta UI",
+    )
+    product = Product.create(name="Producto UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    window.findChild(QPushButton, "annulLoadOrderButton").click()
+    app.processEvents()
+
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_PENDING
+    assert "permiso" in window.findChild(QLabel, "loadOrderFeedback").text().lower()
