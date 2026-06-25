@@ -101,3 +101,39 @@ def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
 
     assert address_combo.findData(address_a.id) == -1
     assert address_combo.findData(address_b.id) >= 0
+
+
+def test_load_order_dialog_selects_carrier_and_trucks_from_selected_driver(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier_a = Carrier.create(name="Transporte A UI")
+    carrier_b = Carrier.create(name="Transporte B UI")
+    driver_a = Driver.create(name="Chofer A UI", carrier=carrier_a)
+    driver_b = Driver.create(name="Chofer B UI", carrier=carrier_b)
+    truck_a = Truck.create(domain="TRK-A", carrier=carrier_a)
+    truck_b = Truck.create(domain="TRK-B", carrier=carrier_b)
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue65"), "ui_issue65")
+    app.processEvents()
+
+    carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
+    driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
+    truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
+    assert carrier_combo.isEnabled() is False
+
+    _set_combo(driver_combo, driver_b.id)
+
+    assert carrier_combo.currentData() == carrier_b.id
+    assert truck_combo.findData(truck_a.id) == -1
+    assert truck_combo.findData(truck_b.id) >= 0
+
+    _set_combo(driver_combo, driver_a.id)
+
+    assert carrier_combo.currentData() == carrier_a.id
+    assert truck_combo.findData(truck_a.id) >= 0
+    assert truck_combo.findData(truck_b.id) == -1

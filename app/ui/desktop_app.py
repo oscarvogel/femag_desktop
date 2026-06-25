@@ -499,14 +499,15 @@ class LoadOrderEntryDialog(QDialog):
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
+        self.carrier_combo.setEnabled(False)
         header_layout.addWidget(QLabel("Fecha"), 0, 0)
         header_layout.addWidget(self.order_date, 0, 1)
-        header_layout.addWidget(QLabel("Transportista"), 0, 2)
-        header_layout.addWidget(self.carrier_combo, 0, 3)
-        header_layout.addWidget(QLabel("Camion"), 1, 0)
-        header_layout.addWidget(self.truck_combo, 1, 1)
-        header_layout.addWidget(QLabel("Chofer"), 1, 2)
-        header_layout.addWidget(self.driver_combo, 1, 3)
+        header_layout.addWidget(QLabel("Chofer"), 0, 2)
+        header_layout.addWidget(self.driver_combo, 0, 3)
+        header_layout.addWidget(QLabel("Transportista"), 1, 0)
+        header_layout.addWidget(self.carrier_combo, 1, 1)
+        header_layout.addWidget(QLabel("Camion"), 1, 2)
+        header_layout.addWidget(self.truck_combo, 1, 3)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
         header_layout.addWidget(self.observations_input, 2, 1, 1, 3)
         root.addWidget(header)
@@ -588,14 +589,31 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.currentCellChanged.connect(
             lambda row, _column, _previous_row, _previous_column: self._render_products(row)
         )
+        self.driver_combo.currentIndexChanged.connect(lambda _index: self._select_driver_carrier())
+        self.carrier_combo.currentIndexChanged.connect(lambda _index: self._refresh_truck_options())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
 
     def _populate_options(self) -> None:
         _fill_combo(self.carrier_combo, _carrier_options())
-        _fill_combo(self.truck_combo, _truck_options())
         _fill_combo(self.driver_combo, _driver_options())
+        self._refresh_truck_options()
         _fill_combo(self.client_combo, _client_options())
         self._refresh_address_options()
+
+    def _select_driver_carrier(self) -> None:
+        driver_id = self.driver_combo.currentData()
+        if driver_id is None:
+            self.carrier_combo.setCurrentIndex(0)
+            return
+        driver = Driver.get_by_id(driver_id)
+        _set_combo(self.carrier_combo, driver.carrier.id)
+
+    def _refresh_truck_options(self) -> None:
+        carrier_id = self.carrier_combo.currentData()
+        current_truck_id = self.truck_combo.currentData()
+        _fill_combo(self.truck_combo, _truck_options(carrier_id=carrier_id))
+        if current_truck_id is not None:
+            _set_combo(self.truck_combo, current_truck_id)
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
@@ -942,9 +960,16 @@ def _carrier_options() -> list[tuple[int, str]]:
         return []
 
 
-def _truck_options() -> list[tuple[int, str]]:
+def _truck_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
     try:
-        return [(truck.id, truck.domain) for truck in Truck.select().where(Truck.active == True).order_by(Truck.domain)]  # noqa: E712
+        if carrier_id is None:
+            return []
+        return [
+            (truck.id, truck.domain)
+            for truck in Truck.select()
+            .where((Truck.active == True) & (Truck.carrier == carrier_id))  # noqa: E712
+            .order_by(Truck.domain)
+        ]
     except (InterfaceError, OperationalError):
         return []
 
