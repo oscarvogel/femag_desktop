@@ -1,4 +1,4 @@
-from peewee import DatabaseProxy, MySQLDatabase
+from peewee import DatabaseProxy, MySQLDatabase, SqliteDatabase
 
 from app.config.settings import Settings, load_settings
 
@@ -18,6 +18,21 @@ def build_mysql_database(settings: Settings | None = None) -> MySQLDatabase:
     )
 
 
+def build_sqlite_database(settings: Settings | None = None) -> SqliteDatabase:
+    settings = settings or load_settings()
+    sqlite_path = settings.sqlite_path
+    if sqlite_path.parent != sqlite_path:
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    return SqliteDatabase(str(sqlite_path), pragmas={"foreign_keys": 1})
+
+
+def build_runtime_database(settings: Settings | None = None):
+    settings = settings or load_settings()
+    if settings.db_engine == "sqlite":
+        return build_sqlite_database(settings)
+    return build_mysql_database(settings)
+
+
 def bind_database(database) -> None:
     if database_proxy.obj is not None:
         database_proxy.initialize(database)
@@ -26,6 +41,12 @@ def bind_database(database) -> None:
 
 
 def initialize_runtime_database(settings: Settings | None = None):
-    db = build_mysql_database(settings)
+    db = build_runtime_database(settings)
+    bind_database(db)
+    return db
+
+
+def initialize_demo_database(settings: Settings | None = None):
+    db = build_sqlite_database(settings)
     bind_database(db)
     return db

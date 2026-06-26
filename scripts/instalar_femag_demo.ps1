@@ -141,15 +141,20 @@ try {
         Write-Info "No se encontro requirements.txt; se omite instalacion de dependencias."
     }
 
+    Write-Step "Configurando base SQLite local de demo"
+    $DemoDatabasePath = "femag_demo.sqlite3"
+    $EnvFile = Join-Path $RepoDir ".env"
+    [System.IO.File]::WriteAllLines($EnvFile, @(
+        "FEMAG_DB_ENGINE=sqlite",
+        "FEMAG_SQLITE_PATH=femag_demo.sqlite3",
+        "FEMAG_DEMO=1"
+    ), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+    $env:FEMAG_ENV_FILE = $EnvFile
+    Write-Info "Demo configurada para usar SQLite local: $DemoDatabasePath"
+
     if (Test-Path "scripts\init_db.py") {
-        Write-Step "Inicializando base FEMAG si corresponde"
-        try {
-            Invoke-VenvPython -Arguments @("scripts\init_db.py")
-        } catch {
-            Write-Host "    No se pudo inicializar la base operativa con init_db.py." -ForegroundColor Yellow
-            Write-Host "    La demo integral continuara con SQLite local en backups." -ForegroundColor Yellow
-            Write-Host "    Detalle: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+        Write-Step "Inicializando schema FEMAG en SQLite demo"
+        Invoke-VenvPython -Arguments @("scripts\init_db.py")
     } else {
         Write-Info "No se encontro scripts\init_db.py; se omite inicializacion."
     }
@@ -158,7 +163,7 @@ try {
         Write-Step "Generando demo integral Orden de carga"
         Invoke-VenvPython -Arguments @(
             "scripts\issue_73_integral_demo.py",
-            "--database-path", "backups\issue_73_integral_demo.sqlite3",
+            "--database-path", $DemoDatabasePath,
             "--evidence-dir", "docs\prints\issue_73_integral_demo"
         )
     } else {
