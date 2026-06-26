@@ -54,12 +54,13 @@ Si se ejecutan comandos manuales, hacerlos desde la carpeta raiz del repo
 6. Entra en la rama de demo.
 7. Crea `.venv`.
 8. Instala `requirements.txt`.
-9. Ejecuta `scripts/init_db.py` si existe.
-10. Ejecuta `scripts/issue_73_integral_demo.py`.
-11. Ejecuta `python -m app.main --smoke`.
-12. Abre `python -m app.main --demo-ui`.
+9. Crea `.env` de demo con `FEMAG_DB_ENGINE=sqlite`, `FEMAG_SQLITE_PATH=femag_demo.sqlite3` y `FEMAG_DEMO=1`.
+10. Ejecuta `scripts/init_db.py` contra `femag_demo.sqlite3`.
+11. Ejecuta `scripts/issue_73_integral_demo.py` contra la misma base SQLite.
+12. Ejecuta `python -m app.main --smoke`.
+13. Abre `python -m app.main --demo-ui`.
 
-Si `scripts/init_db.py` no puede conectarse a una base MySQL operativa, el script informa la limitacion y continua la demo integral con SQLite local en `backups`.
+La demo cliente no intenta conectar a MySQL. Produccion o instalacion real sigue usando MySQL cuando no se configura `FEMAG_DB_ENGINE=sqlite`.
 
 ## Que mostrar en la demo
 

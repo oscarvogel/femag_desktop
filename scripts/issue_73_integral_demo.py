@@ -18,7 +18,7 @@ from app.services.permission_service import PermissionService
 
 
 DEFAULT_EVIDENCE_DIR = Path("docs") / "prints" / "issue_73_integral_demo"
-DEFAULT_DATABASE_PATH = Path("backups") / "issue_73_integral_demo.sqlite3"
+DEFAULT_DATABASE_PATH = Path("femag_demo.sqlite3")
 
 
 def run_integral_demo(
@@ -282,7 +282,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     database_path = Path(args.database_path)
-    database_path.parent.mkdir(parents=True, exist_ok=True)
+    if database_path.parent != Path("."):
+        database_path.parent.mkdir(parents=True, exist_ok=True)
     database = SqliteDatabase(database_path)
     try:
         result = run_integral_demo(database=database, evidence_dir=args.evidence_dir, username=args.username)
