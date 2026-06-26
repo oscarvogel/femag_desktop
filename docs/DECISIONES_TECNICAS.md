@@ -14,6 +14,10 @@ La interfaz usa PyQt. Los cambios de UI deben respetar widgets, layouts, senales
 
 Issue #70 incorpora ABMs minimos para operar Ordenes de carga en `app/ui/master_abm.py`. Estos ABMs no son el patron definitivo ni instancian todavia `pyqt5libs` AutoABM: mantienen una pantalla PyQt local pequena porque `pyqt5libs` no es importable en el entorno de validacion actual y el AutoABM generado necesita antes un adaptador FEMAG para permisos, auditoria por servicios y labels de combos de relaciones. Cuando ese adaptador exista, migrar estos maestros al patron reutilizable de `pyqt5libs` en un issue dedicado.
 
+## Cuenta corriente documental de Ordenes de carga
+
+Issue #72 agrega una cuenta corriente minima y trazable desde Ordenes de carga. Como los productos aun no tienen precios/listas comerciales, la emision genera movimientos documentales de importe cero (`ARS 0`) separados por cliente unico involucrado en la orden. La trazabilidad se guarda con `load_order`, `source_ref=LoadOrder:<id>` y auditoria. La generacion es idempotente por orden/cliente/tipo de movimiento para evitar duplicados, con indice unico fisico sobre orden, cliente, tipo y marca de reverso. Si la orden se anula, se genera un movimiento de reverso documental por cada movimiento original, tambien idempotente. Este criterio no es facturacion, remito fiscal, F150, AFIP/ARCA ni presupuesto.
+
 ## MySQL
 
 MySQL es la base de datos prevista para datos operativos. Los cambios que afecten estructura, migraciones, queries o compatibilidad de datos deben entrar por issues especificos y con validacion clara.
