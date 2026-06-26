@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orden de carga OC-000003</title>
+<style>
+@page { size: A4; margin: 14mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; color: #202124; font-size: 11.5px; line-height: 1.35; margin: 0; }
+h1 { font-size: 21px; margin: 0; letter-spacing: 0; }
+h2 { font-size: 15px; margin: 16px 0 8px; border-bottom: 1px solid #2f3a4a; padding-bottom: 4px; }
+h3 { font-size: 13px; margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; page-break-inside: avoid; }
+th, td { border: 1px solid #9aa0a6; padding: 5px 6px; text-align: left; vertical-align: top; }
+th { background: #eef2f7; color: #172033; font-weight: bold; }
+.document { min-height: 260mm; }
+.topline { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #172033; padding-bottom: 10px; margin-bottom: 12px; }
+.doc-kind { text-transform: uppercase; font-size: 11px; font-weight: bold; color: #475569; }
+.badge { border: 1px solid #172033; padding: 5px 8px; font-weight: bold; text-transform: uppercase; white-space: nowrap; }
+.copy-badge { border-color: #9f1239; color: #9f1239; }
+.meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 10px 0 4px; }
+.box { border: 1px solid #c6ccd5; padding: 7px; min-height: 42px; }
+.label { display: block; font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; }
+.value { font-size: 12px; color: #111827; }
+.destination { border: 1px solid #c6ccd5; padding: 9px; margin-top: 10px; page-break-inside: avoid; }
+.destination-title { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.destination-total, .general-total { text-align: right; font-weight: bold; margin-top: 7px; }
+.observations { white-space: pre-wrap; border: 1px solid #d9e1ec; min-height: 34px; padding: 7px; }
+.summary-list { margin: 8px 0 0; padding-left: 18px; }
+.summary-list li { margin-bottom: 5px; }
+.footer-note { margin-top: 16px; font-size: 10px; color: #64748b; border-top: 1px solid #c6ccd5; padding-top: 6px; }
+.page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+<section class="document">
+
+<header class="topline">
+<div>
+<div class="doc-kind">Documento logistico interno</div>
+<h1>Orden de carga OC-000003</h1>
+<div>Orden de carga Nro. 3</div>
+</div>
+<div class="badge copy-badge">Reimpresion operativa - Copia para reimpresion</div>
+</header>
+
+
+<h2>Cabecera logística</h2>
+<section class="meta-grid">
+<div class="box"><span class="label">Fecha</span><span class="value">26/06/2026</span></div>
+<div class="box"><span class="label">Estado</span><span class="value">Emitida</span></div>
+<div class="box"><span class="label">Transportista</span><span class="value">ISSUE73 Transporte Demo</span></div>
+<div class="box"><span class="label">Chofer</span><span class="value">ISSUE73 Chofer Demo</span></div>
+<div class="box"><span class="label">Camion / patente</span><span class="value">I730ABC</span></div>
+<div class="box"><span class="label">Tipo</span><span class="value">Carga multi-cliente</span></div>
+</section>
+
+<h2>Detalle por cliente / destino</h2>
+<section class="destination">
+<div class="destination-title">
+<h3>Cliente / destino 1</h3>
+<strong>120 bolsas / 30 packs</strong>
+</div>
+<div class="meta-grid">
+<div class="box"><span class="label">Cliente</span><span class="value">ISSUE73 Cliente Norte</span></div>
+<div class="box"><span class="label">Destino</span><span class="value">Ruta 12 km 73, Posadas</span></div>
+<div class="box"><span class="label">Provincia</span><span class="value">Misiones</span></div>
+</div>
+<table>
+<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
+<tr><td>ISSUE73 Producto bolsa</td><td>bolsas</td><td>120</td><td>bolsas</td><td>Primer destino</td></tr><tr><td>ISSUE73 Producto pack</td><td>packs</td><td>30</td><td>packs</td><td>Complemento</td></tr>
+</table>
+<div class="destination-total">Total destino: 120 bolsas / 30 packs</div>
+
+</section>
+
+<section class="destination">
+<div class="destination-title">
+<h3>Cliente / destino 2</h3>
+<strong>2500 kg</strong>
+</div>
+<div class="meta-grid">
+<div class="box"><span class="label">Cliente</span><span class="value">ISSUE73 Cliente Norte</span></div>
+<div class="box"><span class="label">Destino</span><span class="value">Parque Industrial lote 73, Eldorado</span></div>
+<div class="box"><span class="label">Provincia</span><span class="value">Misiones</span></div>
+</div>
+<table>
+<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
+<tr><td>ISSUE73 Producto granel</td><td>kg</td><td>2500</td><td>kg</td><td>Granel</td></tr>
+</table>
+<div class="destination-total">Total destino: 2500 kg</div>
+
+</section>
+
+<section class="destination">
+<div class="destination-title">
+<h3>Cliente / destino 3</h3>
+<strong>75 bolsas</strong>
+</div>
+<div class="meta-grid">
+<div class="box"><span class="label">Cliente</span><span class="value">ISSUE73 Cliente Sur</span></div>
+<div class="box"><span class="label">Destino</span><span class="value">Deposito Sur calle 73, Obera</span></div>
+<div class="box"><span class="label">Provincia</span><span class="value">Misiones</span></div>
+</div>
+<table>
+<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
+<tr><td>ISSUE73 Producto bolsa</td><td>bolsas</td><td>75</td><td>bolsas</td><td>Sur</td></tr>
+</table>
+<div class="destination-total">Total destino: 75 bolsas</div>
+
+</section>
+<div class="general-total">Total general: 195 bolsas / 2500 kg / 30 packs</div>
+<h2>Pallets</h2><p>Sin pallets declarados.</p>
+<h2>Observaciones operativas</h2>
+<div class="observations">Demo integral issue #73: orden multi-cliente/multi-destino documental.</div>
+<p class="footer-note">No fiscal. No reemplaza documentacion fiscal ni comprobantes comerciales.</p>
+</section>
+<div class="page-break"></div>
+<section class="document summary-document">
+
+<header class="topline">
+<div>
+<div class="doc-kind">Resumen para adjuntar al sobre de la orden</div>
+<h1>Hoja resumen / sobre de carga OC-000003</h1>
+<div>Orden de carga Nro. 3</div>
+</div>
+<div class="badge copy-badge">Reimpresion operativa - Copia para reimpresion</div>
+</header>
+
+
+<h2>Cabecera logística</h2>
+<section class="meta-grid">
+<div class="box"><span class="label">Fecha</span><span class="value">26/06/2026</span></div>
+<div class="box"><span class="label">Estado</span><span class="value">Emitida</span></div>
+<div class="box"><span class="label">Transportista</span><span class="value">ISSUE73 Transporte Demo</span></div>
+<div class="box"><span class="label">Chofer</span><span class="value">ISSUE73 Chofer Demo</span></div>
+<div class="box"><span class="label">Camion / patente</span><span class="value">I730ABC</span></div>
+<div class="box"><span class="label">Tipo</span><span class="value">Carga multi-cliente</span></div>
+</section>
+
+
+<h2>Clientes / destinos</h2>
+<p><strong>3 clientes / destinos</strong></p>
+<ul class="summary-list"><li>ISSUE73 Cliente Norte - Ruta 12 km 73, Posadas (120 bolsas / 30 packs)</li><li>ISSUE73 Cliente Norte - Parque Industrial lote 73, Eldorado (2500 kg)</li><li>ISSUE73 Cliente Sur - Deposito Sur calle 73, Obera (75 bolsas)</li></ul>
+
+<h2>Totales</h2>
+<p class="general-total">Total general: 195 bolsas / 2500 kg / 30 packs</p>
+<h2>Observaciones operativas</h2>
+<div class="observations">Demo integral issue #73: orden multi-cliente/multi-destino documental.</div>
+<p class="footer-note">Hoja logistica minima para oficina. No fiscal.</p>
+</section>
+</body>
+</html>

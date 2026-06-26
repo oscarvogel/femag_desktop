@@ -187,15 +187,95 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     assert "emitida" in feedback.text().lower()
     assert status.text() == "Emitida"
 
-    window.findChild(QPushButton, "reprintLoadOrderButton").click()
+    window.findChild(QPushButton, "printLoadOrderButton").click()
+    app.processEvents()
+    assert "vista a4" in feedback.text().lower()
+    assert list(tmp_path.glob("orden_y_resumen_*.html"))
+
+    window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
     assert "reimpresion" in feedback.text().lower()
-    assert list(tmp_path.glob("orden_y_resumen_*.html"))
+    assert "Reimpresion" in next(tmp_path.glob("orden_y_resumen_*.html")).read_text(encoding="utf-8")
 
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
     assert status.text() == "Anulada"
+
+
+def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_search_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Buscar UI")
+    driver_a = Driver.create(name="Chofer Buscar UI A", carrier=carrier)
+    truck_a = Truck.create(domain="BUS123", carrier=carrier)
+    driver_b = Driver.create(name="Chofer Buscar UI B", carrier=carrier)
+    truck_b = Truck.create(domain="BUS456", carrier=carrier)
+    product = Product.create(name="Producto Buscar UI", unit="kg")
+    client_a = Client.create(name="Cliente Norte Buscar", cuit="30712345001", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Norte",
+    )
+    client_b = Client.create(name="Cliente Sur Buscar", cuit="30712345002", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Sur",
+    )
+    service = LoadOrderService(current_user=user.username)
+    order_a = service.create_order(
+        carrier=carrier,
+        driver=driver_a,
+        truck=truck_a,
+        destinations=[{"client": client_a, "delivery_address": address_a, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    service.create_order(
+        carrier=carrier,
+        driver=driver_b,
+        truck=truck_b,
+        destinations=[{"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 2}]}],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    search_input = window.findChild(QLineEdit, "loadOrderSearchInput")
+    search_button = window.findChild(QPushButton, "searchLoadOrderButton")
+    reprint_button = window.findChild(QPushButton, "reprintLoadOrderButton")
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    feedback = window.findChild(QLabel, "loadOrderFeedback")
+
+    assert search_input is not None
+    assert reprint_button is None or not reprint_button.isVisible()
+    assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir / Reimprimir"
+    assert table.rowCount() == 2
+
+    search_input.setText("Norte")
+    search_button.click()
+    app.processEvents()
+
+    assert table.rowCount() == 1
+    assert table.item(0, 0).data(Qt.UserRole) == order_a.id
+    assert "1 resultado" in feedback.text().lower()
 
 
 def test_load_order_page_blocks_annul_without_permission(db):
