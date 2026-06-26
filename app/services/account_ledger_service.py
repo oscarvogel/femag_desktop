@@ -64,9 +64,11 @@ class AccountLedgerService:
 
     def _clients_for_order(self, order: LoadOrder) -> list[Client]:
         clients: list[Client] = []
+        client_ids = set()
         for destination in order.destinations.order_by():
-            if destination.client not in clients:
+            if destination.client.id not in client_ids:
                 clients.append(destination.client)
+                client_ids.add(destination.client.id)
         if not clients and order.client is not None:
             clients.append(order.client)
         return clients

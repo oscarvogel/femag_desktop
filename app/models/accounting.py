@@ -19,3 +19,6 @@ class ClientAccountMovement(BaseModel):
     is_reversal = BooleanField(default=False)
     reverses = ForeignKeyField("self", backref="reversal_movements", null=True)
     created_by = CharField(null=True)
+
+    class Meta:
+        indexes = ((("load_order", "client", "movement_type", "is_reversal"), True),)

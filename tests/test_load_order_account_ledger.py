@@ -1,6 +1,36 @@
 from tests.test_load_orders import _multi_client_data, _valid_order_payload
 
 
+def test_account_movements_have_physical_duplicate_protection(db):
+    from peewee import IntegrityError
+
+    from app.models.accounting import ClientAccountMovement
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+
+    data = _multi_client_data()
+    order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
+    issued = LoadOrderOperationService(current_user="admin").issue(order)
+    original = ClientAccountMovement.get()
+
+    try:
+        ClientAccountMovement.create(
+            client=original.client,
+            load_order=issued,
+            movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
+            amount=0,
+            currency="ARS",
+            description="duplicado no permitido",
+            source_ref=f"LoadOrder:{issued.id}",
+            is_reversal=False,
+            created_by="admin",
+        )
+    except IntegrityError:
+        pass
+    else:
+        raise AssertionError("La cuenta corriente debe impedir duplicados fisicos por orden/cliente/tipo")
+
+
 def test_issued_load_order_generates_traceable_account_movement(db):
     from app.models.accounting import ClientAccountMovement
     from app.models.load_orders import LoadOrder
