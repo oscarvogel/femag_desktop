@@ -484,10 +484,13 @@ class TruckEntryDialog(QDialog):
         self.carrier_combo = _combo("truckCarrierInput", _carrier_options())
         self.domain_input = QLineEdit()
         self.domain_input.setObjectName("truckDomainInput")
+        self.active_combo = _combo("truckActiveInput", [(True, "Activo"), (False, "Inactivo")], include_empty=False)
         form.addWidget(QLabel("Transportista"), 0, 0)
         form.addWidget(self.carrier_combo, 0, 1)
         form.addWidget(QLabel("Patente"), 1, 0)
         form.addWidget(self.domain_input, 1, 1)
+        form.addWidget(QLabel("Estado"), 2, 0)
+        form.addWidget(self.active_combo, 2, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveTruckButton", self._save)
@@ -498,10 +501,14 @@ class TruckEntryDialog(QDialog):
         truck = Truck.get_by_id(self.record_id)
         _set_combo(self.carrier_combo, truck.carrier.id)
         self.domain_input.setText(truck.domain)
+        _set_combo(self.active_combo, truck.active)
 
     def _save(self) -> None:
         carrier_id = self.carrier_combo.currentData()
         domain = self.domain_input.text().strip().upper()
+        if carrier_id is None and not _carrier_options():
+            self.feedback.setText("Debe cargar un transportista antes de crear un camión.")
+            return
         if carrier_id is None or not domain:
             self.feedback.setText("Complete transportista y patente.")
             return
@@ -513,6 +520,7 @@ class TruckEntryDialog(QDialog):
                 truck = Truck.get_by_id(self.record_id)
                 truck.domain = domain
                 truck.carrier = carrier
+                truck.active = bool(self.active_combo.currentData())
                 truck.save()
                 self.saved_record = truck
             self.accept()

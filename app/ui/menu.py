@@ -59,6 +59,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
                     approved_item("Clientes"),
                     approved_item("Choferes"),
                     approved_item("Transportistas"),
+                    approved_item("Camiones"),
                     approved_item("Productos"),
                     approved_item("Cuenta corriente", route_key="placeholder"),
                     approved_item("Reportes", route_key="placeholder"),
