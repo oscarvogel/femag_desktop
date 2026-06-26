@@ -534,7 +534,7 @@ class LoadOrderEntryDialog(QDialog):
         title = QLabel("Nueva orden de carga")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
-        hint = QLabel("Primero complete la cabecera logistica. Luego agregue cada cliente/destino y sus productos.")
+        hint = QLabel("Seleccione el chofer. El transportista se cargara automaticamente. Luego elija camion y complete los destinos.")
         hint.setObjectName("formHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -561,10 +561,10 @@ class LoadOrderEntryDialog(QDialog):
         self.observations_input.setPlaceholderText("Observaciones generales")
         header_layout.addWidget(QLabel("Fecha"), 0, 0)
         header_layout.addWidget(self.order_date, 0, 1)
-        header_layout.addWidget(QLabel("Transportista"), 0, 2)
-        header_layout.addWidget(self.carrier_combo, 0, 3)
-        header_layout.addWidget(QLabel("Chofer"), 1, 0)
-        header_layout.addWidget(self.driver_combo, 1, 1)
+        header_layout.addWidget(QLabel("Chofer"), 0, 2)
+        header_layout.addWidget(self.driver_combo, 0, 3)
+        header_layout.addWidget(QLabel("Transportista"), 1, 0)
+        header_layout.addWidget(self.carrier_combo, 1, 1)
         header_layout.addWidget(QLabel("Camion / patente"), 1, 2)
         header_layout.addWidget(self.truck_combo, 1, 3)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
@@ -648,26 +648,43 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.currentCellChanged.connect(
             lambda row, _column, _previous_row, _previous_column: self._render_products(row)
         )
-        self.carrier_combo.currentIndexChanged.connect(lambda _index: self._refresh_logistic_options())
+        self.driver_combo.currentIndexChanged.connect(lambda _index: self._refresh_from_driver())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
 
     def _populate_options(self) -> None:
+        _fill_combo(self.driver_combo, _driver_options())
         _fill_combo(self.carrier_combo, _carrier_options())
-        self._refresh_logistic_options()
+        self.carrier_combo.setEnabled(False)
         _fill_combo(self.client_combo, _client_options())
         self._refresh_address_options()
 
-    def _refresh_logistic_options(self) -> None:
-        carrier_id = self.carrier_combo.currentData()
-        current_driver_id = self.driver_combo.currentData()
-        current_truck_id = self.truck_combo.currentData()
-        with QSignalBlocker(self.driver_combo):
-            _fill_combo(self.driver_combo, _driver_options(carrier_id=carrier_id))
-        if current_driver_id is not None:
-            _set_combo(self.driver_combo, current_driver_id)
+    def _refresh_from_driver(self) -> None:
+        driver_id = self.driver_combo.currentData()
+        if driver_id is None:
+            self.carrier_combo.setCurrentIndex(-1)
+            _fill_combo(self.truck_combo, [])
+            return
+        try:
+            driver = Driver.get_by_id(driver_id)
+        except Driver.DoesNotExist:
+            self.carrier_combo.setCurrentIndex(-1)
+            _fill_combo(self.truck_combo, [])
+            return
+        try:
+            carrier = driver.carrier
+        except Carrier.DoesNotExist:
+            carrier = None
+        if carrier is None:
+            self.carrier_combo.setCurrentIndex(-1)
+            _fill_combo(self.truck_combo, [])
+            return
+        carrier_id = carrier.id
+        if self.carrier_combo.findData(carrier_id) < 0:
+            _fill_combo(self.carrier_combo, _carrier_options())
+        _set_combo(self.carrier_combo, carrier_id)
         _fill_combo(self.truck_combo, _truck_options(carrier_id=carrier_id))
-        if current_truck_id is not None:
-            _set_combo(self.truck_combo, current_truck_id)
+        if self.truck_combo.count() == 1:
+            self.truck_combo.setCurrentIndex(0)
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
@@ -759,14 +776,14 @@ class LoadOrderEntryDialog(QDialog):
                 self.product_table.setItem(row_index, column, QTableWidgetItem(value))
 
     def _save(self) -> None:
-        if self.carrier_combo.currentData() is None:
-            self.feedback.setText("Seleccione transportista.")
-            return
-        if self.truck_combo.currentData() is None:
-            self.feedback.setText("Seleccione camion.")
-            return
         if self.driver_combo.currentData() is None:
             self.feedback.setText("Seleccione chofer.")
+            return
+        if self.carrier_combo.currentData() is None:
+            self.feedback.setText("El chofer seleccionado no tiene transportista asignado.")
+            return
+        if self.truck_combo.currentData() is None:
+            self.feedback.setText("Seleccione camion / patente.")
             return
         try:
             destinations = []
