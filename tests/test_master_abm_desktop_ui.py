@@ -364,10 +364,10 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
 
     dialog = LoadOrderEntryDialog(LoadOrderService(current_user=user.username), user.username)
     app.processEvents()
-    _set_combo(dialog.findChild(QComboBox, "loadOrderCarrierInput"), carrier.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
+    app.processEvents()
     assert dialog.findChild(QComboBox, "loadOrderTruckInput").findData(truck.id) >= 0
     _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
-    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
     _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
     _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
     dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
