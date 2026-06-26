@@ -1,7 +1,7 @@
 param(
     [string]$InstallRoot = "$env:USERPROFILE\FEMAG",
     [string]$RepoUrl = "https://github.com/oscarvogel/femag_desktop.git",
-    [string]$Branch = "codex/issue-73-load-order-integral-demo",
+    [string]$Branch = "main",
     [switch]$SkipWinget,
     [switch]$SkipUi
 )

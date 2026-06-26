@@ -35,11 +35,14 @@ Parametros utiles:
 .\instalar_femag_demo.ps1 -SkipUi
 ```
 
-Por defecto usa la rama:
+Por defecto usa la rama estable de demo:
 
 ```text
-codex/issue-73-load-order-integral-demo
+main
 ```
+
+Si se ejecutan comandos manuales, hacerlos desde la carpeta raiz del repo
+(`...\femag_desktop`), no desde `...\femag_desktop\app`.
 
 ## Que hace
 

@@ -164,6 +164,59 @@ def test_desktop_exposes_minimal_master_abm_pages(db):
     assert readonly_window._route_indexes["load_orders"] >= 0
 
 
+def test_clients_abm_page_creates_edits_and_refreshes_grid(db):
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QApplication, QDialog, QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Client
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_clients_abm", password_hash="x", profile=profile)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "newClientButtonTable")
+    assert table is not None
+    assert table.rowCount() == 0
+
+    def fill_new_client():
+        dialog = app.activeModalWidget()
+        assert isinstance(dialog, QDialog)
+        dialog.findChild(QLineEdit, "clientNameInput").setText("Cliente Demo UI")
+        dialog.findChild(QLineEdit, "clientCuitInput").setText("30700000991")
+        dialog.findChild(QLineEdit, "clientIvaInput").setText("RI")
+        dialog.findChild(QPushButton, "saveClientButton").click()
+
+    QTimer.singleShot(0, fill_new_client)
+    window.findChild(QPushButton, "newClientButton").click()
+    app.processEvents()
+
+    client = Client.get(Client.cuit == "30700000991")
+    assert client.name == "Cliente Demo UI"
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Cliente Demo UI"
+
+    def fill_edit_client():
+        dialog = app.activeModalWidget()
+        assert isinstance(dialog, QDialog)
+        dialog.findChild(QLineEdit, "clientNameInput").setText("Cliente Demo UI Editado")
+        dialog.findChild(QPushButton, "saveClientButton").click()
+
+    QTimer.singleShot(0, fill_edit_client)
+    window.findChild(QPushButton, "editClientButton").click()
+    app.processEvents()
+
+    client = Client.get_by_id(client.id)
+    assert client.name == "Cliente Demo UI Editado"
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Cliente Demo UI Editado"
+
+
 def test_master_abm_documents_autoabm_debt():
     from app.ui.master_abm import AUTO_ABM_TECHNICAL_DEBT
 
