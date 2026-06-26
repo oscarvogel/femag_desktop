@@ -1,4 +1,5 @@
 param(
+    [string]$InstallDir = "",
     [string]$InstallRoot = "$env:USERPROFILE\FEMAG",
     [string]$RepoUrl = "https://github.com/oscarvogel/femag_desktop.git",
     [string]$Branch = "main",
@@ -106,8 +107,9 @@ Ensure-Git
 Ensure-Python
 
 Write-Step "Preparando carpeta de instalacion"
-New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-$RepoDir = Join-Path $InstallRoot "femag_desktop"
+$RepoDir = if ($InstallDir) { $InstallDir } else { Join-Path $InstallRoot "femag_desktop" }
+$RepoParent = Split-Path -Parent $RepoDir
+New-Item -ItemType Directory -Force -Path $RepoParent | Out-Null
 
 if (-not (Test-Path $RepoDir)) {
     Write-Step "Clonando FEMAG Desktop"

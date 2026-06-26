@@ -9,6 +9,8 @@ def test_windows_demo_installer_script_documents_required_flow():
     assert "Python.Python.3.12" in script
     assert "https://github.com/oscarvogel/femag_desktop.git" in script
     assert '[string]$Branch = "main"' in script
+    assert "[string]$InstallDir" in script
+    assert '$RepoDir = if ($InstallDir)' in script
     assert "codex/issue-73-load-order-integral-demo" not in script
     assert "requirements.txt" in script
     assert "FEMAG_DB_ENGINE=sqlite" in script
@@ -25,3 +27,4 @@ def test_windows_demo_installer_script_documents_required_flow():
     assert "no el sistema productivo final" in docs
     assert "Orden de carga multi-cliente/multi-destino" in docs
     assert "main" in docs
+    assert '-InstallDir "C:\\femag_desktop\\app"' in docs

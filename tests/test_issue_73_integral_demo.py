@@ -50,3 +50,45 @@ def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     movements = ClientAccountMovement.select().where(ClientAccountMovement.load_order == first["order"])
     assert {movement.source_ref for movement in movements} == {f"LoadOrder:{first['order'].id}"}
     assert {movement.amount for movement in movements} == {0}
+
+
+def test_issue_73_integral_demo_cli_generates_file_sqlite_database(tmp_path):
+    import sqlite3
+
+    from scripts.issue_73_integral_demo import main
+
+    db_path = tmp_path / "femag_demo.sqlite3"
+    evidence_dir = tmp_path / "evidence"
+
+    assert main(["--database-path", str(db_path), "--evidence-dir", str(evidence_dir)]) == 0
+
+    assert db_path.exists()
+    assert (evidence_dir / "orden_carga_1.html").exists()
+    assert (evidence_dir / "hoja_resumen_1.html").exists()
+
+    connection = sqlite3.connect(db_path)
+    try:
+        counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in (
+                "client",
+                "clientaddress",
+                "carrier",
+                "driver",
+                "truck",
+                "product",
+                "loadorder",
+                "clientaccountmovement",
+            )
+        }
+    finally:
+        connection.close()
+
+    assert counts["client"] >= 2
+    assert counts["clientaddress"] >= 3
+    assert counts["carrier"] >= 1
+    assert counts["driver"] >= 1
+    assert counts["truck"] >= 1
+    assert counts["product"] >= 3
+    assert counts["loadorder"] >= 1
+    assert counts["clientaccountmovement"] >= 4

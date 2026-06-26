@@ -32,7 +32,16 @@ Parametros utiles:
 
 ```powershell
 .\instalar_femag_demo.ps1 -InstallRoot "$env:USERPROFILE\FEMAG"
+.\instalar_femag_demo.ps1 -Branch "main" -InstallDir "C:\femag_desktop\app"
 .\instalar_femag_demo.ps1 -SkipUi
+```
+
+Para reinstalar desde cero en la PC de demo:
+
+```powershell
+Remove-Item -Recurse -Force C:\femag_desktop\app
+cd C:\femag_desktop\scripts
+powershell -ExecutionPolicy Bypass -File .\instalar_femag_demo.ps1 -Branch "main" -InstallDir "C:\femag_desktop\app"
 ```
 
 Por defecto usa la rama estable de demo:
@@ -50,7 +59,7 @@ Si se ejecutan comandos manuales, hacerlos desde la carpeta raiz del repo
 2. Si falta Git, intenta instalarlo con `winget`.
 3. Verifica Python.
 4. Si falta Python, intenta instalar Python 3.12 con `winget`.
-5. Clona `https://github.com/oscarvogel/femag_desktop.git`.
+5. Clona `https://github.com/oscarvogel/femag_desktop.git` en `-InstallDir` si se informo, o en `-InstallRoot\femag_desktop`.
 6. Entra en la rama de demo.
 7. Crea `.venv`.
 8. Instala `requirements.txt`.
