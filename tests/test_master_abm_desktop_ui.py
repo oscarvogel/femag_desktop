@@ -14,7 +14,7 @@ def test_minimal_master_dialogs_create_load_order_ready_data(db):
 
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
-    from app.ui.desktop_app import (
+    from app.ui.master_abm import (
         CarrierEntryDialog,
         ClientAddressEntryDialog,
         ClientEntryDialog,
@@ -162,3 +162,11 @@ def test_desktop_exposes_minimal_master_abm_pages(db):
     assert readonly_window.findChild(QPushButton, "newTruckButton").isEnabled() is False
     assert readonly_window.findChild(QPushButton, "editTruckButton").isEnabled() is False
     assert readonly_window._route_indexes["load_orders"] >= 0
+
+
+def test_master_abm_documents_autoabm_debt():
+    from app.ui.master_abm import AUTO_ABM_TECHNICAL_DEBT
+
+    assert "do not instantiate pyqt5libs AutoABM yet" in AUTO_ABM_TECHNICAL_DEBT
+    assert "permissions" in AUTO_ABM_TECHNICAL_DEBT
+    assert "audit services" in AUTO_ABM_TECHNICAL_DEBT
