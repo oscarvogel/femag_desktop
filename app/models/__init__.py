@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.accounting import ClientAccountMovement
 from app.models.masters import (
     Carrier,
     Client,
@@ -26,6 +27,7 @@ ALL_MODELS = [
     MenuItem,
     Permission,
     AuditLog,
+    ClientAccountMovement,
     Client,
     ClientAddress,
     Product,

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.models.load_orders import LoadOrder
+from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
 from app.services.load_order_print_service import LoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
@@ -19,6 +20,7 @@ class LoadOrderOperationService:
         self.audit_service = audit_service or AuditService()
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
         self.prints = LoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
 
     def issue(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
@@ -28,7 +30,9 @@ class LoadOrderOperationService:
             raise ValueError("No se puede emitir una orden cerrada.")
         if order.status == LoadOrder.STATUS_ISSUED:
             raise ValueError("La orden ya esta emitida.")
-        return self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
+        issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
+        self.account_ledger.generate_for_load_order(issued)
+        return issued
 
     def print_order(self, order: LoadOrder) -> Path:
         order = self._require_printable(order)
@@ -44,7 +48,9 @@ class LoadOrderOperationService:
             raise ValueError("La orden ya esta anulada.")
         if order.status == LoadOrder.STATUS_CLOSED:
             raise ValueError("No se puede anular una orden cerrada.")
-        return self.load_orders.annul_order(order, can_annul=can_annul, reason="Anulada desde pantalla")
+        annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason="Anulada desde pantalla")
+        self.account_ledger.reverse_for_load_order(annulled)
+        return annulled
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
