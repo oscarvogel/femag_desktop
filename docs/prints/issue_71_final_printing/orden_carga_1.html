@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orden de carga OC-000001</title>
+<style>
+@page { size: A4; margin: 14mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; color: #202124; font-size: 11.5px; line-height: 1.35; margin: 0; }
+h1 { font-size: 21px; margin: 0; letter-spacing: 0; }
+h2 { font-size: 15px; margin: 16px 0 8px; border-bottom: 1px solid #2f3a4a; padding-bottom: 4px; }
+h3 { font-size: 13px; margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; page-break-inside: avoid; }
+th, td { border: 1px solid #9aa0a6; padding: 5px 6px; text-align: left; vertical-align: top; }
+th { background: #eef2f7; color: #172033; font-weight: bold; }
+.document { min-height: 260mm; }
+.topline { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #172033; padding-bottom: 10px; margin-bottom: 12px; }
+.doc-kind { text-transform: uppercase; font-size: 11px; font-weight: bold; color: #475569; }
+.badge { border: 1px solid #172033; padding: 5px 8px; font-weight: bold; text-transform: uppercase; white-space: nowrap; }
+.copy-badge { border-color: #9f1239; color: #9f1239; }
+.meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 10px 0 4px; }
+.box { border: 1px solid #c6ccd5; padding: 7px; min-height: 42px; }
+.label { display: block; font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; }
+.value { font-size: 12px; color: #111827; }
+.destination { border: 1px solid #c6ccd5; padding: 9px; margin-top: 10px; page-break-inside: avoid; }
+.destination-title { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.destination-total, .general-total { text-align: right; font-weight: bold; margin-top: 7px; }
+.observations { white-space: pre-wrap; border: 1px solid #d9e1ec; min-height: 34px; padding: 7px; }
+.summary-list { margin: 8px 0 0; padding-left: 18px; }
+.summary-list li { margin-bottom: 5px; }
+.footer-note { margin-top: 16px; font-size: 10px; color: #64748b; border-top: 1px solid #c6ccd5; padding-top: 6px; }
+.page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+<section class="document">
+
+<header class="topline">
+<div>
+<div class="doc-kind">Documento logistico interno</div>
+<h1>Orden de carga OC-000001</h1>
+<div>Orden de carga Nro. 1</div>
+</div>
+<div class="badge">Original operativo</div>
+</header>
+
+
+<h2>Cabecera logística</h2>
+<section class="meta-grid">
+<div class="box"><span class="label">Fecha</span><span class="value">26/06/2026</span></div>
+<div class="box"><span class="label">Estado</span><span class="value">Pendiente</span></div>
+<div class="box"><span class="label">Transportista</span><span class="value">Transporte Evidencia</span></div>
+<div class="box"><span class="label">Chofer</span><span class="value">Chofer Evidencia</span></div>
+<div class="box"><span class="label">Camion / patente</span><span class="value">EV123A4</span></div>
+<div class="box"><span class="label">Tipo</span><span class="value">Carga multi-cliente</span></div>
+</section>
+
+<h2>Detalle por cliente / destino</h2>
+<section class="destination">
+<div class="destination-title">
+<h3>Cliente / destino 1</h3>
+<strong>200 bolsas</strong>
+</div>
+<div class="meta-grid">
+<div class="box"><span class="label">Cliente</span><span class="value">Cliente Norte SA</span></div>
+<div class="box"><span class="label">Destino</span><span class="value">Parque Industrial, Eldorado</span></div>
+<div class="box"><span class="label">Provincia</span><span class="value">Misiones</span></div>
+</div>
+<table>
+<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
+<tr><td>Fecula bolsa 25kg</td><td>bolsas</td><td>120</td><td>bolsas</td><td></td></tr><tr><td>Harina bolsa 10kg</td><td>bolsas</td><td>80</td><td>bolsas</td><td></td></tr>
+</table>
+<div class="destination-total">Total destino: 200 bolsas</div>
+<div class="observations">Coordinar descarga con porteria</div>
+</section>
+
+<section class="destination">
+<div class="destination-title">
+<h3>Cliente / destino 2</h3>
+<strong>40 bolsas</strong>
+</div>
+<div class="meta-grid">
+<div class="box"><span class="label">Cliente</span><span class="value">Cliente Sur SRL</span></div>
+<div class="box"><span class="label">Destino</span><span class="value">Deposito Sur, Obera</span></div>
+<div class="box"><span class="label">Provincia</span><span class="value">Misiones</span></div>
+</div>
+<table>
+<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
+<tr><td>Fecula bolsa 25kg</td><td>bolsas</td><td>40</td><td>bolsas</td><td></td></tr>
+</table>
+<div class="destination-total">Total destino: 40 bolsas</div>
+<div class="observations">Coordinar descarga con porteria</div>
+</section>
+<div class="general-total">Total general: 240 bolsas</div>
+<h2>Pallets</h2><table><tr><th>Tipo</th><th>Medida</th><th>Peso</th><th>Cantidad</th><th>Obs.</th></tr><tr><td>Pallet comun</td><td>1x1</td><td>12.5</td><td>8</td><td></td></tr></table>
+<h2>Observaciones operativas</h2>
+<div class="observations">Evidencia #71: impresion A4 final.</div>
+<p class="footer-note">No fiscal. No reemplaza documentacion fiscal ni comprobantes comerciales.</p>
+</section>
+</body>
+</html>
