@@ -103,7 +103,7 @@ def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
     assert address_combo.findData(address_b.id) >= 0
 
 
-def test_load_order_dialog_selects_carrier_and_trucks_from_selected_driver(db):
+def test_load_order_dialog_filters_drivers_and_trucks_from_selected_carrier(db):
     from PyQt5.QtWidgets import QApplication, QComboBox
 
     from app.models.masters import Carrier, Driver, Truck
@@ -124,17 +124,21 @@ def test_load_order_dialog_selects_carrier_and_trucks_from_selected_driver(db):
     carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
     driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
     truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
-    assert carrier_combo.isEnabled() is False
+    assert carrier_combo.isEnabled() is True
 
-    _set_combo(driver_combo, driver_b.id)
+    _set_combo(carrier_combo, carrier_b.id)
 
     assert carrier_combo.currentData() == carrier_b.id
+    assert driver_combo.findData(driver_a.id) == -1
+    assert driver_combo.findData(driver_b.id) >= 0
     assert truck_combo.findData(truck_a.id) == -1
     assert truck_combo.findData(truck_b.id) >= 0
 
-    _set_combo(driver_combo, driver_a.id)
+    _set_combo(carrier_combo, carrier_a.id)
 
     assert carrier_combo.currentData() == carrier_a.id
+    assert driver_combo.findData(driver_a.id) >= 0
+    assert driver_combo.findData(driver_b.id) == -1
     assert truck_combo.findData(truck_a.id) >= 0
     assert truck_combo.findData(truck_b.id) == -1
 
@@ -180,6 +184,11 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     feedback = window.findChild(QLabel, "loadOrderFeedback")
     status = window.findChild(QLabel, "detailOrderStatus")
     table.setCurrentCell(0, 0)
+
+    headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
+    assert "Camión / patente" in headers
+    truck_column = headers.index("Camión / patente")
+    assert table.item(0, truck_column).text() == "UI123AA"
 
     window.findChild(QPushButton, "issueLoadOrderButton").click()
     app.processEvents()

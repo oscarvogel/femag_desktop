@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from peewee import InterfaceError, OperationalError, SqliteDatabase
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, QSignalBlocker, Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -312,12 +312,13 @@ class FemagDesktopWindow(QMainWindow):
                     str(sum(pallet.quantity for pallet in order.pallets)),
                     order.driver.name,
                     order.carrier.name,
+                    order.truck.domain,
                     _display_status(order.status),
                 )
                 for column, value in enumerate(values):
                     table.setItem(row_index, column, QTableWidgetItem(value))
                 table.item(row_index, 0).setData(Qt.UserRole, order.id)
-                table.item(row_index, 8).setForeground(_status_color(order.status))
+                table.item(row_index, 9).setForeground(_status_color(order.status))
             if rows:
                 selected_row = 0
                 if selected_order_id["value"] is not None:
@@ -558,14 +559,13 @@ class LoadOrderEntryDialog(QDialog):
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
-        self.carrier_combo.setEnabled(False)
         header_layout.addWidget(QLabel("Fecha"), 0, 0)
         header_layout.addWidget(self.order_date, 0, 1)
-        header_layout.addWidget(QLabel("Chofer"), 0, 2)
-        header_layout.addWidget(self.driver_combo, 0, 3)
-        header_layout.addWidget(QLabel("Transportista"), 1, 0)
-        header_layout.addWidget(self.carrier_combo, 1, 1)
-        header_layout.addWidget(QLabel("Camion"), 1, 2)
+        header_layout.addWidget(QLabel("Transportista"), 0, 2)
+        header_layout.addWidget(self.carrier_combo, 0, 3)
+        header_layout.addWidget(QLabel("Chofer"), 1, 0)
+        header_layout.addWidget(self.driver_combo, 1, 1)
+        header_layout.addWidget(QLabel("Camion / patente"), 1, 2)
         header_layout.addWidget(self.truck_combo, 1, 3)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
         header_layout.addWidget(self.observations_input, 2, 1, 1, 3)
@@ -648,28 +648,23 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.currentCellChanged.connect(
             lambda row, _column, _previous_row, _previous_column: self._render_products(row)
         )
-        self.driver_combo.currentIndexChanged.connect(lambda _index: self._select_driver_carrier())
-        self.carrier_combo.currentIndexChanged.connect(lambda _index: self._refresh_truck_options())
+        self.carrier_combo.currentIndexChanged.connect(lambda _index: self._refresh_logistic_options())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
 
     def _populate_options(self) -> None:
         _fill_combo(self.carrier_combo, _carrier_options())
-        _fill_combo(self.driver_combo, _driver_options())
-        self._refresh_truck_options()
+        self._refresh_logistic_options()
         _fill_combo(self.client_combo, _client_options())
         self._refresh_address_options()
 
-    def _select_driver_carrier(self) -> None:
-        driver_id = self.driver_combo.currentData()
-        if driver_id is None:
-            self.carrier_combo.setCurrentIndex(0)
-            return
-        driver = Driver.get_by_id(driver_id)
-        _set_combo(self.carrier_combo, driver.carrier.id)
-
-    def _refresh_truck_options(self) -> None:
+    def _refresh_logistic_options(self) -> None:
         carrier_id = self.carrier_combo.currentData()
+        current_driver_id = self.driver_combo.currentData()
         current_truck_id = self.truck_combo.currentData()
+        with QSignalBlocker(self.driver_combo):
+            _fill_combo(self.driver_combo, _driver_options(carrier_id=carrier_id))
+        if current_driver_id is not None:
+            _set_combo(self.driver_combo, current_driver_id)
         _fill_combo(self.truck_combo, _truck_options(carrier_id=carrier_id))
         if current_truck_id is not None:
             _set_combo(self.truck_combo, current_truck_id)
@@ -1087,9 +1082,12 @@ def _truck_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
         return []
 
 
-def _driver_options() -> list[tuple[int, str]]:
+def _driver_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
     try:
-        return [(driver.id, driver.name) for driver in Driver.select().where(Driver.active == True).order_by(Driver.name)]  # noqa: E712
+        query = Driver.select().where(Driver.active == True)  # noqa: E712
+        if carrier_id is not None:
+            query = query.where(Driver.carrier == carrier_id)
+        return [(driver.id, driver.name) for driver in query.order_by(Driver.name)]
     except (InterfaceError, OperationalError):
         return []
 

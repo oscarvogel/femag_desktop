@@ -2,6 +2,9 @@
 
 - Orden: OC-000003
 - Estado final: Anulada
+- Transportista: ISSUE73 Transporte Demo
+- Chofer: ISSUE73 Chofer Demo
+- Camion / patente: I730ABC
 - Destinos: 3
 - Productos: 4
 - Orden HTML: `orden_carga_3.html`

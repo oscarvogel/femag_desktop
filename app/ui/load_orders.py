@@ -109,6 +109,7 @@ def build_load_order_workspace_spec() -> LoadOrderWorkspaceSpec:
             "Pallets",
             "Chofer",
             "Transportista",
+            "Camión / patente",
             "Estado",
         ),
         detail_fields=(

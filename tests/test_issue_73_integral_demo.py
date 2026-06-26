@@ -22,6 +22,7 @@ def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     assert first["ledger_originals"] == 2
     assert first["ledger_reversals"] == 2
     assert first["ledger_total"] == 4
+    assert first["truck"] == "I730ABC"
 
     for key in ("order_html", "summary_html", "reprint_html", "readme"):
         path = first[key]
@@ -38,8 +39,11 @@ def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     assert "Cliente / destino 2" in order_html
     assert "Cliente / destino 3" in order_html
     assert "Hoja resumen / sobre de carga" in summary_html
+    assert "I730ABC" in order_html
+    assert "I730ABC" in summary_html
     assert "Reimpresion operativa - Copia para reimpresion" in reprint_html
     assert "Cuenta corriente documental" in readme
+    assert "Camion / patente: I730ABC" in readme
     assert "Computer Use" in readme
     assert computer_use_note in readme
 
