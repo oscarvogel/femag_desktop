@@ -38,6 +38,7 @@ from app.services.permission_service import PermissionService
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.main_window import MainWindow as ShellBuilder
+from app.ui.master_abm import build_master_abm_page, master_abm_configs
 
 
 LOAD_ORDER_PRINTS_DIR = Path("docs") / "prints"
@@ -104,17 +105,23 @@ class FemagDesktopWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self._add_page("dashboard", self._dashboard_page())
-        self._add_page("clients", self._table_page("Clientes", ["Nombre", "CUIT", "Estado"], _client_rows()))
-        self._add_page("products", self._table_page("Productos", ["Producto", "Unidad", "Estado"], _product_rows()))
-        self._add_page("drivers", self._table_page("Choferes", ["Nombre", "Teléfono", "Disponible"], _driver_rows()))
-        self._add_page(
-            "carriers",
-            self._table_page("Transportistas", ["Nombre", "CUIT", "Teléfono", "Estado"], _carrier_rows()),
-        )
+        self._add_master_pages()
         self._add_page("load_orders", self._load_order_page())
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
+
+    def _add_master_pages(self) -> None:
+        for route, config in master_abm_configs().items():
+            self._add_page(
+                route,
+                build_master_abm_page(
+                    config=config,
+                    user=self.user,
+                    current_user=self.shell.username,
+                    parent=self,
+                ),
+            )
 
     def _topbar(self) -> QWidget:
         bar = QFrame()
@@ -896,6 +903,15 @@ def _can_annul_load_orders(user) -> bool:
         return False
 
 
+def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(user, section, action, title)
+    except (InterfaceError, OperationalError):
+        return False
+
+
 def _summarize_order_clients(order: LoadOrder) -> str:
     names = []
     for destination in order.destinations:
@@ -1034,40 +1050,6 @@ def _demo_user():
     if user:
         return user
     return service.create_user("demo_visual", "demo", "Administrador")
-
-
-def _client_rows() -> list[list[str]]:
-    try:
-        return [[client.name, client.cuit, "Activo" if client.active else "Inactivo"] for client in Client.select().limit(20)]
-    except (InterfaceError, OperationalError):
-        return []
-
-
-def _product_rows() -> list[list[str]]:
-    try:
-        return [[product.name, product.unit, "Activo" if product.active else "Inactivo"] for product in Product.select().limit(20)]
-    except (InterfaceError, OperationalError):
-        return []
-
-
-def _driver_rows() -> list[list[str]]:
-    try:
-        return [
-            [driver.name, driver.phone or "", "Disponible" if driver.available else "Ocupado"]
-            for driver in Driver.select().limit(20)
-        ]
-    except (InterfaceError, OperationalError):
-        return []
-
-
-def _carrier_rows() -> list[list[str]]:
-    try:
-        return [
-            [carrier.name, carrier.cuit or "", carrier.phone or "", "Activo" if carrier.active else "Inactivo"]
-            for carrier in Carrier.select().limit(20)
-        ]
-    except (InterfaceError, OperationalError):
-        return []
 
 
 STYLES = """

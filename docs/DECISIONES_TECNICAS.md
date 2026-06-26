@@ -10,6 +10,10 @@ FEMAG Desktop es una aplicacion de escritorio en Python. La prioridad es mantene
 
 La interfaz usa PyQt. Los cambios de UI deben respetar widgets, layouts, senales y patrones existentes. Evitar bloquear el hilo principal con operaciones pesadas.
 
+## ABMs minimos de Ordenes de carga
+
+Issue #70 incorpora ABMs minimos para operar Ordenes de carga en `app/ui/master_abm.py`. Estos ABMs no son el patron definitivo ni instancian todavia `pyqt5libs` AutoABM: mantienen una pantalla PyQt local pequena porque `pyqt5libs` no es importable en el entorno de validacion actual y el AutoABM generado necesita antes un adaptador FEMAG para permisos, auditoria por servicios y labels de combos de relaciones. Cuando ese adaptador exista, migrar estos maestros al patron reutilizable de `pyqt5libs` en un issue dedicado.
+
 ## MySQL
 
 MySQL es la base de datos prevista para datos operativos. Los cambios que afecten estructura, migraciones, queries o compatibilidad de datos deben entrar por issues especificos y con validacion clara.
