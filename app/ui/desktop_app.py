@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
 
 from app.config.database import bind_database, initialize_runtime_database
 from app.models import ALL_MODELS
+from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
 from app.services.auth_service import AuthService
@@ -263,10 +264,16 @@ class FemagDesktopWindow(QMainWindow):
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
-        reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
+        print_button.setText("Imprimir / Reimprimir")
+        search_input = QLineEdit()
+        search_input.setObjectName("loadOrderSearchInput")
+        search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
+        search_input.setMinimumWidth(260)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, issue_button, print_button, reprint_button, annul_button, search_button):
+        for button in (new_button, issue_button, print_button, annul_button):
             actions.addWidget(button)
+        actions.addWidget(search_input)
+        actions.addWidget(search_button)
         actions.addStretch(1)
         left_layout.addLayout(actions)
 
@@ -287,10 +294,13 @@ class FemagDesktopWindow(QMainWindow):
         workspace.addWidget(detail, 0)
         layout.addLayout(workspace, 1)
 
-        def refresh() -> None:
+        def refresh(*, query: str | None = None) -> None:
             rows = service.list_orders() if hasattr(service, "list_orders") else []
             if not hasattr(service, "list_orders"):
                 feedback.setText("Listado operativo pendiente de la capa funcional correspondiente.")
+            query = (query if query is not None else search_input.text()).strip()
+            if query:
+                rows = [order for order in rows if _matches_load_order_query(order, query)]
             table.setRowCount(len(rows))
             for row_index, order in enumerate(rows):
                 values = (
@@ -318,6 +328,9 @@ class FemagDesktopWindow(QMainWindow):
                             break
                 table.setCurrentCell(selected_row, 0)
                 load_selected(selected_row)
+            else:
+                selected_order_id["value"] = None
+                clear_detail()
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
@@ -345,6 +358,12 @@ class FemagDesktopWindow(QMainWindow):
             detail_labels["Transportista"].setText(order.carrier.name)
             detail_labels["Camión / Acoplado"].setText(order.truck.domain)
             detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
+
+        def clear_detail() -> None:
+            detail_labels["number"].setText("OC-000000")
+            detail_labels["status"].setText("-")
+            for field in spec.detail_fields:
+                detail_labels[field].setText("-")
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -379,35 +398,37 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.setText(str(exc))
 
-        def print_order() -> None:
+        def print_or_reprint_order() -> None:
             order = selected_order()
             if order is None:
                 feedback.setText("Seleccione una orden para imprimir.")
                 return
             try:
-                path = operation_service.print_order(order)
-                feedback.setText(f"Vista A4 generada: {path}")
+                if _has_printed_load_order(order):
+                    path = operation_service.reprint_order(order)
+                    feedback.setText(f"Reimpresion A4 generada: {path}")
+                else:
+                    path = operation_service.print_order(order)
+                    feedback.setText(f"Vista A4 generada: {path}")
             except Exception as exc:
                 feedback.setText(str(exc))
 
-        def reprint_order() -> None:
-            order = selected_order()
-            if order is None:
-                feedback.setText("Seleccione una orden para reimprimir.")
-                return
-            try:
-                path = operation_service.reprint_order(order)
-                feedback.setText(f"Reimpresion A4 generada: {path}")
-            except Exception as exc:
-                feedback.setText(str(exc))
+        def search_orders() -> None:
+            query = search_input.text().strip()
+            refresh(query=query)
+            count = table.rowCount()
+            if query:
+                feedback.setText(f"Buscar '{query}': {count} resultado(s).")
+            else:
+                feedback.setText(f"Buscar: {count} orden(es).")
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
-        search_button.clicked.connect(lambda: feedback.setText("Buscar: use el buscador global o filtre desde el listado."))
+        search_button.clicked.connect(search_orders)
+        search_input.returnPressed.connect(search_orders)
         issue_button.clicked.connect(issue)
         annul_button.clicked.connect(annul)
-        print_button.clicked.connect(print_order)
-        reprint_button.clicked.connect(reprint_order)
+        print_button.clicked.connect(print_or_reprint_order)
         refresh()
         return page
 
@@ -901,6 +922,42 @@ def _can_annul_load_orders(user) -> bool:
         return PermissionService().has_permission(user, "Operaciones", "anular", "Órdenes de carga")
     except (InterfaceError, OperationalError):
         return False
+
+
+def _has_printed_load_order(order: LoadOrder) -> bool:
+    try:
+        return (
+            AuditLog.select()
+            .where(
+                AuditLog.module == "Ordenes de carga",
+                AuditLog.action == "imprimir",
+                AuditLog.record_ref == f"LoadOrder:{order.id}",
+            )
+            .exists()
+        )
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _matches_load_order_query(order: LoadOrder, query: str) -> bool:
+    text = " ".join(
+        (
+            _format_order_number(order.order_number),
+            str(order.order_number),
+            order.date.strftime("%d/%m/%Y"),
+            order.status,
+            order.carrier.name,
+            order.driver.name,
+            order.truck.domain,
+            _summarize_order_clients(order),
+            _summarize_order_deliveries(order),
+            _summarize_order_products(order),
+            _order_destinations_text(order),
+            _order_products_text(order),
+            order.observations or "",
+        )
+    )
+    return query.lower() in text.lower()
 
 
 def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
