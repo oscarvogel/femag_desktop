@@ -297,6 +297,92 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     )
 
 
+def test_load_order_page_edits_pending_order_adding_destination_and_product(db, monkeypatch):
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_edit_order_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Editar UI")
+    driver = Driver.create(name="Chofer Editar UI", carrier=carrier)
+    truck = Truck.create(domain="EDI123", carrier=carrier)
+    product_a = Product.create(name="Producto Editar A", unit="kg")
+    product_b = Product.create(name="Producto Editar B", unit="bolsas")
+    client_a = Client.create(name="Cliente Editar A", cuit="30700008801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta A",
+    )
+    client_b = Client.create(name="Cliente Editar B", cuit="30700008802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta B",
+    )
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client_a,
+                "delivery_address": address_a,
+                "products": [{"product": product_a, "quantity": 10}],
+            }
+        ],
+        pallets=[],
+    )
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product_b.id,
+            "product_label": product_b.name,
+            "quantity": 7,
+            "unit": product_b.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+
+    def fill_edit_dialog():
+        dialog = app.activeModalWidget()
+        assert dialog is not None
+        assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").rowCount() == 1
+        _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_b.id)
+        _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_b.id)
+        dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+        dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(1, 0)
+        dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+        dialog.findChild(QPushButton, "saveLoadOrderButton").click()
+
+    QTimer.singleShot(0, fill_edit_dialog)
+    window.findChild(QPushButton, "editLoadOrderButton").click()
+    app.processEvents()
+
+    assert LoadOrder.get_by_id(order.id).order_number == order.order_number
+    assert LoadOrderDestination.select().where(LoadOrderDestination.order == order).count() == 2
+    assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 2
+    assert "VARIOS" in window.findChild(QTableWidget, "loadOrdersTable").item(0, 2).text()
+
+
 def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTableWidget
