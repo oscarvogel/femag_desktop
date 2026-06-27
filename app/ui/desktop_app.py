@@ -22,6 +22,9 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QPushButton,
     QHeaderView,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -561,7 +564,8 @@ class LoadOrderEntryDialog(QDialog):
         self.destinations: list[dict] = []
         self.setObjectName("loadOrderEntryDialog")
         self.setWindowTitle("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
-        self.resize(920, 720)
+        self.setMinimumSize(980, 760)
+        self.resize(1100, 820)
         self._build()
         self._populate_options()
         self._load_order()
@@ -577,6 +581,15 @@ class LoadOrderEntryDialog(QDialog):
         hint.setObjectName("formHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("loadOrderEntryScrollArea")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(14)
 
         header = QFrame()
         header.setObjectName("formSection")
@@ -608,7 +621,12 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.addWidget(self.truck_combo, 1, 3)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
         header_layout.addWidget(self.observations_input, 2, 1, 1, 3)
-        root.addWidget(header)
+        content_layout.addWidget(header)
+
+        work_splitter = QSplitter(Qt.Vertical)
+        work_splitter.setObjectName("loadOrderEntryWorkSplitter")
+        work_splitter.setChildrenCollapsible(False)
+        work_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         destination = QFrame()
         destination.setObjectName("formSection")
@@ -638,8 +656,9 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.destination_table.verticalHeader().setVisible(False)
         self.destination_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.destination_table.setMinimumHeight(180)
         destination_layout.addWidget(self.destination_table)
-        root.addWidget(destination, 1)
+        work_splitter.addWidget(destination)
 
         product = QFrame()
         product.setObjectName("formSection")
@@ -662,8 +681,14 @@ class LoadOrderEntryDialog(QDialog):
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.product_table.setMinimumHeight(160)
         product_layout.addWidget(self.product_table)
-        root.addWidget(product, 1)
+        work_splitter.addWidget(product)
+        work_splitter.setStretchFactor(0, 3)
+        work_splitter.setStretchFactor(1, 2)
+        content_layout.addWidget(work_splitter, 1)
+        scroll_area.setWidget(content)
+        root.addWidget(scroll_area, 1)
 
         self.feedback = QLabel("")
         self.feedback.setObjectName("loadOrderDialogFeedback")
