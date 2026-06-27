@@ -26,6 +26,13 @@ function Test-Command {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Assert-NativeSuccess {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step fallo con codigo de salida $LASTEXITCODE."
+    }
+}
+
 function Install-WithWinget {
     param(
         [string]$PackageId,
@@ -39,6 +46,7 @@ function Install-WithWinget {
     }
     Write-Info "Intentando instalar $DisplayName con winget..."
     winget install --id $PackageId --exact --source winget --accept-source-agreements --accept-package-agreements
+    Assert-NativeSuccess "Instalacion de $DisplayName con winget"
 }
 
 function Ensure-Git {
@@ -50,6 +58,9 @@ function Ensure-Git {
         throw "Git no quedo disponible en PATH. Cerrar y abrir PowerShell, o instalar Git manualmente."
     }
     git --version
+    Assert-NativeSuccess "Verificacion de Git"
+    git config --global http.sslBackend schannel
+    Assert-NativeSuccess "Configuracion TLS de Git"
 }
 
 function Test-Python {
@@ -86,16 +97,21 @@ function Invoke-BasePython {
     param([string[]]$Arguments)
     if (Test-Command "py") {
         & py -3.12 @Arguments
+        Assert-NativeSuccess "Python base"
         return
     }
     & python @Arguments
+    Assert-NativeSuccess "Python base"
 }
 
 function Invoke-VenvPython {
     param([string[]]$Arguments)
     $pythonExe = Join-Path $RepoDir ".venv\Scripts\python.exe"
     & $pythonExe @Arguments
+    Assert-NativeSuccess "Python del entorno virtual"
 }
+
+$PipNetworkOptions = @("--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org")
 
 Write-Host "FEMAG Desktop - instalador demo Orden de carga" -ForegroundColor Green
 Write-Host "Repo: $RepoUrl"
@@ -114,13 +130,17 @@ New-Item -ItemType Directory -Force -Path $RepoParent | Out-Null
 if (-not (Test-Path $RepoDir)) {
     Write-Step "Clonando FEMAG Desktop"
     git clone --branch $Branch $RepoUrl $RepoDir
+    Assert-NativeSuccess "Clone de FEMAG Desktop"
 } else {
     Write-Step "Actualizando repo existente"
     Push-Location $RepoDir
     try {
         git fetch origin
+        Assert-NativeSuccess "Fetch de FEMAG Desktop"
         git checkout $Branch
+        Assert-NativeSuccess "Checkout de rama $Branch"
         git pull --ff-only origin $Branch
+        Assert-NativeSuccess "Pull de rama $Branch"
     } finally {
         Pop-Location
     }
@@ -134,11 +154,11 @@ try {
     }
 
     Write-Step "Actualizando pip"
-    Invoke-VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip")
+    Invoke-VenvPython -Arguments (@("-m", "pip", "install") + $PipNetworkOptions + @("--upgrade", "pip"))
 
     if (Test-Path "requirements.txt") {
         Write-Step "Instalando dependencias"
-        Invoke-VenvPython -Arguments @("-m", "pip", "install", "-r", "requirements.txt")
+        Invoke-VenvPython -Arguments (@("-m", "pip", "install") + $PipNetworkOptions + @("-r", "requirements.txt"))
     } else {
         Write-Info "No se encontro requirements.txt; se omite instalacion de dependencias."
     }
