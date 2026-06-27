@@ -360,12 +360,31 @@ class FemagDesktopWindow(QMainWindow):
             detail_labels["Transportista"].setText(order.carrier.name)
             detail_labels["Camión / Acoplado"].setText(order.truck.domain)
             detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
+            set_action_state(order)
 
         def clear_detail() -> None:
             detail_labels["number"].setText("OC-000000")
             detail_labels["status"].setText("-")
             for field in spec.detail_fields:
                 detail_labels[field].setText("-")
+            issue_button.setEnabled(False)
+            issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
+            edit_button.setEnabled(False)
+            edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+
+        def set_action_state(order: LoadOrder) -> None:
+            is_pending = order.status == LoadOrder.STATUS_PENDING
+            issue_button.setEnabled(is_pending)
+            edit_button.setEnabled(is_pending)
+            if is_pending:
+                issue_button.setToolTip("Emitir la orden seleccionada.")
+                edit_button.setToolTip("Editar la orden pendiente seleccionada.")
+            elif order.status == LoadOrder.STATUS_ISSUED:
+                issue_button.setToolTip("La orden ya esta emitida.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+            else:
+                issue_button.setToolTip("Solo se pueden emitir ordenes pendientes.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)

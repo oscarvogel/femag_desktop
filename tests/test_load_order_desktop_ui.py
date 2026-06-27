@@ -387,6 +387,55 @@ def test_load_order_page_edits_pending_order_adding_destination_and_product(db, 
     assert "VARIOS" in window.findChild(QTableWidget, "loadOrdersTable").item(0, 2).text()
 
 
+def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_issued_actions_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Emitida UI")
+    driver = Driver.create(name="Chofer Emitida UI", carrier=carrier)
+    truck = Truck.create(domain="EMI123", carrier=carrier)
+    client = Client.create(name="Cliente Emitida UI", cuit="30700008803", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Emitida",
+    )
+    product = Product.create(name="Producto Emitida UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    LoadOrderOperationService(current_user=user.username).issue(order)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    issue_button = window.findChild(QPushButton, "issueLoadOrderButton")
+    edit_button = window.findChild(QPushButton, "editLoadOrderButton")
+
+    assert issue_button.isEnabled() is False
+    assert edit_button.isEnabled() is False
+    assert "emitida" in issue_button.toolTip().lower()
+    assert "pendientes" in edit_button.toolTip().lower()
+
+
 def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTableWidget
