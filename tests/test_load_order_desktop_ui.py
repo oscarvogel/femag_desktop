@@ -215,6 +215,7 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
 def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
+    from app.models.accounting import ClientAccountMovement
     from app.models.load_orders import LoadOrder
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -264,11 +265,20 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
     assert "emitida" in feedback.text().lower()
     assert status.text() == "Emitida"
+    assert (
+        ClientAccountMovement.select()
+        .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == False))  # noqa: E712
+        .count()
+        == 1
+    )
 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
     assert "vista a4" in feedback.text().lower()
-    assert list(tmp_path.glob("orden_y_resumen_*.html"))
+    html_path = next(tmp_path.glob("orden_y_resumen_*.html"))
+    html = html_path.read_text(encoding="utf-8")
+    assert "Orden de carga" in html
+    assert "Hoja resumen / sobre de carga" in html
 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
@@ -279,6 +289,12 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
     assert status.text() == "Anulada"
+    assert (
+        ClientAccountMovement.select()
+        .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == True))  # noqa: E712
+        .count()
+        == 1
+    )
 
 
 def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):

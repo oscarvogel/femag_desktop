@@ -32,7 +32,16 @@ Parametros utiles:
 
 ```powershell
 .\instalar_femag_demo.ps1 -InstallRoot "$env:USERPROFILE\FEMAG"
+.\instalar_femag_demo.ps1 -Branch "main" -InstallDir "C:\femag_desktop\app"
 .\instalar_femag_demo.ps1 -SkipUi
+```
+
+Para reinstalar desde cero en la PC de demo:
+
+```powershell
+Remove-Item -Recurse -Force C:\femag_desktop\app
+cd C:\femag_desktop\scripts
+powershell -ExecutionPolicy Bypass -File .\instalar_femag_demo.ps1 -Branch "main" -InstallDir "C:\femag_desktop\app"
 ```
 
 Por defecto usa la rama estable de demo:
@@ -50,16 +59,17 @@ Si se ejecutan comandos manuales, hacerlos desde la carpeta raiz del repo
 2. Si falta Git, intenta instalarlo con `winget`.
 3. Verifica Python.
 4. Si falta Python, intenta instalar Python 3.12 con `winget`.
-5. Clona `https://github.com/oscarvogel/femag_desktop.git`.
+5. Clona `https://github.com/oscarvogel/femag_desktop.git` en `-InstallDir` si se informo, o en `-InstallRoot\femag_desktop`.
 6. Entra en la rama de demo.
 7. Crea `.venv`.
 8. Instala `requirements.txt`.
-9. Ejecuta `scripts/init_db.py` si existe.
-10. Ejecuta `scripts/issue_73_integral_demo.py`.
-11. Ejecuta `python -m app.main --smoke`.
-12. Abre `python -m app.main --demo-ui`.
+9. Crea `.env` de demo con `FEMAG_DB_ENGINE=sqlite`, `FEMAG_SQLITE_PATH=femag_demo.sqlite3` y `FEMAG_DEMO=1`.
+10. Ejecuta `scripts/init_db.py` contra `femag_demo.sqlite3`.
+11. Ejecuta `scripts/issue_73_integral_demo.py` contra la misma base SQLite.
+12. Ejecuta `python -m app.main --smoke`.
+13. Abre `python -m app.main --demo-ui`.
 
-Si `scripts/init_db.py` no puede conectarse a una base MySQL operativa, el script informa la limitacion y continua la demo integral con SQLite local en `backups`.
+La demo cliente no intenta conectar a MySQL. Produccion o instalacion real sigue usando MySQL cuando no se configura `FEMAG_DB_ENGINE=sqlite`.
 
 ## Que mostrar en la demo
 

@@ -23,6 +23,35 @@ def _navigate_to_route(window, route):
     raise AssertionError(f"Route not found in sidebar: {route}")
 
 
+def _admin_window(username: str):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username=username, password_hash="x", profile=profile)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    return app, window
+
+
+def _run_modal(app, trigger, fill_dialog):
+    from PyQt5.QtCore import QTimer
+
+    def fill_active_dialog():
+        dialog = app.activeModalWidget()
+        assert dialog is not None
+        fill_dialog(dialog)
+
+    QTimer.singleShot(0, fill_active_dialog)
+    trigger()
+    app.processEvents()
+
+
 def test_minimal_master_dialogs_create_load_order_ready_data(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
 
@@ -398,6 +427,132 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
 
     assert table.rowCount() == 1
     assert table.item(0, truck_column).text() == "ORD123"
+
+
+def test_carriers_abm_page_creates_edits_and_refreshes_grid(db):
+    from PyQt5.QtWidgets import QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier
+
+    app, window = _admin_window("admin_carriers_abm")
+    table = window.findChild(QTableWidget, "newCarrierButtonTable")
+    assert table is not None
+    assert table.rowCount() == 0
+
+    def fill_new(dialog):
+        dialog.findChild(QLineEdit, "carrierNameInput").setText("Transporte Demo UI")
+        dialog.findChild(QLineEdit, "carrierCuitInput").setText("30700000992")
+        dialog.findChild(QPushButton, "saveCarrierButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "newCarrierButton").click(), fill_new)
+    carrier = Carrier.get(Carrier.cuit == "30700000992")
+    assert carrier.name == "Transporte Demo UI"
+    assert table.item(0, 0).text() == "Transporte Demo UI"
+
+    def fill_edit(dialog):
+        dialog.findChild(QLineEdit, "carrierNameInput").setText("Transporte Demo UI Editado")
+        dialog.findChild(QPushButton, "saveCarrierButton").click()
+
+    table.setCurrentCell(0, 0)
+    _run_modal(app, lambda: window.findChild(QPushButton, "editCarrierButton").click(), fill_edit)
+    carrier = Carrier.get_by_id(carrier.id)
+    assert carrier.name == "Transporte Demo UI Editado"
+    assert table.item(0, 0).text() == "Transporte Demo UI Editado"
+
+
+def test_drivers_abm_page_creates_edits_with_carrier_combo(db):
+    from PyQt5.QtWidgets import QComboBox, QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Driver
+
+    carrier = Carrier.create(name="Transportista Chofer UI")
+    app, window = _admin_window("admin_drivers_abm")
+    table = window.findChild(QTableWidget, "newDriverButtonTable")
+    assert table is not None
+
+    def fill_new(dialog):
+        _set_combo(dialog.findChild(QComboBox, "driverCarrierInput"), carrier.id)
+        dialog.findChild(QLineEdit, "driverNameInput").setText("Chofer Demo UI")
+        dialog.findChild(QLineEdit, "driverDocumentInput").setText("DNI123")
+        dialog.findChild(QPushButton, "saveDriverButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "newDriverButton").click(), fill_new)
+    driver = Driver.get(Driver.document == "DNI123")
+    assert driver.name == "Chofer Demo UI"
+    assert driver.carrier == carrier
+    assert table.item(0, 1).text() == "Transportista Chofer UI"
+
+    def fill_edit(dialog):
+        dialog.findChild(QLineEdit, "driverNameInput").setText("Chofer Demo UI Editado")
+        dialog.findChild(QPushButton, "saveDriverButton").click()
+
+    table.setCurrentCell(0, 0)
+    _run_modal(app, lambda: window.findChild(QPushButton, "editDriverButton").click(), fill_edit)
+    driver = Driver.get_by_id(driver.id)
+    assert driver.name == "Chofer Demo UI Editado"
+    assert table.item(0, 0).text() == "Chofer Demo UI Editado"
+
+
+def test_trucks_abm_page_creates_edits_with_carrier_combo(db):
+    from PyQt5.QtWidgets import QComboBox, QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Truck
+
+    carrier = Carrier.create(name="Transportista Camion UI")
+    app, window = _admin_window("admin_trucks_abm")
+    table = window.findChild(QTableWidget, "newTruckButtonTable")
+    assert table is not None
+
+    def fill_new(dialog):
+        _set_combo(dialog.findChild(QComboBox, "truckCarrierInput"), carrier.id)
+        dialog.findChild(QLineEdit, "truckDomainInput").setText("lun123")
+        dialog.findChild(QPushButton, "saveTruckButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "newTruckButton").click(), fill_new)
+    truck = Truck.get(Truck.domain == "LUN123")
+    assert truck.carrier == carrier
+    assert table.item(0, 0).text() == "LUN123"
+    assert table.item(0, 1).text() == "Transportista Camion UI"
+
+    def fill_edit(dialog):
+        dialog.findChild(QLineEdit, "truckDomainInput").setText("lun456")
+        dialog.findChild(QPushButton, "saveTruckButton").click()
+
+    table.setCurrentCell(0, 0)
+    _run_modal(app, lambda: window.findChild(QPushButton, "editTruckButton").click(), fill_edit)
+    truck = Truck.get_by_id(truck.id)
+    assert truck.domain == "LUN456"
+    assert table.item(0, 0).text() == "LUN456"
+
+
+def test_products_abm_page_creates_edits_and_refreshes_grid(db):
+    from PyQt5.QtWidgets import QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Product
+
+    app, window = _admin_window("admin_products_abm")
+    table = window.findChild(QTableWidget, "newProductButtonTable")
+    assert table is not None
+
+    def fill_new(dialog):
+        dialog.findChild(QLineEdit, "productNameInput").setText("Producto Demo UI")
+        dialog.findChild(QLineEdit, "productUnitInput").setText("bolsas")
+        dialog.findChild(QPushButton, "saveProductButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "newProductButton").click(), fill_new)
+    product = Product.get(Product.name == "Producto Demo UI")
+    assert product.unit == "bolsas"
+    assert table.item(0, 0).text() == "Producto Demo UI"
+
+    def fill_edit(dialog):
+        dialog.findChild(QLineEdit, "productNameInput").setText("Producto Demo UI Editado")
+        dialog.findChild(QPushButton, "saveProductButton").click()
+
+    table.setCurrentCell(0, 0)
+    _run_modal(app, lambda: window.findChild(QPushButton, "editProductButton").click(), fill_edit)
+    product = Product.get_by_id(product.id)
+    assert product.name == "Producto Demo UI Editado"
+    assert table.item(0, 0).text() == "Producto Demo UI Editado"
 
 
 def test_master_abm_documents_autoabm_debt():

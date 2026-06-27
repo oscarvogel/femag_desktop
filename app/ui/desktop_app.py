@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from peewee import InterfaceError, OperationalError, SqliteDatabase
+from peewee import InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, QSignalBlocker, Qt
 from PyQt5.QtWidgets import (
     QApplication,
@@ -27,8 +27,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from app.config.database import bind_database, initialize_runtime_database
-from app.models import ALL_MODELS
+from app.config.database import initialize_demo_database, initialize_runtime_database
+from app.config.schema import ensure_runtime_schema
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
@@ -63,10 +63,9 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
 
 def _prepare_database(*, demo_mode: bool):
     if demo_mode:
-        database = SqliteDatabase(":memory:")
-        bind_database(database)
+        database = initialize_demo_database()
         database.connect(reuse_if_open=True)
-        database.create_tables(ALL_MODELS, safe=True)
+        ensure_runtime_schema(database)
         return database
     try:
         database = initialize_runtime_database()

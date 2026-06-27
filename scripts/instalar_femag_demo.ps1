@@ -1,4 +1,5 @@
 param(
+    [string]$InstallDir = "",
     [string]$InstallRoot = "$env:USERPROFILE\FEMAG",
     [string]$RepoUrl = "https://github.com/oscarvogel/femag_desktop.git",
     [string]$Branch = "main",
@@ -25,6 +26,13 @@ function Test-Command {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Assert-NativeSuccess {
+    param([string]$Step)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step fallo con codigo de salida $LASTEXITCODE."
+    }
+}
+
 function Install-WithWinget {
     param(
         [string]$PackageId,
@@ -38,6 +46,7 @@ function Install-WithWinget {
     }
     Write-Info "Intentando instalar $DisplayName con winget..."
     winget install --id $PackageId --exact --source winget --accept-source-agreements --accept-package-agreements
+    Assert-NativeSuccess "Instalacion de $DisplayName con winget"
 }
 
 function Ensure-Git {
@@ -49,6 +58,9 @@ function Ensure-Git {
         throw "Git no quedo disponible en PATH. Cerrar y abrir PowerShell, o instalar Git manualmente."
     }
     git --version
+    Assert-NativeSuccess "Verificacion de Git"
+    git config --global http.sslBackend schannel
+    Assert-NativeSuccess "Configuracion TLS de Git"
 }
 
 function Test-Python {
@@ -85,16 +97,21 @@ function Invoke-BasePython {
     param([string[]]$Arguments)
     if (Test-Command "py") {
         & py -3.12 @Arguments
+        Assert-NativeSuccess "Python base"
         return
     }
     & python @Arguments
+    Assert-NativeSuccess "Python base"
 }
 
 function Invoke-VenvPython {
     param([string[]]$Arguments)
     $pythonExe = Join-Path $RepoDir ".venv\Scripts\python.exe"
     & $pythonExe @Arguments
+    Assert-NativeSuccess "Python del entorno virtual"
 }
+
+$PipNetworkOptions = @("--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org")
 
 Write-Host "FEMAG Desktop - instalador demo Orden de carga" -ForegroundColor Green
 Write-Host "Repo: $RepoUrl"
@@ -106,19 +123,24 @@ Ensure-Git
 Ensure-Python
 
 Write-Step "Preparando carpeta de instalacion"
-New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-$RepoDir = Join-Path $InstallRoot "femag_desktop"
+$RepoDir = if ($InstallDir) { $InstallDir } else { Join-Path $InstallRoot "femag_desktop" }
+$RepoParent = Split-Path -Parent $RepoDir
+New-Item -ItemType Directory -Force -Path $RepoParent | Out-Null
 
 if (-not (Test-Path $RepoDir)) {
     Write-Step "Clonando FEMAG Desktop"
     git clone --branch $Branch $RepoUrl $RepoDir
+    Assert-NativeSuccess "Clone de FEMAG Desktop"
 } else {
     Write-Step "Actualizando repo existente"
     Push-Location $RepoDir
     try {
         git fetch origin
+        Assert-NativeSuccess "Fetch de FEMAG Desktop"
         git checkout $Branch
+        Assert-NativeSuccess "Checkout de rama $Branch"
         git pull --ff-only origin $Branch
+        Assert-NativeSuccess "Pull de rama $Branch"
     } finally {
         Pop-Location
     }
@@ -132,24 +154,29 @@ try {
     }
 
     Write-Step "Actualizando pip"
-    Invoke-VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip")
+    Invoke-VenvPython -Arguments (@("-m", "pip", "install") + $PipNetworkOptions + @("--upgrade", "pip"))
 
     if (Test-Path "requirements.txt") {
         Write-Step "Instalando dependencias"
-        Invoke-VenvPython -Arguments @("-m", "pip", "install", "-r", "requirements.txt")
+        Invoke-VenvPython -Arguments (@("-m", "pip", "install") + $PipNetworkOptions + @("-r", "requirements.txt"))
     } else {
         Write-Info "No se encontro requirements.txt; se omite instalacion de dependencias."
     }
 
+    Write-Step "Configurando base SQLite local de demo"
+    $DemoDatabasePath = "femag_demo.sqlite3"
+    $EnvFile = Join-Path $RepoDir ".env"
+    [System.IO.File]::WriteAllLines($EnvFile, @(
+        "FEMAG_DB_ENGINE=sqlite",
+        "FEMAG_SQLITE_PATH=femag_demo.sqlite3",
+        "FEMAG_DEMO=1"
+    ), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+    $env:FEMAG_ENV_FILE = $EnvFile
+    Write-Info "Demo configurada para usar SQLite local: $DemoDatabasePath"
+
     if (Test-Path "scripts\init_db.py") {
-        Write-Step "Inicializando base FEMAG si corresponde"
-        try {
-            Invoke-VenvPython -Arguments @("scripts\init_db.py")
-        } catch {
-            Write-Host "    No se pudo inicializar la base operativa con init_db.py." -ForegroundColor Yellow
-            Write-Host "    La demo integral continuara con SQLite local en backups." -ForegroundColor Yellow
-            Write-Host "    Detalle: $($_.Exception.Message)" -ForegroundColor Yellow
-        }
+        Write-Step "Inicializando schema FEMAG en SQLite demo"
+        Invoke-VenvPython -Arguments @("scripts\init_db.py")
     } else {
         Write-Info "No se encontro scripts\init_db.py; se omite inicializacion."
     }
@@ -158,7 +185,7 @@ try {
         Write-Step "Generando demo integral Orden de carga"
         Invoke-VenvPython -Arguments @(
             "scripts\issue_73_integral_demo.py",
-            "--database-path", "backups\issue_73_integral_demo.sqlite3",
+            "--database-path", $DemoDatabasePath,
             "--evidence-dir", "docs\prints\issue_73_integral_demo"
         )
     } else {
