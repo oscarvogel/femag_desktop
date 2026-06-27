@@ -47,24 +47,39 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             disabled_reason=source.disabled_reason,
         )
 
+    transport_children = [
+        item
+        for item in (
+            approved_item("Transportistas"),
+            approved_item("Choferes"),
+            approved_item("Camiones"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
+    principal_items = [
+        approved_item("Dashboard"),
+        approved_item("Órdenes de carga"),
+        approved_item("Remitos"),
+        approved_item("F150", "Generar F150"),
+        approved_item("Clientes"),
+    ]
+    if transport_children:
+        principal_items.append(MenuItemView(title="Transporte", children=transport_children))
+    principal_items.extend(
+        [
+            approved_item("Productos"),
+            approved_item("Cuenta corriente", route_key="placeholder"),
+            approved_item("Reportes", route_key="placeholder"),
+            approved_item("Configuración", "Parámetros", route_key="placeholder"),
+        ]
+    )
+
     return SidebarTreeSpec(
         sections=[
             MenuSectionView(
                 title="Principal",
-                items=[
-                    approved_item("Dashboard"),
-                    approved_item("Órdenes de carga"),
-                    approved_item("Remitos"),
-                    approved_item("F150", "Generar F150"),
-                    approved_item("Clientes"),
-                    approved_item("Choferes"),
-                    approved_item("Transportistas"),
-                    approved_item("Camiones"),
-                    approved_item("Productos"),
-                    approved_item("Cuenta corriente", route_key="placeholder"),
-                    approved_item("Reportes", route_key="placeholder"),
-                    approved_item("Configuración", "Parámetros", route_key="placeholder"),
-                ],
+                items=principal_items,
             )
         ],
         active_route=active_route,

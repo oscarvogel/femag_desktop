@@ -85,6 +85,24 @@ def test_menu_marks_load_orders_as_real_module(db):
     assert summary_item.placeholder is True
 
 
+def test_sidebar_spec_groups_transport_abms(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_transport_menu", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    transport = next(item for item in principal.items if item.title == "Transporte")
+
+    assert [child.title for child in transport.children] == ["Transportistas", "Choferes", "Camiones"]
+    assert [child.route_key for child in transport.children] == ["carriers", "drivers", "trucks"]
+    assert "Choferes" not in [item.title for item in principal.items]
+    assert "Transportistas" not in [item.title for item in principal.items]
+    assert "Camiones" not in [item.title for item in principal.items]
+
+
 def test_app_smoke_command_runs():
     completed = subprocess.run(
         [sys.executable, "-m", "app.main", "--smoke"],

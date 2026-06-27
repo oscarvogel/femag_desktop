@@ -15,11 +15,24 @@ def _navigate_to_route(window, route):
 
     nav = window.findChild(QListWidget, "sidebar")
     assert nav is not None
+
+    def select_visible_route() -> bool:
+        for row in range(nav.count()):
+            item = nav.item(row)
+            if item.data(Qt.UserRole) == route:
+                nav.setCurrentRow(row)
+                return True
+        return False
+
+    if select_visible_route():
+        return
     for row in range(nav.count()):
         item = nav.item(row)
-        if item.data(Qt.UserRole) == route:
+        if item.data(Qt.UserRole) == "group:Transporte":
             nav.setCurrentRow(row)
-            return
+            break
+    if select_visible_route():
+        return
     raise AssertionError(f"Route not found in sidebar: {route}")
 
 
@@ -205,6 +218,41 @@ def test_desktop_exposes_minimal_master_abm_pages(db):
     assert readonly_window.findChild(QPushButton, "newTruckButton").isEnabled() is False
     assert readonly_window.findChild(QPushButton, "editTruckButton").isEnabled() is False
     assert readonly_window._route_indexes["load_orders"] >= 0
+
+
+def test_desktop_sidebar_groups_transport_abms_without_breaking_routes(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QListWidget, QPushButton
+
+    app, window = _admin_window("admin_issue85")
+    nav = window.findChild(QListWidget, "sidebar")
+    assert nav is not None
+
+    rows = [nav.item(row) for row in range(nav.count())]
+    transport_row = next(row for row, item in enumerate(rows) if item.text() == "Transporte")
+    assert nav.item(transport_row).data(Qt.UserRole) == "group:Transporte"
+
+    nav.setCurrentRow(transport_row)
+    app.processEvents()
+    rows = [nav.item(row) for row in range(nav.count())]
+    labels = [item.text().strip() for item in rows]
+    transport_index = labels.index("Transporte")
+    assert labels[transport_index + 1 : transport_index + 4] == ["Transportistas", "Choferes", "Camiones"]
+
+    _navigate_to_route(window, "carriers")
+    assert window.stack.currentIndex() == window._route_indexes["carriers"]
+    assert window.findChild(QPushButton, "newCarrierButton") is not None
+
+    _navigate_to_route(window, "drivers")
+    assert window.stack.currentIndex() == window._route_indexes["drivers"]
+    assert window.findChild(QPushButton, "newDriverButton") is not None
+
+    _navigate_to_route(window, "trucks")
+    assert window.stack.currentIndex() == window._route_indexes["trucks"]
+    assert window.findChild(QPushButton, "newTruckButton") is not None
+
+    _navigate_to_route(window, "load_orders")
+    assert window.stack.currentIndex() == window._route_indexes["load_orders"]
 
 
 def test_clients_abm_page_creates_edits_and_refreshes_grid(db):
