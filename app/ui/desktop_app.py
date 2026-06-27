@@ -91,6 +91,8 @@ class FemagDesktopWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.nav = QListWidget()
         self._route_indexes: dict[str, int] = {}
+        self._expanded_sidebar_groups: set[str] = set()
+        self._current_route = "dashboard"
         self._build()
 
     def _build(self) -> None:
@@ -163,16 +165,55 @@ class FemagDesktopWindow(QMainWindow):
         self.nav.setObjectName("sidebar")
         self.nav.setFixedWidth(250)
         self.nav.setSpacing(4)
-        for section in self.shell.sidebar.sections if self.shell.sidebar else []:
-            for item in section.items:
-                row = QListWidgetItem(item.title)
-                route = item.route_key or "placeholder"
-                row.setData(Qt.UserRole, route)
-                if item.placeholder:
-                    row.setForeground(Qt.gray)
-                    row.setToolTip(item.disabled_reason or future_module_message())
-                self.nav.addItem(row)
+        self._populate_sidebar()
         return self.nav
+
+    def _populate_sidebar(self) -> None:
+        with QSignalBlocker(self.nav):
+            self.nav.clear()
+            current_row = 0
+            for section in self.shell.sidebar.sections if self.shell.sidebar else []:
+                for item in section.items:
+                    row_index = self.nav.count()
+                    row = QListWidgetItem(item.title)
+                    if item.children:
+                        group_key = f"group:{item.title}"
+                        row.setData(Qt.UserRole, group_key)
+                        row.setToolTip("Mostrar u ocultar ABMs relacionados.")
+                        self.nav.addItem(row)
+                        child_routes = {child.route_key for child in item.children}
+                        if self._current_route in child_routes:
+                            self._expanded_sidebar_groups.add(item.title)
+                        if item.title in self._expanded_sidebar_groups:
+                            for child in item.children:
+                                child_row_index = self.nav.count()
+                                child_row = QListWidgetItem(f"    {child.title}")
+                                route = child.route_key or "placeholder"
+                                child_row.setData(Qt.UserRole, route)
+                                if child.placeholder:
+                                    child_row.setForeground(Qt.gray)
+                                    child_row.setToolTip(child.disabled_reason or future_module_message())
+                                self.nav.addItem(child_row)
+                                if route == self._current_route:
+                                    current_row = child_row_index
+                        continue
+                    route = item.route_key or "placeholder"
+                    row.setData(Qt.UserRole, route)
+                    if item.placeholder:
+                        row.setForeground(Qt.gray)
+                        row.setToolTip(item.disabled_reason or future_module_message())
+                    self.nav.addItem(row)
+                    if route == self._current_route:
+                        current_row = row_index
+            if self.nav.count():
+                self.nav.setCurrentRow(current_row)
+
+    def _toggle_sidebar_group(self, group_title: str) -> None:
+        if group_title in self._expanded_sidebar_groups:
+            self._expanded_sidebar_groups.remove(group_title)
+        else:
+            self._expanded_sidebar_groups.add(group_title)
+        self._populate_sidebar()
 
     def _statusbar(self) -> QWidget:
         bar = QFrame()
@@ -195,7 +236,11 @@ class FemagDesktopWindow(QMainWindow):
         if not item:
             return
         route = item.data(Qt.UserRole)
+        if isinstance(route, str) and route.startswith("group:"):
+            self._toggle_sidebar_group(route.removeprefix("group:"))
+            return
         if route in self._route_indexes:
+            self._current_route = route
             self.stack.setCurrentIndex(self._route_indexes[route])
 
     def _dashboard_page(self) -> QWidget:
