@@ -76,6 +76,24 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrderProduct.select().count() == 1
 
 
+def test_load_order_dialog_layout_keeps_work_sections_readable(db):
+    from PyQt5.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue89"), "ui_issue89")
+    app.processEvents()
+
+    assert dialog.minimumWidth() >= 980
+    assert dialog.minimumHeight() >= 760
+    assert dialog.findChild(QScrollArea, "loadOrderEntryScrollArea") is not None
+    assert dialog.findChild(QSplitter, "loadOrderEntryWorkSplitter") is not None
+    assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").minimumHeight() >= 180
+    assert dialog.findChild(QTableWidget, "loadOrderProductDraftTable").minimumHeight() >= 160
+
+
 def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
     from PyQt5.QtWidgets import QApplication, QComboBox
 
