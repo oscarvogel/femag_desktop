@@ -267,6 +267,7 @@ class FemagDesktopWindow(QMainWindow):
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
+        close_button = _action_button("closeLoadOrderButton", "Cerrar")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         search_input = QLineEdit()
@@ -274,7 +275,7 @@ class FemagDesktopWindow(QMainWindow):
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(260)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, edit_button, issue_button, print_button, annul_button):
+        for button in (new_button, edit_button, issue_button, close_button, print_button, annul_button):
             actions.addWidget(button)
         actions.addWidget(search_input)
         actions.addWidget(search_button)
@@ -374,20 +375,27 @@ class FemagDesktopWindow(QMainWindow):
             issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
             edit_button.setEnabled(False)
             edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+            close_button.setEnabled(False)
+            close_button.setToolTip("Seleccione una orden emitida para cerrar.")
 
         def set_action_state(order: LoadOrder) -> None:
             is_pending = order.status == LoadOrder.STATUS_PENDING
+            is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
+            close_button.setEnabled(is_issued)
             if is_pending:
                 issue_button.setToolTip("Emitir la orden seleccionada.")
                 edit_button.setToolTip("Editar la orden pendiente seleccionada.")
+                close_button.setToolTip("Primero emita la orden para poder cerrarla.")
             elif order.status == LoadOrder.STATUS_ISSUED:
                 issue_button.setToolTip("La orden ya esta emitida.")
                 edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+                close_button.setToolTip("Cerrar la orden y liberar el chofer si no tiene otra carga activa.")
             else:
                 issue_button.setToolTip("Solo se pueden emitir ordenes pendientes.")
                 edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+                close_button.setToolTip("Solo se pueden cerrar ordenes emitidas.")
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -436,6 +444,22 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.setText(str(exc))
 
+        def close_order() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para cerrar.")
+                return
+            if order.status != LoadOrder.STATUS_ISSUED:
+                feedback.setText("Solo se pueden cerrar ordenes emitidas.")
+                return
+            try:
+                closed = service.change_status(order, LoadOrder.STATUS_CLOSED, reason="Cierre operativo")
+                feedback.setText(f"Orden {_format_order_number(closed.order_number)} cerrada.")
+                selected_order_id["value"] = closed.id
+                refresh()
+            except Exception as exc:
+                feedback.setText(str(exc))
+
         def print_or_reprint_order() -> None:
             order = selected_order()
             if order is None:
@@ -468,6 +492,7 @@ class FemagDesktopWindow(QMainWindow):
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
         issue_button.clicked.connect(issue)
+        close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_or_reprint_order)
         refresh()
