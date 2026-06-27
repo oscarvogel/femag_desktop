@@ -247,6 +247,8 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
         pallets=[],
     )
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -276,6 +278,7 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     app.processEvents()
     assert "vista a4" in feedback.text().lower()
     html_path = next(tmp_path.glob("orden_y_resumen_*.html"))
+    assert opened_outputs == [html_path]
     html = html_path.read_text(encoding="utf-8")
     assert "Orden de carga" in html
     assert "Hoja resumen / sobre de carga" in html
@@ -283,6 +286,7 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
     assert "reimpresion" in feedback.text().lower()
+    assert opened_outputs == [html_path, html_path]
     assert "Reimpresion" in next(tmp_path.glob("orden_y_resumen_*.html")).read_text(encoding="utf-8")
 
     window.findChild(QPushButton, "annulLoadOrderButton").click()
@@ -295,6 +299,141 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
         .count()
         == 1
     )
+
+
+def test_load_order_page_edits_pending_order_adding_destination_and_product(db, monkeypatch):
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_edit_order_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Editar UI")
+    driver = Driver.create(name="Chofer Editar UI", carrier=carrier)
+    truck = Truck.create(domain="EDI123", carrier=carrier)
+    product_a = Product.create(name="Producto Editar A", unit="kg")
+    product_b = Product.create(name="Producto Editar B", unit="bolsas")
+    client_a = Client.create(name="Cliente Editar A", cuit="30700008801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta A",
+    )
+    client_b = Client.create(name="Cliente Editar B", cuit="30700008802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta B",
+    )
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client_a,
+                "delivery_address": address_a,
+                "products": [{"product": product_a, "quantity": 10}],
+            }
+        ],
+        pallets=[],
+    )
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product_b.id,
+            "product_label": product_b.name,
+            "quantity": 7,
+            "unit": product_b.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+
+    def fill_edit_dialog():
+        dialog = app.activeModalWidget()
+        assert dialog is not None
+        assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").rowCount() == 1
+        _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_b.id)
+        _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_b.id)
+        dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+        dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(1, 0)
+        dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+        dialog.findChild(QPushButton, "saveLoadOrderButton").click()
+
+    QTimer.singleShot(0, fill_edit_dialog)
+    window.findChild(QPushButton, "editLoadOrderButton").click()
+    app.processEvents()
+
+    assert LoadOrder.get_by_id(order.id).order_number == order.order_number
+    assert LoadOrderDestination.select().where(LoadOrderDestination.order == order).count() == 2
+    assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 2
+    assert "VARIOS" in window.findChild(QTableWidget, "loadOrdersTable").item(0, 2).text()
+
+
+def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_issued_actions_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Emitida UI")
+    driver = Driver.create(name="Chofer Emitida UI", carrier=carrier)
+    truck = Truck.create(domain="EMI123", carrier=carrier)
+    client = Client.create(name="Cliente Emitida UI", cuit="30700008803", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Emitida",
+    )
+    product = Product.create(name="Producto Emitida UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    LoadOrderOperationService(current_user=user.username).issue(order)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    issue_button = window.findChild(QPushButton, "issueLoadOrderButton")
+    edit_button = window.findChild(QPushButton, "editLoadOrderButton")
+
+    assert issue_button.isEnabled() is False
+    assert edit_button.isEnabled() is False
+    assert "emitida" in issue_button.toolTip().lower()
+    assert "pendientes" in edit_button.toolTip().lower()
 
 
 def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):
@@ -360,7 +499,7 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
 
     assert search_input is not None
     assert reprint_button is None or not reprint_button.isVisible()
-    assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir / Reimprimir"
+    assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
     assert table.rowCount() == 2
 
     search_input.setText("Norte")

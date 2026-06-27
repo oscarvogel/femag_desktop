@@ -87,6 +87,23 @@ class LoadOrderService:
             raise ValueError("El estado de la orden debe cambiarse con change_status o annul_order.")
         order = LoadOrder.get_by_id(order.id)
         old_snapshot = self._snapshot(order)
+        destinations = changes.pop("destinations", None)
+        pallets = changes.pop("pallets", None)
+        normalized_destinations = None
+        normalized_pallets = None
+        if destinations is not None:
+            if order.status != LoadOrder.STATUS_PENDING:
+                raise ValueError("Solo se pueden editar clientes y productos de ordenes pendientes.")
+            normalized_destinations = self._validate_destinations(
+                destinations,
+                legacy_client=None,
+                legacy_delivery_address=None,
+                legacy_products=None,
+            )
+        if pallets is not None:
+            if order.status != LoadOrder.STATUS_PENDING:
+                raise ValueError("Solo se pueden editar pallets de ordenes pendientes.")
+            normalized_pallets = self._validate_pallets(pallets)
         new_driver = changes.get("driver")
         candidate_carrier = changes.get("carrier", order.carrier)
         candidate_driver = changes.get("driver", order.driver)
@@ -101,10 +118,15 @@ class LoadOrderService:
             if hasattr(order, field):
                 setattr(order, field, value)
         order.updated_by = self.current_user
-        order.save()
-        if previous_driver is not None:
-            self.driver_availability.release_driver(previous_driver, order)
-            self.driver_availability.lock_driver(order.driver, order)
+        with database_proxy.atomic():
+            order.save()
+            if normalized_destinations is not None:
+                self._replace_destinations(order, normalized_destinations)
+            if normalized_pallets is not None:
+                self._replace_pallets(order, normalized_pallets)
+            if previous_driver is not None:
+                self.driver_availability.release_driver(previous_driver, order)
+                self.driver_availability.lock_driver(order.driver, order)
         self.audit_service.record(
             user=self.current_user,
             module="Ordenes de carga",

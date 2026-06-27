@@ -389,6 +389,48 @@ def test_update_order_rejects_direct_status_changes(db):
     assert type(order).get_by_id(order.id).status == LoadOrder.STATUS_PENDING
 
 
+def test_update_pending_order_replaces_destinations_and_products(db):
+    from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    other_client = Client.create(name="Cliente Editado", cuit="30700008888", iva_condition="RI")
+    other_address = ClientAddress.create(
+        client=other_client,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta editada",
+    )
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    updated = service.update_order(
+        order,
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["product"], "quantity": 100}],
+            },
+            {
+                "client": other_client,
+                "delivery_address": other_address,
+                "products": [{"product": data["other_product"], "quantity": 25}],
+            },
+        ],
+    )
+
+    destinations = list(LoadOrderDestination.select().where(LoadOrderDestination.order == updated))
+    products = list(LoadOrderProduct.select().where(LoadOrderProduct.order == updated))
+
+    assert updated.id == order.id
+    assert [destination.client.name for destination in destinations] == ["Cliente FEMAG", "Cliente Editado"]
+    assert [product.product.name for product in products] == ["Fecula de mandioca", "Almidon"]
+    assert [product.quantity for product in products] == [100, 25]
+
+
 def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService

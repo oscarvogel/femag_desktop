@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import webbrowser
 
 from peewee import InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, QSignalBlocker, Qt
@@ -260,16 +262,16 @@ class FemagDesktopWindow(QMainWindow):
         actions.setContentsMargins(10, 10, 10, 10)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
+        edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
-        print_button.setText("Imprimir / Reimprimir")
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(260)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, issue_button, print_button, annul_button):
+        for button in (new_button, edit_button, issue_button, print_button, annul_button):
             actions.addWidget(button)
         actions.addWidget(search_input)
         actions.addWidget(search_button)
@@ -358,12 +360,31 @@ class FemagDesktopWindow(QMainWindow):
             detail_labels["Transportista"].setText(order.carrier.name)
             detail_labels["Camión / Acoplado"].setText(order.truck.domain)
             detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
+            set_action_state(order)
 
         def clear_detail() -> None:
             detail_labels["number"].setText("OC-000000")
             detail_labels["status"].setText("-")
             for field in spec.detail_fields:
                 detail_labels[field].setText("-")
+            issue_button.setEnabled(False)
+            issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
+            edit_button.setEnabled(False)
+            edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+
+        def set_action_state(order: LoadOrder) -> None:
+            is_pending = order.status == LoadOrder.STATUS_PENDING
+            issue_button.setEnabled(is_pending)
+            edit_button.setEnabled(is_pending)
+            if is_pending:
+                issue_button.setToolTip("Emitir la orden seleccionada.")
+                edit_button.setToolTip("Editar la orden pendiente seleccionada.")
+            elif order.status == LoadOrder.STATUS_ISSUED:
+                issue_button.setToolTip("La orden ya esta emitida.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+            else:
+                issue_button.setToolTip("Solo se pueden emitir ordenes pendientes.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -371,6 +392,20 @@ class FemagDesktopWindow(QMainWindow):
                 selected_order_id["value"] = dialog.created_order.id
                 refresh()
                 feedback.setText(f"Orden {_format_order_number(dialog.created_order.order_number)} guardada.")
+
+        def open_edit_order_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para editar.")
+                return
+            if order.status != LoadOrder.STATUS_PENDING:
+                feedback.setText("Solo se pueden editar ordenes pendientes.")
+                return
+            dialog = LoadOrderEntryDialog(service, self.shell.username, self, order=order)
+            if dialog.exec_() == QDialog.Accepted and dialog.created_order is not None:
+                selected_order_id["value"] = dialog.created_order.id
+                refresh()
+                feedback.setText(f"Orden {_format_order_number(dialog.created_order.order_number)} actualizada.")
 
         def issue() -> None:
             order = selected_order()
@@ -406,9 +441,11 @@ class FemagDesktopWindow(QMainWindow):
             try:
                 if _has_printed_load_order(order):
                     path = operation_service.reprint_order(order)
+                    _open_print_output(path)
                     feedback.setText(f"Reimpresion A4 generada: {path}")
                 else:
                     path = operation_service.print_order(order)
+                    _open_print_output(path)
                     feedback.setText(f"Vista A4 generada: {path}")
             except Exception as exc:
                 feedback.setText(str(exc))
@@ -424,6 +461,7 @@ class FemagDesktopWindow(QMainWindow):
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
+        edit_button.clicked.connect(open_edit_order_dialog)
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
         issue_button.clicked.connect(issue)
@@ -514,23 +552,25 @@ def _detail_panel(spec) -> QFrame:
 
 
 class LoadOrderEntryDialog(QDialog):
-    def __init__(self, service: LoadOrderService, current_user: str, parent=None):
+    def __init__(self, service: LoadOrderService, current_user: str, parent=None, *, order: LoadOrder | None = None):
         super().__init__(parent)
         self.service = service
         self.current_user = current_user
+        self.order = LoadOrder.get_by_id(order.id) if order is not None else None
         self.created_order: LoadOrder | None = None
         self.destinations: list[dict] = []
         self.setObjectName("loadOrderEntryDialog")
-        self.setWindowTitle("Nueva orden de carga")
+        self.setWindowTitle("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
         self.resize(920, 720)
         self._build()
         self._populate_options()
+        self._load_order()
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 14)
         root.setSpacing(12)
-        title = QLabel("Nueva orden de carga")
+        title = QLabel("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
         hint = QLabel("Seleccione el chofer. El transportista se cargara automaticamente. Luego elija camion y complete los destinos.")
@@ -656,6 +696,34 @@ class LoadOrderEntryDialog(QDialog):
         self.carrier_combo.setEnabled(False)
         _fill_combo(self.client_combo, _client_options())
         self._refresh_address_options()
+
+    def _load_order(self) -> None:
+        if self.order is None:
+            return
+        self.order_date.setDate(QDate(self.order.date.year, self.order.date.month, self.order.date.day))
+        _set_combo(self.driver_combo, self.order.driver.id)
+        self._refresh_from_driver()
+        _set_combo(self.truck_combo, self.order.truck.id)
+        self.observations_input.setText(self.order.observations or "")
+        self.destinations = [
+            {
+                "client_id": destination.client.id,
+                "address_id": destination.delivery_address.id,
+                "client_label": destination.client.name,
+                "address_label": f"{destination.delivery_address.client.name} - {destination.delivery_address.address}, {destination.delivery_address.city}",
+                "products": [
+                    {
+                        "product_id": product.product.id,
+                        "product_label": product.product.name,
+                        "quantity": product.quantity,
+                        "unit": product.unit,
+                    }
+                    for product in destination.products
+                ],
+            }
+            for destination in self.order.destinations.order_by()
+        ]
+        self._render_destinations()
 
     def _refresh_from_driver(self) -> None:
         driver_id = self.driver_combo.currentData()
@@ -800,15 +868,27 @@ class LoadOrderEntryDialog(QDialog):
                         ],
                     }
                 )
-            self.created_order = self.service.create_order(
-                carrier=Carrier.get_by_id(self.carrier_combo.currentData()),
-                driver=Driver.get_by_id(self.driver_combo.currentData()),
-                truck=Truck.get_by_id(self.truck_combo.currentData()),
-                destinations=destinations,
-                pallets=[],
-                observations=self.observations_input.text().strip() or None,
-                order_date=self.order_date.date().toPyDate(),
-            )
+            if self.order is None:
+                self.created_order = self.service.create_order(
+                    carrier=Carrier.get_by_id(self.carrier_combo.currentData()),
+                    driver=Driver.get_by_id(self.driver_combo.currentData()),
+                    truck=Truck.get_by_id(self.truck_combo.currentData()),
+                    destinations=destinations,
+                    pallets=[],
+                    observations=self.observations_input.text().strip() or None,
+                    order_date=self.order_date.date().toPyDate(),
+                )
+            else:
+                self.created_order = self.service.update_order(
+                    self.order,
+                    carrier=Carrier.get_by_id(self.carrier_combo.currentData()),
+                    driver=Driver.get_by_id(self.driver_combo.currentData()),
+                    truck=Truck.get_by_id(self.truck_combo.currentData()),
+                    destinations=destinations,
+                    pallets=[],
+                    observations=self.observations_input.text().strip() or None,
+                    date=self.order_date.date().toPyDate(),
+                )
             self.accept()
         except Exception as exc:
             self.feedback.setText(str(exc))
@@ -948,6 +1028,15 @@ def _has_printed_load_order(order: LoadOrder) -> bool:
         )
     except (InterfaceError, OperationalError):
         return False
+
+
+def _open_print_output(path: Path) -> None:
+    target = Path(path).resolve()
+    startfile = getattr(os, "startfile", None)
+    if startfile is not None:
+        startfile(str(target))
+        return
+    webbrowser.open(target.as_uri())
 
 
 def _matches_load_order_query(order: LoadOrder, query: str) -> bool:

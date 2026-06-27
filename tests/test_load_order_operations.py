@@ -29,15 +29,18 @@ def test_operational_flow_emits_prints_reprints_and_annuls_order(db, tmp_path):
     assert AuditLog.select().where(AuditLog.action == "reimprimir").count() == 1
 
 
-def test_operational_flow_rejects_printing_before_issue(db, tmp_path):
+def test_operational_flow_prints_pending_order_for_review(db, tmp_path):
+    from app.models.load_orders import LoadOrder
     from app.services.load_order_operation_service import LoadOrderOperationService
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
 
-    with pytest.raises(ValueError, match="Emita la orden"):
-        LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).print_order(order)
+    path = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).print_order(order)
+
+    assert Path(path).exists()
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_PENDING
 
 
 def test_operational_flow_rejects_reissuing_or_printing_annulled_order(db, tmp_path):

@@ -54,8 +54,6 @@ class LoadOrderOperationService:
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
-        if order.status == LoadOrder.STATUS_PENDING:
-            raise ValueError("Emita la orden antes de imprimir.")
         if order.status == LoadOrder.STATUS_ANNULLED:
             raise ValueError("No se puede imprimir una orden anulada.")
         if order.status == LoadOrder.STATUS_CLOSED:
