@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import webbrowser
 
 from peewee import InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, QSignalBlocker, Qt
@@ -264,7 +266,6 @@ class FemagDesktopWindow(QMainWindow):
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
-        print_button.setText("Imprimir / Reimprimir")
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
@@ -421,9 +422,11 @@ class FemagDesktopWindow(QMainWindow):
             try:
                 if _has_printed_load_order(order):
                     path = operation_service.reprint_order(order)
+                    _open_print_output(path)
                     feedback.setText(f"Reimpresion A4 generada: {path}")
                 else:
                     path = operation_service.print_order(order)
+                    _open_print_output(path)
                     feedback.setText(f"Vista A4 generada: {path}")
             except Exception as exc:
                 feedback.setText(str(exc))
@@ -1006,6 +1009,15 @@ def _has_printed_load_order(order: LoadOrder) -> bool:
         )
     except (InterfaceError, OperationalError):
         return False
+
+
+def _open_print_output(path: Path) -> None:
+    target = Path(path).resolve()
+    startfile = getattr(os, "startfile", None)
+    if startfile is not None:
+        startfile(str(target))
+        return
+    webbrowser.open(target.as_uri())
 
 
 def _matches_load_order_query(order: LoadOrder, query: str) -> bool:

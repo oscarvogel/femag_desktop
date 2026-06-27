@@ -247,6 +247,8 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
         pallets=[],
     )
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -276,6 +278,7 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     app.processEvents()
     assert "vista a4" in feedback.text().lower()
     html_path = next(tmp_path.glob("orden_y_resumen_*.html"))
+    assert opened_outputs == [html_path]
     html = html_path.read_text(encoding="utf-8")
     assert "Orden de carga" in html
     assert "Hoja resumen / sobre de carga" in html
@@ -283,6 +286,7 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
     assert "reimpresion" in feedback.text().lower()
+    assert opened_outputs == [html_path, html_path]
     assert "Reimpresion" in next(tmp_path.glob("orden_y_resumen_*.html")).read_text(encoding="utf-8")
 
     window.findChild(QPushButton, "annulLoadOrderButton").click()
@@ -446,7 +450,7 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
 
     assert search_input is not None
     assert reprint_button is None or not reprint_button.isVisible()
-    assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir / Reimprimir"
+    assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
     assert table.rowCount() == 2
 
     search_input.setText("Norte")
