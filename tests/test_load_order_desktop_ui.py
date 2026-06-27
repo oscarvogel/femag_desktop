@@ -454,6 +454,58 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
     assert "pendientes" in edit_button.toolTip().lower()
 
 
+def test_load_order_page_closes_issued_order_and_releases_driver(db):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_close_issued_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Cierre UI")
+    driver = Driver.create(name="Chofer Cierre UI", carrier=carrier)
+    truck = Truck.create(domain="CIE123", carrier=carrier)
+    client = Client.create(name="Cliente Cierre UI", cuit="30700008804", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Cierre",
+    )
+    product = Product.create(name="Producto Cierre UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    LoadOrderOperationService(current_user=user.username).issue(order)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    close_button = window.findChild(QPushButton, "closeLoadOrderButton")
+    assert close_button.isEnabled() is True
+
+    close_button.click()
+    app.processEvents()
+
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_CLOSED
+    assert Driver.get_by_id(driver.id).available is True
+    assert "cerrada" in window.findChild(QLabel, "loadOrderFeedback").text().lower()
+
+
 def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_path, monkeypatch):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QTableWidget
