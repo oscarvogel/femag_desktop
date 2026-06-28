@@ -30,14 +30,17 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 
 1. `main.py --demo-ui` → `run_desktop_app(demo_mode=True)` (desktop_app.py:53)
 2. `_prepare_database(True)` → SQLite, `ensure_runtime_schema()`
-3. `_demo_user()` → crea usuario `demo_visual` / `demo` si no existe
-4. Abre `FemagDesktopWindow` sin login — la `LoginWindow` es un stub
+3. `_ensure_demo_user()` → crea usuario `demo` / `demo` si no existe
+4. `_seed_demo_masters()` → carga datos demo estables (clientes, direcciones, transportista, chofer, camión, productos)
+5. Se muestra `LoginWindow` con hint "Modo demo: usuario 'demo', clave 'demo'"
+6. Botón "Completar demo" rellena automáticamente las credenciales
+7. Al aceptar, abre `FemagDesktopWindow` con usuario autenticado y datos cargados
 
 ### Flujo de inicio (producción-ui)
 
-1. `main.py --ui` → intenta MySQL, si falla abre igual sin DB
-2. No se muestra login real (LoginWindow.show() → return None)
-3. Ventana sin usuario → sidebar vacío, sin datos
+1. `main.py --ui` → intenta MySQL, si falla cierra con error
+2. Se muestra `LoginWindow` — el usuario debe ingresar credenciales existentes
+3. Al aceptar, abre `FemagDesktopWindow` con usuario autenticado
 
 ---
 
@@ -45,13 +48,20 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 
 | Aspecto | Estado |
 |---|---|
-| Login real | **NO** — `app/ui/login_window.py` es stub |
-| Demo auto-login | Sí — `_demo_user()` crea "demo_visual" con password "demo" |
+| Login real | **SÍ** — `app/ui/login_window.py` es un `QDialog` con usuario/contraseña |
+| Demo auto-login | Sí — `_ensure_demo_user()` crea usuario `demo` con password `demo` |
+| Botón "Completar demo" | Rellena automáticamente credenciales demo en la pantalla de login |
 | Creación manual | `scripts/create_admin_user.py <user> <pass>` |
-| Hash | bcrypt via `AuthService.authenticate()` |
-| Sesión | No hay sesión real — el user se pasa como string `current_user` a servicios |
+| Reset demo | `python scripts/demo_reset.py` — elimina y recrea la base demo |
+| Hash | PBKDF2-SHA256 via `AuthService` |
+| Sesión | El user autenticado se pasa como objeto `User` a `FemagDesktopWindow` |
 
-**⚠️ Limitación:** No existe pantalla de login funcional. En demo se saltea; en producción entra directamente sin auth.
+### Credenciales demo
+
+| Modo | Usuario | Contraseña |
+|---|---|---|
+| `--demo-ui` | `demo` | `demo` |
+| Producción (creación manual) | según `create_admin_user.py` | según `create_admin_user.py` |
 
 ---
 
@@ -243,8 +253,30 @@ La UI tiene `LoadOrderEntryDialog` con flujo:
 | `scripts/seed_issue_65_load_order_demo.py` | Seed básico de maestros + orden demo |
 | `scripts/issue_73_integral_demo.py` | Demo integral: crear → emitir → imprimir → reimprimir → anular → verificar cuenta corriente |
 | `scripts/migrate_schema.py` | Migración manual de schema |
+| `scripts/demo_reset.py` | Reset completo de la base demo + seed de datos estables |
 
-### 8.2 Test de humo
+### 8.2 Datos demo pre-cargados (vía `scripts/demo_reset.py` o `--demo-ui`)
+
+| Tipo | Nombre | Detalle |
+|---|---|---|
+| Cliente | Demo 1 | 2 direcciones activas: "Entrega Posadas", "Entrega Eldorado" |
+| Cliente | Demo 2 | 1 dirección activa: "Entrega Garuhapé" (prueba autoselección) |
+| Cliente | Sin Entregas Activas | 1 dirección inactiva (prueba feedback) |
+| Transportista | Transportista Demo SRL | Relacionado a chofer y camión |
+| Chofer | Chofer Demo | Pertenece a Transportista Demo SRL |
+| Camión | ABC123 | Pertenece a Transportista Demo SRL |
+| Producto | Fécula de mandioca | Unidad: kg |
+| Producto | Fécula de maíz | Unidad: kg |
+
+### 8.3 Reset de base demo
+
+```bash
+python scripts/demo_reset.py
+```
+
+Elimina `femag_demo.sqlite3` y recrea con schema + datos demo estables + usuario `demo`/`demo`.
+
+### 8.4 Test de humo
 
 ```bash
 py -3.12 -m app.main --smoke
@@ -305,7 +337,6 @@ Total: **114 passed** (al 28-Jun-2026)
 ### 9.3 Lo que NO cubren los tests
 
 - ❌ Impresión física PDF
-- ❌ Login real (no existe)
 - ❌ Remitos / F150 / pagos / cuenta corriente UI (placeholder)
 - ❌ Integración MySQL real (tests usan SQLite)
 - ❌ Rendición de transportistas
@@ -349,32 +380,121 @@ Esperado: genera HTML en `docs/prints/issue_73_integral_demo/`, muestra resumen 
 orden OC-00000X, estado Anulada, 3 destinos, 4 productos, cuenta corriente
 con movimientos originales y reversos.
 
-### 10.5 Demo UI (requiere display)
+### 10.5 Demo UI con datos precargados (requiere display)
 
 ```bash
+# Opción 1: Todo en un paso (auto-seed + login + UI)
 py -3.12 -m app.main --demo-ui
+
+# Opción 2: Reset manual + UI normal
+python scripts/demo_reset.py
+py -3.12 -m app.main --ui
 ```
 
-Esperado: ventana PyQt5 con sidebar, dashboard, ABMs funcionales.
+**Login:** Usuario `demo`, Contraseña `demo`. En modo `--demo-ui` hay un botón "Completar demo" que rellena las credenciales automáticamente.
+
 **Requiere servidor X/display.** No corre en terminal sin GUI.
 
-### 10.6 Verificación manual desde UI
+### 10.6 Circuito manual completo — Orden de carga
 
-1. **Dashboard**: ver tarjetas de resumen, acciones rápidas, alertas
-2. **Clientes**: crear, editar, ver listado con estado Activo/Inactivo
-3. **Domicilios**: crear dirección para cliente, verificar filtro por cliente
-4. **Transportistas**: crear, editar
-5. **Choferes**: crear ligado a transportista, verificar listado
-6. **Camiones**: crear ligado a transportista con patente
-7. **Productos**: crear con nombre y unidad
-8. **Órdenes de carga**:
-   - Crear orden con transportista, chofer, camión, cliente, dirección, producto
-   - Verificar que la orden aparece en el listado
-   - Emitir orden → ver estado "Emitida", chofer bloqueado
-   - Imprimir → ver HTML generado
-   - Cerrar orden → ver estado "Cerrada", chofer liberado
-   - Crear otra orden, emitir, anular → ver estado "Anulada"
-   - Verificar que orden anulada no permite emitir ni imprimir
+#### Paso 1: Login y datos pre-cargados
+
+1. Ejecutar `py -3.12 -m app.main --demo-ui`
+2. En la pantalla de login, click en "Completar demo" (rellena usuario `demo` / `demo`)
+3. Click en "Ingresar"
+4. Verificar que se abre el Dashboard con tarjetas de resumen
+
+#### Paso 2: Verificar datos demo
+
+1. Click en **Clientes** en el sidebar
+2. Verificar que existen: "Demo 1", "Demo 2", "Sin Entregas Activas"
+3. Click en **Domicilios** en el sidebar
+4. Verificar que "Demo 1" tiene direcciones "Entrega Posadas" y "Entrega Eldorado"
+5. Verificar que "Demo 2" tiene dirección "Entrega Garuhapé"
+6. Verificar que "Sin Entregas Activas" tiene dirección "Dirección inactiva" con estado Inactivo
+7. Click en **Transportistas** → verificar "Transportista Demo SRL"
+8. Click en **Choferes** → verificar "Chofer Demo" asociado a Transportista Demo SRL
+9. Click en **Camiones** → verificar patente "ABC123" asociado a Transportista Demo SRL
+10. Click en **Productos** → verificar "Fécula de mandioca" y "Fécula de maíz"
+
+#### Paso 3: Crear orden con cliente multi-dirección (Demo 1)
+
+1. Click en **Órdenes de carga**
+2. Click en **Nuevo**
+3. En el diálogo:
+   a. **Chofer:** seleccionar "Chofer Demo" → verificar que Transportista se autocompleta como "Transportista Demo SRL" (campo deshabilitado)
+   b. **Camión:** seleccionar "ABC123" (filtrado por el transportista del chofer)
+   c. **Cliente:** seleccionar "Demo 1"
+   d. **Dirección de entrega:** verificar que solo muestra las direcciones activas de Demo 1 ("Entrega Posadas", "Entrega Eldorado") — no debe mostrar direcciones de otros clientes
+   e. Seleccionar "Entrega Posadas"
+   f. Click en **Agregar cliente** para añadir el destino
+   g. En la grilla de destinos, seleccionar la fila agregada
+   h. Click en **Agregar producto**
+   i. En el diálogo de producto:
+      - Producto: "Fécula de mandioca"
+      - Cantidad: 500
+      - Unidad: kg
+      - Click en Guardar
+4. Click en **Guardar orden**
+5. Verificar mensaje "Orden guardada" y que aparece en el listado como "Pendiente"
+
+#### Paso 4: Verificar autoselección de dirección (Demo 2)
+
+1. Click en **Nuevo**
+2. Seleccionar "Chofer Demo" → Transportista se autocompleta
+3. Seleccionar "ABC123"
+4. **Cliente:** seleccionar "Demo 2"
+5. **Dirección de entrega:** debe auto-seleccionar "Entrega Garuhapé" (única activa)
+6. Agregar cliente y producto, guardar → verificar que se crea correctamente
+
+#### Paso 5: Verificar feedback de cliente sin direcciones activas
+
+1. Click en **Nuevo**
+2. Seleccionar chofer, camión
+3. **Cliente:** seleccionar "Sin Entregas Activas"
+4. **Dirección de entrega:** debe estar vacía con mensaje de feedback
+5. Cancelar el diálogo
+
+#### Paso 6: Editar orden pendiente
+
+1. Seleccionar la primera orden creada (Demo 1 → Posadas → Fécula)
+2. Click en **Editar**
+3. Agregar un segundo destino: "Demo 1" → "Entrega Eldorado" → producto "Fécula de maíz" × 200 kg
+4. Guardar
+5. Verificar que la orden ahora tiene 2 destinos en el listado
+
+#### Paso 7: Emitir orden
+
+1. Seleccionar la orden editada
+2. Click en **Emitir**
+3. Verificar que el estado cambia a "Emitida"
+4. Verificar en **Choferes** que "Chofer Demo" aparece como "No disponible" (bloqueado)
+
+#### Paso 8: Imprimir orden
+
+1. Seleccionar la orden emitida
+2. Click en **Imprimir**
+3. Verificar que se genera archivo HTML en `docs/prints/orden_y_resumen_N.html`
+
+#### Paso 9: Cerrar orden y liberar chofer
+
+1. Seleccionar la orden emitida
+2. Click en **Cerrar**
+3. Verificar que el estado cambia a "Cerrada"
+4. Verificar en **Choferes** que "Chofer Demo" vuelve a "Disponible"
+
+#### Paso 10: Anular orden
+
+1. Crear una nueva orden con Demo 1 → Posadas → Fécula de mandioca × 100 kg
+2. Emitirla
+3. Click en **Anular**
+4. Verificar que el estado cambia a "Anulada"
+5. Verificar que los botones Emitir e Imprimir están deshabilitados para esta orden
+
+#### Paso 11: Verificar dashboard
+
+1. Click en **Dashboard**
+2. Verificar que las tarjetas reflejan: órdenes pendientes, emitidas, cerradas, anuladas
 
 ---
 
@@ -382,7 +502,7 @@ Esperado: ventana PyQt5 con sidebar, dashboard, ABMs funcionales.
 
 | Área | Limitación | Impacto |
 |---|---|---|
-| **Login** | No hay pantalla de login real | Producción sin auth real |
+| **Login (UI)** | Pantalla de login funcional pero sin test automático | Login dialog existe pero no cubierto por tests |
 | **Remitos** | Placeholder | No se puede emitir remitos |
 | **F150** | Placeholder | No se puede generar F150 |
 | **Cuenta corriente UI** | Placeholder | No se puede consultar desde UI |
@@ -424,7 +544,7 @@ Esperado: ventana PyQt5 con sidebar, dashboard, ABMs funcionales.
 | Tests | 114 |
 | Servicios | 13 |
 | Modelos | 18 |
-| Scripts demo | 5 |
+| Scripts demo | 6 |
 | PR mergeados | 20+ |
 | Issue tracking abierto | #95 (plan loops) |
 | PR draft abierto | #110 (loop 3 hardening) |

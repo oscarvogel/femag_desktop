@@ -43,6 +43,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
+from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_master_abm_page, master_abm_configs
 
@@ -54,10 +55,14 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     database = _prepare_database(demo_mode=demo_mode)
     if database is not None:
         PermissionService().seed_defaults()
-        user = _demo_user()
-    else:
-        user = None
+        _ensure_demo_user(demo_mode=demo_mode)
+        if demo_mode:
+            _seed_demo_masters()
     app = QApplication.instance() or QApplication([])
+    login = LoginWindow(demo_mode=demo_mode)
+    if login.show() != QDialog.Accepted:
+        return 0
+    user = login.authenticated_user
     window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
     window.show()
     result = app.exec_()
@@ -1304,12 +1309,83 @@ def _pallet_options() -> list[tuple[int, str]]:
         return []
 
 
-def _demo_user():
+def _ensure_demo_user(*, demo_mode: bool = False):
+    if not demo_mode:
+        return
     service = AuthService()
-    user = service.authenticate("demo_visual", "demo")
-    if user:
-        return user
-    return service.create_user("demo_visual", "demo", "Administrador")
+    if service.authenticate("demo", "demo"):
+        return
+    service.create_user("demo", "demo", "Administrador")
+
+
+def _seed_demo_masters():
+    if _demo_data_exists():
+        return
+    carrier = Carrier.get_or_create(
+        name="Transportista Demo SRL",
+        defaults={"cuit": "30777777771", "phone": "3764-111111"},
+    )[0]
+    driver = Driver.get_or_create(
+        name="Chofer Demo",
+        defaults={"carrier": carrier, "document": "DNI12345678", "phone": "3764-111112"},
+    )[0]
+    driver.carrier = carrier
+    driver.available = True
+    driver.save()
+    Truck.get_or_create(domain="ABC123", defaults={"carrier": carrier})
+
+    client_1 = Client.get_or_create(
+        cuit="30777777772",
+        defaults={"name": "Demo 1", "iva_condition": "RI", "contact": "Demo Principal"},
+    )[0]
+    _ensure_address(client_1, "Entrega Posadas", "Posadas", active=True)
+    _ensure_address(client_1, "Entrega Eldorado", "Eldorado", active=True)
+
+    client_2 = Client.get_or_create(
+        cuit="30777777773",
+        defaults={"name": "Demo 2", "iva_condition": "RI", "contact": "Demo Secundario"},
+    )[0]
+    _ensure_address(client_2, "Entrega Garuhape", "Garuhape", active=True)
+
+    client_inactive = Client.get_or_create(
+        cuit="30777777774",
+        defaults={"name": "Sin Entregas Activas", "iva_condition": "RI"},
+    )[0]
+    _ensure_address(client_inactive, "Direccion inactiva", "Posadas", active=False)
+
+    Product.get_or_create(name="Fecula de mandioca", defaults={"unit": "kg"})
+    Product.get_or_create(name="Fecula de maiz", defaults={"unit": "kg"})
+
+
+def _ensure_address(client: Client, label: str, city: str, *, active: bool):
+    existing = ClientAddress.get_or_none(
+        (ClientAddress.client == client)
+        & (ClientAddress.address_type == "entrega")
+        & (ClientAddress.province == "Misiones")
+        & (ClientAddress.city == city)
+        & (ClientAddress.address == label)
+    )
+    if existing is not None:
+        if existing.active != active:
+            existing.active = active
+            existing.save()
+        return existing
+    return ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city=city,
+        address=label,
+        is_primary=active,
+        active=active,
+    )
+
+
+def _demo_data_exists() -> bool:
+    try:
+        return Carrier.select().count() > 0
+    except (InterfaceError, OperationalError):
+        return False
 
 
 STYLES = """
