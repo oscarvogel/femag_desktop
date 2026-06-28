@@ -252,10 +252,11 @@ class ClientEntryDialog(QDialog):
 
 
 class ClientAddressEntryDialog(QDialog):
-    def __init__(self, *, current_user: str, record_id: int | None = None, parent=None):
+    def __init__(self, *, current_user: str, record_id: int | None = None, client_id: int | None = None, parent=None):
         super().__init__(parent)
         self.current_user = current_user
         self.record_id = record_id
+        self.client_id = client_id
         self.saved_record: ClientAddress | None = None
         self.setObjectName("clientAddressEntryDialog")
         self.setWindowTitle("Domicilio")
@@ -295,15 +296,17 @@ class ClientAddressEntryDialog(QDialog):
         _entry_footer(layout, self, "saveAddressButton", self._save)
 
     def _load_record(self) -> None:
-        if self.record_id is None:
+        if self.record_id is not None:
+            address = ClientAddress.get_by_id(self.record_id)
+            _set_combo(self.client_combo, address.client.id)
+            _set_combo(self.type_combo, address.address_type)
+            _set_combo(self.active_combo, address.active)
+            self.province_input.setText(address.province)
+            self.city_input.setText(address.city)
+            self.street_input.setText(address.address)
             return
-        address = ClientAddress.get_by_id(self.record_id)
-        _set_combo(self.client_combo, address.client.id)
-        _set_combo(self.type_combo, address.address_type)
-        _set_combo(self.active_combo, address.active)
-        self.province_input.setText(address.province)
-        self.city_input.setText(address.city)
-        self.street_input.setText(address.address)
+        if self.client_id is not None:
+            _set_combo(self.client_combo, self.client_id)
 
     def _save(self) -> None:
         client_id = self.client_combo.currentData()
@@ -756,3 +759,182 @@ def _truck_rows() -> list[list[object]]:
         ]
     except (InterfaceError, OperationalError):
         return []
+
+
+def _client_address_rows(client_id: int) -> list[list[object]]:
+    try:
+        return [
+            [
+                address.id,
+                address.address,
+                address.city,
+                address.province,
+                "Activo" if address.active else "Inactivo",
+            ]
+            for address in ClientAddress.select()
+            .where(ClientAddress.client == client_id)
+            .order_by(ClientAddress.address)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
+    page = _page("Clientes", "ABM de clientes con lugares de entrega")
+    layout = page.layout()
+    can_create = _can_use_menu_action(user, "Maestros", "crear", "Clientes")
+    can_modify = _can_use_menu_action(user, "Maestros", "modificar", "Clientes")
+
+    client_feedback = QLabel("")
+    client_feedback.setObjectName("clientAbmFeedback")
+
+    client_actions = QHBoxLayout()
+    new_client_btn = _action_button("newClientButton", "Nuevo")
+    edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
+    new_client_btn.setEnabled(can_create)
+    edit_client_btn.setEnabled(can_modify)
+    client_actions.addWidget(new_client_btn)
+    client_actions.addWidget(edit_client_btn)
+    client_actions.addStretch(1)
+    layout.addLayout(client_actions)
+
+    client_table = QTableWidget(0, 3)
+    client_table.setObjectName("clientTable")
+    client_table.setHorizontalHeaderLabels(["Nombre", "CUIT", "Estado"])
+    client_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    client_table.verticalHeader().setVisible(False)
+    client_table.setSelectionBehavior(QTableWidget.SelectRows)
+    layout.addWidget(client_table, 1)
+
+    separator = QLabel("Lugares de entrega")
+    separator.setObjectName("sectionTitle")
+    layout.addWidget(separator)
+
+    places_feedback = QLabel("")
+    places_feedback.setObjectName("clientPlacesFeedback")
+
+    place_actions = QHBoxLayout()
+    add_place_btn = _action_button("addClientPlaceButton", "Agregar")
+    edit_place_btn = _action_button("editClientPlaceButton", "Editar", secondary=True)
+    toggle_place_btn = _action_button("toggleClientPlaceButton", "Activar/Desactivar", secondary=True)
+    place_actions.addWidget(add_place_btn)
+    place_actions.addWidget(edit_place_btn)
+    place_actions.addWidget(toggle_place_btn)
+    place_actions.addStretch(1)
+    layout.addLayout(place_actions)
+
+    places_table = QTableWidget(0, 4)
+    places_table.setObjectName("clientPlacesTable")
+    places_table.setHorizontalHeaderLabels(["Direccion", "Ciudad", "Provincia", "Estado"])
+    places_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    places_table.verticalHeader().setVisible(False)
+    places_table.setSelectionBehavior(QTableWidget.SelectRows)
+    layout.addWidget(places_table, 1)
+    layout.addWidget(places_feedback)
+
+    def refresh_clients() -> None:
+        rows = _client_rows()
+        client_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            row_id, values = row[0], row[1:]
+            for column, value in enumerate(values):
+                client_table.setItem(row_index, column, QTableWidgetItem(str(value)))
+            if client_table.item(row_index, 0):
+                client_table.item(row_index, 0).setData(Qt.UserRole, row_id)
+        if rows:
+            client_table.setCurrentCell(0, 0)
+            refresh_places()
+        else:
+            places_table.setRowCount(0)
+            places_feedback.setText("")
+
+    def selected_client_id() -> int | None:
+        item = client_table.item(client_table.currentRow(), 0)
+        if item is None:
+            return None
+        return item.data(Qt.UserRole)
+
+    def refresh_places() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            places_table.setRowCount(0)
+            places_feedback.setText("Seleccione un cliente para ver sus lugares de entrega.")
+            return
+        rows = _client_address_rows(cid)
+        places_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            row_id, values = row[0], row[1:]
+            for column, value in enumerate(values):
+                places_table.setItem(row_index, column, QTableWidgetItem(str(value)))
+            if places_table.item(row_index, 0):
+                places_table.item(row_index, 0).setData(Qt.UserRole, row_id)
+        if not rows:
+            places_feedback.setText("Este cliente no tiene lugares de entrega cargados.")
+        else:
+            client_feedback.setText("")
+
+    def open_new_client() -> None:
+        if not can_create:
+            client_feedback.setText("El perfil actual no permite crear este maestro.")
+            return
+        dialog = ClientEntryDialog(current_user=current_user, parent=parent)
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.setText("Cliente guardado.")
+
+    def open_edit_client() -> None:
+        if not can_modify:
+            client_feedback.setText("El perfil actual no permite modificar este maestro.")
+            return
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.setText("Seleccione un cliente para editar.")
+            return
+        dialog = ClientEntryDialog(current_user=current_user, record_id=cid, parent=parent)
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.setText("Cliente actualizado.")
+
+    def open_new_place() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            places_feedback.setText("Seleccione un cliente primero.")
+            return
+        dialog = ClientAddressEntryDialog(current_user=current_user, client_id=cid, parent=parent)
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_places()
+            places_feedback.setText("Lugar de entrega guardado.")
+
+    def open_edit_place() -> None:
+        item = places_table.item(places_table.currentRow(), 0)
+        if item is None:
+            places_feedback.setText("Seleccione un lugar de entrega para editar.")
+            return
+        pid = item.data(Qt.UserRole)
+        dialog = ClientAddressEntryDialog(current_user=current_user, record_id=pid, parent=parent)
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_places()
+            places_feedback.setText("Lugar de entrega actualizado.")
+
+    def toggle_place_active() -> None:
+        item = places_table.item(places_table.currentRow(), 0)
+        if item is None:
+            places_feedback.setText("Seleccione un lugar de entrega para activar o desactivar.")
+            return
+        pid = item.data(Qt.UserRole)
+        address = ClientAddress.get_by_id(pid)
+        address.active = not address.active
+        address.save()
+        refresh_places()
+        status = "activado" if address.active else "desactivado"
+        places_feedback.setText(f"Lugar de entrega {status}.")
+
+    new_client_btn.clicked.connect(open_new_client)
+    edit_client_btn.clicked.connect(open_edit_client)
+    add_place_btn.clicked.connect(open_new_place)
+    edit_place_btn.clicked.connect(open_edit_place)
+    toggle_place_btn.clicked.connect(toggle_place_active)
+    client_table.currentCellChanged.connect(lambda *_: refresh_places())
+
+    refresh_clients()
+    return page
