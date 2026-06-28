@@ -623,3 +623,99 @@ def test_load_order_page_blocks_annul_without_permission(db):
 
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_PENDING
     assert "permiso" in window.findChild(QLabel, "loadOrderFeedback").text().lower()
+
+
+def test_load_order_dialog_excludes_inactive_delivery_addresses(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente Inactivo UI", cuit="30700000003", iva_condition="RI")
+    active_address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Activa",
+    )
+    inactive_address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Inactiva",
+        active=False,
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue97"), "ui_issue97")
+    app.processEvents()
+
+    client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    _set_combo(client_combo, client.id)
+    app.processEvents()
+
+    assert address_combo.findData(active_address.id) >= 0
+    assert address_combo.findData(inactive_address.id) == -1
+
+
+def test_load_order_dialog_auto_selects_single_delivery_address(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente Unico UI", cuit="30700000004", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Unica",
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue97"), "ui_issue97")
+    app.processEvents()
+
+    client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    _set_combo(client_combo, client.id)
+    app.processEvents()
+
+    assert address_combo.currentData() == address.id
+
+
+def test_load_order_dialog_shows_feedback_when_no_active_addresses(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente Sin Lugar UI", cuit="30700000005", iva_condition="RI")
+    ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Inactiva",
+        active=False,
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue97"), "ui_issue97")
+    app.processEvents()
+
+    client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    _set_combo(client_combo, client.id)
+    app.processEvents()
+
+    assert address_combo.currentData() is None
+    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
+    assert "no tiene lugares de entrega activos" in feedback.text()
