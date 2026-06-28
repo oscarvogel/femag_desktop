@@ -12,7 +12,7 @@ class LoadOrderOperationService:
         self,
         current_user: str,
         *,
-        prints_dir: str | Path = Path("docs") / "prints",
+        prints_dir: str | Path = Path("outputs") / "load_orders",
         audit_service: AuditService | None = None,
     ):
         self.current_user = current_user
@@ -36,11 +36,10 @@ class LoadOrderOperationService:
 
     def print_order(self, order: LoadOrder) -> Path:
         order = self._require_printable(order)
-        return self.prints.export_combined(order, self.prints_dir)
+        return self.prints.export_pdf(order, self.prints_dir)
 
     def reprint_order(self, order: LoadOrder) -> Path:
-        order = self._require_printable(order)
-        return self.prints.export_combined(order, self.prints_dir, reprint=True)
+        return self.print_order(order)
 
     def annul(self, order: LoadOrder, *, can_annul: bool) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
@@ -54,8 +53,6 @@ class LoadOrderOperationService:
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
-        if order.status == LoadOrder.STATUS_ANNULLED:
-            raise ValueError("No se puede imprimir una orden anulada.")
         if order.status == LoadOrder.STATUS_CLOSED:
             raise ValueError("No se puede imprimir una orden cerrada.")
         return order

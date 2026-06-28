@@ -74,7 +74,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Seed demo data for issue #65 multi-client load orders.")
     parser.add_argument("--username", default="issue65_demo")
     parser.add_argument("--password", default="demo")
-    parser.add_argument("--prints-dir", default="docs/prints/issue_65_demo")
+    parser.add_argument("--prints-dir", default="outputs/load_orders/issue_65_demo")
     args = parser.parse_args()
 
     run_id = datetime.now().strftime("%y%m%d%H%M%S")
@@ -93,7 +93,7 @@ def main() -> int:
     print(f"Orden: OC-{order.order_number:06d}")
     print(f"Clientes/destinos: {order.destinations.count()}")
     print(f"Productos: {order.products.count()}")
-    print(f"HTML A4: {combined}")
+    print(f"PDF A4: {combined}")
     return 0
 
 

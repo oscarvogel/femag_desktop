@@ -90,7 +90,7 @@ def build_load_order_view_spec() -> ABMViewSpec:
             "destination_products",
             "pallets",
         ),
-        actions=("ver", "crear", "modificar", "imprimir", "reimprimir", "anular", "cerrar"),
+        actions=("ver", "crear", "modificar", "imprimir", "anular", "cerrar"),
     )
 
 

@@ -230,7 +230,7 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
     assert truck_combo.findData(wrong_truck.id) == -1
 
 
-def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
+def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
     from app.models.accounting import ClientAccountMovement
@@ -294,18 +294,16 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
-    assert "vista a4" in feedback.text().lower()
-    html_path = next(tmp_path.glob("orden_y_resumen_*.html"))
-    assert opened_outputs == [html_path]
-    html = html_path.read_text(encoding="utf-8")
-    assert "Orden de carga" in html
-    assert "Hoja resumen / sobre de carga" in html
+    assert "pdf generado correctamente" in feedback.text().lower()
+    pdf_path = next(tmp_path.glob("orden_carga_*.pdf"))
+    assert opened_outputs == [pdf_path]
+    assert str(pdf_path) in feedback.text()
+    assert pdf_path.read_bytes().startswith(b"%PDF")
 
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
-    assert "reimpresion" in feedback.text().lower()
-    assert opened_outputs == [html_path, html_path]
-    assert "Reimpresion" in next(tmp_path.glob("orden_y_resumen_*.html")).read_text(encoding="utf-8")
+    assert "pdf generado correctamente" in feedback.text().lower()
+    assert opened_outputs == [pdf_path, pdf_path]
 
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
@@ -317,6 +315,65 @@ def test_load_order_page_operates_emit_reprint_and_annul_feedback(db, tmp_path, 
         .count()
         == 1
     )
+
+    window.findChild(QPushButton, "printLoadOrderButton").click()
+    app.processEvents()
+    assert "pdf generado correctamente" in feedback.text().lower()
+    assert opened_outputs == [pdf_path, pdf_path, pdf_path]
+
+
+def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_print_open_failure", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte PDF UI")
+    driver = Driver.create(name="Chofer PDF UI", carrier=carrier)
+    truck = Truck.create(domain="PDF123", carrier=carrier)
+    client = Client.create(name="Cliente PDF UI", cuit="30712345009", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta PDF",
+    )
+    product = Product.create(name="Producto PDF UI", unit="kg")
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+
+    def fail_open(_path):
+        raise OSError("visor no disponible")
+
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", fail_open)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    window.findChild(QPushButton, "printLoadOrderButton").click()
+    app.processEvents()
+
+    pdf_path = next(tmp_path.glob("orden_carga_*.pdf")).resolve()
+    feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+
+    assert pdf_path.exists()
+    assert "PDF generado correctamente" in feedback
+    assert str(pdf_path) in feedback
+    assert "No se pudo abrir automaticamente" in feedback
 
 
 def test_load_order_page_edits_pending_order_adding_destination_and_product(db, monkeypatch):

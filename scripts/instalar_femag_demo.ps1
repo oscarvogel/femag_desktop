@@ -199,13 +199,13 @@ try {
         Write-Step "Demo UI omitida por parametro -SkipUi"
     } else {
         Write-Step "Abriendo FEMAG Desktop demo"
-        Write-Host "En la ventana, mostrar: Maestros minimos, Ordenes de carga, emitir, imprimir/reimprimir y anular." -ForegroundColor Yellow
+        Write-Host "En la ventana, mostrar: Maestros minimos, Ordenes de carga, emitir, Imprimir y anular." -ForegroundColor Yellow
         Invoke-VenvPython -Arguments @("-m", "app.main", "--demo-ui")
     }
 
     Write-Step "Demo preparada"
     Write-Host "Carpeta del repo: $RepoDir" -ForegroundColor Green
-    Write-Host "Evidencia HTML: $(Join-Path $RepoDir 'docs\prints\issue_73_integral_demo')" -ForegroundColor Green
+    Write-Host "Evidencia PDF: $(Join-Path $RepoDir 'docs\prints\issue_73_integral_demo')" -ForegroundColor Green
 } finally {
     Pop-Location
 }

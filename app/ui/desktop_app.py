@@ -48,7 +48,7 @@ from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
 
 
-LOAD_ORDER_PRINTS_DIR = Path("docs") / "prints"
+LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
@@ -520,20 +520,22 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.setText(str(exc))
 
-        def print_or_reprint_order() -> None:
+        def print_order() -> None:
             order = selected_order()
             if order is None:
                 feedback.setText("Seleccione una orden para imprimir.")
                 return
             try:
-                if _has_printed_load_order(order):
-                    path = operation_service.reprint_order(order)
-                    _open_print_output(path)
-                    feedback.setText(f"Reimpresion A4 generada: {path}")
-                else:
-                    path = operation_service.print_order(order)
-                    _open_print_output(path)
-                    feedback.setText(f"Vista A4 generada: {path}")
+                path = operation_service.print_order(order)
+                resolved_path = Path(path).resolve()
+                feedback.setText(f"PDF generado correctamente: {resolved_path}")
+                try:
+                    _open_print_output(resolved_path)
+                except Exception as open_exc:
+                    feedback.setText(
+                        f"PDF generado correctamente: {resolved_path}. "
+                        f"No se pudo abrir automaticamente: {open_exc}"
+                    )
             except Exception as exc:
                 feedback.setText(str(exc))
 
@@ -554,7 +556,7 @@ class FemagDesktopWindow(QMainWindow):
         issue_button.clicked.connect(issue)
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
-        print_button.clicked.connect(print_or_reprint_order)
+        print_button.clicked.connect(print_order)
         refresh()
         return page
 

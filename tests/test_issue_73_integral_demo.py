@@ -1,5 +1,6 @@
 def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     from app.models.accounting import ClientAccountMovement
+    from pypdf import PdfReader
     from scripts.issue_73_integral_demo import run_integral_demo
 
     evidence_dir = tmp_path / "issue_73_evidence"
@@ -24,26 +25,24 @@ def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     assert first["ledger_total"] == 4
     assert first["truck"] == "I730ABC"
 
-    for key in ("order_html", "summary_html", "reprint_html", "readme"):
+    for key in ("order_pdf", "regenerated_pdf", "readme"):
         path = first[key]
         assert path.exists()
         assert path.parent == evidence_dir
 
-    order_html = first["order_html"].read_text(encoding="utf-8")
-    summary_html = first["summary_html"].read_text(encoding="utf-8")
-    reprint_html = first["reprint_html"].read_text(encoding="utf-8")
+    reader = PdfReader(str(first["order_pdf"]))
+    order_pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
     readme = first["readme"].read_text(encoding="utf-8")
 
-    assert "Documento logistico interno" in order_html
-    assert "Cliente / destino 1" in order_html
-    assert "Cliente / destino 2" in order_html
-    assert "Cliente / destino 3" in order_html
-    assert "Hoja resumen / sobre de carga" in summary_html
-    assert "I730ABC" in order_html
-    assert "I730ABC" in summary_html
-    assert "Reimpresion operativa - Copia para reimpresion" in reprint_html
+    assert first["order_pdf"] == first["regenerated_pdf"]
+    assert "ORDEN DE DESPACHO DE FECULA DE MANDIOCA" in order_pdf_text
+    assert "ISSUE73 Cliente Norte" in order_pdf_text
+    assert "ISSUE73 Cliente Sur" in order_pdf_text
+    assert "I730ABC" in order_pdf_text
+    assert "Reimpresion" not in order_pdf_text
     assert "Cuenta corriente documental" in readme
     assert "Camion / patente: I730ABC" in readme
+    assert "Orden PDF: `orden_carga_" in readme
     assert "Computer Use" in readme
     assert computer_use_note in readme
 
@@ -63,8 +62,7 @@ def test_issue_73_integral_demo_cli_generates_file_sqlite_database(tmp_path):
     assert main(["--database-path", str(db_path), "--evidence-dir", str(evidence_dir)]) == 0
 
     assert db_path.exists()
-    assert (evidence_dir / "orden_carga_1.html").exists()
-    assert (evidence_dir / "hoja_resumen_1.html").exists()
+    assert (evidence_dir / "orden_carga_1.pdf").exists()
 
     connection = sqlite3.connect(db_path)
     try:
