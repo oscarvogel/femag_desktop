@@ -51,6 +51,10 @@ class LoadOrderOperationService:
         self.account_ledger.reverse_for_load_order(annulled)
         return annulled
 
+    def export_budgets(self, order: LoadOrder) -> list[Path]:
+        order = LoadOrder.get_by_id(order.id)
+        return self.prints.export_budgets(order, self.prints_dir)
+
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_CLOSED:

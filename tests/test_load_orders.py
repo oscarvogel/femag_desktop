@@ -626,3 +626,193 @@ def test_reopening_closed_order_requires_driver_availability(db):
 
     with pytest.raises(ValueError, match="chofer.*bloqueado"):
         service.change_status(first, LoadOrder.STATUS_PENDING)
+
+
+def test_calculate_product_prices_uses_defaults(db):
+    from app.models.masters import Client, Product, TipoIVA
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    service = LoadOrderService(current_user="admin")
+    product = Product.create(name="Test", unit="kg", precio_neto_base=100.0, tipo_iva=iva)
+    client = Client.create(name="Test", cuit="30111111111", iva_condition="RI", descuento_porcentaje=10.0)
+    result = service._calculate_product_prices(
+        {"product": product, "quantity": 10},
+        client,
+    )
+    assert result["precio_neto_unitario"] == 100.0
+    assert result["descuento_porcentaje"] == 10.0
+    assert result["neto_subtotal"] == 1000.0
+    assert result["descuento_importe"] == 100.0
+    assert result["neto_gravado"] == 900.0
+    assert result["iva_porcentaje"] == 21.0
+    assert result["iva_importe"] == 189.0
+    assert result["total"] == 1089.0
+
+
+def test_calculate_product_prices_with_overrides(db):
+    from app.models.masters import Client, Product
+    from app.services.load_order_service import LoadOrderService
+
+    service = LoadOrderService(current_user="admin")
+    product = Product.create(name="Test", unit="kg")
+    client = Client.create(name="Test", cuit="30111111111", iva_condition="RI")
+    result = service._calculate_product_prices(
+        {
+            "product": product,
+            "quantity": 5,
+            "precio_neto_unitario": 200.0,
+            "descuento_porcentaje": 5.0,
+            "iva_porcentaje": 10.5,
+        },
+        client,
+    )
+    assert result["precio_neto_unitario"] == 200.0
+    assert result["descuento_porcentaje"] == 5.0
+    assert result["neto_subtotal"] == 1000.0
+    assert result["descuento_importe"] == 50.0
+    assert result["neto_gravado"] == 950.0
+    assert result["iva_porcentaje"] == 10.5
+    assert result["iva_importe"] == 99.75
+    assert result["total"] == 1049.75
+
+
+def test_create_load_order_stores_prices_from_defaults(db):
+    from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    product = Product.create(name="Fecula test", unit="kg", precio_neto_base=18000.0, tipo_iva=iva)
+    client = Client.create(
+        name="Cliente con descuento", cuit="30999999991", iva_condition="RI", descuento_porcentaje=10.0
+    )
+    address = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta 12"
+    )
+    carrier = Carrier.create(name="Test Carrier")
+    driver = Driver.create(name="Test Driver", carrier=carrier)
+    truck = Truck.create(domain="TEST01", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{
+            "client": client,
+            "delivery_address": address,
+            "products": [{"product": product, "quantity": 100}],
+        }],
+        pallets=[],
+    )
+    lp = LoadOrderProduct.get(LoadOrderProduct.order == order)
+    assert lp.precio_neto_unitario == 18000.0
+    assert lp.descuento_porcentaje == 10.0
+    assert lp.neto_subtotal == 1_800_000.0
+    assert lp.descuento_importe == 180_000.0
+    assert lp.neto_gravado == 1_620_000.0
+    assert lp.iva_porcentaje == 21.0
+    assert lp.iva_importe == 340_200.0
+    assert lp.total == 1_960_200.0
+
+
+def test_create_load_order_stores_prices_from_overrides(db):
+    from app.models.load_orders import LoadOrder, LoadOrderProduct
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    product = Product.create(name="Fecula test", unit="kg")
+    client = Client.create(name="Cliente test", cuit="30999999992", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta 12"
+    )
+    carrier = Carrier.create(name="Test Carrier")
+    driver = Driver.create(name="Test Driver", carrier=carrier)
+    truck = Truck.create(domain="TEST02", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{
+            "client": client,
+            "delivery_address": address,
+            "products": [{
+                "product": product,
+                "quantity": 50,
+                "precio_neto_unitario": 150.0,
+                "descuento_porcentaje": 0.0,
+                "iva_porcentaje": 10.5,
+            }],
+        }],
+        pallets=[],
+    )
+    lp = LoadOrderProduct.get(LoadOrderProduct.order == order)
+    assert lp.precio_neto_unitario == 150.0
+    assert lp.descuento_porcentaje == 0.0
+    assert lp.total == 50 * 150.0 * (1 + 10.5 / 100.0)
+
+
+def test_create_load_order_creates_budget_status_for_each_client(db):
+    from app.models.load_orders import LoadOrderBudgetStatus, LoadOrderDestination
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    product = Product.create(name="Test", unit="kg")
+    client_a = Client.create(name="Cliente A", cuit="30111111111", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A"
+    )
+    client_b = Client.create(name="Cliente B", cuit="30222222222", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta B"
+    )
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="TEST03", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+    budgets = list(LoadOrderBudgetStatus.select().where(LoadOrderBudgetStatus.order == order))
+    clients = {b.client.id for b in budgets}
+    assert client_a.id in clients
+    assert client_b.id in clients
+    assert all(b.status == "Pendiente" for b in budgets)
+
+
+def test_create_load_order_budget_status_survives_update(db):
+    from app.models.load_orders import LoadOrderBudgetStatus
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    product = Product.create(name="Test", unit="kg")
+    client = Client.create(name="Cliente", cuit="30111111111", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta"
+    )
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="TEST04", carrier=carrier)
+
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 10}]}],
+        pallets=[],
+    )
+    updated = service.update_order(
+        order,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 20}]}],
+    )
+    count = LoadOrderBudgetStatus.select().where(LoadOrderBudgetStatus.order == updated).count()
+    assert count == 1

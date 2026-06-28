@@ -282,3 +282,74 @@ def test_printing_again_regenerates_same_pdf_without_reprint_copy(db, tmp_path):
     assert first_path == second_path
     assert second_path.name == "orden_carga_1.pdf"
     assert "Reimpresion" not in text
+
+
+def test_print_service_exports_budget_pdf_for_client(db, tmp_path):
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    client = Client.create(name="Cliente Presupuesto", cuit="30111111111", iva_condition="RI", descuento_porcentaje=5.0)
+    address = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta 12"
+    )
+    product = Product.create(name="Fecula Premium", unit="kg", precio_neto_base=20000.0, tipo_iva=iva)
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="BUDGET01", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier, driver=driver, truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 50}]}],
+        pallets=[],
+    )
+
+    service = LoadOrderPrintService(current_user="admin")
+    pdf_path = service.export_budget(order, client, tmp_path)
+    text = _pdf_text(pdf_path)
+
+    assert pdf_path.exists()
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert "PRESUPUESTO" in text
+    assert "Cliente Presupuesto" in text
+    assert "$ 1,000,000" in text or "1,000,000" in text
+    assert "$ 50,000" in text or "50,000" in text
+
+
+def test_print_service_exports_budgets_for_all_clients_in_order(db, tmp_path):
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.load_order_service import LoadOrderService
+
+    client_a = Client.create(name="Cliente A Budget", cuit="30111111112", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A"
+    )
+    client_b = Client.create(name="Cliente B Budget", cuit="30111111113", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta B"
+    )
+    product = Product.create(name="Producto test", unit="kg")
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="BUDGET02", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier, driver=driver, truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+
+    service = LoadOrderPrintService(current_user="admin")
+    paths = service.export_budgets(order, tmp_path)
+
+    assert len(paths) == 2
+    for p in paths:
+        assert p.read_bytes().startswith(b"%PDF")
+    names = [p.name for p in paths]
+    assert any("Cliente_A_Budget" in n for n in names)
+    assert any("Cliente_B_Budget" in n for n in names)

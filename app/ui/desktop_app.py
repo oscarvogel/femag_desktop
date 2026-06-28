@@ -36,7 +36,7 @@ from app.config.database import initialize_demo_database, initialize_runtime_dat
 from app.config.schema import ensure_runtime_schema
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 from app.services.auth_service import AuthService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
@@ -374,12 +374,13 @@ class FemagDesktopWindow(QMainWindow):
         close_button = _action_button("closeLoadOrderButton", "Cerrar")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
+        budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(260)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
-        for button in (new_button, edit_button, issue_button, close_button, print_button, annul_button):
+        for button in (new_button, edit_button, issue_button, close_button, print_button, budget_button, annul_button):
             actions.addWidget(button)
         actions.addWidget(search_input)
         actions.addWidget(search_button)
@@ -583,6 +584,23 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.setText(str(exc))
 
+        def print_budget() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para presupuestar.")
+                return
+            try:
+                paths = operation_service.export_budgets(order)
+                resolved = [Path(p).resolve() for p in paths]
+                feedback.setText(f"Presupuesto(s) generado(s): {', '.join(str(r) for r in resolved)}")
+                if resolved:
+                    try:
+                        _open_print_output(resolved[0])
+                    except Exception:
+                        pass
+            except Exception as exc:
+                feedback.setText(str(exc))
+
         def search_orders() -> None:
             query = search_input.text().strip()
             refresh(query=query)
@@ -601,6 +619,7 @@ class FemagDesktopWindow(QMainWindow):
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_order)
+        budget_button.clicked.connect(print_budget)
         refresh()
         return page
 
@@ -781,9 +800,9 @@ class LoadOrderEntryDialog(QDialog):
         destination_inputs.addWidget(add_destination_button, 2, 0)
         destination_inputs.addWidget(remove_destination_button, 2, 1)
         destination_layout.addLayout(destination_inputs)
-        self.destination_table = QTableWidget(0, 3)
+        self.destination_table = QTableWidget(0, 4)
         self.destination_table.setObjectName("loadOrderDestinationDraftTable")
-        self.destination_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Productos"))
+        self.destination_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Productos", "Total $"))
         self.destination_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.destination_table.verticalHeader().setVisible(False)
         self.destination_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -806,9 +825,9 @@ class LoadOrderEntryDialog(QDialog):
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
-        self.product_table = QTableWidget(0, 3)
+        self.product_table = QTableWidget(0, 6)
         self.product_table.setObjectName("loadOrderProductDraftTable")
-        self.product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad"))
+        self.product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad", "P.Unit", "Dto%", "Total"))
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -873,6 +892,9 @@ class LoadOrderEntryDialog(QDialog):
                         "product_label": product.product.name,
                         "quantity": product.quantity,
                         "unit": product.unit,
+                        "precio_neto_unitario": product.precio_neto_unitario,
+                        "descuento_porcentaje": product.descuento_porcentaje,
+                        "total": product.total,
                     }
                     for product in destination.products
                 ],
@@ -961,7 +983,14 @@ class LoadOrderEntryDialog(QDialog):
         if row < 0 or row >= len(self.destinations):
             self.feedback.setText("Seleccione un cliente/destino antes de agregar productos.")
             return
-        dialog = LoadOrderProductDialog(self)
+        dest = self.destinations[row]
+        client = None
+        if dest.get("client_id"):
+            try:
+                client = Client.get_by_id(dest["client_id"])
+            except Client.DoesNotExist:
+                pass
+        dialog = LoadOrderProductDialog(self, client=client)
         if dialog.exec_() != QDialog.Accepted or dialog.product is None:
             return
         self.destinations[row]["products"].append(dialog.product)
@@ -989,10 +1018,12 @@ class LoadOrderEntryDialog(QDialog):
     def _render_destinations(self) -> None:
         self.destination_table.setRowCount(len(self.destinations))
         for row_index, destination in enumerate(self.destinations):
+            total = sum(p.get("total", 0.0) for p in destination["products"])
             values = (
                 destination["client_label"],
                 destination["address_label"],
                 str(len(destination["products"])),
+                f"$ {total:,.2f}",
             )
             for column, value in enumerate(values):
                 self.destination_table.setItem(row_index, column, QTableWidgetItem(value))
@@ -1005,8 +1036,18 @@ class LoadOrderEntryDialog(QDialog):
         if 0 <= destination_index < len(self.destinations):
             products = self.destinations[destination_index]["products"]
         self.product_table.setRowCount(len(products))
-        for row_index, product in enumerate(products):
-            values = (product["product_label"], f"{product['quantity']:g}", product["unit"])
+        for row_index, prod in enumerate(products):
+            precio = prod.get("precio_neto_unitario", 0.0)
+            dto_pct = prod.get("descuento_porcentaje", 0.0)
+            total = prod.get("total", 0.0)
+            values = (
+                prod["product_label"],
+                f"{prod['quantity']:g}",
+                prod["unit"],
+                f"$ {precio:,.2f}",
+                f"{dto_pct:g}%",
+                f"$ {total:,.2f}",
+            )
             for column, value in enumerate(values):
                 self.product_table.setItem(row_index, column, QTableWidgetItem(value))
 
@@ -1031,6 +1072,9 @@ class LoadOrderEntryDialog(QDialog):
                             {
                                 "product": Product.get_by_id(product["product_id"]),
                                 "quantity": product["quantity"],
+                                "precio_neto_unitario": product.get("precio_neto_unitario"),
+                                "descuento_porcentaje": product.get("descuento_porcentaje"),
+                                "iva_porcentaje": product.get("iva_porcentaje"),
                             }
                             for product in destination["products"]
                         ],
@@ -1063,33 +1107,89 @@ class LoadOrderEntryDialog(QDialog):
 
 
 class LoadOrderProductDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, client: Client | None = None):
         super().__init__(parent)
         self.product: dict | None = None
+        self.client = client
         self.setObjectName("loadOrderProductDialog")
         self.setWindowTitle("Agregar producto")
-        self.resize(460, 220)
+        self.resize(500, 420)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 14)
         layout.setSpacing(10)
         title = QLabel("Agregar producto")
         title.setObjectName("dialogTitle")
         layout.addWidget(title)
+
         form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
+
         self.product_combo = QComboBox()
         self.product_combo.setObjectName("productDialogProductInput")
         self.quantity_input = QDoubleSpinBox()
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
         self.quantity_input.setDecimals(2)
+        self.precio_input = QDoubleSpinBox()
+        self.precio_input.setObjectName("productDialogPrecioInput")
+        self.precio_input.setRange(0, 99999999)
+        self.precio_input.setDecimals(2)
+        self.precio_input.setPrefix("$ ")
+        self.descuento_input = QDoubleSpinBox()
+        self.descuento_input.setObjectName("productDialogDescuentoInput")
+        self.descuento_input.setRange(0, 100)
+        self.descuento_input.setDecimals(2)
+        self.descuento_input.setSuffix(" %")
+        self.iva_input = QDoubleSpinBox()
+        self.iva_input.setObjectName("productDialogIvaInput")
+        self.iva_input.setRange(0, 100)
+        self.iva_input.setDecimals(2)
+        self.iva_input.setSuffix(" %")
+        self.iva_input.setEnabled(False)
+
         form.addWidget(QLabel("Producto"), 0, 0)
-        form.addWidget(self.product_combo, 0, 1)
+        form.addWidget(self.product_combo, 0, 1, 1, 2)
         form.addWidget(QLabel("Cantidad"), 1, 0)
-        form.addWidget(self.quantity_input, 1, 1)
+        form.addWidget(self.quantity_input, 1, 1, 1, 2)
+        form.addWidget(QLabel("Precio neto unitario"), 2, 0)
+        form.addWidget(self.precio_input, 2, 1, 1, 2)
+        form.addWidget(QLabel("Descuento"), 3, 0)
+        form.addWidget(self.descuento_input, 3, 1)
+        form.addWidget(QLabel("IVA"), 3, 2)
+        form.addWidget(self.iva_input, 3, 3)
         layout.addLayout(form)
+
+        totals_grid = QGridLayout()
+        totals_grid.setVerticalSpacing(4)
+        self.neto_subtotal_label = QLabel("$ 0.00")
+        self.neto_subtotal_label.setObjectName("productDialogNetoSubtotal")
+        self.descuento_importe_label = QLabel("$ 0.00")
+        self.descuento_importe_label.setObjectName("productDialogDescuentoImporte")
+        self.neto_gravado_label = QLabel("$ 0.00")
+        self.neto_gravado_label.setObjectName("productDialogNetoGravado")
+        self.iva_importe_label = QLabel("$ 0.00")
+        self.iva_importe_label.setObjectName("productDialogIvaImporte")
+        self.total_label = QLabel("$ 0.00")
+        self.total_label.setObjectName("productDialogTotal")
+        self.total_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+
+        totals_grid.addWidget(QLabel("Neto subtotal:"), 0, 0)
+        totals_grid.addWidget(self.neto_subtotal_label, 0, 1)
+        totals_grid.addWidget(QLabel("Descuento:"), 1, 0)
+        totals_grid.addWidget(self.descuento_importe_label, 1, 1)
+        totals_grid.addWidget(QLabel("Neto gravado:"), 2, 0)
+        totals_grid.addWidget(self.neto_gravado_label, 2, 1)
+        totals_grid.addWidget(QLabel("IVA:"), 3, 0)
+        totals_grid.addWidget(self.iva_importe_label, 3, 1)
+        totals_grid.addWidget(QLabel("Total:"), 4, 0)
+        totals_grid.addWidget(self.total_label, 4, 1)
+        layout.addLayout(totals_grid)
+
         self.feedback = QLabel("")
         self.feedback.setObjectName("productDialogFeedback")
         layout.addWidget(self.feedback)
+
         footer = QHBoxLayout()
         footer.addStretch(1)
         cancel_button = _action_button("cancelProductButton", "Cancelar", secondary=True)
@@ -1097,9 +1197,47 @@ class LoadOrderProductDialog(QDialog):
         footer.addWidget(cancel_button)
         footer.addWidget(add_button)
         layout.addLayout(footer)
+
         _fill_combo(self.product_combo, _product_options())
+        self.product_combo.currentIndexChanged.connect(self._on_product_changed)
+        self.quantity_input.valueChanged.connect(self._recalculate)
+        self.precio_input.valueChanged.connect(self._recalculate)
+        self.descuento_input.valueChanged.connect(self._recalculate)
         cancel_button.clicked.connect(self.reject)
         add_button.clicked.connect(self._accept_product)
+
+    def _on_product_changed(self) -> None:
+        product_id = self.product_combo.currentData()
+        if product_id is None:
+            return
+        try:
+            product = Product.get_by_id(product_id)
+        except Product.DoesNotExist:
+            return
+        self.precio_input.setValue(product.precio_neto_base or 0.0)
+        if product.tipo_iva:
+            self.iva_input.setValue(product.tipo_iva.porcentaje)
+        elif self.iva_input.value() == 0:
+            self.iva_input.setValue(21.0)
+        if self.client and self.descuento_input.value() == 0:
+            self.descuento_input.setValue(self.client.descuento_porcentaje or 0.0)
+        self._recalculate()
+
+    def _recalculate(self) -> None:
+        quantity = self.quantity_input.value()
+        precio = self.precio_input.value()
+        descuento = self.descuento_input.value()
+        iva_pct = self.iva_input.value()
+        neto_subtotal = quantity * precio
+        descuento_importe = neto_subtotal * descuento / 100.0
+        neto_gravado = neto_subtotal - descuento_importe
+        iva_importe = neto_gravado * iva_pct / 100.0
+        total = neto_gravado + iva_importe
+        self.neto_subtotal_label.setText(f"$ {neto_subtotal:,.2f}")
+        self.descuento_importe_label.setText(f"$ {descuento_importe:,.2f}")
+        self.neto_gravado_label.setText(f"$ {neto_gravado:,.2f}")
+        self.iva_importe_label.setText(f"$ {iva_importe:,.2f}")
+        self.total_label.setText(f"$ {total:,.2f}")
 
     def _accept_product(self) -> None:
         product_id = self.product_combo.currentData()
@@ -1116,6 +1254,14 @@ class LoadOrderProductDialog(QDialog):
             "product_label": product.name,
             "quantity": quantity,
             "unit": product.unit,
+            "precio_neto_unitario": self.precio_input.value(),
+            "descuento_porcentaje": self.descuento_input.value(),
+            "iva_porcentaje": self.iva_input.value(),
+            "neto_subtotal": quantity * self.precio_input.value(),
+            "descuento_importe": quantity * self.precio_input.value() * self.descuento_input.value() / 100.0,
+            "neto_gravado": quantity * self.precio_input.value() * (1 - self.descuento_input.value() / 100.0),
+            "iva_importe": quantity * self.precio_input.value() * (1 - self.descuento_input.value() / 100.0) * self.iva_input.value() / 100.0,
+            "total": quantity * self.precio_input.value() * (1 - self.descuento_input.value() / 100.0) * (1 + self.iva_input.value() / 100.0),
         }
         self.accept()
 
@@ -1399,7 +1545,7 @@ def _seed_demo_masters():
 
     client_1 = Client.get_or_create(
         cuit="30777777772",
-        defaults={"name": "Demo 1", "iva_condition": "RI", "contact": "Demo Principal"},
+        defaults={"name": "Demo 1", "iva_condition": "RI", "contact": "Demo Principal", "descuento_porcentaje": 10.0},
     )[0]
     _ensure_address(client_1, "Entrega Posadas", "Posadas", active=True)
     _ensure_address(client_1, "Entrega Eldorado", "Eldorado", active=True)
@@ -1416,8 +1562,9 @@ def _seed_demo_masters():
     )[0]
     _ensure_address(client_inactive, "Direccion inactiva", "Posadas", active=False)
 
-    Product.get_or_create(name="Fecula de mandioca", defaults={"unit": "kg"})
-    Product.get_or_create(name="Fecula de maiz", defaults={"unit": "kg"})
+    iva_default = TipoIVA.iva_default()
+    Product.get_or_create(name="Fecula de mandioca", defaults={"unit": "kg", "precio_neto_base": 18000.0, "tipo_iva": iva_default})
+    Product.get_or_create(name="Fecula de maiz", defaults={"unit": "kg", "precio_neto_base": 9500.0, "tipo_iva": iva_default})
 
 
 def _ensure_address(client: Client, label: str, city: str, *, active: bool):

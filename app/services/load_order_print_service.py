@@ -9,7 +9,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.models.load_orders import LoadOrder
+from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+from app.models.masters import Client
 from app.services.audit_service import AuditService
 
 
@@ -316,6 +317,149 @@ class LoadOrderPrintService:
     def _p(self, value: object, *, bold: bool = False) -> Paragraph:
         style = self.styles["cell_bold"] if bold else self.styles["cell"]
         return Paragraph(escape(str(value or "-")), style)
+
+    def export_budget(self, order: LoadOrder, client: Client, output_dir: str | Path) -> Path:
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        safe_name = client.name.replace(" ", "_").replace("/", "-")
+        target = path / f"presupuesto_{safe_name}_{order.order_number}.pdf"
+        doc = SimpleDocTemplate(
+            str(target),
+            pagesize=A4,
+            rightMargin=14 * mm,
+            leftMargin=14 * mm,
+            topMargin=12 * mm,
+            bottomMargin=14 * mm,
+            title=f"Presupuesto {client.name} - OC {order.order_number}",
+        )
+        story = [
+            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
+            Spacer(1, 5 * mm),
+            Paragraph(f"PRESUPUESTO - Orden de carga Nro. {order.order_number:04d}", self.styles["title"]),
+            self._budget_header(order, client),
+            Spacer(1, 5 * mm),
+            Paragraph(f"Cliente: {client.name}", self.styles["section"]),
+            Spacer(1, 3 * mm),
+            self._budget_detail_table(order, client),
+            Spacer(1, 8 * mm),
+            self._budget_totals(order, client),
+            Spacer(1, 15 * mm),
+            Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
+        ]
+        doc.build(story)
+        self.audit_service.record(
+            user=self.current_user,
+            module="Ordenes de carga",
+            action="presupuesto",
+            record_ref=f"LoadOrder:{order.id}",
+            new_value={"file_path": str(target), "client": client.name, "order_number": order.order_number},
+        )
+        return target
+
+    def export_budgets(self, order: LoadOrder, output_dir: str | Path) -> list[Path]:
+        paths = []
+        clients_seen = set()
+        for destination in order.destinations:
+            client = destination.client
+            if client.id not in clients_seen:
+                clients_seen.add(client.id)
+                paths.append(self.export_budget(order, client, output_dir))
+        return paths
+
+    def _budget_header(self, order: LoadOrder, client: Client) -> Table:
+        data = [[f"Fecha: {order.date:%d/%m/%Y}", f"Estado: Pendiente"]]
+        table = Table(data, colWidths=[85 * mm, 85 * mm])
+        table.setStyle(
+            TableStyle([
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ])
+        )
+        return table
+
+    def _budget_detail_table(self, order: LoadOrder, client: Client) -> Table:
+        products = (
+            LoadOrderProduct.select()
+            .join(LoadOrderDestination)
+            .where(
+                (LoadOrderProduct.order == order)
+                & (LoadOrderDestination.client == client)
+            )
+        )
+        header = [
+            self._p("Cant.", bold=True),
+            self._p("Producto", bold=True),
+            self._p("P. Unit.", bold=True),
+            self._p("Dto %", bold=True),
+            self._p("Neto Subt.", bold=True),
+            self._p("Dto $", bold=True),
+            self._p("Neto Grav.", bold=True),
+            self._p("IVA %", bold=True),
+            self._p("IVA $", bold=True),
+            self._p("Total", bold=True),
+        ]
+        rows = [header]
+        for prod in products:
+            rows.append([
+                _quantity(prod.quantity),
+                self._p(prod.product.name),
+                self._p(f"$ {prod.precio_neto_unitario:,.2f}"),
+                self._p(f"{prod.descuento_porcentaje:g}%"),
+                self._p(f"$ {prod.neto_subtotal:,.2f}"),
+                self._p(f"$ {prod.descuento_importe:,.2f}"),
+                self._p(f"$ {prod.neto_gravado:,.2f}"),
+                self._p(f"{prod.iva_porcentaje:g}%"),
+                self._p(f"$ {prod.iva_importe:,.2f}"),
+                self._p(f"$ {prod.total:,.2f}"),
+            ])
+        col_widths = [14 * mm, 34 * mm, 18 * mm, 12 * mm, 18 * mm, 16 * mm, 18 * mm, 12 * mm, 16 * mm, 18 * mm]
+        table = Table(rows, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return table
+
+    def _budget_totals(self, order: LoadOrder, client: Client) -> Table:
+        products = (
+            LoadOrderProduct.select()
+            .join(LoadOrderDestination)
+            .where(
+                (LoadOrderProduct.order == order)
+                & (LoadOrderDestination.client == client)
+            )
+        )
+        total_neto_subtotal = sum(p.neto_subtotal for p in products)
+        total_descuento = sum(p.descuento_importe for p in products)
+        total_neto_gravado = sum(p.neto_gravado for p in products)
+        total_iva = sum(p.iva_importe for p in products)
+        total_general = sum(p.total for p in products)
+        data = [
+            [self._p("Neto subtotal:", bold=True), self._p(f"$ {total_neto_subtotal:,.2f}")],
+            [self._p("Descuento total:", bold=True), self._p(f"$ {total_descuento:,.2f}")],
+            [self._p("Neto gravado:", bold=True), self._p(f"$ {total_neto_gravado:,.2f}")],
+            [self._p("IVA total:", bold=True), self._p(f"$ {total_iva:,.2f}")],
+            [self._p("TOTAL PRESUPUESTO:", bold=True), self._p(f"$ {total_general:,.2f}")],
+        ]
+        table = Table(data, colWidths=[55 * mm, 55 * mm])
+        table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("LINEABOVE", (0, -1), (-1, -1), 1.5, colors.black),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return table
 
     def _legacy_html(self, order: LoadOrder) -> str:
         return (
