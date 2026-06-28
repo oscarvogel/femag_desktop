@@ -83,8 +83,7 @@ class LoginWindow(QDialog):
         if self.demo_mode:
             demo_fill = QPushButton("Completar demo")
             demo_fill.setObjectName("loginDemoFillButton")
-            demo_fill.setProperty("secondary", True)
-            demo_fill.setMinimumWidth(130)
+            demo_fill.setMinimumWidth(140)
             demo_fill.clicked.connect(self._fill_demo)
             buttons.addWidget(demo_fill)
 
@@ -92,7 +91,6 @@ class LoginWindow(QDialog):
 
         cancel_btn = QPushButton("Salir")
         cancel_btn.setObjectName("loginCancelButton")
-        cancel_btn.setProperty("secondary", True)
         cancel_btn.setMinimumWidth(90)
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
@@ -184,30 +182,44 @@ class LoginWindow(QDialog):
         min-height: 20px;
     }
     QPushButton {
-        background: #0b6fdc;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        min-height: 20px;
+        max-height: 20px;
+        padding: 8px 20px;
+    }
+    #loginSubmitButton {
+        background: #2563eb;
         color: #ffffff;
         border: 0;
-        border-radius: 6px;
-        padding: 10px 20px;
-        font-weight: 600;
-        font-size: 14px;
     }
-    QPushButton:hover {
+    #loginSubmitButton:hover {
         background: #1d4ed8;
     }
-    QPushButton:pressed {
+    #loginSubmitButton:pressed {
         background: #1e40af;
     }
-    QPushButton[secondary="true"] {
+    #loginCancelButton {
         background: #ffffff;
-        color: #334155;
-        border: 1px solid #cbd5e1;
+        color: #374151;
+        border: 1px solid #d1d5db;
     }
-    QPushButton[secondary="true"]:hover {
-        background: #f8fafc;
-        border-color: #94a3b8;
+    #loginCancelButton:hover {
+        background: #f3f4f6;
     }
-    QPushButton[secondary="true"]:pressed {
-        background: #f1f5f9;
+    #loginCancelButton:pressed {
+        background: #e5e7eb;
+    }
+    #loginDemoFillButton {
+        background: #eff6ff;
+        color: #1d4ed8;
+        border: 1px solid #bfdbfe;
+    }
+    #loginDemoFillButton:hover {
+        background: #dbeafe;
+    }
+    #loginDemoFillButton:pressed {
+        background: #bfdbfe;
     }
     """
