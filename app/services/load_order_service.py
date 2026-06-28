@@ -261,6 +261,7 @@ class LoadOrderService:
             client = self._require_instance(item.get("client"), Client, "cliente")
             delivery_address = self._require_instance(item.get("delivery_address"), ClientAddress, "lugar de entrega")
             self._require_active(client, "cliente")
+            self._require_active(delivery_address, "lugar de entrega")
             if delivery_address.client.id != client.id:
                 raise ValueError("El lugar de entrega debe pertenecer al cliente seleccionado.")
             products = item.get("products") or []

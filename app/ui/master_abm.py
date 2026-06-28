@@ -138,7 +138,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "addresses": MasterAbmConfig(
             "Domicilios",
-            ["Cliente", "Tipo", "Localidad", "Direccion"],
+            ["Cliente", "Tipo", "Localidad", "Direccion", "Estado"],
             _address_rows,
             ClientAddressEntryDialog,
             "newAddressButton",
@@ -277,6 +277,7 @@ class ClientAddressEntryDialog(QDialog):
         self.city_input.setObjectName("addressCityInput")
         self.street_input = QLineEdit()
         self.street_input.setObjectName("addressStreetInput")
+        self.active_combo = _combo("addressActiveInput", [(True, "Activo"), (False, "Inactivo")], include_empty=False)
         form.addWidget(QLabel("Cliente"), 0, 0)
         form.addWidget(self.client_combo, 0, 1)
         form.addWidget(QLabel("Tipo"), 1, 0)
@@ -287,6 +288,8 @@ class ClientAddressEntryDialog(QDialog):
         form.addWidget(self.city_input, 3, 1)
         form.addWidget(QLabel("Direccion"), 4, 0)
         form.addWidget(self.street_input, 4, 1)
+        form.addWidget(QLabel("Estado"), 5, 0)
+        form.addWidget(self.active_combo, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveAddressButton", self._save)
@@ -297,6 +300,7 @@ class ClientAddressEntryDialog(QDialog):
         address = ClientAddress.get_by_id(self.record_id)
         _set_combo(self.client_combo, address.client.id)
         _set_combo(self.type_combo, address.address_type)
+        _set_combo(self.active_combo, address.active)
         self.province_input.setText(address.province)
         self.city_input.setText(address.city)
         self.street_input.setText(address.address)
@@ -325,6 +329,7 @@ class ClientAddressEntryDialog(QDialog):
                 address = ClientAddress.get_by_id(self.record_id)
                 address.client = client
                 address.address_type = address_type
+                address.active = bool(self.active_combo.currentData())
                 address.province = province
                 address.city = city
                 address.address = street
@@ -691,7 +696,14 @@ def _client_rows() -> list[list[object]]:
 def _address_rows() -> list[list[object]]:
     try:
         return [
-            [address.id, address.client.name, address.address_type, address.city, address.address]
+            [
+                address.id,
+                address.client.name,
+                address.address_type,
+                address.city,
+                address.address,
+                "Activo" if address.active else "Inactivo",
+            ]
             for address in ClientAddress.select()
             .join(Client)
             .order_by(Client.name, ClientAddress.city)

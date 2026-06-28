@@ -21,6 +21,7 @@ class ClientAddress(BaseModel):
     address = CharField()
     is_primary = BooleanField(default=False)
     observations = TextField(null=True)
+    active = BooleanField(default=True)
 
 
 class Product(BaseModel):

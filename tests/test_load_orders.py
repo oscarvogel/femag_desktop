@@ -320,6 +320,7 @@ def test_create_load_order_rejects_driver_from_another_carrier(db):
     ("field", "message"),
     [
         ("client", "cliente.*inactivo"),
+        ("address", "lugar de entrega.*inactivo"),
         ("carrier", "transportista.*inactivo"),
         ("driver", "chofer.*inactivo"),
         ("truck", "camion.*inactivo"),
@@ -369,6 +370,29 @@ def test_update_pending_order_rejects_invalid_order_date(db):
 
     with pytest.raises(ValueError, match="fecha"):
         service.update_order(order, date="2026-06-28")
+
+
+def test_update_pending_order_rejects_inactive_delivery_address(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    data["address"].active = False
+    data["address"].save()
+
+    with pytest.raises(ValueError, match="lugar de entrega.*inactivo"):
+        service.update_order(
+            order,
+            destinations=[
+                {
+                    "client": data["client"],
+                    "delivery_address": data["address"],
+                    "products": [{"product": data["product"], "quantity": 50}],
+                }
+            ],
+        )
 
 
 @pytest.mark.parametrize(
