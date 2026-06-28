@@ -157,3 +157,60 @@ def test_app_ui_flag_reports_launch_error(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "No se pudo abrir FEMAG Desktop UI" in captured.err
     assert "PyQt5 no esta instalado" in captured.err
+
+
+def test_runtime_ui_prepares_schema_for_existing_local_database(tmp_path, monkeypatch):
+    from peewee import SqliteDatabase
+
+    from app.config.database import bind_database
+    from app.ui import desktop_app
+
+    database_path = tmp_path / "runtime.sqlite3"
+    database = SqliteDatabase(str(database_path), pragmas={"foreign_keys": 1})
+    bind_database(database)
+    database.connect(reuse_if_open=True)
+    database.execute_sql(
+        """
+        CREATE TABLE client (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            cuit VARCHAR(255) NOT NULL,
+            iva_condition VARCHAR(255) NOT NULL,
+            active BOOL DEFAULT 1,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """
+    )
+    database.execute_sql(
+        """
+        CREATE TABLE clientaddress (
+            id INTEGER PRIMARY KEY,
+            client_id INTEGER NOT NULL,
+            address_type VARCHAR(255) NOT NULL,
+            province VARCHAR(255) NOT NULL,
+            city VARCHAR(255) NOT NULL,
+            address VARCHAR(255) NOT NULL,
+            is_primary BOOL DEFAULT 0,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """
+    )
+    database.close()
+
+    def fake_initialize_runtime_database():
+        runtime_database = SqliteDatabase(str(database_path), pragmas={"foreign_keys": 1})
+        bind_database(runtime_database)
+        return runtime_database
+
+    monkeypatch.setattr(desktop_app, "initialize_runtime_database", fake_initialize_runtime_database)
+
+    prepared = desktop_app._prepare_database(demo_mode=False)
+
+    try:
+        column_names = {column.name for column in prepared.get_columns("clientaddress")}
+        assert "active" in column_names
+    finally:
+        if prepared is not None and not prepared.is_closed():
+            prepared.close()

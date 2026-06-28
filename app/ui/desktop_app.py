@@ -80,6 +80,7 @@ def _prepare_database(*, demo_mode: bool):
     try:
         database = initialize_runtime_database()
         database.connect(reuse_if_open=True)
+        ensure_runtime_schema(database)
         return database
     except Exception:
         return None
