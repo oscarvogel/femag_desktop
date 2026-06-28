@@ -719,3 +719,125 @@ def test_load_order_dialog_shows_feedback_when_no_active_addresses(db):
     assert address_combo.currentData() is None
     feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
     assert "no tiene lugares de entrega activos" in feedback.text()
+
+
+def test_demo_seed_client_1_has_two_active_addresses(db):
+    from app.models.masters import Client
+    from app.ui.desktop_app import _address_options, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    client_1 = Client.get(Client.cuit == "30777777772")
+    assert client_1.name == "Demo 1"
+
+    options = _address_options(client_id=client_1.id)
+    assert len(options) == 2
+    labels = [label for _id, label in options]
+    assert any("Posadas" in label for label in labels)
+    assert any("Eldorado" in label for label in labels)
+
+
+def test_demo_seed_client_2_has_one_active_address(db):
+    from app.models.masters import Client
+    from app.ui.desktop_app import _address_options, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    client = Client.get(Client.cuit == "30777777773")
+    assert client.name == "Demo 2"
+
+    options = _address_options(client_id=client.id)
+    assert len(options) == 1
+    label = options[0][1]
+    assert "Garuhape" in label
+
+
+def test_demo_seed_client_inactive_has_no_active_addresses(db):
+    from app.models.masters import Client, ClientAddress
+    from app.ui.desktop_app import _address_options, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    client = Client.get(Client.cuit == "30777777774")
+    assert client.name == "Sin Entregas Activas"
+
+    total_addresses = ClientAddress.select().where(ClientAddress.client == client).count()
+    assert total_addresses == 1
+    active_count = ClientAddress.select().where(
+        (ClientAddress.client == client) & (ClientAddress.active == True)
+    ).count()
+    assert active_count == 0
+
+    options = _address_options(client_id=client.id)
+    assert len(options) == 0
+
+
+def test_demo_seed_address_options_without_client_returns_all_active(db):
+    from app.ui.desktop_app import _address_options, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    options = _address_options(client_id=None)
+    assert len(options) == 3
+
+
+def test_demo_load_order_dialog_shows_correct_addresses_per_client(db):
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+
+    from app.models.masters import Client
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="demo"), "demo")
+    app.processEvents()
+
+    client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
+
+    client_1 = Client.get(Client.cuit == "30777777772")
+    client_2 = Client.get(Client.cuit == "30777777773")
+    client_inactive = Client.get(Client.cuit == "30777777774")
+
+    _set_combo(client_combo, client_1.id)
+    app.processEvents()
+    assert address_combo.count() > 1
+    items = [address_combo.itemText(i) for i in range(address_combo.count())]
+    assert any("Posadas" in item for item in items)
+    assert any("Eldorado" in item for item in items)
+
+    _set_combo(client_combo, client_2.id)
+    app.processEvents()
+    assert address_combo.currentText() != "-- Seleccione --"
+    assert "Garuhape" in address_combo.currentText()
+
+    _set_combo(client_combo, client_inactive.id)
+    app.processEvents()
+    assert address_combo.currentData() is None
+    assert "no tiene lugares de entrega activos" in feedback.text()
+
+    _set_combo(client_combo, client_1.id)
+    app.processEvents()
+    assert address_combo.count() > 1
+
+
+def test_demo_seed_inactive_address_excluded_from_all_clients(db):
+    from app.models.masters import Client, ClientAddress
+    from app.ui.desktop_app import _address_options, _seed_demo_masters
+
+    _seed_demo_masters()
+
+    client = Client.get(Client.cuit == "30777777774")
+    inactive_address = ClientAddress.get(
+        ClientAddress.client == client, ClientAddress.active == False
+    )
+
+    all_options = _address_options(client_id=None)
+    ids = [opt_id for opt_id, _label in all_options]
+    assert inactive_address.id not in ids
