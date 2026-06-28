@@ -41,6 +41,7 @@ class LoadOrderService:
         observations: str | None = None,
         order_date: date | None = None,
     ) -> LoadOrder:
+        order_date = self._validate_order_date(order_date)
         carrier, driver, truck = self._validate_logistic_header(carrier, driver, truck)
         normalized_destinations = self._validate_destinations(
             destinations,
@@ -53,7 +54,7 @@ class LoadOrderService:
         with database_proxy.atomic():
             order = LoadOrder.create(
                 order_number=self._next_order_number(),
-                date=order_date or date.today(),
+                date=order_date,
                 client=None,
                 delivery_address=None,
                 carrier=carrier,
@@ -109,6 +110,8 @@ class LoadOrderService:
         candidate_driver = changes.get("driver", order.driver)
         candidate_truck = changes.get("truck", order.truck)
         self._validate_logistic_header(candidate_carrier, candidate_driver, candidate_truck)
+        if "date" in changes:
+            changes["date"] = self._validate_order_date(changes["date"], allow_none=False)
         if new_driver is not None and new_driver.id != order.driver.id and order.is_active:
             self.driver_availability.ensure_available(new_driver, excluding_order=order)
             previous_driver = order.driver
@@ -221,6 +224,9 @@ class LoadOrderService:
         carrier = self._require_instance(carrier, Carrier, "transportista")
         driver = self._require_instance(driver, Driver, "chofer")
         truck = self._require_instance(truck, Truck, "camion")
+        self._require_active(carrier, "transportista")
+        self._require_active(driver, "chofer")
+        self._require_active(truck, "camion")
         if truck.carrier.id != carrier.id:
             raise ValueError("El camion debe pertenecer al transportista seleccionado.")
         master_service = MasterService(current_user=self.current_user, audit_service=self.audit_service)
@@ -254,6 +260,7 @@ class LoadOrderService:
                 raise ValueError("Cada cliente de la orden debe ser un detalle valido.")
             client = self._require_instance(item.get("client"), Client, "cliente")
             delivery_address = self._require_instance(item.get("delivery_address"), ClientAddress, "lugar de entrega")
+            self._require_active(client, "cliente")
             if delivery_address.client.id != client.id:
                 raise ValueError("El lugar de entrega debe pertenecer al cliente seleccionado.")
             products = item.get("products") or []
@@ -278,6 +285,7 @@ class LoadOrderService:
             if not isinstance(item, dict):
                 raise ValueError("Cada producto de la orden debe ser un detalle valido.")
             product = self._require_instance(item.get("product"), Product, "producto")
+            self._require_active(product, "producto")
             quantity = item.get("quantity")
             if quantity is None or quantity <= 0:
                 raise ValueError("La cantidad de producto debe ser mayor a cero.")
@@ -317,6 +325,19 @@ class LoadOrderService:
             return model_class.get_by_id(value.id)
         except model_class.DoesNotExist as exc:
             raise ValueError(f"El {label} no existe.") from exc
+
+    def _require_active(self, value, label: str) -> None:
+        if hasattr(value, "active") and value.active is False:
+            raise ValueError(f"El {label} esta inactivo.")
+
+    def _validate_order_date(self, value, *, allow_none: bool = True) -> date:
+        if value is None:
+            if allow_none:
+                return date.today()
+            raise ValueError("La fecha de la orden es obligatoria.")
+        if not isinstance(value, date):
+            raise ValueError("La fecha de la orden no es valida.")
+        return value
 
     def _replace_products(self, order: LoadOrder, products: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
