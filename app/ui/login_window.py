@@ -72,7 +72,7 @@ class LoginWindow(QDialog):
         self.feedback = QLabel("")
         self.feedback.setObjectName("loginFeedback")
         self.feedback.setWordWrap(True)
-        self.feedback.setFixedHeight(20)
+        self.feedback.setMinimumHeight(20)
         outer_layout.addWidget(self.feedback)
 
         outer_layout.addSpacing(10)
@@ -185,9 +185,7 @@ class LoginWindow(QDialog):
         border-radius: 6px;
         font-size: 14px;
         font-weight: 600;
-        min-height: 20px;
-        max-height: 20px;
-        padding: 8px 20px;
+        padding: 10px 24px;
     }
     #loginSubmitButton {
         background: #2563eb;
