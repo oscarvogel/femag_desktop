@@ -850,7 +850,12 @@ class LoadOrderEntryDialog(QDialog):
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
-        _fill_combo(self.address_combo, _address_options(client_id=client_id))
+        options = _address_options(client_id=client_id)
+        _fill_combo(self.address_combo, options)
+        if len(options) == 1:
+            self.address_combo.setCurrentIndex(1)
+        if client_id is not None and not options:
+            self.feedback.setText("El cliente seleccionado no tiene lugares de entrega activos.")
 
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
@@ -1243,7 +1248,7 @@ def _client_options() -> list[tuple[int, str]]:
 
 def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
     try:
-        query = ClientAddress.select().join(Client)
+        query = ClientAddress.select().join(Client).where(ClientAddress.active == True)  # noqa: E712
         if client_id is not None:
             query = query.where(ClientAddress.client == client_id)
         return [

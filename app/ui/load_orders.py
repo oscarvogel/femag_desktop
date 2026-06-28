@@ -323,7 +323,7 @@ def _client_options() -> tuple[LoadOrderScreenOption, ...]:
 def _delivery_address_options() -> tuple[LoadOrderScreenOption, ...]:
     return tuple(
         LoadOrderScreenOption(address.id, f"{address.client.name} - {address.address}, {address.city}")
-        for address in ClientAddress.select().join(Client).order_by(Client.name, ClientAddress.city)
+        for address in ClientAddress.select().join(Client).where(ClientAddress.active == True).order_by(Client.name, ClientAddress.city)  # noqa: E712
     )
 
 
