@@ -7,6 +7,16 @@ Issue: [#111](https://github.com/oscarvogel/femag_desktop/issues/111)
 
 ## 1. Arquitectura y entry points
 
+### 1.1 Instalación de dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación completa.
+
+### 1.2 Entry points
+
 | Concepto | Detalle |
 |---|---|
 | Entry point | `app/main.py` |
