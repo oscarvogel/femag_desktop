@@ -12,7 +12,6 @@ from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.services.load_order_operation_service import LoadOrderOperationService
-from app.services.load_order_print_service import LoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 
@@ -37,11 +36,9 @@ def run_integral_demo(
     operations = LoadOrderOperationService(current_user=username, prints_dir=evidence_dir)
     issued = operations.issue(order)
 
-    print_service = LoadOrderPrintService(current_user=username)
     output_dir = Path(evidence_dir)
-    order_html = print_service.export_order(issued, output_dir)
-    summary_html = print_service.export_summary(issued, output_dir)
-    reprint_html = operations.reprint_order(issued)
+    order_pdf = operations.print_order(issued)
+    regenerated_pdf = operations.print_order(issued)
 
     annulled = operations.annul(issued, can_annul=True)
     originals = _movements_for(annulled, reversal=False)
@@ -49,9 +46,8 @@ def run_integral_demo(
     readme = _write_readme(
         output_dir=output_dir,
         order=annulled,
-        order_html=order_html,
-        summary_html=summary_html,
-        reprint_html=reprint_html,
+        order_pdf=order_pdf,
+        regenerated_pdf=regenerated_pdf,
         originals=len(originals),
         reversals=len(reversals),
     )
@@ -68,9 +64,8 @@ def run_integral_demo(
         "ledger_originals": len(originals),
         "ledger_reversals": len(reversals),
         "ledger_total": len(originals) + len(reversals),
-        "order_html": order_html,
-        "summary_html": summary_html,
-        "reprint_html": reprint_html,
+        "order_pdf": order_pdf,
+        "regenerated_pdf": regenerated_pdf,
         "readme": readme,
     }
 
@@ -203,9 +198,8 @@ def _write_readme(
     *,
     output_dir: Path,
     order: LoadOrder,
-    order_html: Path,
-    summary_html: Path,
-    reprint_html: Path,
+    order_pdf: Path,
+    regenerated_pdf: Path,
     originals: int,
     reversals: int,
 ) -> Path:
@@ -224,9 +218,8 @@ def _write_readme(
                 f"- Camion / patente: {order.truck.domain}",
                 f"- Destinos: {order.destinations.count()}",
                 f"- Productos: {order.products.count()}",
-                f"- Orden HTML: `{order_html.name}`",
-                f"- Hoja/sobre HTML: `{summary_html.name}`",
-                f"- Reimpresion HTML: `{reprint_html.name}`",
+                f"- Orden PDF: `{order_pdf.name}`",
+                f"- Regeneracion PDF: `{regenerated_pdf.name}`",
                 f"- Cuenta corriente documental: {originals} movimientos originales y {reversals} reversos.",
                 "",
                 "## Flujo validado por script",
@@ -234,12 +227,11 @@ def _write_readme(
                 "1. Asegura maestros sinteticos.",
                 "2. Crea Orden de carga multi-cliente/multi-destino.",
                 "3. Emite la orden.",
-                "4. Genera Orden HTML A4.",
-                "5. Genera hoja/sobre HTML A4.",
-                "6. Reimprime como copia operativa.",
-                "7. Verifica cuenta corriente documental.",
-                "8. Anula la orden.",
-                "9. Verifica reversos documentales.",
+                "4. Genera Orden PDF A4.",
+                "5. Regenera el mismo PDF desde el unico boton Imprimir.",
+                "6. Verifica cuenta corriente documental.",
+                "7. Anula la orden.",
+                "8. Verifica reversos documentales.",
                 "",
                 "## Computer Use",
                 "",

@@ -5,7 +5,7 @@ import pytest
 from tests.test_load_orders import _valid_order_payload, _master_data
 
 
-def test_operational_flow_emits_prints_reprints_and_annuls_order(db, tmp_path):
+def test_operational_flow_emits_prints_again_and_annuls_order(db, tmp_path):
     from app.models.audit import AuditLog
     from app.models.load_orders import LoadOrder
     from app.services.load_order_operation_service import LoadOrderOperationService
@@ -17,16 +17,16 @@ def test_operational_flow_emits_prints_reprints_and_annuls_order(db, tmp_path):
 
     issued = operations.issue(order)
     first_print = operations.print_order(issued)
-    reprint = operations.reprint_order(issued)
+    second_print = operations.print_order(issued)
     annulled = operations.annul(issued, can_annul=True)
 
     assert issued.status == LoadOrder.STATUS_ISSUED
     assert Path(first_print).exists()
-    assert Path(reprint).exists()
-    assert "Reimpresion" in Path(reprint).read_text(encoding="utf-8")
+    assert Path(second_print).exists()
+    assert first_print == second_print
+    assert Path(second_print).name == "orden_carga_1.pdf"
     assert annulled.status == LoadOrder.STATUS_ANNULLED
-    assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 1
-    assert AuditLog.select().where(AuditLog.action == "reimprimir").count() == 1
+    assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 2
 
 
 def test_operational_flow_prints_pending_order_for_review(db, tmp_path):
@@ -43,7 +43,7 @@ def test_operational_flow_prints_pending_order_for_review(db, tmp_path):
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_PENDING
 
 
-def test_operational_flow_rejects_reissuing_or_printing_annulled_order(db, tmp_path):
+def test_operational_flow_rejects_reissuing_but_prints_annulled_order(db, tmp_path):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_operation_service import LoadOrderOperationService
     from app.services.load_order_service import LoadOrderService
@@ -55,8 +55,9 @@ def test_operational_flow_rejects_reissuing_or_printing_annulled_order(db, tmp_p
 
     with pytest.raises(ValueError, match="anulada"):
         operations.issue(annulled)
-    with pytest.raises(ValueError, match="anulada"):
-        operations.print_order(annulled)
+    pdf_path = operations.print_order(annulled)
+    assert Path(pdf_path).exists()
+    assert Path(pdf_path).name == "orden_carga_1.pdf"
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
 
 

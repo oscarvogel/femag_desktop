@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from pypdf import PdfReader
+
 
 def _order():
     from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
@@ -30,29 +32,40 @@ def _order():
     )
 
 
-def test_print_service_exports_order_summary_and_combined_html(db, tmp_path):
+def _pdf_text(path: Path) -> str:
+    reader = PdfReader(str(path))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def test_print_service_exports_load_order_pdf_with_real_format_fields(db, tmp_path):
     from app.models.audit import AuditLog
     from app.services.load_order_print_service import LoadOrderPrintService
 
     order = _order()
     service = LoadOrderPrintService(current_user="admin")
 
-    order_path = service.export_order(order, tmp_path)
-    summary_path = service.export_summary(order, tmp_path)
-    combined_path = service.export_combined(order, tmp_path, reprint=True)
+    pdf_path = service.export_pdf(order, tmp_path)
+    text = _pdf_text(pdf_path)
 
-    for path in (order_path, summary_path, combined_path):
-        html = Path(path).read_text(encoding="utf-8")
-        assert "Orden de carga Nro. 1" in html
-        assert "Cliente FEMAG" in html
-        assert "Juan Perez" in html
-        assert "AB123CD" in html
-
-    combined = Path(combined_path).read_text(encoding="utf-8")
-    assert "Hoja resumen / sobre de carga" in combined
-    assert "@page" in combined
-    assert "Reimpresion" in combined
-    assert AuditLog.select().where(AuditLog.action == "reimprimir").count() == 1
+    assert pdf_path.name == "orden_carga_1.pdf"
+    assert pdf_path.exists()
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert "GRAEF HERMANOS S.R.L." in text
+    assert "ORDEN DE DESPACHO DE FECULA DE MANDIOCA" in text
+    assert "Nro.: 0001" in text
+    assert "1. DATOS DEL CLIENTE" in text
+    assert "Cliente FEMAG" in text
+    assert "Ruta 12" in text
+    assert "2. DETALLE DEL PRODUCTO A DESPACHAR" in text
+    assert "Fecula" in text
+    assert "1000" in text
+    assert "3. DATOS DEL TRANSPORTE" in text
+    assert "Transporte Norte" in text
+    assert "Juan Perez" in text
+    assert "AB123CD" in text
+    assert "Imprimir con hoja resumen" in text
+    assert "Firma del encargado de carga" in text
+    assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 1
 
 
 def test_print_service_groups_multi_client_order_by_destination(db, tmp_path):
@@ -100,15 +113,16 @@ def test_print_service_groups_multi_client_order_by_destination(db, tmp_path):
         pallets=[],
     )
 
-    html = Path(LoadOrderPrintService(current_user="admin").export_combined(order, tmp_path)).read_text(
-        encoding="utf-8"
-    )
+    pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(order, tmp_path)
+    text = _pdf_text(pdf_path)
 
-    assert "Cabecera logística" in html
-    assert "Detalle por cliente / destino" in html
-    assert html.index("Cliente FEMAG") < html.index("Fecula")
-    assert html.index("Cliente Sur") < html.index("Almidon")
-    assert "Cliente cabecera" not in html
+    assert "VARIOS" in text
+    assert "Ruta 12" in text
+    assert "Ruta 14" in text
+    assert "Cliente FEMAG" in text
+    assert "Fecula" in text
+    assert "Cliente Sur" in text
+    assert "Almidon" in text
 
 
 def test_final_a4_print_separates_logistics_destinations_and_totals(db, tmp_path):
@@ -162,74 +176,96 @@ def test_final_a4_print_separates_logistics_destinations_and_totals(db, tmp_path
         observations="Prioridad de despacho oficina.",
     )
 
-    html = Path(LoadOrderPrintService(current_user="admin").export_combined(order, tmp_path)).read_text(
-        encoding="utf-8"
-    )
+    pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(order, tmp_path)
+    text = _pdf_text(pdf_path)
 
-    assert "<title>Orden de carga OC-000001</title>" in html
-    assert "Documento logistico interno" in html
-    assert "No fiscal" in html
-    assert "Cliente / destino 1" in html
-    assert "Cliente / destino 2" in html
-    assert html.index("Cliente Norte") < html.index("Fecula bolsa 25kg")
-    assert html.index("Cliente Sur") < html.rindex("Fecula bolsa 25kg")
-    assert "Total destino: 200 bolsas" in html
-    assert "Total destino: 40 bolsas" in html
-    assert "Total general: 240 bolsas" in html
-    assert "Prioridad de despacho oficina." in html
-    assert "Factura" not in html
-    assert "Remito fiscal" not in html
-    assert "F150" not in html
+    assert "Cliente Norte" in text
+    assert "Cliente Sur" in text
+    assert "Fecula bolsa 25kg" in text
+    assert "Harina bolsa 10kg" in text
+    assert "160" in text
+    assert "2" in text
+    assert "Prioridad de despacho oficina." in text
+    assert "Factura" not in text
+    assert "Remito fiscal" not in text
+    assert "F150" not in text
 
 
-def test_final_summary_envelope_is_compact_and_does_not_flatten_clients(db, tmp_path):
+def test_pdf_marks_annulled_order_without_changing_status(db, tmp_path):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_print_service import LoadOrderPrintService
+
+    order = _order()
+    annulled = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).annul(order, can_annul=True)
+
+    pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(annulled, tmp_path)
+    text = _pdf_text(pdf_path)
+
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
+    assert "ANULADA" in text
+    assert "Estado: Anulada" in text
+
+
+def test_pdf_uses_up_to_four_product_columns_and_sends_extra_products_to_detail(db, tmp_path):
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_print_service import LoadOrderPrintService
     from app.services.load_order_service import LoadOrderService
 
-    carrier = Carrier.create(name="Transporte Sobre")
-    driver = Driver.create(name="Chofer Sobre", carrier=carrier)
-    truck = Truck.create(domain="SB123CD", carrier=carrier)
-    product = Product.create(name="Producto Sobre", unit="packs")
-    destinations = []
-    for index, name in enumerate(("Cliente A", "Cliente B"), start=1):
-        client = Client.create(name=name, cuit=f"3072000000{index}", iva_condition="RI")
-        address = ClientAddress.create(
-            client=client,
-            address_type="entrega",
-            province="Misiones",
-            city=f"Ciudad {index}",
-            address=f"Destino {index}",
+    carrier = Carrier.create(name="Transporte Articulos")
+    driver = Driver.create(name="Chofer Articulos", carrier=carrier)
+    truck = Truck.create(domain="ART123", carrier=carrier)
+    client = Client.create(name="Cliente Articulos", cuit="30720000001", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Destino articulos",
+    )
+    products = [
+        Product.create(name=name, unit=unit)
+        for name, unit in (
+            ("Fecula 25kg", "bolsas"),
+            ("Fecula 10kg", "bolsas"),
+            ("Pack 1kg", "packs"),
+            ("Almidon", "kg"),
+            ("Producto extra", "cajas"),
         )
-        destinations.append(
-            {
-                "client": client,
-                "delivery_address": address,
-                "products": [{"product": product, "quantity": index * 10}],
-            }
-        )
+    ]
     order = LoadOrderService(current_user="admin").create_order(
         carrier=carrier,
         driver=driver,
         truck=truck,
-        destinations=destinations,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [
+                    {"product": product, "quantity": index * 10}
+                    for index, product in enumerate(products, start=1)
+                ],
+            }
+        ],
         pallets=[],
     )
 
-    summary = Path(LoadOrderPrintService(current_user="admin").export_summary(order, tmp_path)).read_text(
-        encoding="utf-8"
-    )
+    pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(order, tmp_path)
+    text = _pdf_text(pdf_path)
 
-    assert "Hoja resumen / sobre de carga" in summary
-    assert "Resumen para adjuntar al sobre de la orden" in summary
-    assert "Cliente A - Destino 1, Ciudad 1" in summary
-    assert "Cliente B - Destino 2, Ciudad 2" in summary
-    assert "2 clientes / destinos" in summary
-    assert "Total general: 30 packs" in summary
-    assert "Cliente unico" not in summary
+    assert "Fecula" in text
+    assert "25kg" in text
+    assert "10kg" in text
+    assert "Pack 1kg" in text
+    assert "Almidon" in text
+    assert "Producto extra - 50 cajas" in text
+    assert "Bolsas 25 kg" not in text
+    assert "Bolsas 10 kg" not in text
+    assert "Lote" in text
+    assert "Elab." in text
 
 
-def test_reprint_html_marks_copy_and_preserves_issued_status(db, tmp_path):
+def test_printing_again_regenerates_same_pdf_without_reprint_copy(db, tmp_path):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_operation_service import LoadOrderOperationService
 
@@ -237,10 +273,12 @@ def test_reprint_html_marks_copy_and_preserves_issued_status(db, tmp_path):
     operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
     issued = operations.issue(order)
 
-    reprint_path = operations.reprint_order(issued)
+    first_path = operations.print_order(issued)
+    second_path = operations.print_order(issued)
     reloaded = LoadOrder.get_by_id(issued.id)
-    html = Path(reprint_path).read_text(encoding="utf-8")
+    text = _pdf_text(second_path)
 
     assert reloaded.status == LoadOrder.STATUS_ISSUED
-    assert "Reimpresion operativa" in html
-    assert "Copia para reimpresion" in html
+    assert first_path == second_path
+    assert second_path.name == "orden_carga_1.pdf"
+    assert "Reimpresion" not in text

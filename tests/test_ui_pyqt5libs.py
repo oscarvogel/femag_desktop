@@ -50,7 +50,6 @@ def test_load_order_view_spec_uses_pyqt5libs_abm_contract():
         "crear",
         "modificar",
         "imprimir",
-        "reimprimir",
         "anular",
         "cerrar",
     )

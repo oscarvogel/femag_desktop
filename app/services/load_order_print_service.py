@@ -2,6 +2,13 @@ from collections import defaultdict
 from html import escape
 from pathlib import Path
 
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
 from app.models.load_orders import LoadOrder
 from app.services.audit_service import AuditService
 
@@ -10,292 +17,364 @@ class LoadOrderPrintService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
+        self.styles = _styles()
 
-    def export_order(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
-        return self._write(
-            output_dir,
-            f"orden_carga_{order.order_number}.html",
-            self.render_order(order, reprint=reprint),
-            order,
-            reprint,
-        )
-
-    def export_summary(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
-        return self._write(
-            output_dir,
-            f"hoja_resumen_{order.order_number}.html",
-            self.render_summary(order, reprint=reprint),
-            order,
-            reprint,
-        )
-
-    def export_combined(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
-        html = self._document(
-            self._document_title(order),
-            f"{self._order_body(order, reprint=reprint)}<div class=\"page-break\"></div>{self._summary_body(order, reprint=reprint)}",
-        )
-        return self._write(output_dir, f"orden_y_resumen_{order.order_number}.html", html, order, reprint)
-
-    def render_order(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        return self._document(self._document_title(order), self._order_body(order, reprint=reprint))
-
-    def render_summary(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        return self._document(self._document_title(order), self._summary_body(order, reprint=reprint))
-
-    def _write(self, output_dir: str | Path, filename: str, html: str, order: LoadOrder, reprint: bool) -> Path:
+    def export_pdf(self, order: LoadOrder, output_dir: str | Path) -> Path:
         path = Path(output_dir)
         path.mkdir(parents=True, exist_ok=True)
-        target = path / filename
-        target.write_text(html, encoding="utf-8")
+        target = path / f"orden_carga_{order.order_number}.pdf"
+        self._build_pdf(order, target)
         self.audit_service.record(
             user=self.current_user,
             module="Ordenes de carga",
-            action="reimprimir" if reprint else "imprimir",
+            action="imprimir",
             record_ref=f"LoadOrder:{order.id}",
             new_value={"file_path": str(target), "order_number": order.order_number},
         )
         return target
 
-    def _document(self, title: str, body: str) -> str:
-        return f"""<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<title>{escape(title)}</title>
-<style>
-@page {{ size: A4; margin: 14mm; }}
-* {{ box-sizing: border-box; }}
-body {{ font-family: Arial, sans-serif; color: #202124; font-size: 11.5px; line-height: 1.35; margin: 0; }}
-h1 {{ font-size: 21px; margin: 0; letter-spacing: 0; }}
-h2 {{ font-size: 15px; margin: 16px 0 8px; border-bottom: 1px solid #2f3a4a; padding-bottom: 4px; }}
-h3 {{ font-size: 13px; margin: 0 0 8px; }}
-table {{ width: 100%; border-collapse: collapse; margin-top: 8px; page-break-inside: avoid; }}
-th, td {{ border: 1px solid #9aa0a6; padding: 5px 6px; text-align: left; vertical-align: top; }}
-th {{ background: #eef2f7; color: #172033; font-weight: bold; }}
-.document {{ min-height: 260mm; }}
-.topline {{ display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid #172033; padding-bottom: 10px; margin-bottom: 12px; }}
-.doc-kind {{ text-transform: uppercase; font-size: 11px; font-weight: bold; color: #475569; }}
-.badge {{ border: 1px solid #172033; padding: 5px 8px; font-weight: bold; text-transform: uppercase; white-space: nowrap; }}
-.copy-badge {{ border-color: #9f1239; color: #9f1239; }}
-.meta-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 10px 0 4px; }}
-.box {{ border: 1px solid #c6ccd5; padding: 7px; min-height: 42px; }}
-.label {{ display: block; font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: bold; }}
-.value {{ font-size: 12px; color: #111827; }}
-.destination {{ border: 1px solid #c6ccd5; padding: 9px; margin-top: 10px; page-break-inside: avoid; }}
-.destination-title {{ display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }}
-.destination-total, .general-total {{ text-align: right; font-weight: bold; margin-top: 7px; }}
-.observations {{ white-space: pre-wrap; border: 1px solid #d9e1ec; min-height: 34px; padding: 7px; }}
-.summary-list {{ margin: 8px 0 0; padding-left: 18px; }}
-.summary-list li {{ margin-bottom: 5px; }}
-.footer-note {{ margin-top: 16px; font-size: 10px; color: #64748b; border-top: 1px solid #c6ccd5; padding-top: 6px; }}
-.page-break {{ page-break-before: always; }}
-</style>
-</head>
-<body>{body}</body>
-</html>"""
+    def export_order(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
+        return self.export_pdf(order, output_dir)
 
-    def _order_body(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        flag = self._reprint_flag(reprint)
-        return f"""
-<section class="document">
-{self._header(order, "Orden de carga", "Documento logistico interno", flag)}
-{self._meta(order)}
-{self._destinations(order)}
-{self._pallets(order)}
-<h2>Observaciones operativas</h2>
-<div class="observations">{escape(order.observations or "Sin observaciones.")}</div>
-<p class="footer-note">No fiscal. No reemplaza documentacion fiscal ni comprobantes comerciales.</p>
-</section>
-"""
+    def export_summary(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
+        return self.export_pdf(order, output_dir)
 
-    def _summary_body(self, order: LoadOrder, *, reprint: bool = False) -> str:
-        flag = self._reprint_flag(reprint)
-        return f"""
-<section class="document summary-document">
-{self._header(order, "Hoja resumen / sobre de carga", "Resumen para adjuntar al sobre de la orden", flag)}
-{self._meta(order)}
-{self._summary_destinations(order)}
-<h2>Totales</h2>
-<p class="general-total">Total general: {escape(self._total_text(self._order_totals(order)))}</p>
-<h2>Observaciones operativas</h2>
-<div class="observations">{escape(order.observations or "Sin observaciones.")}</div>
-<p class="footer-note">Hoja logistica minima para oficina. No fiscal.</p>
-</section>
-"""
+    def export_combined(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
+        return self.export_pdf(order, output_dir)
 
-    def _document_title(self, order: LoadOrder) -> str:
-        return f"Orden de carga OC-{order.order_number:06d}"
+    def render_order(self, order: LoadOrder, *, reprint: bool = False) -> str:
+        return self._legacy_html(order)
 
-    def _reprint_flag(self, reprint: bool) -> str:
-        if not reprint:
-            return ""
-        return "<div class=\"badge copy-badge\">Reimpresion operativa - Copia para reimpresion</div>"
+    def render_summary(self, order: LoadOrder, *, reprint: bool = False) -> str:
+        return self._legacy_html(order)
 
-    def _header(self, order: LoadOrder, title: str, subtitle: str, flag: str) -> str:
-        right = flag or "<div class=\"badge\">Original operativo</div>"
-        return f"""
-<header class="topline">
-<div>
-<div class="doc-kind">{escape(subtitle)}</div>
-<h1>{escape(title)} OC-{order.order_number:06d}</h1>
-<div>Orden de carga Nro. {order.order_number}</div>
-</div>
-{right}
-</header>
-"""
+    def _build_pdf(self, order: LoadOrder, target: Path) -> None:
+        doc = SimpleDocTemplate(
+            str(target),
+            pagesize=A4,
+            rightMargin=14 * mm,
+            leftMargin=14 * mm,
+            topMargin=12 * mm,
+            bottomMargin=14 * mm,
+            title=f"Orden de carga {order.order_number}",
+        )
+        story = [
+            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
+            Spacer(1, 5 * mm),
+            Paragraph("ORDEN DE DESPACHO DE FECULA DE MANDIOCA", self.styles["title"]),
+            self._header_table(order),
+            Spacer(1, 5 * mm),
+        ]
+        if order.status == LoadOrder.STATUS_ANNULLED:
+            story.extend([Paragraph("ANULADA", self.styles["annulled"]), Spacer(1, 3 * mm)])
+        story.extend(
+            [
+                Paragraph("1. DATOS DEL CLIENTE", self.styles["section"]),
+                self._client_table(order),
+                Spacer(1, 8 * mm),
+                Paragraph("2. DETALLE DEL PRODUCTO A DESPACHAR", self.styles["section"]),
+                self._detail_table(order),
+                Spacer(1, 9 * mm),
+                Paragraph("3. DATOS DEL TRANSPORTE", self.styles["section"]),
+                self._transport_table(order),
+                Spacer(1, 13 * mm),
+                self._observations(order),
+                Spacer(1, 15 * mm),
+                Paragraph("Firma del encargado de carga: __________________________", self.styles["normal"]),
+            ]
+        )
+        doc.build(story)
 
-    def _meta(self, order: LoadOrder) -> str:
-        return f"""
-<h2>Cabecera logística</h2>
-<section class="meta-grid">
-{self._box("Fecha", f"{order.date:%d/%m/%Y}")}
-{self._box("Estado", order.status)}
-{self._box("Transportista", order.carrier.name)}
-{self._box("Chofer", order.driver.name)}
-{self._box("Camion / patente", order.truck.domain)}
-{self._box("Tipo", "Carga multi-cliente" if len(self._destination_groups(order)) > 1 else "Carga operativa")}
-</section>
-"""
-
-    def _destinations(self, order: LoadOrder) -> str:
-        sections = []
-        destinations = self._destination_groups(order)
-        if not destinations:
-            return self._legacy_products(order)
-        for index, destination in enumerate(destinations, start=1):
-            rows = "".join(
-                f"<tr><td>{escape(item.product.name)}</td><td>{escape(item.product.unit)}</td>"
-                f"<td>{item.quantity:g}</td><td>{escape(item.unit)}</td><td>{escape(item.observations or '')}</td></tr>"
-                for item in destination.products
+    def _header_table(self, order: LoadOrder) -> Table:
+        data = [[f"Nro.: {order.order_number:04d}", f"Fecha: {order.date:%d/%m/%Y}", f"Estado: {order.status}"]]
+        table = Table(data, colWidths=[45 * mm, 58 * mm, 67 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
             )
-            destination_total = self._total_text(self._destination_totals(destination))
-            sections.append(
-                f"""
-<section class="destination">
-<div class="destination-title">
-<h3>Cliente / destino {index}</h3>
-<strong>{escape(destination_total)}</strong>
-</div>
-<div class="meta-grid">
-{self._box("Cliente", destination.client.name)}
-{self._box("Destino", f"{destination.delivery_address.address}, {destination.delivery_address.city}")}
-{self._box("Provincia", destination.delivery_address.province)}
-</div>
-<table>
-<tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>
-{rows}
-</table>
-<div class="destination-total">Total destino: {escape(destination_total)}</div>
-{self._destination_observations(destination)}
-</section>
-"""
+        )
+        return table
+
+    def _client_table(self, order: LoadOrder) -> Table:
+        client = self._client_label(order)
+        destination = self._destination_label(order)
+        data = [[self._p("DATOS DEL CLIENTE:"), self._p(client)], [self._p("DESTINO:"), self._p(destination)]]
+        table = Table(data, colWidths=[42 * mm, 128 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
             )
-        return (
-            f"<h2>Detalle por cliente / destino</h2>{''.join(sections)}"
-            f"<div class=\"general-total\">Total general: {escape(self._total_text(self._order_totals(order)))}</div>"
         )
+        return table
 
-    def _legacy_products(self, order: LoadOrder) -> str:
-        rows = "".join(
-            f"<tr><td>{escape(item.product.name)}</td><td>{escape(item.product.unit)}</td>"
-            f"<td>{item.quantity:g}</td><td>{escape(item.unit)}</td><td>{escape(item.observations or '')}</td></tr>"
-            for item in order.products
+    def _detail_table(self, order: LoadOrder) -> Table:
+        article_columns = self._article_columns(order)
+        header = [
+            self._p("Cliente / destino / detalle de entrega", bold=True),
+            *(self._p(article, bold=True) for article in article_columns),
+            self._p("Pallet", bold=True),
+            self._p("Detalle", bold=True),
+            self._p("Lote", bold=True),
+            self._p("Elab.", bold=True),
+        ]
+        rows = [header]
+        totals = defaultdict(float)
+        for row in self._detail_rows(order):
+            rows.append(
+                [
+                    self._p(row["destination"]),
+                    *(_quantity(row["articles"].get(article, 0.0)) for article in article_columns),
+                    _quantity(row["pallet"]),
+                    self._p(row["detail"]),
+                    "-",
+                    "-",
+                ]
+            )
+            for article in article_columns:
+                totals[article] += row["articles"].get(article, 0.0)
+            totals["pallet"] += row["pallet"]
+        rows.append(
+            [
+                self._p("TOTALES", bold=True),
+                *(_quantity(totals[article]) for article in article_columns),
+                _quantity(totals["pallet"]),
+                "",
+                "",
+                "",
+            ]
         )
-        return (
-            "<h2>Detalle por cliente / destino</h2>"
-            "<section class=\"destination\">"
-            "<h3>Cliente / destino historico</h3>"
-            f"{self._legacy_destination_meta(order)}"
-            "<table><tr><th>Producto</th><th>Presentacion</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr>"
-            f"{rows}</table>"
-            f"<div class=\"general-total\">Total general: {escape(self._total_text(self._order_totals(order)))}</div>"
-            "</section>"
+        article_width = 68 / max(len(article_columns), 1)
+        table = Table(
+            rows,
+            colWidths=[
+                42 * mm,
+                *(article_width * mm for _article in article_columns),
+                13 * mm,
+                31 * mm,
+                12 * mm,
+                16 * mm,
+            ],
         )
-
-    def _pallets(self, order: LoadOrder) -> str:
-        pallets = list(order.pallets)
-        if not pallets:
-            return "<h2>Pallets</h2><p>Sin pallets declarados.</p>"
-        rows = "".join(
-            f"<tr><td>{escape(item.pallet_type.type)}</td><td>{escape(item.measure)}</td>"
-            f"<td>{item.weight:g}</td><td>{item.quantity}</td><td>{escape(item.observations or '')}</td></tr>"
-            for item in pallets
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 7.1),
+                    ("ALIGN", (1, 1), (len(article_columns) + 1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
         )
-        return (
-            "<h2>Pallets</h2><table><tr><th>Tipo</th><th>Medida</th><th>Peso</th>"
-            f"<th>Cantidad</th><th>Obs.</th></tr>{rows}</table>"
+        return table
+
+    def _transport_table(self, order: LoadOrder) -> Table:
+        data = [
+            [self._p("Empresa de transporte:", bold=True), self._p(order.carrier.name)],
+            [self._p("Dominio del vehiculo:", bold=True), self._p(order.truck.domain)],
+            [self._p("Nombre del chofer:", bold=True), self._p(order.driver.name)],
+            [self._p("Vehiculo limpio y apto:", bold=True), self._p("Si / No")],
+        ]
+        table = Table(data, colWidths=[58 * mm, 112 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
         )
+        return table
 
-    def _summary_destinations(self, order: LoadOrder) -> str:
-        destinations = self._destination_groups(order)
-        count = len(destinations)
-        if count == 0:
-            return self._legacy_summary(order)
-        items = "".join(
-            "<li>"
-            f"{escape(destination.client.name)} - "
-            f"{escape(destination.delivery_address.address)}, {escape(destination.delivery_address.city)}"
-            f" ({escape(self._total_text(self._destination_totals(destination)))})"
-            "</li>"
-            for destination in destinations
-        )
-        return f"""
-<h2>Clientes / destinos</h2>
-<p><strong>{count} clientes / destinos</strong></p>
-<ul class="summary-list">{items}</ul>
-"""
+    def _observations(self, order: LoadOrder) -> Paragraph:
+        value = order.observations or "-"
+        return Paragraph(f"<b>Observaciones:</b> {escape(value)}", self.styles["normal"])
 
-    def _legacy_summary(self, order: LoadOrder) -> str:
-        if order.client is None or order.delivery_address is None:
-            return "<h2>Clientes / destinos</h2><p>Sin cliente/destino declarado.</p>"
-        return f"""
-<h2>Clientes / destinos</h2>
-<p><strong>1 cliente / destino</strong></p>
-<ul class="summary-list">
-<li>{escape(order.client.name)} - {escape(order.delivery_address.address)}, {escape(order.delivery_address.city)}</li>
-</ul>
-"""
+    def _detail_rows(self, order: LoadOrder) -> list[dict[str, object]]:
+        rows = []
+        article_columns = self._article_columns(order)
+        destinations = list(order.destinations.order_by())
+        if destinations:
+            for destination in destinations:
+                products = list(destination.products)
+                rows.append(
+                    self._detail_row(order, self._row_destination(order, destination), products, article_columns)
+                )
+        else:
+            rows.append(self._detail_row(order, self._destination_label(order), list(order.products), article_columns))
+        if not rows:
+            rows.append(
+                {
+                    "destination": self._destination_label(order),
+                    "articles": {article: 0.0 for article in article_columns},
+                    "pallet": self._pallet_total(order),
+                    "detail": "-",
+                }
+            )
+        return rows
 
-    def _legacy_destination_meta(self, order: LoadOrder) -> str:
-        if order.client is None or order.delivery_address is None:
-            return ""
-        return (
-            "<div class=\"meta-grid\">"
-            f"{self._box('Cliente', order.client.name)}"
-            f"{self._box('Destino', f'{order.delivery_address.address}, {order.delivery_address.city}')}"
-            f"{self._box('Provincia', order.delivery_address.province)}"
-            "</div>"
-        )
+    def _detail_row(
+        self,
+        order: LoadOrder,
+        destination_label: str,
+        products: list,
+        article_columns: list[str],
+    ) -> dict[str, object]:
+        articles = {article: 0.0 for article in article_columns}
+        detail_items = []
+        for item in products:
+            product_name = item.product.name
+            if product_name in articles:
+                articles[product_name] += item.quantity
+            else:
+                detail_items.append(self._product_detail(item))
+        if not detail_items:
+            detail_items = [self._product_detail(item) for item in products]
+        return {
+            "destination": destination_label,
+            "articles": articles,
+            "pallet": self._pallet_share_for_products(order, products),
+            "detail": " / ".join(detail_items) if detail_items else "-",
+        }
 
-    def _destination_groups(self, order: LoadOrder):
-        return list(order.destinations.order_by())
+    def _pallet_share_for_products(self, order: LoadOrder, products: list) -> float:
+        total_quantity = sum(product.quantity for product in order.products)
+        if not total_quantity:
+            return 0.0
+        row_quantity = sum(product.quantity for product in products)
+        return round(self._pallet_total(order) * (row_quantity / total_quantity), 2)
 
-    def _destination_observations(self, destination) -> str:
-        if not destination.observations:
-            return ""
-        return f"<div class=\"observations\">{escape(destination.observations)}</div>"
-
-    def _destination_totals(self, destination) -> dict[str, float]:
-        totals: dict[str, float] = defaultdict(float)
-        for item in destination.products:
-            totals[item.unit] += item.quantity
-        return dict(totals)
-
-    def _order_totals(self, order: LoadOrder) -> dict[str, float]:
-        totals: dict[str, float] = defaultdict(float)
+    def _article_columns(self, order: LoadOrder) -> list[str]:
+        articles = []
         for item in order.products:
-            totals[item.unit] += item.quantity
-        return dict(totals)
+            product_name = item.product.name
+            if product_name not in articles:
+                articles.append(product_name)
+            if len(articles) == 4:
+                break
+        return articles or ["Articulo"]
 
-    def _total_text(self, totals: dict[str, float]) -> str:
-        if not totals:
-            return "Sin cantidades"
-        return " / ".join(f"{quantity:g} {escape(unit)}" for unit, quantity in sorted(totals.items()))
+    def _product_detail(self, item) -> str:
+        detail = f"{item.product.name} - {_quantity(item.quantity)} {item.unit}"
+        if item.observations:
+            detail = f"{detail} - {item.observations}"
+        return detail
 
-    def _box(self, label: str, value: str) -> str:
+    def _pallet_total(self, order: LoadOrder) -> float:
+        return float(sum(pallet.quantity for pallet in order.pallets))
+
+    def _row_destination(self, order: LoadOrder, destination) -> str:
+        if destination is None:
+            if order.client is None or order.delivery_address is None:
+                return "-"
+            return f"{order.client.name} - {order.delivery_address.address} - {order.delivery_address.city}"
         return (
-            "<div class=\"box\">"
-            f"<span class=\"label\">{escape(label)}</span>"
-            f"<span class=\"value\">{escape(value or '-')}</span>"
-            "</div>"
+            f"{destination.client.name} - {destination.delivery_address.address} - "
+            f"{destination.delivery_address.city}"
         )
+
+    def _client_label(self, order: LoadOrder) -> str:
+        destinations = list(order.destinations)
+        if len(destinations) > 1:
+            return "VARIOS"
+        if len(destinations) == 1:
+            return destinations[0].client.name
+        if order.client is not None:
+            return order.client.name
+        return "-"
+
+    def _destination_label(self, order: LoadOrder) -> str:
+        destinations = list(order.destinations)
+        labels = []
+        if destinations:
+            for destination in destinations:
+                address = destination.delivery_address
+                labels.append(f"{address.province} - {address.city} - {address.address}")
+        elif order.delivery_address is not None:
+            address = order.delivery_address
+            labels.append(f"{address.province} - {address.city} - {address.address}")
+        return " / ".join(labels) if labels else "-"
+
+    def _p(self, value: object, *, bold: bool = False) -> Paragraph:
+        style = self.styles["cell_bold"] if bold else self.styles["cell"]
+        return Paragraph(escape(str(value or "-")), style)
+
+    def _legacy_html(self, order: LoadOrder) -> str:
+        return (
+            "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">"
+            f"<title>Orden de carga OC-{order.order_number:06d}</title></head>"
+            f"<body><h1>Orden de carga Nro. {order.order_number}</h1>"
+            "<p>La impresion operativa vigente se genera en PDF.</p></body></html>"
+        )
+
+
+def _styles() -> dict[str, ParagraphStyle]:
+    base = getSampleStyleSheet()
+    return {
+        "company": ParagraphStyle(
+            "company",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            alignment=TA_CENTER,
+            leading=13,
+        ),
+        "title": ParagraphStyle(
+            "title",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            alignment=TA_LEFT,
+            leading=13,
+        ),
+        "section": ParagraphStyle(
+            "section",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            alignment=TA_LEFT,
+            leading=12,
+            spaceAfter=4,
+        ),
+        "annulled": ParagraphStyle(
+            "annulled",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=30,
+            textColor=colors.HexColor("#a00000"),
+            alignment=TA_CENTER,
+            leading=34,
+        ),
+        "normal": ParagraphStyle("normal", parent=base["Normal"], fontSize=9, leading=12),
+        "cell": ParagraphStyle("cell", parent=base["Normal"], fontSize=6.8, leading=8),
+        "cell_bold": ParagraphStyle(
+            "cell_bold", parent=base["Normal"], fontName="Helvetica-Bold", fontSize=6.8, leading=8, alignment=TA_CENTER
+        ),
+        "right": ParagraphStyle("right", parent=base["Normal"], fontSize=8, alignment=TA_RIGHT),
+    }
+
+
+def _quantity(value: float) -> str:
+    if not value:
+        return "-"
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
