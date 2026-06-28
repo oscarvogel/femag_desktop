@@ -317,6 +317,61 @@ def test_create_load_order_rejects_driver_from_another_carrier(db):
 
 
 @pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("client", "cliente.*inactivo"),
+        ("carrier", "transportista.*inactivo"),
+        ("driver", "chofer.*inactivo"),
+        ("truck", "camion.*inactivo"),
+    ],
+)
+def test_create_load_order_rejects_inactive_master_data(db, field, message):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    payload = _valid_order_payload(data)
+    data[field].active = False
+    data[field].save()
+
+    with pytest.raises(ValueError, match=message):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
+
+def test_create_load_order_rejects_inactive_product(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    payload = _valid_order_payload(data)
+    data["product"].active = False
+    data["product"].save()
+
+    with pytest.raises(ValueError, match="producto.*inactivo"):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
+
+def test_create_load_order_rejects_invalid_order_date(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    payload = _valid_order_payload(data)
+    payload["order_date"] = "2026-06-28"
+
+    with pytest.raises(ValueError, match="fecha"):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
+
+def test_update_pending_order_rejects_invalid_order_date(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    with pytest.raises(ValueError, match="fecha"):
+        service.update_order(order, date="2026-06-28")
+
+
+@pytest.mark.parametrize(
     "products",
     [
         [{"product": None, "quantity": 100}],
