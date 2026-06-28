@@ -45,7 +45,7 @@ from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
-from app.ui.master_abm import build_master_abm_page, master_abm_configs
+from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
 
 
 LOAD_ORDER_PRINTS_DIR = Path("docs") / "prints"
@@ -125,15 +125,25 @@ class FemagDesktopWindow(QMainWindow):
 
     def _add_master_pages(self) -> None:
         for route, config in master_abm_configs().items():
-            self._add_page(
-                route,
-                build_master_abm_page(
-                    config=config,
-                    user=self.user,
-                    current_user=self.shell.username,
-                    parent=self,
-                ),
-            )
+            if route == "clients":
+                self._add_page(
+                    route,
+                    build_client_abm_page(
+                        user=self.user,
+                        current_user=self.shell.username,
+                        parent=self,
+                    ),
+                )
+            else:
+                self._add_page(
+                    route,
+                    build_master_abm_page(
+                        config=config,
+                        user=self.user,
+                        current_user=self.shell.username,
+                        parent=self,
+                    ),
+                )
 
     def _topbar(self) -> QWidget:
         bar = QFrame()

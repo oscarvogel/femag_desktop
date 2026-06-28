@@ -271,7 +271,7 @@ def test_clients_abm_page_creates_edits_and_refreshes_grid(db):
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
 
-    table = window.findChild(QTableWidget, "newClientButtonTable")
+    table = window.findChild(QTableWidget, "clientTable")
     assert table is not None
     assert table.rowCount() == 0
 
@@ -609,3 +609,165 @@ def test_master_abm_documents_autoabm_debt():
     assert "do not instantiate pyqt5libs AutoABM yet" in AUTO_ABM_TECHNICAL_DEBT
     assert "permissions" in AUTO_ABM_TECHNICAL_DEBT
     assert "audit services" in AUTO_ABM_TECHNICAL_DEBT
+
+
+def test_client_abm_page_shows_addresses_for_selected_client(db):
+    from PyQt5.QtWidgets import QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Z Cliente Places", cuit="30700000993", iva_condition="RI")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Eldorado", address="Ruta B")
+
+    app, window = _admin_window("admin_client_places")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    assert client_table is not None
+
+    row_count = client_table.rowCount()
+    target_row = None
+    for r in range(row_count):
+        if client_table.item(r, 0).text() == "Z Cliente Places":
+            target_row = r
+            break
+    assert target_row is not None, "Client not found in client table"
+    client_table.setCurrentCell(target_row, 0)
+    app.processEvents()
+
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    assert places_table is not None
+    assert places_table.rowCount() == 2
+    headers = [places_table.horizontalHeaderItem(c).text() for c in range(places_table.columnCount())]
+    assert "Estado" in headers
+    addr_items = [places_table.item(r, 0).text() for r in range(places_table.rowCount())]
+    assert "Ruta A" in addr_items
+    assert "Ruta B" in addr_items
+
+
+def test_client_abm_can_add_address_from_client_page(db):
+    from PyQt5.QtWidgets import QComboBox, QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Z Cliente Add Place", cuit="30700000994", iva_condition="RI")
+    app, window = _admin_window("admin_add_place")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    target_row = None
+    for r in range(client_table.rowCount()):
+        if client_table.item(r, 0).text() == "Z Cliente Add Place":
+            target_row = r
+            break
+    assert target_row is not None
+    client_table.setCurrentCell(target_row, 0)
+    app.processEvents()
+
+    def fill_place(dialog):
+        _set_combo(dialog.findChild(QComboBox, "addressTypeInput"), "entrega")
+        dialog.findChild(QLineEdit, "addressProvinceInput").setText("Misiones")
+        dialog.findChild(QLineEdit, "addressCityInput").setText("Posadas")
+        dialog.findChild(QLineEdit, "addressStreetInput").setText("Ruta Nueva")
+        dialog.findChild(QPushButton, "saveAddressButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "addClientPlaceButton").click(), fill_place)
+
+    address = ClientAddress.get(ClientAddress.address == "Ruta Nueva")
+    assert address.client.id == client.id
+    assert address.active is True
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    assert places_table.rowCount() == 1
+    assert places_table.item(0, 0).text() == "Ruta Nueva"
+
+
+def test_client_abm_can_edit_existing_address(db):
+    from PyQt5.QtWidgets import QLineEdit, QPushButton, QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Z Cliente Edit Place", cuit="30700000995", iva_condition="RI")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Original")
+    app, window = _admin_window("admin_edit_place")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    for r in range(client_table.rowCount()):
+        if client_table.item(r, 0).text() == "Z Cliente Edit Place":
+            client_table.setCurrentCell(r, 0)
+            break
+    app.processEvents()
+
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    assert places_table.rowCount() == 1
+    assert places_table.item(0, 0).text() == "Ruta Original"
+    places_table.setCurrentCell(0, 0)
+
+    def fill_edit(dialog):
+        dialog.findChild(QLineEdit, "addressStreetInput").setText("Ruta Editada")
+        dialog.findChild(QPushButton, "saveAddressButton").click()
+
+    _run_modal(app, lambda: window.findChild(QPushButton, "editClientPlaceButton").click(), fill_edit)
+
+    address = ClientAddress.get(ClientAddress.client == client)
+    assert address.address == "Ruta Editada"
+    assert places_table.item(0, 0).text() == "Ruta Editada"
+
+
+def test_client_abm_can_toggle_address_active_from_page(db):
+    from PyQt5.QtWidgets import QPushButton, QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Z Cliente Toggle", cuit="30700000996", iva_condition="RI")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Toggle")
+    app, window = _admin_window("admin_toggle_place")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    for r in range(client_table.rowCount()):
+        if client_table.item(r, 0).text() == "Z Cliente Toggle":
+            client_table.setCurrentCell(r, 0)
+            break
+    app.processEvents()
+
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    assert places_table.rowCount() == 1
+    assert places_table.item(0, 3).text() == "Activo"
+    places_table.setCurrentCell(0, 0)
+
+    toggle_btn = window.findChild(QPushButton, "toggleClientPlaceButton")
+    toggle_btn.click()
+    app.processEvents()
+
+    address = ClientAddress.get(ClientAddress.client == client)
+    assert address.active is False
+    assert places_table.item(0, 3).text() == "Inactivo"
+
+    toggle_btn.click()
+    app.processEvents()
+
+    address = ClientAddress.get(ClientAddress.client == client)
+    assert address.active is True
+    assert places_table.item(0, 3).text() == "Activo"
+
+
+def test_client_abm_shows_inactive_and_active_addresses(db):
+    from PyQt5.QtWidgets import QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Z Cliente Mixed", cuit="30700000997", iva_condition="RI")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Activa")
+    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Eldorado", address="Ruta Inactiva", active=False)
+    app, window = _admin_window("admin_mixed_places")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    for r in range(client_table.rowCount()):
+        if client_table.item(r, 0).text() == "Z Cliente Mixed":
+            client_table.setCurrentCell(r, 0)
+            break
+    app.processEvents()
+
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    assert places_table.rowCount() == 2
+    statuses = [places_table.item(r, 3).text() for r in range(places_table.rowCount())]
+    assert "Activo" in statuses
+    assert "Inactivo" in statuses
