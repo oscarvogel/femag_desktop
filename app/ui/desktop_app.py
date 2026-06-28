@@ -258,6 +258,41 @@ class FemagDesktopWindow(QMainWindow):
             self._current_route = route
             self.stack.setCurrentIndex(self._route_indexes[route])
 
+    def _navigate_to_route(self, route: str) -> None:
+        for i in range(self.nav.count()):
+            item = self.nav.item(i)
+            if item and item.data(Qt.UserRole) == route:
+                self.nav.setCurrentRow(i)
+                return
+
+    def _handle_dashboard_new_load_order(self) -> None:
+        self._navigate_to_route("load_orders")
+        page = self.stack.currentWidget()
+        if page is None:
+            return
+        btn = page.findChild(QPushButton, "newLoadOrderButton")
+        if btn and btn.isEnabled():
+            btn.click()
+
+    def _handle_dashboard_search_load_order(self) -> None:
+        self._navigate_to_route("load_orders")
+        page = self.stack.currentWidget()
+        if page is None:
+            return
+        search_input = page.findChild(QLineEdit, "loadOrderSearchInput")
+        if search_input:
+            search_input.setFocus()
+            search_input.selectAll()
+
+    def _handle_dashboard_new_client(self) -> None:
+        self._navigate_to_route("clients")
+        page = self.stack.currentWidget()
+        if page is None:
+            return
+        btn = page.findChild(QPushButton, "newClientButton")
+        if btn and btn.isEnabled():
+            btn.click()
+
     def _dashboard_page(self) -> QWidget:
         spec = DashboardService().view_spec(demo_mode=True)
         page = _page(spec.title, "Vista general de actividad y accesos frecuentes")
@@ -265,8 +300,16 @@ class FemagDesktopWindow(QMainWindow):
         actions = QHBoxLayout()
         for action in spec.quick_actions:
             button = QPushButton(action.title)
+            button.setObjectName(f"dashboard{action.title.replace(' ', '')}")
             button.setEnabled(action.enabled)
             button.setMinimumHeight(52)
+            if action.enabled and action.route_key:
+                if action.route_key == "load_orders.new":
+                    button.clicked.connect(self._handle_dashboard_new_load_order)
+                elif action.route_key == "load_orders.search":
+                    button.clicked.connect(self._handle_dashboard_search_load_order)
+                elif action.route_key == "clients.new":
+                    button.clicked.connect(self._handle_dashboard_new_client)
             actions.addWidget(button)
         layout.addLayout(actions)
         cards = QGridLayout()
