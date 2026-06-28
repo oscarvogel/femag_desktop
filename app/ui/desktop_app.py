@@ -896,17 +896,24 @@ class LoadOrderEntryDialog(QDialog):
             carrier = driver.carrier
         except Carrier.DoesNotExist:
             carrier = None
-        if carrier is None:
+        if carrier is None or not carrier.active:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            if carrier is None:
+                self.feedback.setText("El chofer seleccionado no tiene transportista asociado.")
+            else:
+                self.feedback.setText("El transportista asociado al chofer esta inactivo.")
             return
         carrier_id = carrier.id
         if self.carrier_combo.findData(carrier_id) < 0:
             _fill_combo(self.carrier_combo, _carrier_options())
         _set_combo(self.carrier_combo, carrier_id)
-        _fill_combo(self.truck_combo, _truck_options(carrier_id=carrier_id))
-        if self.truck_combo.count() == 1:
-            self.truck_combo.setCurrentIndex(0)
+        truck_options = _truck_options(carrier_id=carrier_id)
+        _fill_combo(self.truck_combo, truck_options)
+        if len(truck_options) == 1:
+            self.truck_combo.setCurrentIndex(1)
+        elif not truck_options:
+            self.feedback.setText("No hay camiones activos para el transportista seleccionado.")
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
