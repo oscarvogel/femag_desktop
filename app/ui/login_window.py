@@ -10,7 +10,7 @@ class LoginWindow(QDialog):
         self.authenticated_user = None
         self.demo_mode = demo_mode
         self.setWindowTitle("FEMAG Desktop - Inicio de sesion")
-        self.setFixedSize(460, 380)
+        self.setFixedSize(460, 440)
         self.setStyleSheet(self._STYLES)
         self._build()
 
@@ -185,7 +185,8 @@ class LoginWindow(QDialog):
         border-radius: 6px;
         font-size: 14px;
         font-weight: 600;
-        padding: 10px 24px;
+        min-height: 22px;
+        padding: 14px 28px;
     }
     #loginSubmitButton {
         background: #2563eb;
