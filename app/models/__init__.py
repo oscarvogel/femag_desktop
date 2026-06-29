@@ -8,10 +8,12 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    TipoIVA,
     Truck,
 )
 from app.models.load_orders import (
     LoadOrder,
+    LoadOrderBudgetStatus,
     LoadOrderDestination,
     LoadOrderPallet,
     LoadOrderProduct,
@@ -31,6 +33,7 @@ ALL_MODELS = [
     Client,
     ClientAddress,
     Product,
+    TipoIVA,
     Carrier,
     Driver,
     Truck,
@@ -41,6 +44,7 @@ ALL_MODELS = [
     LoadOrderProduct,
     LoadOrderPallet,
     LoadOrderStatusHistory,
+    LoadOrderBudgetStatus,
     AppParameter,
     NumberSequence,
     ImportBatch,

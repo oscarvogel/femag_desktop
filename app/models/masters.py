@@ -1,6 +1,16 @@
-from peewee import BooleanField, CharField, FloatField, ForeignKeyField, TextField
+from peewee import BooleanField, CharField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
+
+
+class TipoIVA(BaseModel):
+    nombre = CharField(unique=True)
+    porcentaje = FloatField()
+    activo = BooleanField(default=True)
+
+    @classmethod
+    def iva_default(cls) -> "TipoIVA":
+        return cls.get_or_create(nombre="IVA 21%", defaults={"porcentaje": 21.0, "activo": True})[0]
 
 
 class Client(BaseModel):
@@ -11,6 +21,7 @@ class Client(BaseModel):
     email = CharField(null=True)
     contact = CharField(null=True)
     active = BooleanField(default=True)
+    descuento_porcentaje = FloatField(default=0.0)
 
 
 class ClientAddress(BaseModel):
@@ -28,6 +39,8 @@ class Product(BaseModel):
     name = CharField(unique=True)
     unit = CharField()
     active = BooleanField(default=True)
+    precio_neto_base = FloatField(default=0.0)
+    tipo_iva = ForeignKeyField(TipoIVA, backref="products", null=True)
 
 
 class Carrier(BaseModel):

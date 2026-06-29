@@ -3,7 +3,7 @@ from datetime import date
 from peewee import CharField, DateField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 
 
 class LoadOrder(BaseModel):
@@ -46,6 +46,45 @@ class LoadOrderProduct(BaseModel):
     quantity = FloatField()
     unit = CharField()
     observations = TextField(null=True)
+    precio_neto_unitario = FloatField(default=0.0)
+    descuento_porcentaje = FloatField(default=0.0)
+    neto_subtotal = FloatField(default=0.0)
+    descuento_importe = FloatField(default=0.0)
+    neto_gravado = FloatField(default=0.0)
+    iva_porcentaje = FloatField(default=21.0)
+    iva_importe = FloatField(default=0.0)
+    total = FloatField(default=0.0)
+    lote = CharField(null=True)
+    fecha_elaboracion = DateField(null=True)
+
+
+class LoadOrderPallet(BaseModel):
+    order = ForeignKeyField(LoadOrder, backref="pallets", on_delete="CASCADE")
+    pallet_type = ForeignKeyField(PalletType, backref="load_order_details")
+    measure = CharField()
+    weight = FloatField()
+    quantity = IntegerField()
+    observations = TextField(null=True)
+
+
+class LoadOrderStatusHistory(BaseModel):
+    order = ForeignKeyField(LoadOrder, backref="status_history", on_delete="CASCADE")
+    old_status = CharField(null=True)
+    new_status = CharField()
+    user = CharField(null=True)
+    observation = TextField(null=True)
+
+
+class LoadOrderBudgetStatus(BaseModel):
+    STATUS_PENDING = "Pendiente"
+    STATUS_APPROVED = "Aprobado"
+    STATUS_REJECTED = "Rechazado"
+    STATUS_ANNULLED = "Anulado"
+    STATUS_APPLIED = "Aplicado a cuenta corriente"
+
+    order = ForeignKeyField(LoadOrder, backref="budget_statuses", on_delete="CASCADE")
+    client = ForeignKeyField(Client, backref="budget_statuses")
+    status = CharField(default=STATUS_PENDING)
 
 
 class LoadOrderPallet(BaseModel):

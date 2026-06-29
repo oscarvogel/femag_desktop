@@ -3,12 +3,13 @@ from datetime import date
 from app.config.database import database_proxy
 from app.models.load_orders import (
     LoadOrder,
+    LoadOrderBudgetStatus,
     LoadOrderDestination,
     LoadOrderPallet,
     LoadOrderProduct,
     LoadOrderStatusHistory,
 )
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.driver_availability_service import DriverAvailabilityService
@@ -352,19 +353,51 @@ class LoadOrderService:
                 observations=item.get("observations"),
             )
 
+    def _calculate_product_prices(self, product_item: dict, destination_client: Client) -> dict:
+        product = product_item["product"]
+        quantity = product_item["quantity"]
+        precio = product_item.get("precio_neto_unitario")
+        if precio is None:
+            precio = product.precio_neto_base or 0.0
+        descuento = product_item.get("descuento_porcentaje")
+        if descuento is None:
+            descuento = destination_client.descuento_porcentaje or 0.0
+        iva_porcentaje = product_item.get("iva_porcentaje")
+        if iva_porcentaje is None:
+            tipo_iva = product.tipo_iva
+            iva_porcentaje = tipo_iva.porcentaje if tipo_iva else TipoIVA.iva_default().porcentaje
+        neto_subtotal = quantity * precio
+        descuento_importe = neto_subtotal * descuento / 100.0
+        neto_gravado = neto_subtotal - descuento_importe
+        iva_importe = neto_gravado * iva_porcentaje / 100.0
+        total = neto_gravado + iva_importe
+        return {
+            "precio_neto_unitario": precio,
+            "descuento_porcentaje": descuento,
+            "neto_subtotal": neto_subtotal,
+            "descuento_importe": descuento_importe,
+            "neto_gravado": neto_gravado,
+            "iva_porcentaje": iva_porcentaje,
+            "iva_importe": iva_importe,
+            "total": total,
+        }
+
     def _replace_destinations(self, order: LoadOrder, destinations: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
         LoadOrderDestination.delete().where(LoadOrderDestination.order == order).execute()
+        LoadOrderBudgetStatus.delete().where(LoadOrderBudgetStatus.order == order).execute()
         for item in destinations:
+            client = item["client"]
             destination = LoadOrderDestination.create(
                 order=order,
-                client=item["client"],
+                client=client,
                 delivery_address=item["delivery_address"],
                 sequence=item["sequence"],
                 observations=item.get("observations"),
             )
             for product_item in item["products"]:
                 product = product_item["product"]
+                prices = self._calculate_product_prices(product_item, client)
                 LoadOrderProduct.create(
                     order=order,
                     destination=destination,
@@ -372,7 +405,13 @@ class LoadOrderService:
                     quantity=product_item["quantity"],
                     unit=product_item.get("unit") or product.unit,
                     observations=product_item.get("observations"),
+                    **prices,
                 )
+            budget, _ = LoadOrderBudgetStatus.get_or_create(
+                order=order,
+                client=client,
+                defaults={"status": LoadOrderBudgetStatus.STATUS_PENDING},
+            )
 
     def _replace_pallets(self, order: LoadOrder, pallets: list[dict]) -> None:
         LoadOrderPallet.delete().where(LoadOrderPallet.order == order).execute()
