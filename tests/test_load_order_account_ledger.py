@@ -1,6 +1,6 @@
 from pytest import approx
+from conftest import _master_data, _multi_client_data, _valid_order_payload
 
-from tests.test_load_orders import _master_data, _multi_client_data, _valid_order_payload
 
 
 def test_account_movements_have_physical_duplicate_protection(db):
