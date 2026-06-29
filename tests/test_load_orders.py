@@ -1,78 +1,5 @@
 import pytest
-
-
-def _master_data():
-    from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
-
-    client = Client.create(name="Cliente FEMAG", cuit="30712345678", iva_condition="RI")
-    address = ClientAddress.create(
-        client=client,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta 12",
-        is_primary=True,
-    )
-    carrier = Carrier.create(name="Transporte Norte", cuit="30777777770")
-    driver = Driver.create(name="Juan Perez", carrier=carrier, document="123")
-    truck = Truck.create(domain="AB123CD", carrier=carrier)
-    product = Product.create(name="Fecula de mandioca", unit="kg")
-    other_product = Product.create(name="Almidon", unit="bolsa")
-    pallet = PalletType.create(type="Pallet comun", measure="1x1", weight=12.5)
-    return {
-        "client": client,
-        "address": address,
-        "carrier": carrier,
-        "driver": driver,
-        "truck": truck,
-        "product": product,
-        "other_product": other_product,
-        "pallet": pallet,
-    }
-
-
-def _multi_client_data():
-    from app.models.masters import Client, ClientAddress, Product
-
-    data = _master_data()
-    other_client = Client.create(name="Cliente Sur", cuit="30999999999", iva_condition="RI")
-    other_address = ClientAddress.create(
-        client=other_client,
-        address_type="entrega",
-        province="Misiones",
-        city="Obera",
-        address="Ruta 14",
-    )
-    other_destination = ClientAddress.create(
-        client=data["client"],
-        address_type="entrega",
-        province="Misiones",
-        city="Eldorado",
-        address="Ruta 12 km 1540",
-    )
-    third_product = Product.create(name="Glucosa", unit="bidon")
-    data.update(
-        {
-            "other_client": other_client,
-            "other_address": other_address,
-            "other_destination": other_destination,
-            "third_product": third_product,
-        }
-    )
-    return data
-
-
-def _valid_order_payload(data):
-    return {
-        "client": data["client"],
-        "delivery_address": data["address"],
-        "carrier": data["carrier"],
-        "driver": data["driver"],
-        "truck": data["truck"],
-        "products": [{"product": data["product"], "quantity": 100}],
-        "pallets": [],
-    }
-
+from conftest import _master_data, _multi_client_data, _valid_order_payload
 
 def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     from app.models.audit import AuditLog
@@ -113,7 +40,6 @@ def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     assert LoadOrderPallet.select().where(LoadOrderPallet.order == order).count() == 1
     assert AuditLog.select().where(AuditLog.module == "Ordenes de carga").count() >= 2
 
-
 def test_create_load_order_with_one_client_and_multiple_products_in_destination(db):
     from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
     from app.services.load_order_service import LoadOrderService
@@ -145,7 +71,6 @@ def test_create_load_order_with_one_client_and_multiple_products_in_destination(
     assert destination.client == data["client"]
     assert destination.delivery_address == data["address"]
     assert [item.product.name for item in products] == ["Fecula de mandioca", "Almidon"]
-
 
 def test_create_load_order_with_multiple_clients_destinations_and_products(db):
     from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
@@ -181,7 +106,6 @@ def test_create_load_order_with_multiple_clients_destinations_and_products(db):
     assert [destination.delivery_address.city for destination in destinations] == ["Posadas", "Obera"]
     assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 3
 
-
 def test_create_load_order_allows_same_client_with_multiple_delivery_places(db):
     from app.models.load_orders import LoadOrderDestination
     from app.services.load_order_service import LoadOrderService
@@ -214,7 +138,6 @@ def test_create_load_order_allows_same_client_with_multiple_delivery_places(db):
 
     assert cities == ["Posadas", "Eldorado"]
 
-
 def test_create_load_order_rejects_destination_without_products(db):
     from app.services.load_order_service import LoadOrderService
 
@@ -234,7 +157,6 @@ def test_create_load_order_rejects_destination_without_products(db):
             ],
             pallets=[],
         )
-
 
 @pytest.mark.parametrize(
     ("field", "message"),
@@ -256,7 +178,6 @@ def test_create_load_order_requires_header_entities(db, field, message):
     with pytest.raises(ValueError, match=message):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_create_load_order_requires_products(db):
     from app.services.load_order_service import LoadOrderService
 
@@ -266,7 +187,6 @@ def test_create_load_order_requires_products(db):
 
     with pytest.raises(ValueError, match="producto"):
         LoadOrderService(current_user="admin").create_order(**payload)
-
 
 def test_create_load_order_rejects_address_from_another_client(db):
     from app.models.masters import Client, ClientAddress
@@ -287,7 +207,6 @@ def test_create_load_order_rejects_address_from_another_client(db):
     with pytest.raises(ValueError, match="cliente"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_create_load_order_rejects_truck_from_another_carrier(db):
     from app.models.masters import Carrier, Truck
     from app.services.load_order_service import LoadOrderService
@@ -301,7 +220,6 @@ def test_create_load_order_rejects_truck_from_another_carrier(db):
     with pytest.raises(ValueError, match="camion.*transportista"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_create_load_order_rejects_driver_from_another_carrier(db):
     from app.models.masters import Carrier, Driver
     from app.services.load_order_service import LoadOrderService
@@ -314,7 +232,6 @@ def test_create_load_order_rejects_driver_from_another_carrier(db):
 
     with pytest.raises(ValueError, match="chofer.*transportista"):
         LoadOrderService(current_user="admin").create_order(**payload)
-
 
 @pytest.mark.parametrize(
     ("field", "message"),
@@ -337,7 +254,6 @@ def test_create_load_order_rejects_inactive_master_data(db, field, message):
     with pytest.raises(ValueError, match=message):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_create_load_order_rejects_inactive_product(db):
     from app.services.load_order_service import LoadOrderService
 
@@ -349,7 +265,6 @@ def test_create_load_order_rejects_inactive_product(db):
     with pytest.raises(ValueError, match="producto.*inactivo"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_create_load_order_rejects_invalid_order_date(db):
     from app.services.load_order_service import LoadOrderService
 
@@ -360,7 +275,6 @@ def test_create_load_order_rejects_invalid_order_date(db):
     with pytest.raises(ValueError, match="fecha"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 def test_update_pending_order_rejects_invalid_order_date(db):
     from app.services.load_order_service import LoadOrderService
 
@@ -370,7 +284,6 @@ def test_update_pending_order_rejects_invalid_order_date(db):
 
     with pytest.raises(ValueError, match="fecha"):
         service.update_order(order, date="2026-06-28")
-
 
 def test_update_pending_order_rejects_inactive_delivery_address(db):
     from app.services.load_order_service import LoadOrderService
@@ -394,7 +307,6 @@ def test_update_pending_order_rejects_inactive_delivery_address(db):
             ],
         )
 
-
 @pytest.mark.parametrize(
     "products",
     [
@@ -413,7 +325,6 @@ def test_create_load_order_rejects_invalid_product_reference(db, products):
     with pytest.raises(ValueError, match="producto"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 @pytest.mark.parametrize("quantity", [0, -1])
 def test_create_load_order_rejects_invalid_product_quantity(db, quantity):
     from app.services.load_order_service import LoadOrderService
@@ -425,7 +336,6 @@ def test_create_load_order_rejects_invalid_product_quantity(db, quantity):
     with pytest.raises(ValueError, match="cantidad"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
-
 @pytest.mark.parametrize("quantity", [0, -1])
 def test_create_load_order_rejects_invalid_pallet_quantity(db, quantity):
     from app.services.load_order_service import LoadOrderService
@@ -436,7 +346,6 @@ def test_create_load_order_rejects_invalid_pallet_quantity(db, quantity):
 
     with pytest.raises(ValueError, match="pallet"):
         LoadOrderService(current_user="admin").create_order(**payload)
-
 
 def test_list_orders_returns_created_orders_newest_first(db):
     from datetime import date
@@ -453,7 +362,6 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(status=first.STATUS_CLOSED) == [first]
     assert service.list_orders(client=data["client"]) == [second, first]
 
-
 def test_update_order_rejects_direct_status_changes(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService
@@ -466,7 +374,6 @@ def test_update_order_rejects_direct_status_changes(db):
         service.update_order(order, status=LoadOrder.STATUS_ANNULLED)
 
     assert type(order).get_by_id(order.id).status == LoadOrder.STATUS_PENDING
-
 
 def test_update_pending_order_replaces_destinations_and_products(db):
     from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
@@ -508,7 +415,6 @@ def test_update_pending_order_replaces_destinations_and_products(db):
     assert [destination.client.name for destination in destinations] == ["Cliente FEMAG", "Cliente Editado"]
     assert [product.product.name for product in products] == ["Fecula de mandioca", "Almidon"]
     assert [product.quantity for product in products] == [100, 25]
-
 
 def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
     from app.models.load_orders import LoadOrder
@@ -553,7 +459,6 @@ def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
 
     assert type(data["driver"]).get_by_id(data["driver"].id).available is True
 
-
 def test_change_active_order_to_blocked_driver_is_rejected(db):
     from app.models.masters import Driver
     from app.services.load_order_service import LoadOrderService
@@ -573,7 +478,6 @@ def test_change_active_order_to_blocked_driver_is_rejected(db):
 
     with pytest.raises(ValueError, match="chofer.*bloqueado"):
         service.update_order(order, driver=other_driver)
-
 
 def test_available_drivers_excludes_blocked_active_drivers(db):
     from app.models.masters import Driver
@@ -596,7 +500,6 @@ def test_available_drivers_excludes_blocked_active_drivers(db):
 
     assert free_driver.name in names
     assert data["driver"].name not in names
-
 
 def test_reopening_closed_order_requires_driver_availability(db):
     from app.models.load_orders import LoadOrder
@@ -627,7 +530,6 @@ def test_reopening_closed_order_requires_driver_availability(db):
     with pytest.raises(ValueError, match="chofer.*bloqueado"):
         service.change_status(first, LoadOrder.STATUS_PENDING)
 
-
 def test_calculate_product_prices_uses_defaults(db):
     from app.models.masters import Client, Product, TipoIVA
     from app.services.load_order_service import LoadOrderService
@@ -648,7 +550,6 @@ def test_calculate_product_prices_uses_defaults(db):
     assert result["iva_porcentaje"] == 21.0
     assert result["iva_importe"] == 189.0
     assert result["total"] == 1089.0
-
 
 def test_calculate_product_prices_with_overrides(db):
     from app.models.masters import Client, Product
@@ -675,7 +576,6 @@ def test_calculate_product_prices_with_overrides(db):
     assert result["iva_porcentaje"] == 10.5
     assert result["iva_importe"] == 99.75
     assert result["total"] == 1049.75
-
 
 def test_create_load_order_stores_prices_from_defaults(db):
     from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
@@ -715,7 +615,6 @@ def test_create_load_order_stores_prices_from_defaults(db):
     assert lp.iva_importe == 340_200.0
     assert lp.total == 1_960_200.0
 
-
 def test_create_load_order_stores_prices_from_overrides(db):
     from app.models.load_orders import LoadOrder, LoadOrderProduct
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -752,7 +651,6 @@ def test_create_load_order_stores_prices_from_overrides(db):
     assert lp.descuento_porcentaje == 0.0
     assert lp.total == 50 * 150.0 * (1 + 10.5 / 100.0)
 
-
 def test_create_load_order_creates_budget_status_for_each_client(db):
     from app.models.load_orders import LoadOrderBudgetStatus, LoadOrderDestination
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -786,7 +684,6 @@ def test_create_load_order_creates_budget_status_for_each_client(db):
     assert client_a.id in clients
     assert client_b.id in clients
     assert all(b.status == "Pendiente" for b in budgets)
-
 
 def test_create_load_order_budget_status_survives_update(db):
     from app.models.load_orders import LoadOrderBudgetStatus
