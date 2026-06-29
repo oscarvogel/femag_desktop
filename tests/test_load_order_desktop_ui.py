@@ -898,3 +898,77 @@ def test_demo_seed_inactive_address_excluded_from_all_clients(db):
     all_options = _address_options(client_id=None)
     ids = [opt_id for opt_id, _label in all_options]
     assert inactive_address.id not in ids
+def test_load_order_dialog_shows_feedback_when_driver_has_inactive_carrier(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Inactivo UI", active=False)
+    driver = Driver.create(name="Chofer Carrier Inactivo", carrier=carrier)
+    Truck.create(domain="INACTIVO", carrier=carrier)
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue98"), "ui_issue98")
+    app.processEvents()
+
+    driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
+    carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
+    truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
+    _set_combo(driver_combo, driver.id)
+    app.processEvents()
+
+    assert carrier_combo.currentData() is None
+    assert truck_combo.currentData() is None
+    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
+    assert "inactivo" in feedback.text()
+
+
+def test_load_order_dialog_shows_feedback_when_no_compatible_trucks(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+
+    from app.models.masters import Carrier, Driver
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Sin Camion UI", active=True)
+    driver = Driver.create(name="Chofer Sin Camion", carrier=carrier)
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue98"), "ui_issue98")
+    app.processEvents()
+
+    driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
+    carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
+    truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
+    _set_combo(driver_combo, driver.id)
+    app.processEvents()
+
+    assert carrier_combo.currentData() == carrier.id
+    assert truck_combo.currentData() is None
+    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
+    assert "camiones" in feedback.text()
+
+
+def test_load_order_dialog_auto_selects_single_compatible_truck(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Unico Truck UI", active=True)
+    driver = Driver.create(name="Chofer Unico Truck", carrier=carrier)
+    truck = Truck.create(domain="UNICO", carrier=carrier)
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue98"), "ui_issue98")
+    app.processEvents()
+
+    driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
+    truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
+    _set_combo(driver_combo, driver.id)
+    app.processEvents()
+
+    assert truck_combo.currentData() == truck.id
