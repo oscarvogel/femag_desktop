@@ -5,3 +5,11 @@ __pycache__/
 venv/
 .env
 backups/
+# Editor tooling MCP (CodeGraph) — local to each machine
+.codegraph/
+.cursor/
+# Local runtime outputs
+outputs/
+# Demo/validation databases (see AGENTS.md areas protegidas: datos demo)
+femag_*.sqlite3
+femag_*.sqlite3-journal
