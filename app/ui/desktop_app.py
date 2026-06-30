@@ -714,8 +714,13 @@ class LoadOrderEntryDialog(QDialog):
         self.destinations: list[dict] = []
         self.setObjectName("loadOrderEntryDialog")
         self.setWindowTitle("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
-        self.setMinimumSize(980, 760)
+        # Issue #131: el alto minimo anterior (760) excedia la altura util en laptops
+        # con barra de tareas visible (~720px) y dejaba los botones Guardar/Cancelar
+        # cortados debajo del borde inferior. Bajamos el minimo a 600 para que el
+        # QScrollArea central absorba el overflow y el footer quede siempre visible.
+        self.setMinimumSize(980, 600)
         self.resize(1100, 820)
+        self.setSizeGripEnabled(True)
         self._build()
         self._populate_options()
         self._load_order()
