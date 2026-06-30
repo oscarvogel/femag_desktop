@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orden de carga</title>
+<style>
+@page { size: A4; margin: 16mm; }
+body { font-family: Arial, sans-serif; color: #202124; font-size: 12px; }
+h1 { font-size: 20px; margin: 0 0 10px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+h3 { font-size: 14px; margin: 14px 0 4px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { border: 1px solid #9aa0a6; padding: 6px; text-align: left; }
+.meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
+.label { font-weight: bold; }
+.page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+<h1>Orden de carga Nro. 1</h1>
+<p><strong>Reimpresion</strong></p>
+
+<section class="meta">
+<h2>Cabecera logística</h2>
+<div><span class="label">Fecha:</span> 25/06/2026</div>
+<div><span class="label">Estado:</span> Emitida</div>
+<div><span class="label">Transportista:</span> E2E Transporte Norte</div>
+<div><span class="label">Chofer:</span> E2E Chofer Norte</div>
+<div><span class="label">Camion:</span> E2E123</div>
+</section>
+
+<h2>Detalle por cliente / destino</h2><h3>E2E Cliente Norte - Ruta 12, Posadas</h3><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr><tr><td>E2E Fecula</td><td>1000</td><td>kg</td><td></td></tr></table><h3>E2E Cliente Sur - Ruta 14, Obera</h3><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr><tr><td>E2E Almidon</td><td>25</td><td>bolsa</td><td></td></tr></table>
+<h2>Pallets</h2><table><tr><th>Tipo</th><th>Medida</th><th>Peso</th><th>Cantidad</th><th>Obs.</th></tr></table>
+<h2>Observaciones</h2>
+<p>Validacion e2e issue 68</p>
+<div class="page-break"></div>
+<h1>Orden de carga Nro. 1</h1>
+<h2>Hoja resumen / sobre de carga</h2>
+
+
+<section class="meta">
+<h2>Cabecera logística</h2>
+<div><span class="label">Fecha:</span> 25/06/2026</div>
+<div><span class="label">Estado:</span> Emitida</div>
+<div><span class="label">Transportista:</span> E2E Transporte Norte</div>
+<div><span class="label">Chofer:</span> E2E Chofer Norte</div>
+<div><span class="label">Camion:</span> E2E123</div>
+</section>
+
+<h2>Detalle por cliente / destino</h2><h3>E2E Cliente Norte - Ruta 12, Posadas</h3><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr><tr><td>E2E Fecula</td><td>1000</td><td>kg</td><td></td></tr></table><h3>E2E Cliente Sur - Ruta 14, Obera</h3><table><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Obs.</th></tr><tr><td>E2E Almidon</td><td>25</td><td>bolsa</td><td></td></tr></table>
+<h2>Pallets</h2><table><tr><th>Tipo</th><th>Medida</th><th>Peso</th><th>Cantidad</th><th>Obs.</th></tr></table>
+<h2>Observaciones</h2>
+<p>Validacion e2e issue 68</p>
+</body>
+</html>
