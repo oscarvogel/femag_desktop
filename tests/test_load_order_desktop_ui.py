@@ -87,11 +87,44 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     app.processEvents()
 
     assert dialog.minimumWidth() >= 980
-    assert dialog.minimumHeight() >= 760
+    # Issue #131: el alto minimo bajo de 760 a 600 para que el dialogo entre
+    # en pantallas chicas; el QScrollArea central absorbe el overflow.
+    assert 600 <= dialog.minimumHeight() < 760
     assert dialog.findChild(QScrollArea, "loadOrderEntryScrollArea") is not None
     assert dialog.findChild(QSplitter, "loadOrderEntryWorkSplitter") is not None
     assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").minimumHeight() >= 180
     assert dialog.findChild(QTableWidget, "loadOrderProductDraftTable").minimumHeight() >= 160
+
+
+def test_load_order_dialog_keeps_save_and_cancel_visible_at_minimum_height(db):
+    """Issue #131: en pantallas de ~720px de alto util el dialogo no debe
+    recortar los botones Guardar/Cancelar del pie del formulario."""
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue131"), "ui_issue131")
+    dialog.resize(1100, dialog.minimumHeight())
+    app.processEvents()
+
+    save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
+    cancel_button = dialog.findChild(QPushButton, "cancelLoadOrderButton")
+    assert save_button is not None
+    assert cancel_button is not None
+
+    dialog_height = dialog.height()
+    save_bottom = save_button.mapToParent(save_button.rect().bottomLeft()).y()
+    cancel_bottom = cancel_button.mapToParent(cancel_button.rect().bottomLeft()).y()
+    assert save_bottom <= dialog_height, (
+        f"El boton Guardar se sale del dialogo: bottom={save_bottom}, "
+        f"dialog_height={dialog_height}"
+    )
+    assert cancel_bottom <= dialog_height, (
+        f"El boton Cancelar se sale del dialogo: bottom={cancel_bottom}, "
+        f"dialog_height={dialog_height}"
+    )
 
 
 def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
