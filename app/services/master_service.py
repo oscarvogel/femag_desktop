@@ -16,8 +16,25 @@ class MasterService:
             new_value=payload,
         )
 
-    def create_product(self, name: str, unit: str) -> Product:
-        row = Product.create(name=name, unit=unit)
+    def create_product(
+        self,
+        name: str,
+        unit: str,
+        *,
+        precio_lista_1: float = 0.0,
+        precio_lista_2: float = 0.0,
+        precio_lista_3: float = 0.0,
+        precio_lista_4: float = 0.0,
+    ) -> Product:
+        row = Product.create(
+            name=name,
+            unit=unit,
+            precio_neto_base=precio_lista_1,
+            precio_lista_1=precio_lista_1,
+            precio_lista_2=precio_lista_2,
+            precio_lista_3=precio_lista_3,
+            precio_lista_4=precio_lista_4,
+        )
         self._record("Product", row, {"name": name, "unit": unit})
         return row
 

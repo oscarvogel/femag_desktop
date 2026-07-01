@@ -15,7 +15,10 @@ class ClientService:
         phone: str | None = None,
         email: str | None = None,
         contact: str | None = None,
+        lista_precios: int = 1,
     ) -> Client:
+        if lista_precios not in (1, 2, 3, 4):
+            raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
         client = Client.create(
             name=name,
             cuit=cuit,
@@ -23,6 +26,7 @@ class ClientService:
             phone=phone,
             email=email,
             contact=contact,
+            lista_precios=lista_precios,
         )
         self.audit_service.record(
             user=self.current_user,

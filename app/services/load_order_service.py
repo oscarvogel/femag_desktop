@@ -358,7 +358,7 @@ class LoadOrderService:
         quantity = product_item["quantity"]
         precio = product_item.get("precio_neto_unitario")
         if precio is None:
-            precio = product.precio_neto_base or 0.0
+            precio = self._price_for_client_list(product, destination_client)
         descuento = product_item.get("descuento_porcentaje")
         if descuento is None:
             descuento = destination_client.descuento_porcentaje or 0.0
@@ -381,6 +381,15 @@ class LoadOrderService:
             "iva_importe": iva_importe,
             "total": total,
         }
+
+    def _price_for_client_list(self, product: Product, client: Client) -> float:
+        price_list = client.lista_precios or 1
+        if price_list not in (1, 2, 3, 4):
+            raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
+        value = getattr(product, f"precio_lista_{price_list}") or 0.0
+        if value:
+            return value
+        return product.precio_neto_base or 0.0
 
     def _replace_destinations(self, order: LoadOrder, destinations: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()

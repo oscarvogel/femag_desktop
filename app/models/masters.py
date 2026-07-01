@@ -22,6 +22,7 @@ class Client(BaseModel):
     contact = CharField(null=True)
     active = BooleanField(default=True)
     descuento_porcentaje = FloatField(default=0.0)
+    lista_precios = IntegerField(default=1)
 
 
 class ClientAddress(BaseModel):
@@ -40,6 +41,10 @@ class Product(BaseModel):
     unit = CharField()
     active = BooleanField(default=True)
     precio_neto_base = FloatField(default=0.0)
+    precio_lista_1 = FloatField(default=0.0)
+    precio_lista_2 = FloatField(default=0.0)
+    precio_lista_3 = FloatField(default=0.0)
+    precio_lista_4 = FloatField(default=0.0)
     tipo_iva = ForeignKeyField(TipoIVA, backref="products", null=True)
 
 

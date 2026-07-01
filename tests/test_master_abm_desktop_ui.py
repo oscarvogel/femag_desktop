@@ -602,6 +602,61 @@ def test_products_abm_page_creates_edits_and_refreshes_grid(db):
     assert product.name == "Producto Demo UI Editado"
     assert table.item(0, 0).text() == "Producto Demo UI Editado"
 
+def test_product_dialog_saves_four_price_lists(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit, QPushButton
+
+    from app.models.masters import Product
+    from app.ui.master_abm import ProductEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = ProductEntryDialog(current_user="ui_price_lists")
+    app.processEvents()
+    dialog.findChild(QLineEdit, "productNameInput").setText("Producto Listas UI")
+    dialog.findChild(QLineEdit, "productUnitInput").setText("kg")
+    dialog.findChild(QLineEdit, "productPriceList1Input").setText("100")
+    dialog.findChild(QLineEdit, "productPriceList2Input").setText("120")
+    dialog.findChild(QLineEdit, "productPriceList3Input").setText("140")
+    dialog.findChild(QLineEdit, "productPriceList4Input").setText("160")
+    dialog.findChild(QPushButton, "saveProductButton").click()
+
+    product = Product.get(Product.name == "Producto Listas UI")
+    assert product.precio_lista_1 == 100
+    assert product.precio_lista_2 == 120
+    assert product.precio_lista_3 == 140
+    assert product.precio_lista_4 == 160
+
+    edit = ProductEntryDialog(current_user="ui_price_lists", record_id=product.id)
+    edit.findChild(QLineEdit, "productPriceList3Input").setText("145")
+    edit.findChild(QPushButton, "saveProductButton").click()
+
+    product = Product.get_by_id(product.id)
+    assert product.precio_lista_3 == 145
+
+def test_client_dialog_saves_assigned_price_list(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+
+    from app.models.masters import Client
+    from app.ui.master_abm import ClientEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = ClientEntryDialog(current_user="ui_client_price_list")
+    app.processEvents()
+    dialog.findChild(QLineEdit, "clientNameInput").setText("Cliente Lista UI")
+    dialog.findChild(QLineEdit, "clientCuitInput").setText("30700000998")
+    dialog.findChild(QLineEdit, "clientIvaInput").setText("RI")
+    _set_combo(dialog.findChild(QComboBox, "clientPriceListInput"), 3)
+    dialog.findChild(QPushButton, "saveClientButton").click()
+
+    client = Client.get(Client.cuit == "30700000998")
+    assert client.lista_precios == 3
+
+    edit = ClientEntryDialog(current_user="ui_client_price_list", record_id=client.id)
+    _set_combo(edit.findChild(QComboBox, "clientPriceListInput"), 4)
+    edit.findChild(QPushButton, "saveClientButton").click()
+
+    client = Client.get_by_id(client.id)
+    assert client.lista_precios == 4
+
 
 def test_master_abm_documents_autoabm_debt():
     from app.ui.master_abm import AUTO_ABM_TECHNICAL_DEBT

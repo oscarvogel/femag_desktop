@@ -76,6 +76,31 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrderProduct.select().count() == 1
 
 
+def test_product_dialog_prefills_price_from_client_price_list(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox
+
+    from app.models.masters import Client, Product
+    from app.ui.desktop_app import LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente Lista UI", cuit="30700001001", iva_condition="RI", lista_precios=3)
+    product = Product.create(
+        name="Producto Lista UI",
+        unit="kg",
+        precio_lista_1=100.0,
+        precio_lista_2=120.0,
+        precio_lista_3=140.0,
+        precio_lista_4=160.0,
+    )
+
+    dialog = LoadOrderProductDialog(client=client)
+    app.processEvents()
+    _set_combo(dialog.findChild(QComboBox, "productDialogProductInput"), product.id)
+    app.processEvents()
+
+    assert dialog.findChild(QDoubleSpinBox, "productDialogPrecioInput").value() == 140.0
+
+
 def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     from PyQt5.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
 
