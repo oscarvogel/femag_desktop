@@ -130,7 +130,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
     return {
         "clients": MasterAbmConfig(
             "Clientes",
-            ["Nombre", "CUIT", "Estado"],
+            ["Nombre", "CUIT", "Lista", "Estado"],
             _client_rows,
             ClientEntryDialog,
             "newClientButton",
@@ -146,7 +146,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "products": MasterAbmConfig(
             "Productos",
-            ["Producto", "Unidad", "Estado"],
+            ["Producto", "Unidad", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             _product_rows,
             ProductEntryDialog,
             "newProductButton",
@@ -201,6 +201,7 @@ class ClientEntryDialog(QDialog):
         self.iva_input.setObjectName("clientIvaInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("clientPhoneInput")
+        self.price_list_combo = _combo("clientPriceListInput", _price_list_options(), include_empty=False)
         form.addWidget(QLabel("Nombre"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("CUIT"), 1, 0)
@@ -209,6 +210,8 @@ class ClientEntryDialog(QDialog):
         form.addWidget(self.iva_input, 2, 1)
         form.addWidget(QLabel("Telefono"), 3, 0)
         form.addWidget(self.phone_input, 3, 1)
+        form.addWidget(QLabel("Lista de precios"), 4, 0)
+        form.addWidget(self.price_list_combo, 4, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveClientButton", self._save)
@@ -222,6 +225,7 @@ class ClientEntryDialog(QDialog):
         self.cuit_input.setText(client.cuit)
         self.iva_input.setText(client.iva_condition)
         self.phone_input.setText(client.phone or "")
+        _set_combo(self.price_list_combo, client.lista_precios)
 
     def _save(self) -> None:
         name = self.name_input.text().strip()
@@ -237,6 +241,7 @@ class ClientEntryDialog(QDialog):
                     cuit,
                     iva,
                     phone=self.phone_input.text().strip() or None,
+                    lista_precios=int(self.price_list_combo.currentData() or 1),
                 )
             else:
                 client = Client.get_by_id(self.record_id)
@@ -244,6 +249,7 @@ class ClientEntryDialog(QDialog):
                 client.cuit = cuit
                 client.iva_condition = iva
                 client.phone = self.phone_input.text().strip() or None
+                client.lista_precios = int(self.price_list_combo.currentData() or 1)
                 client.save()
                 self.saved_record = client
             self.accept()
@@ -554,10 +560,26 @@ class ProductEntryDialog(QDialog):
         self.name_input.setObjectName("productNameInput")
         self.unit_input = QLineEdit()
         self.unit_input.setObjectName("productUnitInput")
+        self.price_list_1_input = QLineEdit()
+        self.price_list_1_input.setObjectName("productPriceList1Input")
+        self.price_list_2_input = QLineEdit()
+        self.price_list_2_input.setObjectName("productPriceList2Input")
+        self.price_list_3_input = QLineEdit()
+        self.price_list_3_input.setObjectName("productPriceList3Input")
+        self.price_list_4_input = QLineEdit()
+        self.price_list_4_input.setObjectName("productPriceList4Input")
         form.addWidget(QLabel("Producto"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Unidad"), 1, 0)
         form.addWidget(self.unit_input, 1, 1)
+        form.addWidget(QLabel("Lista 1"), 2, 0)
+        form.addWidget(self.price_list_1_input, 2, 1)
+        form.addWidget(QLabel("Lista 2"), 3, 0)
+        form.addWidget(self.price_list_2_input, 3, 1)
+        form.addWidget(QLabel("Lista 3"), 4, 0)
+        form.addWidget(self.price_list_3_input, 4, 1)
+        form.addWidget(QLabel("Lista 4"), 5, 0)
+        form.addWidget(self.price_list_4_input, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveProductButton", self._save)
@@ -569,6 +591,10 @@ class ProductEntryDialog(QDialog):
         product = Product.get_by_id(self.record_id)
         self.name_input.setText(product.name)
         self.unit_input.setText(product.unit)
+        self.price_list_1_input.setText(_money_text(product.precio_lista_1 or product.precio_neto_base))
+        self.price_list_2_input.setText(_money_text(product.precio_lista_2))
+        self.price_list_3_input.setText(_money_text(product.precio_lista_3))
+        self.price_list_4_input.setText(_money_text(product.precio_lista_4))
 
     def _save(self) -> None:
         name = self.name_input.text().strip()
@@ -577,12 +603,23 @@ class ProductEntryDialog(QDialog):
             self.feedback.setText("Complete producto y unidad.")
             return
         try:
+            prices = {
+                "precio_lista_1": _parse_float(self.price_list_1_input.text()),
+                "precio_lista_2": _parse_float(self.price_list_2_input.text()),
+                "precio_lista_3": _parse_float(self.price_list_3_input.text()),
+                "precio_lista_4": _parse_float(self.price_list_4_input.text()),
+            }
             if self.record_id is None:
-                self.saved_record = MasterService(self.current_user).create_product(name, unit)
+                self.saved_record = MasterService(self.current_user).create_product(name, unit, **prices)
             else:
                 product = Product.get_by_id(self.record_id)
                 product.name = name
                 product.unit = unit
+                product.precio_neto_base = prices["precio_lista_1"]
+                product.precio_lista_1 = prices["precio_lista_1"]
+                product.precio_lista_2 = prices["precio_lista_2"]
+                product.precio_lista_3 = prices["precio_lista_3"]
+                product.precio_lista_4 = prices["precio_lista_4"]
                 product.save()
                 self.saved_record = product
             self.accept()
@@ -663,6 +700,20 @@ def _set_combo(combo: QComboBox, value: object) -> None:
         combo.setCurrentIndex(index)
 
 
+def _price_list_options() -> list[tuple[int, str]]:
+    return [(1, "Lista 1"), (2, "Lista 2"), (3, "Lista 3"), (4, "Lista 4")]
+
+
+def _parse_float(value: str) -> float:
+    normalized = value.strip().replace(",", ".")
+    return float(normalized) if normalized else 0.0
+
+
+def _money_text(value: float | None) -> str:
+    value = value or 0.0
+    return f"{value:g}"
+
+
 def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
     if user is None:
         return False
@@ -689,7 +740,7 @@ def _carrier_options() -> list[tuple[int, str]]:
 def _client_rows() -> list[list[object]]:
     try:
         return [
-            [client.id, client.name, client.cuit, "Activo" if client.active else "Inactivo"]
+            [client.id, client.name, client.cuit, f"Lista {client.lista_precios}", "Activo" if client.active else "Inactivo"]
             for client in Client.select().order_by(Client.name).limit(50)
         ]
     except (InterfaceError, OperationalError):
@@ -719,7 +770,16 @@ def _address_rows() -> list[list[object]]:
 def _product_rows() -> list[list[object]]:
     try:
         return [
-            [product.id, product.name, product.unit, "Activo" if product.active else "Inactivo"]
+            [
+                product.id,
+                product.name,
+                product.unit,
+                _money_text(product.precio_lista_1 or product.precio_neto_base),
+                _money_text(product.precio_lista_2),
+                _money_text(product.precio_lista_3),
+                _money_text(product.precio_lista_4),
+                "Activo" if product.active else "Inactivo",
+            ]
             for product in Product.select().order_by(Product.name).limit(50)
         ]
     except (InterfaceError, OperationalError):
@@ -798,9 +858,9 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
-    client_table = QTableWidget(0, 3)
+    client_table = QTableWidget(0, 4)
     client_table.setObjectName("clientTable")
-    client_table.setHorizontalHeaderLabels(["Nombre", "CUIT", "Estado"])
+    client_table.setHorizontalHeaderLabels(["Nombre", "CUIT", "Lista", "Estado"])
     client_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     client_table.verticalHeader().setVisible(False)
     client_table.setSelectionBehavior(QTableWidget.SelectRows)

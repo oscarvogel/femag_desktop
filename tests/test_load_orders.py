@@ -551,6 +551,69 @@ def test_calculate_product_prices_uses_defaults(db):
     assert result["iva_importe"] == 189.0
     assert result["total"] == 1089.0
 
+def test_calculate_product_prices_uses_client_price_list(db):
+    from app.models.masters import Client, Product, TipoIVA
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    service = LoadOrderService(current_user="admin")
+    product = Product.create(
+        name="Test",
+        unit="kg",
+        precio_lista_1=100.0,
+        precio_lista_2=120.0,
+        precio_lista_3=140.0,
+        precio_lista_4=160.0,
+        tipo_iva=iva,
+    )
+    client = Client.create(name="Test", cuit="30111111111", iva_condition="RI", lista_precios=3)
+
+    result = service._calculate_product_prices({"product": product, "quantity": 10}, client)
+
+    assert result["precio_neto_unitario"] == 140.0
+    assert result["neto_subtotal"] == 1400.0
+    assert result["total"] == 1694.0
+
+def test_create_load_order_stores_price_from_customer_price_list(db):
+    from app.models.load_orders import LoadOrderProduct
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    product = Product.create(
+        name="Fecula listas",
+        unit="kg",
+        precio_lista_1=1000.0,
+        precio_lista_2=1500.0,
+        precio_lista_3=2000.0,
+        precio_lista_4=2500.0,
+        tipo_iva=iva,
+    )
+    client = Client.create(name="Cliente Lista 4", cuit="30999999993", iva_condition="RI", lista_precios=4)
+    address = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta 12"
+    )
+    carrier = Carrier.create(name="Test Carrier")
+    driver = Driver.create(name="Test Driver", carrier=carrier)
+    truck = Truck.create(domain="TEST05", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{
+            "client": client,
+            "delivery_address": address,
+            "products": [{"product": product, "quantity": 2}],
+        }],
+        pallets=[],
+    )
+
+    lp = LoadOrderProduct.get(LoadOrderProduct.order == order)
+    assert lp.precio_neto_unitario == 2500.0
+    assert lp.neto_subtotal == 5000.0
+    assert lp.total == 6050.0
+
 def test_calculate_product_prices_with_overrides(db):
     from app.models.masters import Client, Product
     from app.services.load_order_service import LoadOrderService

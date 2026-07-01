@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config.database import initialize_runtime_database
 from app.config.schema import ensure_runtime_schema
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 from app.models.security import User
 from app.services.auth_service import AuthService
 from app.services.load_order_print_service import LoadOrderPrintService
@@ -25,7 +25,12 @@ def _create_demo_order(username: str, run_id: str):
     carrier = Carrier.create(name=f"ISSUE65 Transporte Demo {run_id}", cuit=f"3070{run_id[-7:]}")
     driver = Driver.create(name=f"ISSUE65 Chofer Demo {run_id}", carrier=carrier, document=f"D{run_id[-7:]}")
     truck = Truck.create(domain=f"I65{run_id[-4:]}", carrier=carrier)
-    client_a = Client.create(name=f"ISSUE65 Cliente Norte {run_id}", cuit=f"3065{run_id[-7:]}", iva_condition="RI")
+    client_a = Client.create(
+        name=f"ISSUE65 Cliente Norte {run_id}",
+        cuit=f"3065{run_id[-7:]}",
+        iva_condition="RI",
+        lista_precios=1,
+    )
     address_a = ClientAddress.create(
         client=client_a,
         address_type="entrega",
@@ -34,7 +39,12 @@ def _create_demo_order(username: str, run_id: str):
         address=f"Ruta 12 demo {run_id}",
         is_primary=True,
     )
-    client_b = Client.create(name=f"ISSUE65 Cliente Sur {run_id}", cuit=f"3066{run_id[-7:]}", iva_condition="RI")
+    client_b = Client.create(
+        name=f"ISSUE65 Cliente Sur {run_id}",
+        cuit=f"3066{run_id[-7:]}",
+        iva_condition="RI",
+        lista_precios=2,
+    )
     address_b = ClientAddress.create(
         client=client_b,
         address_type="entrega",
@@ -43,8 +53,27 @@ def _create_demo_order(username: str, run_id: str):
         address=f"Ruta 14 demo {run_id}",
         is_primary=True,
     )
-    product_a = Product.create(name=f"ISSUE65 Fecula demo {run_id}", unit="kg")
-    product_b = Product.create(name=f"ISSUE65 Almidon demo {run_id}", unit="bolsa")
+    iva_default = TipoIVA.iva_default()
+    product_a = Product.create(
+        name=f"ISSUE65 Fecula demo {run_id}",
+        unit="kg",
+        precio_neto_base=18000.0,
+        precio_lista_1=18000.0,
+        precio_lista_2=19000.0,
+        precio_lista_3=20000.0,
+        precio_lista_4=21000.0,
+        tipo_iva=iva_default,
+    )
+    product_b = Product.create(
+        name=f"ISSUE65 Almidon demo {run_id}",
+        unit="bolsa",
+        precio_neto_base=9500.0,
+        precio_lista_1=9500.0,
+        precio_lista_2=10000.0,
+        precio_lista_3=10500.0,
+        precio_lista_4=11000.0,
+        tipo_iva=iva_default,
+    )
     PalletType.get_or_create(type=f"ISSUE65 Pallet demo {run_id}", defaults={"measure": "1x1", "weight": 12.5})
     return LoadOrderService(current_user=username).create_order(
         carrier=carrier,

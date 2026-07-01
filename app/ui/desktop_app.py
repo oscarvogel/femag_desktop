@@ -1219,7 +1219,7 @@ class LoadOrderProductDialog(QDialog):
             product = Product.get_by_id(product_id)
         except Product.DoesNotExist:
             return
-        self.precio_input.setValue(product.precio_neto_base or 0.0)
+        self.precio_input.setValue(_product_price_for_client(product, self.client))
         if product.tipo_iva:
             self.iva_input.setValue(product.tipo_iva.porcentaje)
         elif self.iva_input.value() == 0:
@@ -1550,15 +1550,25 @@ def _seed_demo_masters():
 
     client_1 = Client.get_or_create(
         cuit="30777777772",
-        defaults={"name": "Demo 1", "iva_condition": "RI", "contact": "Demo Principal", "descuento_porcentaje": 10.0},
+        defaults={
+            "name": "Demo 1",
+            "iva_condition": "RI",
+            "contact": "Demo Principal",
+            "descuento_porcentaje": 10.0,
+            "lista_precios": 1,
+        },
     )[0]
+    client_1.lista_precios = 1
+    client_1.save()
     _ensure_address(client_1, "Entrega Posadas", "Posadas", active=True)
     _ensure_address(client_1, "Entrega Eldorado", "Eldorado", active=True)
 
     client_2 = Client.get_or_create(
         cuit="30777777773",
-        defaults={"name": "Demo 2", "iva_condition": "RI", "contact": "Demo Secundario"},
+        defaults={"name": "Demo 2", "iva_condition": "RI", "contact": "Demo Secundario", "lista_precios": 2},
     )[0]
+    client_2.lista_precios = 2
+    client_2.save()
     _ensure_address(client_2, "Entrega Garuhape", "Garuhape", active=True)
 
     client_inactive = Client.get_or_create(
@@ -1568,8 +1578,8 @@ def _seed_demo_masters():
     _ensure_address(client_inactive, "Direccion inactiva", "Posadas", active=False)
 
     iva_default = TipoIVA.iva_default()
-    Product.get_or_create(name="Fecula de mandioca", defaults={"unit": "kg", "precio_neto_base": 18000.0, "tipo_iva": iva_default})
-    Product.get_or_create(name="Fecula de maiz", defaults={"unit": "kg", "precio_neto_base": 9500.0, "tipo_iva": iva_default})
+    _ensure_demo_product("Fecula de mandioca", "kg", iva_default, (18000.0, 19000.0, 20000.0, 21000.0))
+    _ensure_demo_product("Fecula de maiz", "kg", iva_default, (9500.0, 10000.0, 10500.0, 11000.0))
 
 
 def _ensure_address(client: Client, label: str, city: str, *, active: bool):
@@ -1583,7 +1593,7 @@ def _ensure_address(client: Client, label: str, city: str, *, active: bool):
     if existing is not None:
         if existing.active != active:
             existing.active = active
-            existing.save()
+        existing.save()
         return existing
     return ClientAddress.create(
         client=client,
@@ -1594,6 +1604,46 @@ def _ensure_address(client: Client, label: str, city: str, *, active: bool):
         is_primary=active,
         active=active,
     )
+
+
+def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tuple[float, float, float, float]) -> Product:
+    product, _ = Product.get_or_create(
+        name=name,
+        defaults={
+            "unit": unit,
+            "precio_neto_base": prices[0],
+            "precio_lista_1": prices[0],
+            "precio_lista_2": prices[1],
+            "precio_lista_3": prices[2],
+            "precio_lista_4": prices[3],
+            "tipo_iva": iva_default,
+        },
+    )
+    changed = False
+    for field, value in {
+        "precio_neto_base": prices[0],
+        "precio_lista_1": prices[0],
+        "precio_lista_2": prices[1],
+        "precio_lista_3": prices[2],
+        "precio_lista_4": prices[3],
+        "tipo_iva": iva_default,
+    }.items():
+        if getattr(product, field) != value:
+            setattr(product, field, value)
+            changed = True
+    if changed:
+        product.save()
+    return product
+
+
+def _product_price_for_client(product: Product, client: Client | None) -> float:
+    price_list = client.lista_precios if client is not None else 1
+    if price_list not in (1, 2, 3, 4):
+        price_list = 1
+    value = getattr(product, f"precio_lista_{price_list}") or 0.0
+    if value:
+        return value
+    return product.precio_neto_base or 0.0
 
 
 def _demo_data_exists() -> bool:

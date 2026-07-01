@@ -10,7 +10,7 @@ from app.config.database import bind_database
 from app.config.schema import ensure_runtime_schema
 from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder
-from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
@@ -88,12 +88,16 @@ def _ensure_demo_masters() -> dict:
 
     client_norte, _ = Client.get_or_create(
         cuit="30730000002",
-        defaults={"name": "ISSUE73 Cliente Norte", "iva_condition": "RI", "contact": "Demo Norte"},
+        defaults={"name": "ISSUE73 Cliente Norte", "iva_condition": "RI", "contact": "Demo Norte", "lista_precios": 1},
     )
     client_sur, _ = Client.get_or_create(
         cuit="30730000003",
-        defaults={"name": "ISSUE73 Cliente Sur", "iva_condition": "RI", "contact": "Demo Sur"},
+        defaults={"name": "ISSUE73 Cliente Sur", "iva_condition": "RI", "contact": "Demo Sur", "lista_precios": 2},
     )
+    client_norte.lista_precios = 1
+    client_norte.save()
+    client_sur.lista_precios = 2
+    client_sur.save()
     address_norte_a = _get_or_create_address(
         client=client_norte,
         city="Posadas",
@@ -113,9 +117,10 @@ def _ensure_demo_masters() -> dict:
         observations="Destino sur",
     )
 
-    product_bolsa, _ = Product.get_or_create(name="ISSUE73 Producto bolsa", defaults={"unit": "bolsas"})
-    product_pack, _ = Product.get_or_create(name="ISSUE73 Producto pack", defaults={"unit": "packs"})
-    product_granel, _ = Product.get_or_create(name="ISSUE73 Producto granel", defaults={"unit": "kg"})
+    iva_default = TipoIVA.iva_default()
+    product_bolsa = _ensure_demo_product("ISSUE73 Producto bolsa", "bolsas", iva_default, (900.0, 950.0, 1000.0, 1050.0))
+    product_pack = _ensure_demo_product("ISSUE73 Producto pack", "packs", iva_default, (1200.0, 1300.0, 1400.0, 1500.0))
+    product_granel = _ensure_demo_product("ISSUE73 Producto granel", "kg", iva_default, (180.0, 190.0, 200.0, 210.0))
 
     return {
         "carrier": carrier,
@@ -130,6 +135,30 @@ def _ensure_demo_masters() -> dict:
         "product_pack": product_pack,
         "product_granel": product_granel,
     }
+
+
+def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tuple[float, float, float, float]) -> Product:
+    product, _ = Product.get_or_create(
+        name=name,
+        defaults={
+            "unit": unit,
+            "precio_neto_base": prices[0],
+            "precio_lista_1": prices[0],
+            "precio_lista_2": prices[1],
+            "precio_lista_3": prices[2],
+            "precio_lista_4": prices[3],
+            "tipo_iva": iva_default,
+        },
+    )
+    product.unit = unit
+    product.precio_neto_base = prices[0]
+    product.precio_lista_1 = prices[0]
+    product.precio_lista_2 = prices[1]
+    product.precio_lista_3 = prices[2]
+    product.precio_lista_4 = prices[3]
+    product.tipo_iva = iva_default
+    product.save()
+    return product
 
 
 def _get_or_create_address(*, client: Client, city: str, address: str, observations: str) -> ClientAddress:
