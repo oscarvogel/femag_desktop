@@ -152,6 +152,19 @@ def test_load_order_dialog_keeps_save_and_cancel_visible_at_minimum_height(db):
     )
 
 
+def test_load_order_dialog_initial_height_fits_client_monitor(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue137"), "ui_issue137")
+    app.processEvents()
+
+    assert dialog.height() <= 680
+
+
 def test_load_order_dialog_filters_delivery_addresses_by_selected_client(db):
     from PyQt5.QtWidgets import QApplication, QComboBox
 
