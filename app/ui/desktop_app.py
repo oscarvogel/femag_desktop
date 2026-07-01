@@ -719,7 +719,7 @@ class LoadOrderEntryDialog(QDialog):
         # cortados debajo del borde inferior. Bajamos el minimo a 600 para que el
         # QScrollArea central absorba el overflow y el footer quede siempre visible.
         self.setMinimumSize(980, 600)
-        self.resize(1100, 820)
+        self.resize(1100, 660)
         self.setSizeGripEnabled(True)
         self._build()
         self._populate_options()
