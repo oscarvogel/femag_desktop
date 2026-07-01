@@ -1696,6 +1696,40 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 QPushButton { background: #0b6fdc; color: #ffffff; border: 0; border-radius: 6px; padding: 9px 14px; font-weight: 600; }
 QPushButton[secondary="true"] { background: #ffffff; color: #334155; border: 1px solid #d9e1ec; }
 QPushButton:disabled { background: #e2e8f0; color: #64748b; }
+QComboBox, QDateEdit {
+    background: #ffffff;
+    color: #172033;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    min-height: 34px;
+    padding: 6px 34px 6px 10px;
+}
+QComboBox:hover, QDateEdit:hover { border: 1px solid #94a3b8; }
+QComboBox:focus, QDateEdit:focus { border: 1px solid #0b6fdc; background: #fbfdff; }
+QComboBox:disabled, QDateEdit:disabled { background: #f1f5f9; color: #94a3b8; border: 1px solid #e2e8f0; }
+QComboBox::drop-down, QDateEdit::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border-left: 1px solid #d9e1ec;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    background: #f8fafc;
+}
+QComboBox::down-arrow, QDateEdit::down-arrow {
+    image: url(app/ui/assets/chevron-down.svg);
+    width: 12px;
+    height: 8px;
+}
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    color: #172033;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #e8f1ff;
+    selection-color: #0f172a;
+    padding: 4px;
+    outline: 0;
+}
 #addLoadOrderClientButton { min-width: 178px; }
 #removeLoadOrderClientButton { min-width: 150px; }
 #addLoadOrderProductButton, #removeLoadOrderProductButton { min-width: 132px; }
