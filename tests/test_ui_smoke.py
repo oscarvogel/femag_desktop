@@ -115,6 +115,16 @@ def test_app_smoke_command_runs():
     assert "FEMAG smoke OK" in completed.stdout
 
 
+def test_global_styles_include_polished_combo_controls():
+    from app.ui.desktop_app import STYLES
+
+    assert "QComboBox" in STYLES
+    assert "QComboBox::drop-down" in STYLES
+    assert "chevron-down.svg" in STYLES
+    assert "QComboBox QAbstractItemView" in STYLES
+    assert "QDateEdit" in STYLES
+
+
 def test_app_ui_flag_runs_ui_launcher(monkeypatch):
     from app import main as app_main
 
