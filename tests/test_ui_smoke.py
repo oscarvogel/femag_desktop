@@ -125,6 +125,18 @@ def test_global_styles_include_polished_combo_controls():
     assert "QDateEdit" in STYLES
 
 
+def test_global_styles_include_polished_form_controls():
+    from app.ui.desktop_app import STYLES
+
+    assert "QLineEdit" in STYLES
+    assert "QTextEdit" in STYLES
+    assert "QPlainTextEdit" in STYLES
+    assert "QSpinBox" in STYLES
+    assert "QDoubleSpinBox" in STYLES
+    assert "QSpinBox::up-button" in STYLES
+    assert "QDoubleSpinBox::down-button" in STYLES
+
+
 def test_app_ui_flag_runs_ui_launcher(monkeypatch):
     from app import main as app_main
 

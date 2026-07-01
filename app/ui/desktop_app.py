@@ -1696,6 +1696,51 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 QPushButton { background: #0b6fdc; color: #ffffff; border: 0; border-radius: 6px; padding: 9px 14px; font-weight: 600; }
 QPushButton[secondary="true"] { background: #ffffff; color: #334155; border: 1px solid #d9e1ec; }
 QPushButton:disabled { background: #e2e8f0; color: #64748b; }
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    background: #ffffff;
+    color: #172033;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    min-height: 34px;
+    padding: 6px 10px;
+    selection-background-color: #e8f1ff;
+    selection-color: #0f172a;
+}
+QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    border: 1px solid #94a3b8;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #0b6fdc;
+    background: #fbfdff;
+}
+QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border: 1px solid #e2e8f0;
+}
+QLineEdit::placeholder {
+    color: #94a3b8;
+}
+QSpinBox, QDoubleSpinBox {
+    padding-right: 30px;
+}
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #d9e1ec;
+    border-bottom: 1px solid #d9e1ec;
+    border-top-right-radius: 6px;
+    background: #f8fafc;
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 24px;
+    border-left: 1px solid #d9e1ec;
+    border-bottom-right-radius: 6px;
+    background: #f8fafc;
+}
 QComboBox, QDateEdit {
     background: #ffffff;
     color: #172033;
