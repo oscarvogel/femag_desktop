@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QMessageBox,
 )
 
 from app.config.database import initialize_demo_database, initialize_runtime_database
@@ -41,6 +42,9 @@ from app.services.auth_service import AuthService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
+from app.services.client_payment_service import ClientPaymentService
+from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.login_window import LoginWindow
@@ -120,6 +124,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("dashboard", self._dashboard_page())
         self._add_master_pages()
         self._add_page("load_orders", self._load_order_page())
+        self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
@@ -294,6 +299,39 @@ class FemagDesktopWindow(QMainWindow):
         if btn and btn.isEnabled():
             btn.click()
 
+    def _handle_dashboard_open_customer_ledger(self) -> None:
+        self._navigate_to_route("customer_ledger")
+
+    def _handle_dashboard_register_payment(self) -> None:
+        self._open_payment_dialog(preset_client=None)
+
+    def _customer_ledger_page(self) -> QWidget:
+        return CustomerLedgerPage(
+            current_user=self.shell.username,
+            register_payment_callback=self._open_payment_dialog,
+            parent=self,
+        )
+
+    def _open_payment_dialog(self, preset_client=None) -> None:
+        try:
+            dialog = ClientPaymentDialog(
+                current_user=self.shell.username,
+                preset_client=preset_client,
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Pago", f"No se pudo abrir el formulario: {exc}")
+            return
+        if dialog.exec_() == QDialog.Accepted:
+            payment = dialog.registered_payment()
+            if payment is not None:
+                self._refresh_customer_ledger_after_payment()
+
+    def _refresh_customer_ledger_after_payment(self) -> None:
+        page = self.stack.widget(self._route_indexes.get("customer_ledger", -1))
+        if isinstance(page, CustomerLedgerPage):
+            page.refresh()
+
     def _dashboard_page(self) -> QWidget:
         spec = DashboardService().view_spec(demo_mode=True)
         page = _page(spec.title, "Vista general de actividad y accesos frecuentes")
@@ -311,6 +349,10 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_search_load_order)
                 elif action.route_key == "clients.new":
                     button.clicked.connect(self._handle_dashboard_new_client)
+                elif action.route_key == "customer_ledger.view":
+                    button.clicked.connect(self._handle_dashboard_open_customer_ledger)
+                elif action.route_key == "customer_ledger.register_payment":
+                    button.clicked.connect(self._handle_dashboard_register_payment)
             actions.addWidget(button)
         layout.addLayout(actions)
         cards = QGridLayout()
