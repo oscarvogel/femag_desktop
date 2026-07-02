@@ -145,9 +145,15 @@ def test_disabled_dashboard_buttons_have_no_action(db):
 
     remittance_btn = window.findChild(QPushButton, "dashboardRegistrarremito")
     f150_btn = window.findChild(QPushButton, "dashboardF150")
+    assert remittance_btn is not None
+    assert f150_btn is not None
+    assert not remittance_btn.isEnabled()
+    assert not f150_btn.isEnabled()
+
+    # Registrar pago y Cuenta corriente ahora navegan a pantallas reales (issue #144).
     payment_btn = window.findChild(QPushButton, "dashboardRegistrarpago")
     cc_btn = window.findChild(QPushButton, "dashboardCuentacorriente")
-
-    for btn in (remittance_btn, f150_btn, payment_btn, cc_btn):
-        assert btn is not None
-        assert not btn.isEnabled()
+    assert payment_btn is not None
+    assert cc_btn is not None
+    assert payment_btn.isEnabled()
+    assert cc_btn.isEnabled()

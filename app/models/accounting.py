@@ -3,14 +3,17 @@ from peewee import BooleanField, CharField, FloatField, ForeignKeyField, TextFie
 from app.models.base import BaseModel
 from app.models.load_orders import LoadOrder
 from app.models.masters import Client
+from app.models.payments import ClientPayment
 
 
 class ClientAccountMovement(BaseModel):
     TYPE_LOAD_ORDER = "load_order_documental"
     TYPE_LOAD_ORDER_REVERSAL = "load_order_documental_reversal"
+    TYPE_PAYMENT = "payment"
 
     client = ForeignKeyField(Client, backref="account_movements")
-    load_order = ForeignKeyField(LoadOrder, backref="account_movements")
+    load_order = ForeignKeyField(LoadOrder, backref="account_movements", null=True)
+    payment = ForeignKeyField(ClientPayment, backref="account_movements", null=True)
     movement_type = CharField()
     amount = FloatField(default=0)
     net_amount = FloatField(default=0)
