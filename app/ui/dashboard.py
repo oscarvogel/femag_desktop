@@ -75,8 +75,8 @@ class DashboardService:
             QuickActionSpec("Nuevo cliente", "clients.new", True),
             QuickActionSpec("Registrar remito", None, False, future_module_message()),
             QuickActionSpec("F150", None, False, future_module_message()),
-            QuickActionSpec("Registrar pago", None, False, future_module_message()),
-            QuickActionSpec("Cuenta corriente", None, False, future_module_message()),
+            QuickActionSpec("Registrar pago", "customer_ledger.register_payment", True),
+            QuickActionSpec("Cuenta corriente", "customer_ledger.view", True),
         )
         cards = {
             "Órdenes creadas hoy": summary["ordenes_hoy"] or 0,
@@ -89,7 +89,7 @@ class DashboardService:
             f"Choferes bloqueados: {summary['choferes_bloqueados'] or 0}",
             f"Órdenes abiertas: {summary['ordenes_pendientes'] or 0}",
             f"Último backup: {summary['ultimo_backup'] or 'Sin registros'}",
-            "Próximos módulos: remitos, F150, pagos y cuenta corriente.",
+            "Próximos módulos: remitos, F150.",
         ]
         if demo_mode:
             alerts.append("Modo demo visual con datos de prueba.")
