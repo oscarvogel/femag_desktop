@@ -390,11 +390,24 @@ class FemagDesktopWindow(QMainWindow):
         )
         selected_order_id: dict[str, int | None] = {"value": None}
 
-        kpi_grid = QGridLayout()
+        kpi_scroll = QScrollArea()
+        kpi_scroll.setObjectName("loadOrderKpiScroll")
+        kpi_scroll.setWidgetResizable(True)
+        kpi_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        kpi_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        kpi_scroll.setFrameShape(QFrame.NoFrame)
+        kpi_scroll.setMinimumHeight(96)
+        kpi_inner = QWidget()
+        kpi_inner.setObjectName("loadOrderKpiInner")
+        kpi_grid = QGridLayout(kpi_inner)
+        kpi_grid.setContentsMargins(0, 0, 0, 0)
         kpi_grid.setSpacing(16)
         for index, (label, value, helper) in enumerate(_load_order_kpis(service)):
-            kpi_grid.addWidget(_kpi_card(label, value, helper), 0, index)
-        layout.addLayout(kpi_grid)
+            card = _kpi_card(label, value, helper)
+            card.setMinimumWidth(180)
+            kpi_grid.addWidget(card, 0, index)
+        kpi_scroll.setWidget(kpi_inner)
+        layout.addWidget(kpi_scroll)
 
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
@@ -453,7 +466,7 @@ class FemagDesktopWindow(QMainWindow):
         workspace.addWidget(detail)
         workspace.setStretchFactor(0, 1)
         workspace.setStretchFactor(1, 0)
-        workspace.setSizes([1000, 360])
+        workspace.setSizes([1000, 300])
         layout.addWidget(workspace, 1)
 
         def refresh(*, query: str | None = None) -> None:
@@ -733,8 +746,8 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
 def _detail_panel(spec) -> QFrame:
     panel = QFrame()
     panel.setObjectName("detailPanel")
-    panel.setMinimumWidth(280)
-    panel.setMaximumWidth(520)
+    panel.setMinimumWidth(220)
+    panel.setMaximumWidth(480)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 16, 16, 12)
     title = QLabel("Detalle de la orden")
