@@ -3,10 +3,12 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -92,6 +94,18 @@ class CustomerLedgerPage(QWidget):
         header = QLabel("Clientes con movimientos")
         header.setObjectName("customerLedgerClientsHeader")
         layout.addWidget(header)
+
+        self.search_input = QLineEdit()
+        self.search_input.setObjectName("customerLedgerSearchInput")
+        self.search_input.setPlaceholderText("Buscar cliente...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        layout.addWidget(self.search_input)
+
+        self.only_with_balance = QCheckBox("Solo con saldo")
+        self.only_with_balance.setObjectName("customerLedgerOnlyWithBalance")
+        self.only_with_balance.toggled.connect(self._on_search_changed)
+        layout.addWidget(self.only_with_balance)
 
         self.clients_table = QTableWidget(0, 3)
         self.clients_table.setObjectName("customerLedgerClientsTable")
@@ -193,6 +207,21 @@ class CustomerLedgerPage(QWidget):
         layout.addWidget(self.empty_label)
         return panel
 
+    def _on_search_changed(self, *_args) -> None:
+        self.refresh()
+
+    def _filter_balances(self, balances: list[dict]) -> list[dict]:
+        query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
+        only_balance = self.only_with_balance.isChecked() if hasattr(self, "only_with_balance") else False
+        filtered: list[dict] = []
+        for entry in balances:
+            if only_balance and abs(entry["balance"]) <= 0.01:
+                continue
+            if query and query not in entry["client"].name.lower():
+                continue
+            filtered.append(entry)
+        return filtered
+
     def refresh(self) -> None:
         previous_id = None
         current = self.clients_table.currentRow()
@@ -202,7 +231,8 @@ class CustomerLedgerPage(QWidget):
                 previous_id = item.data(Qt.UserRole)
         self.clients_table.blockSignals(True)
         self.clients_table.clearContents()
-        balances = client_balances()
+        all_balances = client_balances()
+        balances = self._filter_balances(all_balances)
         self.clients_table.setRowCount(len(balances))
         total_to_collect = 0.0
         clients_with_balance = 0
@@ -232,11 +262,14 @@ class CustomerLedgerPage(QWidget):
             movements_cell.setToolTip(f"{movements} movimiento(s)")
             self.clients_table.setItem(row_index, 2, movements_cell)
 
-        # Totals footer
+        # Totals footer (sobre el conjunto filtrado para que coincida con la tabla)
+        suffix = ""
+        if len(balances) != len(all_balances):
+            suffix = f"  ·  (de {len(all_balances)} totales)"
         self.totals_label.setText(
             f"Total a cobrar: <b>${total_to_collect:,.2f}</b>  ·  "
             f"Clientes con saldo: <b>{clients_with_balance}</b>  ·  "
-            f"Total clientes: <b>{len(balances)}</b>"
+            f"Total clientes: <b>{len(balances)}</b>{suffix}"
         )
 
         if balances:
