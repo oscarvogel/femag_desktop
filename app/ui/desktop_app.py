@@ -409,7 +409,7 @@ class FemagDesktopWindow(QMainWindow):
         left_layout.setSpacing(0)
 
         actions = QHBoxLayout()
-        actions.setContentsMargins(10, 10, 10, 10)
+        actions.setContentsMargins(10, 10, 10, 6)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
@@ -421,14 +421,20 @@ class FemagDesktopWindow(QMainWindow):
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
-        search_input.setMinimumWidth(260)
+        search_input.setMinimumWidth(220)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
         for button in (new_button, edit_button, issue_button, close_button, print_button, budget_button, annul_button):
             actions.addWidget(button)
-        actions.addWidget(search_input)
-        actions.addWidget(search_button)
         actions.addStretch(1)
+
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(10, 0, 10, 10)
+        search_row.setSpacing(8)
+        search_row.addWidget(search_input, 1)
+        search_row.addWidget(search_button)
+
         left_layout.addLayout(actions)
+        left_layout.addLayout(search_row)
 
         table = QTableWidget(0, len(spec.table_columns))
         table.setObjectName("loadOrdersTable")
