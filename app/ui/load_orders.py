@@ -124,7 +124,7 @@ def build_load_order_workspace_spec() -> LoadOrderWorkspaceSpec:
             "Observaciones",
         ),
         detail_actions=("Editar", "Historial"),
-        status_labels=("Pendiente", "Emitida", "En carga", "Entregada", "Anulada"),
+        status_labels=tuple((*LoadOrder.ACTIVE_STATUSES, *LoadOrder.FINAL_STATUSES)),
     )
 
 
