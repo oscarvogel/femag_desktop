@@ -10,6 +10,7 @@ REAL_MODULES = {
     "Dashboard": "dashboard",
     "Pendientes": "pending",
     "Órdenes de carga": "load_orders",
+    "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
     "Domicilios": "addresses",
     "Productos": "products",
