@@ -399,8 +399,9 @@ class FemagDesktopWindow(QMainWindow):
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
 
-        workspace = QHBoxLayout()
-        workspace.setSpacing(8)
+        workspace = QSplitter(Qt.Horizontal)
+        workspace.setChildrenCollapsible(False)
+        workspace.setHandleWidth(6)
         left_panel = QFrame()
         left_panel.setObjectName("contentPanel")
         left_layout = QVBoxLayout(left_panel)
@@ -442,9 +443,12 @@ class FemagDesktopWindow(QMainWindow):
 
         detail = _detail_panel(spec)
         detail_labels: dict[str, QLabel] = detail.property("detailLabels")
-        workspace.addWidget(left_panel, 1)
-        workspace.addWidget(detail, 0)
-        layout.addLayout(workspace, 1)
+        workspace.addWidget(left_panel)
+        workspace.addWidget(detail)
+        workspace.setStretchFactor(0, 1)
+        workspace.setStretchFactor(1, 0)
+        workspace.setSizes([1000, 360])
+        layout.addWidget(workspace, 1)
 
         def refresh(*, query: str | None = None) -> None:
             rows = service.list_orders() if hasattr(service, "list_orders") else []
@@ -723,7 +727,8 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
 def _detail_panel(spec) -> QFrame:
     panel = QFrame()
     panel.setObjectName("detailPanel")
-    panel.setFixedWidth(360)
+    panel.setMinimumWidth(280)
+    panel.setMaximumWidth(520)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 16, 16, 12)
     title = QLabel("Detalle de la orden")
