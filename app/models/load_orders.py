@@ -85,20 +85,3 @@ class LoadOrderBudgetStatus(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="budget_statuses", on_delete="CASCADE")
     client = ForeignKeyField(Client, backref="budget_statuses")
     status = CharField(default=STATUS_PENDING)
-
-
-class LoadOrderPallet(BaseModel):
-    order = ForeignKeyField(LoadOrder, backref="pallets", on_delete="CASCADE")
-    pallet_type = ForeignKeyField(PalletType, backref="load_order_details")
-    measure = CharField()
-    weight = FloatField()
-    quantity = IntegerField()
-    observations = TextField(null=True)
-
-
-class LoadOrderStatusHistory(BaseModel):
-    order = ForeignKeyField(LoadOrder, backref="status_history", on_delete="CASCADE")
-    old_status = CharField(null=True)
-    new_status = CharField()
-    user = CharField(null=True)
-    observation = TextField(null=True)
