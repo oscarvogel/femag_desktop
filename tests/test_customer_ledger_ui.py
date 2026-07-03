@@ -34,8 +34,9 @@ def test_customer_ledger_page_renders_with_movement(db):
     ClientPaymentService(current_user="admin").register_payment(client=client, amount=5000)
 
     page = CustomerLedgerPage(current_user="admin", register_payment_callback=lambda *a, **k: None)
-    assert page.clients_list.count() >= 1
-    assert page.detail_balance.text().startswith("Saldo actual:")
+    assert page.clients_table.rowCount() >= 1
+    assert page.detail_balance.text().startswith("$")
+    assert page.detail_movements.text() != "0"
     assert page.movements_table.rowCount() >= 2
 
 
