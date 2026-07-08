@@ -1,6 +1,7 @@
 from app.models.audit import AuditLog
 from app.models.payments import ClientPayment
 from app.models.accounting import ClientAccountMovement
+from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
 from app.models.masters import (
     Carrier,
     Client,
@@ -21,7 +22,6 @@ from app.models.load_orders import (
     LoadOrderStatusHistory,
 )
 from app.models.security import MenuItem, Permission, User, UserProfile
-from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
 
 
 ALL_MODELS = [
@@ -32,6 +32,7 @@ ALL_MODELS = [
     AuditLog,
     ClientAccountMovement,
     ClientPayment,
+    ImportBatch,
     Client,
     ClientAddress,
     Product,
@@ -49,6 +50,5 @@ ALL_MODELS = [
     LoadOrderBudgetStatus,
     AppParameter,
     NumberSequence,
-    ImportBatch,
     BackupLog,
 ]
