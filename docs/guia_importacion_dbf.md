@@ -16,6 +16,15 @@ Quedan fuera de este corte remitos historicos, F150 real, saldos iniciales y cua
 
 ## Ejecucion
 
+Desde la app de escritorio:
+
+1. Abrir `Importación DBF` en el menú lateral.
+2. Elegir los DBF disponibles para clientes, transportistas, choferes, camiones o productos.
+3. Confirmar `Encoding` y `Sistema origen`.
+4. Ejecutar `Importar DBF` y revisar el resumen por entidad.
+
+Desde consola:
+
 Configurar la base destino de FEMAG con las variables habituales y ejecutar solo las entidades disponibles:
 
 ```bash

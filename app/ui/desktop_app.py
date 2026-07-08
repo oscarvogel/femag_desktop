@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -35,6 +36,7 @@ from PyQt5.QtWidgets import (
 
 from app.config.database import initialize_demo_database, initialize_runtime_database
 from app.config.schema import ensure_runtime_schema
+from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
@@ -125,6 +127,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_master_pages()
         self._add_page("load_orders", self._load_order_page())
         self._add_page("customer_ledger", self._customer_ledger_page())
+        self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
@@ -694,6 +697,84 @@ class FemagDesktopWindow(QMainWindow):
         page.layout().addStretch(1)
         return page
 
+    def _legacy_dbf_import_page(self) -> QWidget:
+        page = _page("Importación DBF", "Carga de maestros desde el sistema anterior")
+        layout = page.layout()
+        title = QLabel("Maestros habilitados: clientes, transportistas, choferes, camiones y productos")
+        title.setObjectName("legacyDbfImportTitle")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        form = QFrame()
+        form.setObjectName("formSection")
+        form_layout = QGridLayout(form)
+        form_layout.setContentsMargins(12, 12, 12, 12)
+        form_layout.setHorizontalSpacing(10)
+        form_layout.setVerticalSpacing(8)
+
+        path_inputs: dict[str, QLineEdit] = {}
+        for row, (entity, label, object_name) in enumerate(_legacy_dbf_entities()):
+            form_layout.addWidget(QLabel(label), row, 0)
+            path_input = QLineEdit()
+            path_input.setObjectName(object_name)
+            path_input.setPlaceholderText(r"C:\legacy\archivo.dbf")
+            browse = _action_button(f"{object_name}BrowseButton", "Examinar", secondary=True)
+            browse.clicked.connect(lambda _checked=False, target=path_input: _select_dbf_file(target, self))
+            form_layout.addWidget(path_input, row, 1)
+            form_layout.addWidget(browse, row, 2)
+            path_inputs[entity] = path_input
+
+        encoding_row = len(path_inputs)
+        form_layout.addWidget(QLabel("Encoding"), encoding_row, 0)
+        encoding_input = QLineEdit("cp1252")
+        encoding_input.setObjectName("dbfEncodingInput")
+        form_layout.addWidget(encoding_input, encoding_row, 1)
+
+        source_row = encoding_row + 1
+        form_layout.addWidget(QLabel("Sistema origen"), source_row, 0)
+        source_input = QLineEdit("legacy_dbf")
+        source_input.setObjectName("dbfSourceSystemInput")
+        form_layout.addWidget(source_input, source_row, 1)
+        layout.addWidget(form)
+
+        actions = QHBoxLayout()
+        run_button = _action_button("runLegacyDbfImportButton", "Importar DBF")
+        actions.addWidget(run_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+
+        feedback = QLabel("Seleccione uno o más DBF para ejecutar la importación.")
+        feedback.setObjectName("legacyDbfImportFeedback")
+        feedback.setWordWrap(True)
+        layout.addWidget(feedback)
+
+        table = QTableWidget(0, 5)
+        table.setObjectName("legacyDbfImportSummaryTable")
+        table.setHorizontalHeaderLabels(["Entidad", "Creados", "Actualizados", "Omitidos", "Errores"])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(table, 1)
+
+        def run_import() -> None:
+            paths = {entity: field.text().strip() for entity, field in path_inputs.items() if field.text().strip()}
+            if not paths:
+                feedback.setText("Indicar al menos un archivo DBF para importar.")
+                table.setRowCount(0)
+                return
+            try:
+                summary = LegacyDbfMasterImporter().import_dbf_files(
+                    paths,
+                    source_system=source_input.text().strip() or "legacy_dbf",
+                    encoding=encoding_input.text().strip() or "cp1252",
+                )
+            except Exception as exc:
+                feedback.setText(f"No se pudo importar: {exc}")
+                return
+            _fill_legacy_import_summary(table, summary)
+            feedback.setText("Importación finalizada. Revise el resumen y los errores por entidad.")
+
+        run_button.clicked.connect(run_import)
+        return page
+
 
 def _page(title: str, subtitle: str | None = None) -> QWidget:
     page = QWidget()
@@ -741,6 +822,47 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
     if secondary:
         button.setProperty("secondary", True)
     return button
+
+
+def _legacy_dbf_entities() -> list[tuple[str, str, str]]:
+    return [
+        ("clients", "Clientes", "dbfClientsPathInput"),
+        ("carriers", "Transportistas", "dbfCarriersPathInput"),
+        ("drivers", "Choferes", "dbfDriversPathInput"),
+        ("trucks", "Camiones", "dbfTrucksPathInput"),
+        ("products", "Productos", "dbfProductsPathInput"),
+    ]
+
+
+def _select_dbf_file(target: QLineEdit, parent=None) -> None:
+    file_path, _ = QFileDialog.getOpenFileName(parent, "Seleccionar DBF", "", "DBF (*.dbf);;Todos (*.*)")
+    if file_path:
+        target.setText(file_path)
+
+
+def _fill_legacy_import_summary(table: QTableWidget, summary: dict) -> None:
+    labels = {
+        "clients": "Clientes",
+        "carriers": "Transportistas",
+        "drivers": "Choferes",
+        "trucks": "Camiones",
+        "products": "Productos",
+    }
+    table.setRowCount(len(labels))
+    for row, (entity, label) in enumerate(labels.items()):
+        values = summary.get(entity, {})
+        errors = values.get("errors", [])
+        cells = [
+            label,
+            str(values.get("created", 0)),
+            str(values.get("updated", 0)),
+            str(values.get("skipped", 0)),
+            str(len(errors)),
+        ]
+        for column, value in enumerate(cells):
+            table.setItem(row, column, QTableWidgetItem(value))
+        if errors:
+            table.item(row, 4).setToolTip("; ".join(str(error.get("message", error)) for error in errors))
 
 
 def _detail_panel(spec) -> QFrame:

@@ -103,6 +103,21 @@ def test_sidebar_spec_groups_transport_abms(db):
     assert "Camiones" not in [item.title for item in principal.items]
 
 
+def test_sidebar_spec_exposes_legacy_dbf_import_page(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_import_menu", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    import_item = next(item for item in principal.items if item.title == "Importación DBF")
+
+    assert import_item.placeholder is False
+    assert import_item.route_key == "legacy_dbf_import"
+
+
 def test_app_smoke_command_runs():
     completed = subprocess.run(
         [sys.executable, "-m", "app.main", "--smoke"],
