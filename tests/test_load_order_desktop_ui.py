@@ -487,7 +487,6 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     table = window.findChild(QTableWidget, "loadOrdersTable")
     feedback = window.findChild(QLabel, "loadOrderFeedback")
-    status = window.findChild(QLabel, "detailOrderStatus")
     table.setCurrentCell(0, 0)
 
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
@@ -499,7 +498,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
     assert "emitida" in feedback.text().lower()
-    assert status.text() == "Emitida"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Emitida"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == False))  # noqa: E712
@@ -523,7 +522,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
-    assert status.text() == "Anulada"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Anulada"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == True))  # noqa: E712
@@ -535,6 +534,89 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     assert "pdf generado correctamente" in feedback.text().lower()
     assert opened_outputs == [pdf_path, pdf_path, pdf_path]
+
+
+def test_load_order_detail_panel_keeps_long_summary_readable(db):
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QScrollArea, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderDetailDialog
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_detail_readable_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="ISSUE169 Transportista Norte con nombre largo")
+    driver = Driver.create(name="ISSUE169 Chofer Demo con nombre largo", carrier=carrier)
+    truck = Truck.create(domain="I69ABC", carrier=carrier)
+    client = Client.create(name="ISSUE169 Cliente Norte con nombre largo", cuit="30700016901", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 14 kilometro 169 acceso norte",
+    )
+    product = Product.create(name="ISSUE169 Producto forestal con descripcion larga", unit="kg")
+    product_b = Product.create(name="ISSUE169 Segundo producto", unit="bolsas")
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [{"product": product, "quantity": 42}, {"product": product_b, "quantity": 7}],
+            }
+        ],
+        pallets=[],
+    )
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    metrics = window.findChild(QLabel, "loadOrderMetricsStrip")
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    panel = window.findChild(QFrame, "loadOrderInlineDetailPanel")
+    button = window.findChild(QPushButton, "viewLoadOrderDetailButton")
+    labels: dict[str, QLabel] = panel.property("detailLabels")
+
+    assert window.findChild(QScrollArea, "loadOrderKpiScroll") is None
+    assert "Pendientes: " in metrics.text()
+    assert "Emitidas hoy: " in metrics.text()
+    assert table.rowCount() == 2
+    assert table.cellWidget(1, 0) is panel
+    assert table.rowSpan(1, 0) == 1
+    assert table.columnSpan(1, 0) == table.columnCount()
+    assert button.isEnabled() is True
+    assert not button.icon().isNull()
+    assert not window.findChild(QPushButton, "newLoadOrderButton").icon().isNull()
+    assert labels["summary"].wordWrap() is True
+    assert labels["transport"].wordWrap() is True
+    assert "ISSUE169 Cliente Norte" in labels["summary"].text()
+    assert "Posadas" in labels["summary"].text()
+    assert "ISSUE169 Chofer Demo" in labels["transport"].text()
+
+    dialog = LoadOrderDetailDialog(LoadOrder.select().first(), window)
+    detail_table = dialog.findChild(QTableWidget, "loadOrderDetailItemsTable")
+    assert dialog.findChild(QLabel, "detailOrderNumber").text() == "OC-000001"
+    assert detail_table.rowCount() == 2
+    assert [detail_table.horizontalHeaderItem(i).text() for i in range(detail_table.columnCount())] == [
+        "Cliente",
+        "Destino",
+        "Producto",
+        "Cantidad",
+        "Unidad",
+    ]
+    assert detail_table.item(0, 2).text() == "ISSUE169 Producto forestal con descripcion larga"
+    assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
@@ -842,13 +924,13 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
     assert search_input is not None
     assert reprint_button is None or not reprint_button.isVisible()
     assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
-    assert table.rowCount() == 2
+    assert table.rowCount() == 3
 
     search_input.setText("Norte")
     search_button.click()
     app.processEvents()
 
-    assert table.rowCount() == 1
+    assert table.rowCount() == 2
     assert table.item(0, 0).data(Qt.UserRole) == order_a.id
     assert "1 resultado" in feedback.text().lower()
 

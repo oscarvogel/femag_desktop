@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -390,31 +391,11 @@ class FemagDesktopWindow(QMainWindow):
         )
         selected_order_id: dict[str, int | None] = {"value": None}
 
-        kpi_scroll = QScrollArea()
-        kpi_scroll.setObjectName("loadOrderKpiScroll")
-        kpi_scroll.setWidgetResizable(True)
-        kpi_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        kpi_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        kpi_scroll.setFrameShape(QFrame.NoFrame)
-        kpi_scroll.setMinimumHeight(96)
-        kpi_inner = QWidget()
-        kpi_inner.setObjectName("loadOrderKpiInner")
-        kpi_grid = QGridLayout(kpi_inner)
-        kpi_grid.setContentsMargins(0, 0, 0, 0)
-        kpi_grid.setSpacing(16)
-        for index, (label, value, helper) in enumerate(_load_order_kpis(service)):
-            card = _kpi_card(label, value, helper)
-            card.setMinimumWidth(180)
-            kpi_grid.addWidget(card, 0, index)
-        kpi_scroll.setWidget(kpi_inner)
-        layout.addWidget(kpi_scroll)
+        layout.addWidget(_load_order_metrics_strip(service))
 
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
 
-        workspace = QSplitter(Qt.Horizontal)
-        workspace.setChildrenCollapsible(False)
-        workspace.setHandleWidth(6)
         left_panel = QFrame()
         left_panel.setObjectName("contentPanel")
         left_layout = QVBoxLayout(left_panel)
@@ -431,11 +412,19 @@ class FemagDesktopWindow(QMainWindow):
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
+        _set_button_icon(new_button, QStyle.SP_FileIcon)
+        _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
+        _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
+        _set_button_icon(close_button, QStyle.SP_DialogCloseButton)
+        _set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
+        _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
+        _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(220)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
+        _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
         for button in (new_button, edit_button, issue_button, close_button, print_button, budget_button, annul_button):
             actions.addWidget(button)
         actions.addStretch(1)
@@ -459,15 +448,7 @@ class FemagDesktopWindow(QMainWindow):
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
         left_layout.addWidget(feedback)
-
-        detail = _detail_panel(spec)
-        detail_labels: dict[str, QLabel] = detail.property("detailLabels")
-        workspace.addWidget(left_panel)
-        workspace.addWidget(detail)
-        workspace.setStretchFactor(0, 1)
-        workspace.setStretchFactor(1, 0)
-        workspace.setSizes([1000, 300])
-        layout.addWidget(workspace, 1)
+        layout.addWidget(left_panel, 1)
 
         def refresh(*, query: str | None = None) -> None:
             rows = service.list_orders() if hasattr(service, "list_orders") else []
@@ -476,8 +457,15 @@ class FemagDesktopWindow(QMainWindow):
             query = (query if query is not None else search_input.text()).strip()
             if query:
                 rows = [order for order in rows if _matches_load_order_query(order, query)]
-            table.setRowCount(len(rows))
-            for row_index, order in enumerate(rows):
+            selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
+            if rows and not any(order.id == selected_id for order in rows):
+                selected_id = rows[0].id
+                selected_order_id["value"] = selected_id
+            selected_ids = {selected_id} if selected_id is not None else set()
+            table.setRowCount(len(rows) + len(selected_ids))
+            visual_row = 0
+            selected_row = 0
+            for order in rows:
                 values = (
                     _format_order_number(order.order_number),
                     order.date.strftime("%d/%m/%Y"),
@@ -491,17 +479,15 @@ class FemagDesktopWindow(QMainWindow):
                     _display_status(order.status),
                 )
                 for column, value in enumerate(values):
-                    table.setItem(row_index, column, QTableWidgetItem(value))
-                table.item(row_index, 0).setData(Qt.UserRole, order.id)
-                table.item(row_index, 9).setForeground(_status_color(order.status))
+                    table.setItem(visual_row, column, QTableWidgetItem(value))
+                table.item(visual_row, 0).setData(Qt.UserRole, order.id)
+                table.item(visual_row, 9).setForeground(_status_color(order.status))
+                if order.id == selected_id:
+                    selected_row = visual_row
+                    visual_row += 1
+                    _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                visual_row += 1
             if rows:
-                selected_row = 0
-                if selected_order_id["value"] is not None:
-                    for row_index in range(table.rowCount()):
-                        item = table.item(row_index, 0)
-                        if item is not None and item.data(Qt.UserRole) == selected_order_id["value"]:
-                            selected_row = row_index
-                            break
                 table.setCurrentCell(selected_row, 0)
                 load_selected(selected_row)
             else:
@@ -521,26 +507,9 @@ class FemagDesktopWindow(QMainWindow):
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
             selected_order_id["value"] = order.id
-            first_pallet = order.pallets.first()
-            detail_labels["number"].setText(_format_order_number(order.order_number))
-            detail_labels["status"].setText(_display_status(order.status))
-            detail_labels["status"].setProperty("statusKey", _status_key(order.status))
-            detail_labels["Fecha de orden"].setText(order.date.strftime("%d/%m/%Y"))
-            detail_labels["Clientes / destinos"].setText(_order_destinations_text(order))
-            detail_labels["Detalle de productos"].setText(_order_products_text(order))
-            detail_labels["Cantidad (Pallets)"].setText(str(first_pallet.quantity if first_pallet else 0))
-            detail_labels["Peso estimado"].setText(_estimated_weight(first_pallet))
-            detail_labels["Chofer asignado"].setText(order.driver.name)
-            detail_labels["Transportista"].setText(order.carrier.name)
-            detail_labels["Camión / Acoplado"].setText(order.truck.domain)
-            detail_labels["Observaciones"].setText(order.observations or "Sin observaciones.")
             set_action_state(order)
 
         def clear_detail() -> None:
-            detail_labels["number"].setText("OC-000000")
-            detail_labels["status"].setText("-")
-            for field in spec.detail_fields:
-                detail_labels[field].setText("-")
             issue_button.setEnabled(False)
             issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
             edit_button.setEnabled(False)
@@ -566,6 +535,13 @@ class FemagDesktopWindow(QMainWindow):
                 issue_button.setToolTip("Solo se pueden emitir ordenes pendientes.")
                 edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
                 close_button.setToolTip("Solo se pueden cerrar ordenes emitidas.")
+
+        def open_detail_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para ver el detalle.")
+                return
+            LoadOrderDetailDialog(order, self).exec_()
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -669,7 +645,7 @@ class FemagDesktopWindow(QMainWindow):
         def search_orders() -> None:
             query = search_input.text().strip()
             refresh(query=query)
-            count = table.rowCount()
+            count = _load_order_table_order_count(table)
             if query:
                 feedback.setText(f"Buscar '{query}': {count} resultado(s).")
             else:
@@ -735,6 +711,16 @@ def _kpi_card(title: str, value: str, helper: str) -> QFrame:
     return frame
 
 
+def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
+    metrics = QLabel("   ".join(f"{label}: {value}" for label, value, _helper in _load_order_kpis(service)))
+    metrics.setObjectName("loadOrderMetricsStrip")
+    return metrics
+
+
+def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
+    button.setIcon(QApplication.style().standardIcon(standard_icon))
+
+
 def _action_button(object_name: str, text: str, *, secondary: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName(object_name)
@@ -743,31 +729,204 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
     return button
 
 
-def _detail_panel(spec) -> QFrame:
+def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
+    item = QTableWidgetItem("")
+    item.setData(Qt.UserRole, order.id)
+    table.setItem(row, 0, item)
+    table.setSpan(row, 0, 1, table.columnCount())
+    detail = _inline_load_order_detail_panel()
+    labels: dict[str, QLabel] = detail.property("detailLabels")
+    view_button: QPushButton = detail.property("viewDetailButton")
+    _set_inline_load_order_detail(labels, order)
+    view_button.setEnabled(True)
+    view_button.clicked.connect(open_detail_dialog)
+    table.setCellWidget(row, 0, detail)
+    table.setRowHeight(row, 86)
+
+
+def _load_order_table_order_count(table: QTableWidget) -> int:
+    count = 0
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None and item.data(Qt.UserRole) is not None and table.cellWidget(row, 0) is None:
+            count += 1
+    return count
+
+
+def _inline_load_order_detail_panel() -> QFrame:
     panel = QFrame()
-    panel.setObjectName("detailPanel")
-    panel.setMinimumWidth(220)
-    panel.setMaximumWidth(480)
+    panel.setObjectName("loadOrderInlineDetailPanel")
+    panel.setMinimumHeight(58)
     layout = QVBoxLayout(panel)
-    layout.setContentsMargins(16, 16, 16, 12)
-    title = QLabel("Detalle de la orden")
-    title.setObjectName("detailTitle")
+    layout.setContentsMargins(14, 10, 14, 10)
+    layout.setSpacing(6)
+    header = QHBoxLayout()
+    title = QLabel("Detalle seleccionado")
+    title.setObjectName("inlineDetailTitle")
     number = QLabel("OC-000000")
-    number.setObjectName("detailOrderNumber")
-    status = QLabel("Pendiente")
-    status.setObjectName("detailOrderStatus")
-    layout.addWidget(title)
-    layout.addWidget(number)
-    layout.addWidget(status)
-    labels = {"number": number, "status": status}
-    for field in spec.detail_fields:
-        label, value = _detail_row(field)
-        layout.addWidget(label)
-        layout.addWidget(value)
-        labels[field] = value
-    layout.addStretch(1)
+    number.setObjectName("inlineDetailOrderNumber")
+    status = QLabel("-")
+    status.setObjectName("inlineDetailOrderStatus")
+    view_button = _action_button("viewLoadOrderDetailButton", "Ver detalle", secondary=True)
+    _set_button_icon(view_button, QStyle.SP_FileDialogDetailedView)
+    view_button.setEnabled(False)
+    header.addWidget(title)
+    header.addWidget(number)
+    header.addWidget(status)
+    header.addStretch(1)
+    header.addWidget(view_button)
+    layout.addLayout(header)
+    summary = QLabel("Seleccione una orden para ver el resumen operativo.")
+    summary.setObjectName("inlineDetailSummary")
+    summary.setWordWrap(True)
+    transport = QLabel("-")
+    transport.setObjectName("inlineDetailTransport")
+    transport.setWordWrap(True)
+    observations = QLabel("")
+    observations.setObjectName("inlineDetailObservations")
+    observations.setWordWrap(True)
+    layout.addWidget(summary)
+    layout.addWidget(transport)
+    layout.addWidget(observations)
+    labels = {
+        "number": number,
+        "status": status,
+        "summary": summary,
+        "transport": transport,
+        "observations": observations,
+    }
     panel.setProperty("detailLabels", labels)
+    panel.setProperty("viewDetailButton", view_button)
     return panel
+
+
+def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -> None:
+    first_pallet = order.pallets.first()
+    labels["number"].setText(_format_order_number(order.order_number))
+    labels["status"].setText(_display_status(order.status))
+    labels["status"].setProperty("statusKey", _status_key(order.status))
+    labels["summary"].setText(
+        f"{_summarize_order_clients(order)} | {_summarize_order_deliveries(order)} | "
+        f"{_summarize_order_products(order)}"
+    )
+    labels["transport"].setText(
+        f"{order.date.strftime('%d/%m/%Y')} | {order.driver.name} | "
+        f"{order.carrier.name} | {order.truck.domain} | "
+        f"Pallets: {first_pallet.quantity if first_pallet else 0} | Peso: {_estimated_weight(first_pallet)}"
+    )
+    labels["observations"].setText(f"Obs: {order.observations}" if order.observations else "")
+
+
+def _clear_inline_load_order_detail(labels: dict[str, QLabel]) -> None:
+    labels["number"].setText("OC-000000")
+    labels["status"].setText("-")
+    labels["summary"].setText("Seleccione una orden para ver el resumen operativo.")
+    labels["transport"].setText("-")
+    labels["observations"].setText("")
+
+
+class LoadOrderDetailDialog(QDialog):
+    def __init__(self, order: LoadOrder, parent=None):
+        super().__init__(parent)
+        self.order = LoadOrder.get_by_id(order.id)
+        self.setObjectName("loadOrderDetailDialog")
+        self.setWindowTitle(f"Detalle {_format_order_number(self.order.order_number)}")
+        self.setMinimumSize(820, 460)
+        self._build()
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("Detalle de la orden")
+        title.setObjectName("dialogTitle")
+        number = QLabel(_format_order_number(self.order.order_number))
+        number.setObjectName("detailOrderNumber")
+        status = QLabel(_display_status(self.order.status))
+        status.setObjectName("detailOrderStatus")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(number)
+        header.addWidget(status)
+        layout.addLayout(header)
+
+        orders_title = QLabel("Pedidos / productos")
+        orders_title.setObjectName("sectionTitle")
+        layout.addWidget(orders_title)
+
+        detail_table = QTableWidget(0, 5)
+        detail_table.setObjectName("loadOrderDetailItemsTable")
+        detail_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad"))
+        detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        detail_table.verticalHeader().setVisible(False)
+        detail_table.setShowGrid(False)
+        detail_table.setAlternatingRowColors(True)
+        detail_table.setSelectionBehavior(QTableWidget.SelectRows)
+        detail_table.setMinimumHeight(150)
+        detail_table.setRowCount(len(_load_order_detail_item_rows(self.order)))
+        for row, values in enumerate(_load_order_detail_item_rows(self.order)):
+            for column, value in enumerate(values):
+                detail_table.setItem(row, column, QTableWidgetItem(value))
+        layout.addWidget(detail_table, 1)
+
+        transport_title = QLabel("Transporte y observaciones")
+        transport_title.setObjectName("sectionTitle")
+        layout.addWidget(transport_title)
+        fields = QGridLayout()
+        fields.setHorizontalSpacing(16)
+        fields.setVerticalSpacing(8)
+        for row, (label_text, value_text) in enumerate(_load_order_transport_rows(self.order)):
+            label = QLabel(label_text)
+            label.setObjectName("detailLabel")
+            value = QLabel(value_text)
+            value.setObjectName("detailValue")
+            value.setWordWrap(True)
+            fields.addWidget(label, row, 0, Qt.AlignTop)
+            fields.addWidget(value, row, 1)
+        fields.setColumnStretch(0, 0)
+        fields.setColumnStretch(1, 1)
+        layout.addLayout(fields)
+
+        close_button = _action_button("closeLoadOrderDetailButton", "Cerrar", secondary=True)
+        close_button.clicked.connect(self.accept)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        footer.addWidget(close_button)
+        layout.addStretch(1)
+        layout.addLayout(footer)
+
+
+def _load_order_detail_item_rows(order: LoadOrder) -> list[tuple[str, str, str, str, str]]:
+    rows = []
+    for item in order.products:
+        destination = item.destination
+        client_name = destination.client.name if destination is not None else _summarize_order_clients(order)
+        destination_text = (
+            f"{destination.delivery_address.address}, {destination.delivery_address.city}"
+            if destination is not None
+            else _summarize_order_deliveries(order)
+        )
+        rows.append((client_name, destination_text, item.product.name, f"{item.quantity:g}", item.unit))
+    if rows:
+        return rows
+    for destination in order.destinations:
+        rows.append((destination.client.name, f"{destination.delivery_address.address}, {destination.delivery_address.city}", "-", "-", "-"))
+    return rows or [("-", "-", "-", "-", "-")]
+
+
+def _load_order_transport_rows(order: LoadOrder) -> list[tuple[str, str]]:
+    first_pallet = order.pallets.first()
+    return [
+        ("Fecha de orden", order.date.strftime("%d/%m/%Y")),
+        ("Cantidad (Pallets)", str(first_pallet.quantity if first_pallet else 0)),
+        ("Peso estimado", _estimated_weight(first_pallet)),
+        ("Chofer asignado", order.driver.name),
+        ("Transportista", order.carrier.name),
+        ("Camion / Acoplado", order.truck.domain),
+        ("Observaciones", order.observations or "Sin observaciones."),
+    ]
 
 
 class LoadOrderEntryDialog(QDialog):
@@ -1868,14 +2027,27 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 #statusbar { background: #ffffff; color: #64748b; border-top: 1px solid #d9e1ec; }
 #heading { font-size: 25px; font-weight: 700; margin-bottom: 0; color: #111827; }
 #subheading { color: #526174; margin-bottom: 6px; }
-#card, #kpiCard, #contentPanel, #detailPanel, #formSection {
+#loadOrderMetricsStrip {
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px 4px 2px;
+}
+#card, #kpiCard, #contentPanel, #detailPanel, #loadOrderInlineDetailPanel, #formSection {
     background: #ffffff; border: 1px solid #d9e1ec; border-radius: 8px;
 }
 #card { min-height: 88px; }
 #cardValue, #kpiValue { font-size: 28px; font-weight: 700; color: #111827; }
 #kpiCard { min-height: 96px; }
 #kpiHelper { color: #64748b; font-size: 12px; }
-#detailPanel { margin-left: 8px; }
+#loadOrderInlineDetailPanel {
+    background: #fbfdff;
+    border-top: 1px solid #d9e1ec;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
+}
 #formSection { margin-top: 2px; }
 #formHint { color: #526174; font-size: 12px; }
 #dialogTitle { font-size: 20px; font-weight: 700; color: #111827; }
@@ -1918,6 +2090,11 @@ QPushButton[stepNav="true"]:checked {
 #detailOrderNumber { color: #0b6fdc; font-size: 20px; font-weight: 700; margin-top: 6px; }
 #detailLabel { color: #64748b; font-size: 12px; margin-top: 7px; }
 #detailValue { color: #172033; font-size: 13px; }
+#inlineDetailTitle { color: #334155; font-size: 13px; font-weight: 700; }
+#inlineDetailOrderNumber { color: #0b6fdc; font-size: 15px; font-weight: 700; }
+#inlineDetailOrderStatus { color: #64748b; font-size: 13px; font-weight: 700; }
+#inlineDetailSummary { color: #172033; font-size: 12px; font-weight: 600; }
+#inlineDetailTransport, #inlineDetailObservations { color: #526174; font-size: 12px; }
 #badgePendiente, #badgeEmitida, #badgeEncarga, #badgeEntregada, #badgeAnulada {
     border-radius: 8px; padding: 4px 8px; font-weight: 700; max-width: 120px;
 }
