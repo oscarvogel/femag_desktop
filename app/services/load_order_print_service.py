@@ -7,7 +7,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Client
@@ -365,6 +365,61 @@ class LoadOrderPrintService:
                 clients_seen.add(client.id)
                 paths.append(self.export_budget(order, client, output_dir))
         return paths
+
+    def export_combined_budget(self, order: LoadOrder, output_dir: str | Path) -> Path:
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        target = path / f"presupuestos_orden_{order.order_number}.pdf"
+        doc = SimpleDocTemplate(
+            str(target),
+            pagesize=A4,
+            rightMargin=14 * mm,
+            leftMargin=14 * mm,
+            topMargin=12 * mm,
+            bottomMargin=14 * mm,
+            title=f"Presupuestos OC {order.order_number}",
+        )
+        story = []
+        clients_seen = set()
+        clients = []
+        for destination in order.destinations:
+            client = destination.client
+            if client.id not in clients_seen:
+                clients_seen.add(client.id)
+                clients.append(client)
+        for index, client in enumerate(clients):
+            if index:
+                story.append(PageBreak())
+            story.extend(self._budget_story(order, client))
+        doc.build(story)
+        self.audit_service.record(
+            user=self.current_user,
+            module="Ordenes de carga",
+            action="presupuesto",
+            record_ref=f"LoadOrder:{order.id}",
+            new_value={
+                "file_path": str(target),
+                "clients": [client.name for client in clients],
+                "order_number": order.order_number,
+            },
+        )
+        return target
+
+    def _budget_story(self, order: LoadOrder, client: Client) -> list:
+        return [
+            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
+            Spacer(1, 5 * mm),
+            Paragraph(f"PRESUPUESTO - Orden de carga Nro. {order.order_number:04d}", self.styles["title"]),
+            self._budget_header(order, client),
+            Spacer(1, 5 * mm),
+            Paragraph(f"Cliente: {client.name}", self.styles["section"]),
+            Spacer(1, 3 * mm),
+            self._budget_detail_table(order, client),
+            Spacer(1, 8 * mm),
+            self._budget_totals(order, client),
+            Spacer(1, 15 * mm),
+            Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
+        ]
 
     def _budget_header(self, order: LoadOrder, client: Client) -> Table:
         data = [[f"Fecha: {order.date:%d/%m/%Y}", f"Estado: Pendiente"]]

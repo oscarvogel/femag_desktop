@@ -422,7 +422,7 @@ def test_end_to_end_multi_client_budget_and_account_ledger(db, tmp_path):
     )
     operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
 
-    budget_paths = operations.export_budgets(order)
+    budget_path = operations.export_combined_budget(order)
     issued = operations.issue(order)
 
     movements = list(
@@ -437,8 +437,8 @@ def test_end_to_end_multi_client_budget_and_account_ledger(db, tmp_path):
     budgets = list(LoadOrderBudgetStatus.select().where(LoadOrderBudgetStatus.order == issued))
 
     assert issued.status == LoadOrder.STATUS_ISSUED
-    assert len(budget_paths) == 2
-    assert all(path.exists() and path.read_bytes().startswith(b"%PDF") for path in budget_paths)
+    assert budget_path.exists()
+    assert budget_path.read_bytes().startswith(b"%PDF")
     assert {movement.client.id for movement in movements} == {client_a.id, client_b.id}
     assert len(movements) == 2
     assert {round(movement.total_amount, 2) for movement in movements} == {12100.0, 10890.0}

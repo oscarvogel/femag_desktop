@@ -631,14 +631,13 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.setText("Seleccione una orden para presupuestar.")
                 return
             try:
-                paths = operation_service.export_budgets(order)
-                resolved = [Path(p).resolve() for p in paths]
-                feedback.setText(f"Presupuesto(s) generado(s): {', '.join(str(r) for r in resolved)}")
-                for path in resolved:
-                    try:
-                        _open_print_output(path)
-                    except Exception:
-                        pass
+                path = operation_service.export_combined_budget(order)
+                resolved = Path(path).resolve()
+                feedback.setText(f"Presupuesto generado: {resolved}")
+                try:
+                    _open_print_output(resolved)
+                except Exception:
+                    pass
             except Exception as exc:
                 feedback.setText(str(exc))
 

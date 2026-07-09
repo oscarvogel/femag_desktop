@@ -353,3 +353,43 @@ def test_print_service_exports_budgets_for_all_clients_in_order(db, tmp_path):
     names = [p.name for p in paths]
     assert any("Cliente_A_Budget" in n for n in names)
     assert any("Cliente_B_Budget" in n for n in names)
+
+
+def test_print_service_exports_combined_budget_pdf_for_all_clients(db, tmp_path):
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.load_order_service import LoadOrderService
+
+    client_a = Client.create(name="Cliente A Combined", cuit="30111111122", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A"
+    )
+    client_b = Client.create(name="Cliente B Combined", cuit="30111111123", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta B"
+    )
+    product_a = Product.create(name="Producto combinado A", unit="kg")
+    product_b = Product.create(name="Producto combinado B", unit="bolsas")
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="BUDGET03", carrier=carrier)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier, driver=driver, truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+
+    service = LoadOrderPrintService(current_user="admin")
+    path = service.export_combined_budget(order, tmp_path)
+    text = _pdf_text(path)
+
+    assert path.name == "presupuestos_orden_1.pdf"
+    assert path.read_bytes().startswith(b"%PDF")
+    assert "Cliente A Combined" in text
+    assert "Producto combinado A" in text
+    assert "Cliente B Combined" in text
+    assert "Producto combinado B" in text

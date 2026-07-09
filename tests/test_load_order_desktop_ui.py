@@ -619,7 +619,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
-def test_load_order_page_opens_all_client_budget_pdfs(db, tmp_path, monkeypatch):
+def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
     from app.models.security import User, UserProfile
@@ -673,14 +673,12 @@ def test_load_order_page_opens_all_client_budget_pdfs(db, tmp_path, monkeypatch)
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    budget_paths = sorted(tmp_path.glob("presupuesto_*.pdf"))
+    budget_paths = sorted(tmp_path.glob("presupuestos_orden_*.pdf"))
     feedback = window.findChild(QLabel, "loadOrderFeedback").text()
 
-    assert len(budget_paths) == 2
-    assert len(opened_outputs) == 2
-    assert set(opened_outputs) == set(budget_paths)
-    assert "Cliente_Budget_A" in feedback
-    assert "Cliente_Budget_B" in feedback
+    assert len(budget_paths) == 1
+    assert opened_outputs == budget_paths
+    assert "presupuestos_orden_1.pdf" in feedback
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
