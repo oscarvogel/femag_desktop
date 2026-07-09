@@ -412,7 +412,8 @@ class FemagDesktopWindow(QMainWindow):
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
 
-        workspace = QSplitter(Qt.Horizontal)
+        workspace = QSplitter(Qt.Vertical)
+        workspace.setObjectName("loadOrderWorkspaceSplitter")
         workspace.setChildrenCollapsible(False)
         workspace.setHandleWidth(6)
         left_panel = QFrame()
@@ -466,7 +467,7 @@ class FemagDesktopWindow(QMainWindow):
         workspace.addWidget(detail)
         workspace.setStretchFactor(0, 1)
         workspace.setStretchFactor(1, 0)
-        workspace.setSizes([860, 420])
+        workspace.setSizes([620, 240])
         layout.addWidget(workspace, 1)
 
         def refresh(*, query: str | None = None) -> None:
@@ -746,26 +747,40 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
 def _detail_panel(spec) -> QFrame:
     panel = QFrame()
     panel.setObjectName("detailPanel")
-    panel.setMinimumWidth(340)
-    panel.setMaximumWidth(540)
-    panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+    panel.setMinimumHeight(170)
+    panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 16, 16, 12)
+    layout.setSpacing(10)
+    header = QHBoxLayout()
     title = QLabel("Detalle de la orden")
     title.setObjectName("detailTitle")
     number = QLabel("OC-000000")
     number.setObjectName("detailOrderNumber")
     status = QLabel("Pendiente")
     status.setObjectName("detailOrderStatus")
-    layout.addWidget(title)
-    layout.addWidget(number)
-    layout.addWidget(status)
+    header.addWidget(title)
+    header.addStretch(1)
+    header.addWidget(number)
+    header.addWidget(status)
+    layout.addLayout(header)
     labels = {"number": number, "status": status}
-    for field in spec.detail_fields:
+    details = QGridLayout()
+    details.setContentsMargins(0, 0, 0, 0)
+    details.setHorizontalSpacing(14)
+    details.setVerticalSpacing(6)
+    details.setColumnStretch(0, 0)
+    details.setColumnStretch(1, 1)
+    details.setColumnStretch(2, 0)
+    details.setColumnStretch(3, 1)
+    for index, field in enumerate(spec.detail_fields):
         label, value = _detail_row(field)
-        layout.addWidget(label)
-        layout.addWidget(value)
+        row = index // 2
+        column = (index % 2) * 2
+        details.addWidget(label, row, column, Qt.AlignTop)
+        details.addWidget(value, row, column + 1)
         labels[field] = value
+    layout.addLayout(details)
     layout.addStretch(1)
     panel.setProperty("detailLabels", labels)
     return panel

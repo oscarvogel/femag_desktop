@@ -394,7 +394,8 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
 
 
 def test_load_order_detail_panel_keeps_long_summary_readable(db):
-    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QTableWidget
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QSizePolicy, QSplitter, QTableWidget
 
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -437,10 +438,13 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
     app.processEvents()
 
+    splitter = window.findChild(QSplitter, "loadOrderWorkspaceSplitter")
     panel = window.findChild(QFrame, "detailPanel")
     labels: dict[str, QLabel] = panel.property("detailLabels")
 
-    assert panel.minimumWidth() >= 340
+    assert splitter.orientation() == Qt.Vertical
+    assert panel.maximumWidth() > 1000
+    assert panel.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
     assert labels["Clientes / destinos"].wordWrap() is True
     assert labels["Detalle de productos"].wordWrap() is True
     assert "ISSUE169 Cliente Norte" in labels["Clientes / destinos"].text()
