@@ -418,6 +418,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
         address="Ruta 14 kilometro 169 acceso norte",
     )
     product = Product.create(name="ISSUE169 Producto forestal con descripcion larga", unit="kg")
+    product_b = Product.create(name="ISSUE169 Segundo producto", unit="bolsas")
     LoadOrderService(current_user=user.username).create_order(
         carrier=carrier,
         driver=driver,
@@ -426,7 +427,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
             {
                 "client": client,
                 "delivery_address": address,
-                "products": [{"product": product, "quantity": 42}],
+                "products": [{"product": product, "quantity": 42}, {"product": product_b, "quantity": 7}],
             }
         ],
         pallets=[],
@@ -460,7 +461,18 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert "ISSUE169 Chofer Demo" in labels["transport"].text()
 
     dialog = LoadOrderDetailDialog(LoadOrder.select().first(), window)
+    detail_table = dialog.findChild(QTableWidget, "loadOrderDetailItemsTable")
     assert dialog.findChild(QLabel, "detailOrderNumber").text() == "OC-000001"
+    assert detail_table.rowCount() == 2
+    assert [detail_table.horizontalHeaderItem(i).text() for i in range(detail_table.columnCount())] == [
+        "Cliente",
+        "Destino",
+        "Producto",
+        "Cantidad",
+        "Unidad",
+    ]
+    assert detail_table.item(0, 2).text() == "ISSUE169 Producto forestal con descripcion larga"
+    assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):

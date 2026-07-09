@@ -831,7 +831,7 @@ class LoadOrderDetailDialog(QDialog):
         self.order = LoadOrder.get_by_id(order.id)
         self.setObjectName("loadOrderDetailDialog")
         self.setWindowTitle(f"Detalle {_format_order_number(self.order.order_number)}")
-        self.setMinimumSize(760, 420)
+        self.setMinimumSize(820, 460)
         self._build()
 
     def _build(self) -> None:
@@ -852,10 +852,32 @@ class LoadOrderDetailDialog(QDialog):
         header.addWidget(status)
         layout.addLayout(header)
 
+        orders_title = QLabel("Pedidos / productos")
+        orders_title.setObjectName("sectionTitle")
+        layout.addWidget(orders_title)
+
+        detail_table = QTableWidget(0, 5)
+        detail_table.setObjectName("loadOrderDetailItemsTable")
+        detail_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad"))
+        detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        detail_table.verticalHeader().setVisible(False)
+        detail_table.setShowGrid(False)
+        detail_table.setAlternatingRowColors(True)
+        detail_table.setSelectionBehavior(QTableWidget.SelectRows)
+        detail_table.setMinimumHeight(150)
+        detail_table.setRowCount(len(_load_order_detail_item_rows(self.order)))
+        for row, values in enumerate(_load_order_detail_item_rows(self.order)):
+            for column, value in enumerate(values):
+                detail_table.setItem(row, column, QTableWidgetItem(value))
+        layout.addWidget(detail_table, 1)
+
+        transport_title = QLabel("Transporte y observaciones")
+        transport_title.setObjectName("sectionTitle")
+        layout.addWidget(transport_title)
         fields = QGridLayout()
         fields.setHorizontalSpacing(16)
         fields.setVerticalSpacing(8)
-        for row, (label_text, value_text) in enumerate(_load_order_detail_rows(self.order)):
+        for row, (label_text, value_text) in enumerate(_load_order_transport_rows(self.order)):
             label = QLabel(label_text)
             label.setObjectName("detailLabel")
             value = QLabel(value_text)
@@ -876,12 +898,28 @@ class LoadOrderDetailDialog(QDialog):
         layout.addLayout(footer)
 
 
-def _load_order_detail_rows(order: LoadOrder) -> list[tuple[str, str]]:
+def _load_order_detail_item_rows(order: LoadOrder) -> list[tuple[str, str, str, str, str]]:
+    rows = []
+    for item in order.products:
+        destination = item.destination
+        client_name = destination.client.name if destination is not None else _summarize_order_clients(order)
+        destination_text = (
+            f"{destination.delivery_address.address}, {destination.delivery_address.city}"
+            if destination is not None
+            else _summarize_order_deliveries(order)
+        )
+        rows.append((client_name, destination_text, item.product.name, f"{item.quantity:g}", item.unit))
+    if rows:
+        return rows
+    for destination in order.destinations:
+        rows.append((destination.client.name, f"{destination.delivery_address.address}, {destination.delivery_address.city}", "-", "-", "-"))
+    return rows or [("-", "-", "-", "-", "-")]
+
+
+def _load_order_transport_rows(order: LoadOrder) -> list[tuple[str, str]]:
     first_pallet = order.pallets.first()
     return [
         ("Fecha de orden", order.date.strftime("%d/%m/%Y")),
-        ("Clientes / destinos", _order_destinations_text(order)),
-        ("Detalle de productos", _order_products_text(order)),
         ("Cantidad (Pallets)", str(first_pallet.quantity if first_pallet else 0)),
         ("Peso estimado", _estimated_weight(first_pallet)),
         ("Chofer asignado", order.driver.name),
