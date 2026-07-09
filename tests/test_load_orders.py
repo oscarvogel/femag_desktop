@@ -417,14 +417,14 @@ def test_update_pending_order_replaces_destinations_and_products(db):
     assert [product.quantity for product in products] == [100, 25]
 
 
-def test_update_legacy_draft_order_as_pending(db):
+def test_update_legacy_unissued_order_as_pending(db):
     from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
     service = LoadOrderService(current_user="admin")
     order = service.create_order(**_valid_order_payload(data))
-    order.status = "Borrador"
+    order.status = "Preparacion"
     order.save()
 
     updated = service.update_order(

@@ -36,6 +36,10 @@ class LoadOrder(BaseModel):
     def is_pending(self) -> bool:
         return self.status in self.PENDING_STATUSES
 
+    @property
+    def is_unissued(self) -> bool:
+        return self.status not in (self.STATUS_ISSUED, *self.FINAL_STATUSES)
+
 
 class LoadOrderDestination(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="destinations", on_delete="CASCADE")

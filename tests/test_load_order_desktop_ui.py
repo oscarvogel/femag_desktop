@@ -808,7 +808,7 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
     assert "pendientes" in edit_button.toolTip().lower()
 
 
-def test_load_order_page_treats_legacy_draft_as_pending_for_actions(db):
+def test_load_order_page_treats_legacy_unissued_status_as_actionable(db):
     from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
 
     from app.models.load_orders import LoadOrder
@@ -822,18 +822,18 @@ def test_load_order_page_treats_legacy_draft_as_pending_for_actions(db):
     PermissionService().seed_defaults()
     profile = UserProfile.get(UserProfile.name == "Administrador")
     user = User.create(username="admin_legacy_draft_ui", password_hash="x", profile=profile)
-    carrier = Carrier.create(name="Transporte Borrador UI")
-    driver = Driver.create(name="Chofer Borrador UI", carrier=carrier)
+    carrier = Carrier.create(name="Transporte No Emitida UI")
+    driver = Driver.create(name="Chofer No Emitida UI", carrier=carrier)
     truck = Truck.create(domain="BOR123", carrier=carrier)
-    client = Client.create(name="Cliente Borrador UI", cuit="30700008830", iva_condition="RI")
+    client = Client.create(name="Cliente No Emitida UI", cuit="30700008830", iva_condition="RI")
     address = ClientAddress.create(
         client=client,
         address_type="entrega",
         province="Misiones",
         city="Posadas",
-        address="Ruta Borrador",
+        address="Ruta No Emitida",
     )
-    product = Product.create(name="Producto Borrador UI", unit="kg")
+    product = Product.create(name="Producto No Emitida UI", unit="kg")
     order = LoadOrderService(current_user=user.username).create_order(
         carrier=carrier,
         driver=driver,
@@ -841,7 +841,7 @@ def test_load_order_page_treats_legacy_draft_as_pending_for_actions(db):
         destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
         pallets=[],
     )
-    order.status = "Borrador"
+    order.status = "Preparacion"
     order.save()
 
     window = FemagDesktopWindow(user=user, demo_mode=True)

@@ -518,7 +518,7 @@ class FemagDesktopWindow(QMainWindow):
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
 
         def set_action_state(order: LoadOrder) -> None:
-            is_pending = order.is_pending
+            is_pending = order.is_unissued
             is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
@@ -555,7 +555,7 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.setText("Seleccione una orden para editar.")
                 return
-            if not order.is_pending:
+            if not order.is_unissued:
                 feedback.setText("Solo se pueden editar ordenes pendientes.")
                 return
             dialog = LoadOrderEntryDialog(service, self.shell.username, self, order=order)
@@ -1661,7 +1661,7 @@ def _format_order_number(number: int) -> str:
 
 
 def _display_status(status: str) -> str:
-    return {"Borrador": "Pendiente", "Cerrada": "Entregada"}.get(status, status)
+    return {"Borrador": "Pendiente", "Preparacion": "Pendiente", "Cerrada": "Entregada"}.get(status, status)
 
 
 def _status_key(status: str) -> str:
@@ -1671,6 +1671,7 @@ def _status_key(status: str) -> str:
 def _status_color(status: str):
     colors = {
         "Borrador": Qt.darkYellow,
+        "Preparacion": Qt.darkYellow,
         "Emitida": Qt.darkGreen,
         "Cerrada": Qt.darkGray,
         "Anulada": Qt.red,
