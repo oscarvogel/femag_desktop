@@ -343,7 +343,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     table = window.findChild(QTableWidget, "loadOrdersTable")
     feedback = window.findChild(QLabel, "loadOrderFeedback")
-    status = window.findChild(QLabel, "detailOrderStatus")
+    status = window.findChild(QLabel, "inlineDetailOrderStatus")
     table.setCurrentCell(0, 0)
 
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
@@ -394,14 +394,14 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
 
 
 def test_load_order_detail_panel_keeps_long_summary_readable(db):
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QSizePolicy, QSplitter, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QTableWidget
 
+    from app.models.load_orders import LoadOrder
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
     from app.services.permission_service import PermissionService
-    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderDetailDialog
 
     app = QApplication.instance() or QApplication([])
     PermissionService().seed_defaults()
@@ -438,17 +438,19 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
     app.processEvents()
 
-    splitter = window.findChild(QSplitter, "loadOrderWorkspaceSplitter")
-    panel = window.findChild(QFrame, "detailPanel")
+    panel = window.findChild(QFrame, "loadOrderInlineDetailPanel")
+    button = window.findChild(QPushButton, "viewLoadOrderDetailButton")
     labels: dict[str, QLabel] = panel.property("detailLabels")
 
-    assert splitter.orientation() == Qt.Vertical
-    assert panel.maximumWidth() > 1000
-    assert panel.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
-    assert labels["Clientes / destinos"].wordWrap() is True
-    assert labels["Detalle de productos"].wordWrap() is True
-    assert "ISSUE169 Cliente Norte" in labels["Clientes / destinos"].text()
-    assert "ISSUE169 Producto forestal" in labels["Detalle de productos"].text()
+    assert button.isEnabled() is True
+    assert labels["summary"].wordWrap() is True
+    assert labels["transport"].wordWrap() is True
+    assert "ISSUE169 Cliente Norte" in labels["summary"].text()
+    assert "ISSUE169 Producto forestal" in labels["summary"].text()
+    assert "ISSUE169 Chofer Demo" in labels["transport"].text()
+
+    dialog = LoadOrderDetailDialog(LoadOrder.select().first(), window)
+    assert dialog.findChild(QLabel, "detailOrderNumber").text() == "OC-000001"
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
