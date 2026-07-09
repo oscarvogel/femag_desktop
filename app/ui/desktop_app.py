@@ -634,9 +634,9 @@ class FemagDesktopWindow(QMainWindow):
                 paths = operation_service.export_budgets(order)
                 resolved = [Path(p).resolve() for p in paths]
                 feedback.setText(f"Presupuesto(s) generado(s): {', '.join(str(r) for r in resolved)}")
-                if resolved:
+                for path in resolved:
                     try:
-                        _open_print_output(resolved[0])
+                        _open_print_output(path)
                     except Exception:
                         pass
             except Exception as exc:

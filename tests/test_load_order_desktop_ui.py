@@ -619,6 +619,70 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
+def test_load_order_page_opens_all_client_budget_pdfs(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_budget_all_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Budget UI")
+    driver = Driver.create(name="Chofer Budget UI", carrier=carrier)
+    truck = Truck.create(domain="BUD123", carrier=carrier)
+    product_a = Product.create(name="Producto Budget A", unit="kg")
+    product_b = Product.create(name="Producto Budget B", unit="bolsas")
+    client_a = Client.create(name="Cliente Budget A", cuit="30700018801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Budget A",
+    )
+    client_b = Client.create(name="Cliente Budget B", cuit="30700018802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Budget B",
+    )
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    window.findChild(QPushButton, "budgetLoadOrderButton").click()
+    app.processEvents()
+
+    budget_paths = sorted(tmp_path.glob("presupuesto_*.pdf"))
+    feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+
+    assert len(budget_paths) == 2
+    assert len(opened_outputs) == 2
+    assert set(opened_outputs) == set(budget_paths)
+    assert "Cliente_Budget_A" in feedback
+    assert "Cliente_Budget_B" in feedback
+
+
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 

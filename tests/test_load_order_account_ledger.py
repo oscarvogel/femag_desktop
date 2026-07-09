@@ -388,6 +388,64 @@ def test_issued_order_with_two_clients_sets_both_budgets_to_applied(db):
     assert all(b.status == LoadOrderBudgetStatus.STATUS_APPLIED for b in budgets)
 
 
+def test_end_to_end_multi_client_budget_and_account_ledger(db, tmp_path):
+    from app.models.accounting import ClientAccountMovement
+    from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+
+    iva = TipoIVA.iva_default()
+    carrier = Carrier.create(name="Carrier E2E")
+    driver = Driver.create(name="Driver E2E", carrier=carrier)
+    truck = Truck.create(domain="E2E01", carrier=carrier)
+    client_a = Client.create(name="Cliente E2E A", cuit="30111111901", iva_condition="RI", descuento_porcentaje=0.0)
+    address_a = ClientAddress.create(
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A"
+    )
+    client_b = Client.create(name="Cliente E2E B", cuit="30111111902", iva_condition="RI", descuento_porcentaje=10.0)
+    address_b = ClientAddress.create(
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta B"
+    )
+    product_a = Product.create(name="Producto E2E A", unit="kg", precio_neto_base=1000.0, tipo_iva=iva)
+    product_b = Product.create(name="Producto E2E B", unit="kg", precio_neto_base=2000.0, tipo_iva=iva)
+
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 5}]},
+        ],
+        pallets=[],
+    )
+    operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
+
+    budget_paths = operations.export_budgets(order)
+    issued = operations.issue(order)
+
+    movements = list(
+        ClientAccountMovement.select()
+        .where(
+            (ClientAccountMovement.load_order == issued)
+            & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER)
+            & (ClientAccountMovement.is_reversal == False)  # noqa: E712
+        )
+        .order_by(ClientAccountMovement.client)
+    )
+    budgets = list(LoadOrderBudgetStatus.select().where(LoadOrderBudgetStatus.order == issued))
+
+    assert issued.status == LoadOrder.STATUS_ISSUED
+    assert len(budget_paths) == 2
+    assert all(path.exists() and path.read_bytes().startswith(b"%PDF") for path in budget_paths)
+    assert {movement.client.id for movement in movements} == {client_a.id, client_b.id}
+    assert len(movements) == 2
+    assert {round(movement.total_amount, 2) for movement in movements} == {12100.0, 10890.0}
+    assert {budget.client.id for budget in budgets} == {client_a.id, client_b.id}
+    assert all(budget.status == LoadOrderBudgetStatus.STATUS_APPLIED for budget in budgets)
+
+
 def test_annulling_resets_budget_status_to_pending_via_recreate(db):
     from app.models.load_orders import LoadOrderBudgetStatus
     from app.services.load_order_operation_service import LoadOrderOperationService
