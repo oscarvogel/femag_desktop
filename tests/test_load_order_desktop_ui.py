@@ -681,6 +681,97 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     assert "presupuestos_orden_1.pdf" in feedback
 
 
+def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
+    from pypdf import PdfReader
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_budget_selection_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Selection UI")
+    driver_a = Driver.create(name="Chofer Selection A", carrier=carrier)
+    driver_b = Driver.create(name="Chofer Selection B", carrier=carrier)
+    truck_a = Truck.create(domain="SEL123A", carrier=carrier)
+    truck_b = Truck.create(domain="SEL123B", carrier=carrier)
+    product = Product.create(name="Producto Selection", unit="kg")
+    client_a = Client.create(name="Cliente Selection A", cuit="30700028801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Selection A",
+    )
+    client_b = Client.create(name="Cliente Selection B", cuit="30700028802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Selection B",
+    )
+    client_c = Client.create(name="Cliente Selection C", cuit="30700028803", iva_condition="RI")
+    address_c = ClientAddress.create(
+        client=client_c,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta Selection C",
+    )
+    service = LoadOrderService(current_user=user.username)
+    first_order = service.create_order(
+        carrier=carrier,
+        driver=driver_a,
+        truck=truck_a,
+        destinations=[{"client": client_a, "delivery_address": address_a, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    second_order = service.create_order(
+        carrier=carrier,
+        driver=driver_b,
+        truck=truck_b,
+        destinations=[
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 2}]},
+            {"client": client_c, "delivery_address": address_c, "products": [{"product": product, "quantity": 3}]},
+        ],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+
+    assert table.item(0, 0).data(256) == second_order.id
+    assert table.cellWidget(1, 0).property("detailLabels")["number"].text() == "OC-000002"
+
+    table.setCurrentCell(2, 0)
+    app.processEvents()
+
+    assert table.item(1, 0).data(256) == first_order.id
+    assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
+
+    table.setCurrentCell(0, 0)
+    app.processEvents()
+    window.findChild(QPushButton, "budgetLoadOrderButton").click()
+    app.processEvents()
+
+    assert len(opened_outputs) == 1
+    reader = PdfReader(str(opened_outputs[0]))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "Cliente Selection B" in text
+    assert "Cliente Selection C" in text
+
+
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 

@@ -390,6 +390,7 @@ class FemagDesktopWindow(QMainWindow):
             prints_dir=LOAD_ORDER_PRINTS_DIR,
         )
         selected_order_id: dict[str, int | None] = {"value": None}
+        refreshing_selection: dict[str, bool] = {"value": False}
 
         layout.addWidget(_load_order_metrics_strip(service))
 
@@ -462,51 +463,62 @@ class FemagDesktopWindow(QMainWindow):
                 selected_id = rows[0].id
                 selected_order_id["value"] = selected_id
             selected_ids = {selected_id} if selected_id is not None else set()
-            table.setRowCount(len(rows) + len(selected_ids))
-            visual_row = 0
-            selected_row = 0
-            for order in rows:
-                values = (
-                    _format_order_number(order.order_number),
-                    order.date.strftime("%d/%m/%Y"),
-                    _summarize_order_clients(order),
-                    _summarize_order_deliveries(order),
-                    _summarize_order_products(order),
-                    str(sum(pallet.quantity for pallet in order.pallets)),
-                    order.driver.name,
-                    order.carrier.name,
-                    order.truck.domain,
-                    _display_status(order.status),
-                )
-                for column, value in enumerate(values):
-                    table.setItem(visual_row, column, QTableWidgetItem(value))
-                table.item(visual_row, 0).setData(Qt.UserRole, order.id)
-                table.item(visual_row, 9).setForeground(_status_color(order.status))
-                if order.id == selected_id:
-                    selected_row = visual_row
+            refreshing_selection["value"] = True
+            try:
+                table.setRowCount(len(rows) + len(selected_ids))
+                visual_row = 0
+                selected_row = 0
+                for order in rows:
+                    values = (
+                        _format_order_number(order.order_number),
+                        order.date.strftime("%d/%m/%Y"),
+                        _summarize_order_clients(order),
+                        _summarize_order_deliveries(order),
+                        _summarize_order_products(order),
+                        str(sum(pallet.quantity for pallet in order.pallets)),
+                        order.driver.name,
+                        order.carrier.name,
+                        order.truck.domain,
+                        _display_status(order.status),
+                    )
+                    for column, value in enumerate(values):
+                        table.setItem(visual_row, column, QTableWidgetItem(value))
+                    table.item(visual_row, 0).setData(Qt.UserRole, order.id)
+                    table.item(visual_row, 9).setForeground(_status_color(order.status))
+                    if order.id == selected_id:
+                        selected_row = visual_row
+                        visual_row += 1
+                        _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
                     visual_row += 1
-                    _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
-                visual_row += 1
+                if rows:
+                    table.setCurrentCell(selected_row, 0)
+                else:
+                    selected_order_id["value"] = None
+                    clear_detail()
+            finally:
+                refreshing_selection["value"] = False
             if rows:
-                table.setCurrentCell(selected_row, 0)
-                load_selected(selected_row)
-            else:
-                selected_order_id["value"] = None
-                clear_detail()
+                load_selected(selected_row, rebuild_detail=False)
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
                 return None
             return LoadOrder.get_by_id(selected_order_id["value"])
 
-        def load_selected(row: int) -> None:
+        def load_selected(row: int, *, rebuild_detail: bool = True) -> None:
+            if refreshing_selection["value"]:
+                return
             if row < 0:
                 return
             item = table.item(row, 0)
             if item is None:
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
+            previous_id = selected_order_id["value"]
             selected_order_id["value"] = order.id
+            if rebuild_detail and previous_id != order.id:
+                refresh()
+                return
             set_action_state(order)
 
         def clear_detail() -> None:
