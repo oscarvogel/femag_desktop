@@ -76,6 +76,132 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrderProduct.select().count() == 1
 
 
+def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Save Ready")
+    driver = Driver.create(name="Chofer Save Ready", carrier=carrier)
+    truck = Truck.create(domain="SR123AA", carrier=carrier)
+    client = Client.create(name="Cliente Save Ready", cuit="30712345001", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Save Ready",
+    )
+    product = Product.create(name="Producto Save Ready", unit="kg")
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_save_ready"), "ui_save_ready")
+    app.processEvents()
+    save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
+
+    assert save_button is not None
+    assert save_button.isEnabled() is False
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+    dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(0, 0)
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 125,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is True
+
+    dialog.findChild(QTableWidget, "loadOrderProductDraftTable").setCurrentCell(0, 0)
+    dialog.findChild(QPushButton, "removeLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+
+def test_load_order_dialog_selects_new_destination_for_next_product(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Multi Destino")
+    Driver.create(name="Chofer Multi Destino", carrier=carrier)
+    Truck.create(domain="MD123AA", carrier=carrier)
+    product = Product.create(name="Producto Multi Destino", unit="kg")
+    client_a = Client.create(name="Cliente Multi A", cuit="30712345011", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Multi A",
+    )
+    client_b = Client.create(name="Cliente Multi B", cuit="30712345012", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Multi B",
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_multi_dest"), "ui_multi_dest")
+    app.processEvents()
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_a.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_a.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_b.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_b.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+    app.processEvents()
+
+    destination_table = dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable")
+    assert destination_table.currentRow() == 1
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 50,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert dialog.destinations[0]["products"] == []
+    assert len(dialog.destinations[1]["products"]) == 1
+
+
 def test_product_dialog_prefills_price_from_client_price_list(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox
 

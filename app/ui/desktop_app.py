@@ -955,11 +955,11 @@ class LoadOrderEntryDialog(QDialog):
         self.next_step_button = _action_button("nextLoadOrderStepButton", "Siguiente", secondary=True)
         footer.addStretch(1)
         cancel_button = _action_button("cancelLoadOrderButton", "Cancelar", secondary=True)
-        save_button = _action_button("saveLoadOrderButton", "Guardar orden")
+        self.save_button = _action_button("saveLoadOrderButton", "Guardar orden")
         footer.addWidget(self.previous_step_button)
         footer.addWidget(self.next_step_button)
         footer.addWidget(cancel_button)
-        footer.addWidget(save_button)
+        footer.addWidget(self.save_button)
         root.addLayout(footer)
 
         self.previous_step_button.clicked.connect(self._previous_step)
@@ -968,14 +968,17 @@ class LoadOrderEntryDialog(QDialog):
         remove_destination_button.clicked.connect(self._remove_destination)
         add_product_button.clicked.connect(self._open_product_dialog)
         remove_product_button.clicked.connect(self._remove_product)
-        save_button.clicked.connect(self._save)
+        self.save_button.clicked.connect(self._save)
         cancel_button.clicked.connect(self.reject)
         self.destination_table.currentCellChanged.connect(
             lambda row, _column, _previous_row, _previous_column: self._render_products(row)
         )
         self.driver_combo.currentIndexChanged.connect(lambda _index: self._refresh_from_driver())
+        self.carrier_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
+        self.truck_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
         self._go_to_step(0)
+        self._update_save_button_state()
 
     def _go_to_step(self, index: int) -> None:
         if index < 0:
@@ -1032,18 +1035,21 @@ class LoadOrderEntryDialog(QDialog):
         ]
         self._render_destinations()
         self._render_review()
+        self._update_save_button_state()
 
     def _refresh_from_driver(self) -> None:
         driver_id = self.driver_combo.currentData()
         if driver_id is None:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            self._update_save_button_state()
             return
         try:
             driver = Driver.get_by_id(driver_id)
         except Driver.DoesNotExist:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            self._update_save_button_state()
             return
         try:
             carrier = driver.carrier
@@ -1056,6 +1062,7 @@ class LoadOrderEntryDialog(QDialog):
                 self.feedback.setText("El chofer seleccionado no tiene transportista asociado.")
             else:
                 self.feedback.setText("El transportista asociado al chofer esta inactivo.")
+            self._update_save_button_state()
             return
         carrier_id = carrier.id
         if self.carrier_combo.findData(carrier_id) < 0:
@@ -1067,6 +1074,7 @@ class LoadOrderEntryDialog(QDialog):
             self.truck_combo.setCurrentIndex(1)
         elif not truck_options:
             self.feedback.setText("No hay camiones activos para el transportista seleccionado.")
+        self._update_save_button_state()
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
@@ -1096,8 +1104,12 @@ class LoadOrderEntryDialog(QDialog):
                 "products": [],
             }
         )
+        new_row = len(self.destinations) - 1
         self._render_destinations()
+        self.destination_table.setCurrentCell(new_row, 0)
+        self._go_to_step(2)
         self.feedback.setText("Cliente/destino agregado. Ahora agregue productos.")
+        self._update_save_button_state()
 
     def _remove_destination(self) -> None:
         row = self.destination_table.currentRow()
@@ -1107,6 +1119,7 @@ class LoadOrderEntryDialog(QDialog):
         self.destinations.pop(row)
         self._render_destinations()
         self.feedback.setText("Cliente/destino quitado.")
+        self._update_save_button_state()
 
     def _open_product_dialog(self) -> None:
         row = self.destination_table.currentRow()
@@ -1128,6 +1141,7 @@ class LoadOrderEntryDialog(QDialog):
         self._render_destinations()
         self.destination_table.setCurrentCell(row, 0)
         self.feedback.setText("Producto agregado.")
+        self._update_save_button_state()
 
     def _remove_product(self) -> None:
         destination_row = self.destination_table.currentRow()
@@ -1144,6 +1158,7 @@ class LoadOrderEntryDialog(QDialog):
         self._render_destinations()
         self.destination_table.setCurrentCell(destination_row, 0)
         self.feedback.setText("Producto quitado.")
+        self._update_save_button_state()
 
     def _render_destinations(self) -> None:
         self.destination_table.setRowCount(len(self.destinations))
@@ -1161,6 +1176,7 @@ class LoadOrderEntryDialog(QDialog):
             self.destination_table.setCurrentCell(0, 0)
         self._render_products(self.destination_table.currentRow())
         self._render_review()
+        self._update_save_button_state()
 
     def _render_products(self, destination_index: int) -> None:
         products = []
@@ -1202,8 +1218,45 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
+        self._update_save_button_state()
+
+    def _is_ready_to_save(self) -> bool:
+        if self.driver_combo.currentData() is None:
+            return False
+        if self.carrier_combo.currentData() is None:
+            return False
+        if self.truck_combo.currentData() is None:
+            return False
+        if not self.destinations:
+            return False
+        for destination in self.destinations:
+            if destination.get("client_id") is None or destination.get("address_id") is None:
+                return False
+            products = destination.get("products") or []
+            if not products:
+                return False
+            for product in products:
+                if product.get("product_id") is None:
+                    return False
+                if product.get("quantity") is None or product.get("quantity") <= 0:
+                    return False
+        return True
+
+    def _update_save_button_state(self) -> None:
+        if not hasattr(self, "save_button"):
+            return
+        ready = self._is_ready_to_save()
+        self.save_button.setEnabled(ready)
+        if ready:
+            self.save_button.setToolTip("Guardar orden.")
+        else:
+            self.save_button.setToolTip("Complete chofer, camion, destino y productos para guardar.")
 
     def _save(self) -> None:
+        if not self._is_ready_to_save():
+            self.feedback.setText("Complete chofer, camion, destino y productos antes de guardar.")
+            self._update_save_button_state()
+            return
         if self.driver_combo.currentData() is None:
             self.feedback.setText("Seleccione chofer.")
             return
