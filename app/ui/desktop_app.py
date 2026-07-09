@@ -803,14 +803,21 @@ class LoadOrderEntryDialog(QDialog):
         hint.setWordWrap(True)
         root.addWidget(hint)
 
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("loadOrderEntryScrollArea")
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.NoFrame)
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(14)
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(12)
+
+        self.step_list = QListWidget()
+        self.step_list.setObjectName("loadOrderEntryStepList")
+        self.step_list.setFixedWidth(150)
+        for label in ("1 Transporte", "2 Destinos", "3 Productos", "4 Revisar"):
+            self.step_list.addItem(label)
+
+        self.step_stack = QStackedWidget()
+        self.step_stack.setObjectName("loadOrderEntryStepStack")
+        body_layout.addWidget(self.step_list)
+        body_layout.addWidget(self.step_stack, 1)
 
         header = QFrame()
         header.setObjectName("formSection")
@@ -842,12 +849,7 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.addWidget(self.truck_combo, 1, 3)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
         header_layout.addWidget(self.observations_input, 2, 1, 1, 3)
-        content_layout.addWidget(header)
-
-        work_splitter = QSplitter(Qt.Vertical)
-        work_splitter.setObjectName("loadOrderEntryWorkSplitter")
-        work_splitter.setChildrenCollapsible(False)
-        work_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.step_stack.addWidget(header)
 
         destination = QFrame()
         destination.setObjectName("formSection")
@@ -879,7 +881,7 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.destination_table.setMinimumHeight(180)
         destination_layout.addWidget(self.destination_table)
-        work_splitter.addWidget(destination)
+        self.step_stack.addWidget(destination)
 
         product = QFrame()
         product.setObjectName("formSection")
@@ -904,12 +906,28 @@ class LoadOrderEntryDialog(QDialog):
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.product_table.setMinimumHeight(160)
         product_layout.addWidget(self.product_table)
-        work_splitter.addWidget(product)
-        work_splitter.setStretchFactor(0, 3)
-        work_splitter.setStretchFactor(1, 2)
-        content_layout.addWidget(work_splitter, 1)
-        scroll_area.setWidget(content)
-        root.addWidget(scroll_area, 1)
+        self.step_stack.addWidget(product)
+
+        review = QFrame()
+        review.setObjectName("formSection")
+        review_layout = QVBoxLayout(review)
+        review_layout.setContentsMargins(12, 12, 12, 12)
+        review_layout.setSpacing(8)
+        review_title = QLabel("Revisar orden")
+        review_title.setObjectName("sectionTitle")
+        review_layout.addWidget(review_title)
+        self.review_table = QTableWidget(0, 6)
+        self.review_table.setObjectName("loadOrderReviewTable")
+        self.review_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total"))
+        self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.review_table.verticalHeader().setVisible(False)
+        self.review_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.review_table.setMinimumHeight(260)
+        review_layout.addWidget(self.review_table)
+        self.step_stack.addWidget(review)
+
+        self.step_list.setCurrentRow(0)
+        root.addWidget(body, 1)
 
         self.feedback = QLabel("")
         self.feedback.setObjectName("loadOrderDialogFeedback")
@@ -917,13 +935,20 @@ class LoadOrderEntryDialog(QDialog):
         root.addWidget(self.feedback)
 
         footer = QHBoxLayout()
+        self.previous_step_button = _action_button("previousLoadOrderStepButton", "Anterior", secondary=True)
+        self.next_step_button = _action_button("nextLoadOrderStepButton", "Siguiente", secondary=True)
         footer.addStretch(1)
         cancel_button = _action_button("cancelLoadOrderButton", "Cancelar", secondary=True)
         save_button = _action_button("saveLoadOrderButton", "Guardar orden")
+        footer.addWidget(self.previous_step_button)
+        footer.addWidget(self.next_step_button)
         footer.addWidget(cancel_button)
         footer.addWidget(save_button)
         root.addLayout(footer)
 
+        self.step_list.currentRowChanged.connect(self._go_to_step)
+        self.previous_step_button.clicked.connect(self._previous_step)
+        self.next_step_button.clicked.connect(self._next_step)
         add_destination_button.clicked.connect(self._add_destination)
         remove_destination_button.clicked.connect(self._remove_destination)
         add_product_button.clicked.connect(self._open_product_dialog)
@@ -935,6 +960,24 @@ class LoadOrderEntryDialog(QDialog):
         )
         self.driver_combo.currentIndexChanged.connect(lambda _index: self._refresh_from_driver())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
+        self._go_to_step(0)
+
+    def _go_to_step(self, index: int) -> None:
+        if index < 0:
+            index = 0
+        if index >= self.step_stack.count():
+            index = self.step_stack.count() - 1
+        if self.step_list.currentRow() != index:
+            self.step_list.setCurrentRow(index)
+        self.step_stack.setCurrentIndex(index)
+        self.previous_step_button.setEnabled(index > 0)
+        self.next_step_button.setEnabled(index < self.step_stack.count() - 1)
+
+    def _previous_step(self) -> None:
+        self._go_to_step(self.step_stack.currentIndex() - 1)
+
+    def _next_step(self) -> None:
+        self._go_to_step(self.step_stack.currentIndex() + 1)
 
     def _populate_options(self) -> None:
         _fill_combo(self.driver_combo, _driver_options())
@@ -973,6 +1016,7 @@ class LoadOrderEntryDialog(QDialog):
             for destination in self.order.destinations.order_by()
         ]
         self._render_destinations()
+        self._render_review()
 
     def _refresh_from_driver(self) -> None:
         driver_id = self.driver_combo.currentData()
@@ -1101,6 +1145,7 @@ class LoadOrderEntryDialog(QDialog):
         if self.destinations and self.destination_table.currentRow() < 0:
             self.destination_table.setCurrentCell(0, 0)
         self._render_products(self.destination_table.currentRow())
+        self._render_review()
 
     def _render_products(self, destination_index: int) -> None:
         products = []
@@ -1121,6 +1166,27 @@ class LoadOrderEntryDialog(QDialog):
             )
             for column, value in enumerate(values):
                 self.product_table.setItem(row_index, column, QTableWidgetItem(value))
+        self._render_review()
+
+    def _render_review(self) -> None:
+        rows = []
+        for destination in self.destinations:
+            products = destination["products"] or [{}]
+            for product in products:
+                rows.append(
+                    (
+                        destination["client_label"],
+                        destination["address_label"],
+                        product.get("product_label", "-"),
+                        f"{product.get('quantity', 0):g}" if product.get("quantity") else "-",
+                        product.get("unit", "-"),
+                        f"$ {product.get('total', 0.0):,.2f}" if product.get("total") else "-",
+                    )
+                )
+        self.review_table.setRowCount(len(rows))
+        for row_index, values in enumerate(rows):
+            for column, value in enumerate(values):
+                self.review_table.setItem(row_index, column, QTableWidgetItem(value))
 
     def _save(self) -> None:
         if self.driver_combo.currentData() is None:

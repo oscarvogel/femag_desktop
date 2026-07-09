@@ -102,7 +102,7 @@ def test_product_dialog_prefills_price_from_client_price_list(db):
 
 
 def test_load_order_dialog_layout_keeps_work_sections_readable(db):
-    from PyQt5.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QListWidget, QPushButton, QStackedWidget, QTableWidget
 
     from app.services.load_order_service import LoadOrderService
     from app.ui.desktop_app import LoadOrderEntryDialog
@@ -115,10 +115,29 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     # Issue #131: el alto minimo bajo de 760 a 600 para que el dialogo entre
     # en pantallas chicas; el QScrollArea central absorbe el overflow.
     assert 600 <= dialog.minimumHeight() < 760
-    assert dialog.findChild(QScrollArea, "loadOrderEntryScrollArea") is not None
-    assert dialog.findChild(QSplitter, "loadOrderEntryWorkSplitter") is not None
+    steps = dialog.findChild(QListWidget, "loadOrderEntryStepList")
+    stack = dialog.findChild(QStackedWidget, "loadOrderEntryStepStack")
+    previous_button = dialog.findChild(QPushButton, "previousLoadOrderStepButton")
+    next_button = dialog.findChild(QPushButton, "nextLoadOrderStepButton")
+    assert steps is not None
+    assert stack is not None
+    assert [steps.item(index).text() for index in range(steps.count())] == [
+        "1 Transporte",
+        "2 Destinos",
+        "3 Productos",
+        "4 Revisar",
+    ]
+    assert stack.count() == 4
+    assert previous_button.isEnabled() is False
+    assert next_button.isEnabled() is True
+    next_button.click()
+    app.processEvents()
+    assert steps.currentRow() == 1
+    assert stack.currentIndex() == 1
+    assert previous_button.isEnabled() is True
     assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").minimumHeight() >= 180
     assert dialog.findChild(QTableWidget, "loadOrderProductDraftTable").minimumHeight() >= 160
+    assert dialog.findChild(QTableWidget, "loadOrderReviewTable") is not None
 
 
 def test_load_order_dialog_keeps_save_and_cancel_visible_at_minimum_height(db):
