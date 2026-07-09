@@ -343,7 +343,6 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     table = window.findChild(QTableWidget, "loadOrdersTable")
     feedback = window.findChild(QLabel, "loadOrderFeedback")
-    status = window.findChild(QLabel, "inlineDetailOrderStatus")
     table.setCurrentCell(0, 0)
 
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
@@ -355,7 +354,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
     assert "emitida" in feedback.text().lower()
-    assert status.text() == "Emitida"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Emitida"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == False))  # noqa: E712
@@ -379,7 +378,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
-    assert status.text() == "Anulada"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Anulada"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == True))  # noqa: E712
@@ -439,6 +438,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     app.processEvents()
 
     metrics = window.findChild(QLabel, "loadOrderMetricsStrip")
+    table = window.findChild(QTableWidget, "loadOrdersTable")
     panel = window.findChild(QFrame, "loadOrderInlineDetailPanel")
     button = window.findChild(QPushButton, "viewLoadOrderDetailButton")
     labels: dict[str, QLabel] = panel.property("detailLabels")
@@ -446,7 +446,13 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert window.findChild(QScrollArea, "loadOrderKpiScroll") is None
     assert "Pendientes: " in metrics.text()
     assert "Emitidas hoy: " in metrics.text()
+    assert table.rowCount() == 2
+    assert table.cellWidget(1, 0) is panel
+    assert table.rowSpan(1, 0) == 1
+    assert table.columnSpan(1, 0) == table.columnCount()
     assert button.isEnabled() is True
+    assert not button.icon().isNull()
+    assert not window.findChild(QPushButton, "newLoadOrderButton").icon().isNull()
     assert labels["summary"].wordWrap() is True
     assert labels["transport"].wordWrap() is True
     assert "ISSUE169 Cliente Norte" in labels["summary"].text()
@@ -762,13 +768,13 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
     assert search_input is not None
     assert reprint_button is None or not reprint_button.isVisible()
     assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
-    assert table.rowCount() == 2
+    assert table.rowCount() == 3
 
     search_input.setText("Norte")
     search_button.click()
     app.processEvents()
 
-    assert table.rowCount() == 1
+    assert table.rowCount() == 2
     assert table.item(0, 0).data(Qt.UserRole) == order_a.id
     assert "1 resultado" in feedback.text().lower()
 

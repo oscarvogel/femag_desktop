@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -411,11 +412,19 @@ class FemagDesktopWindow(QMainWindow):
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
+        _set_button_icon(new_button, QStyle.SP_FileIcon)
+        _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
+        _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
+        _set_button_icon(close_button, QStyle.SP_DialogCloseButton)
+        _set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
+        _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
+        _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(220)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
+        _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
         for button in (new_button, edit_button, issue_button, close_button, print_button, budget_button, annul_button):
             actions.addWidget(button)
         actions.addStretch(1)
@@ -438,10 +447,6 @@ class FemagDesktopWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
-        inline_detail = _inline_load_order_detail_panel()
-        inline_detail_labels: dict[str, QLabel] = inline_detail.property("detailLabels")
-        view_detail_button: QPushButton = inline_detail.property("viewDetailButton")
-        left_layout.addWidget(inline_detail)
         left_layout.addWidget(feedback)
         layout.addWidget(left_panel, 1)
 
@@ -452,8 +457,15 @@ class FemagDesktopWindow(QMainWindow):
             query = (query if query is not None else search_input.text()).strip()
             if query:
                 rows = [order for order in rows if _matches_load_order_query(order, query)]
-            table.setRowCount(len(rows))
-            for row_index, order in enumerate(rows):
+            selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
+            if rows and not any(order.id == selected_id for order in rows):
+                selected_id = rows[0].id
+                selected_order_id["value"] = selected_id
+            selected_ids = {selected_id} if selected_id is not None else set()
+            table.setRowCount(len(rows) + len(selected_ids))
+            visual_row = 0
+            selected_row = 0
+            for order in rows:
                 values = (
                     _format_order_number(order.order_number),
                     order.date.strftime("%d/%m/%Y"),
@@ -467,17 +479,15 @@ class FemagDesktopWindow(QMainWindow):
                     _display_status(order.status),
                 )
                 for column, value in enumerate(values):
-                    table.setItem(row_index, column, QTableWidgetItem(value))
-                table.item(row_index, 0).setData(Qt.UserRole, order.id)
-                table.item(row_index, 9).setForeground(_status_color(order.status))
+                    table.setItem(visual_row, column, QTableWidgetItem(value))
+                table.item(visual_row, 0).setData(Qt.UserRole, order.id)
+                table.item(visual_row, 9).setForeground(_status_color(order.status))
+                if order.id == selected_id:
+                    selected_row = visual_row
+                    visual_row += 1
+                    _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                visual_row += 1
             if rows:
-                selected_row = 0
-                if selected_order_id["value"] is not None:
-                    for row_index in range(table.rowCount()):
-                        item = table.item(row_index, 0)
-                        if item is not None and item.data(Qt.UserRole) == selected_order_id["value"]:
-                            selected_row = row_index
-                            break
                 table.setCurrentCell(selected_row, 0)
                 load_selected(selected_row)
             else:
@@ -497,13 +507,9 @@ class FemagDesktopWindow(QMainWindow):
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
             selected_order_id["value"] = order.id
-            _set_inline_load_order_detail(inline_detail_labels, order)
-            view_detail_button.setEnabled(True)
             set_action_state(order)
 
         def clear_detail() -> None:
-            _clear_inline_load_order_detail(inline_detail_labels)
-            view_detail_button.setEnabled(False)
             issue_button.setEnabled(False)
             issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
             edit_button.setEnabled(False)
@@ -639,7 +645,7 @@ class FemagDesktopWindow(QMainWindow):
         def search_orders() -> None:
             query = search_input.text().strip()
             refresh(query=query)
-            count = table.rowCount()
+            count = _load_order_table_order_count(table)
             if query:
                 feedback.setText(f"Buscar '{query}': {count} resultado(s).")
             else:
@@ -655,7 +661,6 @@ class FemagDesktopWindow(QMainWindow):
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_order)
         budget_button.clicked.connect(print_budget)
-        view_detail_button.clicked.connect(open_detail_dialog)
         refresh()
         return page
 
@@ -712,12 +717,40 @@ def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
     return metrics
 
 
+def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
+    button.setIcon(QApplication.style().standardIcon(standard_icon))
+
+
 def _action_button(object_name: str, text: str, *, secondary: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName(object_name)
     if secondary:
         button.setProperty("secondary", True)
     return button
+
+
+def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
+    item = QTableWidgetItem("")
+    item.setData(Qt.UserRole, order.id)
+    table.setItem(row, 0, item)
+    table.setSpan(row, 0, 1, table.columnCount())
+    detail = _inline_load_order_detail_panel()
+    labels: dict[str, QLabel] = detail.property("detailLabels")
+    view_button: QPushButton = detail.property("viewDetailButton")
+    _set_inline_load_order_detail(labels, order)
+    view_button.setEnabled(True)
+    view_button.clicked.connect(open_detail_dialog)
+    table.setCellWidget(row, 0, detail)
+    table.setRowHeight(row, 86)
+
+
+def _load_order_table_order_count(table: QTableWidget) -> int:
+    count = 0
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None and item.data(Qt.UserRole) is not None and table.cellWidget(row, 0) is None:
+            count += 1
+    return count
 
 
 def _inline_load_order_detail_panel() -> QFrame:
@@ -735,6 +768,7 @@ def _inline_load_order_detail_panel() -> QFrame:
     status = QLabel("-")
     status.setObjectName("inlineDetailOrderStatus")
     view_button = _action_button("viewLoadOrderDetailButton", "Ver detalle", secondary=True)
+    _set_button_icon(view_button, QStyle.SP_FileDialogDetailedView)
     view_button.setEnabled(False)
     header.addWidget(title)
     header.addWidget(number)
