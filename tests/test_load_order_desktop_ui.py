@@ -808,6 +808,51 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
     assert "pendientes" in edit_button.toolTip().lower()
 
 
+def test_load_order_page_treats_legacy_draft_as_pending_for_actions(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_legacy_draft_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Borrador UI")
+    driver = Driver.create(name="Chofer Borrador UI", carrier=carrier)
+    truck = Truck.create(domain="BOR123", carrier=carrier)
+    client = Client.create(name="Cliente Borrador UI", cuit="30700008830", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Borrador",
+    )
+    product = Product.create(name="Producto Borrador UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    order.status = "Borrador"
+    order.save()
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    assert window.findChild(QPushButton, "issueLoadOrderButton").isEnabled() is True
+    assert window.findChild(QPushButton, "editLoadOrderButton").isEnabled() is True
+
+
 def test_load_order_page_closes_issued_order_and_releases_driver(db):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 

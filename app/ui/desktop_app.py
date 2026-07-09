@@ -518,7 +518,7 @@ class FemagDesktopWindow(QMainWindow):
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
 
         def set_action_state(order: LoadOrder) -> None:
-            is_pending = order.status == LoadOrder.STATUS_PENDING
+            is_pending = order.is_pending
             is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
@@ -555,7 +555,7 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.setText("Seleccione una orden para editar.")
                 return
-            if order.status != LoadOrder.STATUS_PENDING:
+            if not order.is_pending:
                 feedback.setText("Solo se pueden editar ordenes pendientes.")
                 return
             dialog = LoadOrderEntryDialog(service, self.shell.username, self, order=order)

@@ -94,7 +94,7 @@ class LoadOrderService:
         normalized_destinations = None
         normalized_pallets = None
         if destinations is not None:
-            if order.status != LoadOrder.STATUS_PENDING:
+            if not order.is_pending:
                 raise ValueError("Solo se pueden editar clientes y productos de ordenes pendientes.")
             normalized_destinations = self._validate_destinations(
                 destinations,
@@ -103,7 +103,7 @@ class LoadOrderService:
                 legacy_products=None,
             )
         if pallets is not None:
-            if order.status != LoadOrder.STATUS_PENDING:
+            if not order.is_pending:
                 raise ValueError("Solo se pueden editar pallets de ordenes pendientes.")
             normalized_pallets = self._validate_pallets(pallets)
         new_driver = changes.get("driver")
@@ -188,7 +188,7 @@ class LoadOrderService:
         return annulled
 
     def pending_count(self) -> int:
-        return LoadOrder.select().where(LoadOrder.status == LoadOrder.STATUS_PENDING).count()
+        return LoadOrder.select().where(LoadOrder.status.in_(LoadOrder.PENDING_STATUSES)).count()
 
     def today_count(self, day: date | None = None) -> int:
         return LoadOrder.select().where(LoadOrder.date == (day or date.today())).count()

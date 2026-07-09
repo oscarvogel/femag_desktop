@@ -8,10 +8,12 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletTyp
 
 class LoadOrder(BaseModel):
     STATUS_PENDING = "Pendiente"
+    STATUS_LEGACY_DRAFT = "Borrador"
     STATUS_ISSUED = "Emitida"
     STATUS_CLOSED = "Cerrada"
     STATUS_ANNULLED = "Anulada"
-    ACTIVE_STATUSES = (STATUS_PENDING, STATUS_ISSUED)
+    PENDING_STATUSES = (STATUS_PENDING, STATUS_LEGACY_DRAFT)
+    ACTIVE_STATUSES = (*PENDING_STATUSES, STATUS_ISSUED)
     FINAL_STATUSES = (STATUS_CLOSED, STATUS_ANNULLED)
 
     order_number = IntegerField(unique=True)
@@ -29,6 +31,10 @@ class LoadOrder(BaseModel):
     @property
     def is_active(self) -> bool:
         return self.status in self.ACTIVE_STATUSES
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status in self.PENDING_STATUSES
 
 
 class LoadOrderDestination(BaseModel):
