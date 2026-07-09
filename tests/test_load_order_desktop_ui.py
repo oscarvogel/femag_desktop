@@ -393,6 +393,60 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     assert opened_outputs == [pdf_path, pdf_path, pdf_path]
 
 
+def test_load_order_detail_panel_keeps_long_summary_readable(db):
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_detail_readable_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="ISSUE169 Transportista Norte con nombre largo")
+    driver = Driver.create(name="ISSUE169 Chofer Demo con nombre largo", carrier=carrier)
+    truck = Truck.create(domain="I69ABC", carrier=carrier)
+    client = Client.create(name="ISSUE169 Cliente Norte con nombre largo", cuit="30700016901", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 14 kilometro 169 acceso norte",
+    )
+    product = Product.create(name="ISSUE169 Producto forestal con descripcion larga", unit="kg")
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [{"product": product, "quantity": 42}],
+            }
+        ],
+        pallets=[],
+    )
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    panel = window.findChild(QFrame, "detailPanel")
+    labels: dict[str, QLabel] = panel.property("detailLabels")
+
+    assert panel.minimumWidth() >= 340
+    assert labels["Clientes / destinos"].wordWrap() is True
+    assert labels["Detalle de productos"].wordWrap() is True
+    assert "ISSUE169 Cliente Norte" in labels["Clientes / destinos"].text()
+    assert "ISSUE169 Producto forestal" in labels["Detalle de productos"].text()
+
+
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 

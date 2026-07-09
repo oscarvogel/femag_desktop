@@ -466,7 +466,7 @@ class FemagDesktopWindow(QMainWindow):
         workspace.addWidget(detail)
         workspace.setStretchFactor(0, 1)
         workspace.setStretchFactor(1, 0)
-        workspace.setSizes([1000, 300])
+        workspace.setSizes([860, 420])
         layout.addWidget(workspace, 1)
 
         def refresh(*, query: str | None = None) -> None:
@@ -746,8 +746,9 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
 def _detail_panel(spec) -> QFrame:
     panel = QFrame()
     panel.setObjectName("detailPanel")
-    panel.setMinimumWidth(220)
-    panel.setMaximumWidth(480)
+    panel.setMinimumWidth(340)
+    panel.setMaximumWidth(540)
+    panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 16, 16, 12)
     title = QLabel("Detalle de la orden")
