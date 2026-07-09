@@ -678,7 +678,7 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
 
     assert len(budget_paths) == 1
     assert opened_outputs == budget_paths
-    assert "presupuestos_orden_1.pdf" in feedback
+    assert "presupuestos_orden_1_" in feedback
 
 
 def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):

@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -369,7 +370,8 @@ class LoadOrderPrintService:
     def export_combined_budget(self, order: LoadOrder, output_dir: str | Path) -> Path:
         path = Path(output_dir)
         path.mkdir(parents=True, exist_ok=True)
-        target = path / f"presupuestos_orden_{order.order_number}.pdf"
+        generated_at = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        target = path / f"presupuestos_orden_{order.order_number}_{generated_at}.pdf"
         doc = SimpleDocTemplate(
             str(target),
             pagesize=A4,
