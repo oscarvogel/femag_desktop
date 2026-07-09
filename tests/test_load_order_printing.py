@@ -393,3 +393,43 @@ def test_print_service_exports_combined_budget_pdf_for_all_clients(db, tmp_path)
     assert "Producto combinado A" in text
     assert "Cliente B Combined" in text
     assert "Producto combinado B" in text
+
+
+def test_print_service_exports_combined_budget_page_for_each_destination(db, tmp_path):
+    from pypdf import PdfReader
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.load_order_service import LoadOrderService
+
+    client = Client.create(name="Cliente Dos Destinos", cuit="30111111124", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A"
+    )
+    address_b = ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Obera", address="Ruta B"
+    )
+    product_a = Product.create(name="Producto destino A", unit="kg")
+    product_b = Product.create(name="Producto destino B", unit="bolsas")
+    carrier = Carrier.create(name="Carrier")
+    driver = Driver.create(name="Driver", carrier=carrier)
+    truck = Truck.create(domain="BUDGET04", carrier=carrier)
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier, driver=driver, truck=truck,
+        destinations=[
+            {"client": client, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
+            {"client": client, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+
+    service = LoadOrderPrintService(current_user="admin")
+    path = service.export_combined_budget(order, tmp_path)
+    reader = PdfReader(str(path))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert len(reader.pages) == 2
+    assert "Ruta A" in text
+    assert "Producto destino A" in text
+    assert "Ruta B" in text
+    assert "Producto destino B" in text
