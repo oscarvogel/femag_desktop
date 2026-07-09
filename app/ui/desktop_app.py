@@ -808,11 +808,28 @@ class LoadOrderEntryDialog(QDialog):
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(12)
 
-        self.step_list = QListWidget()
+        self.step_list = QFrame()
         self.step_list.setObjectName("loadOrderEntryStepList")
-        self.step_list.setFixedWidth(150)
-        for label in ("1 Transporte", "2 Destinos", "3 Productos", "4 Revisar"):
-            self.step_list.addItem(label)
+        self.step_list.setMaximumWidth(180)
+        self.step_list.setMinimumWidth(162)
+        self.step_list.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        step_layout = QVBoxLayout(self.step_list)
+        step_layout.setContentsMargins(8, 8, 8, 8)
+        step_layout.setSpacing(6)
+        step_title = QLabel("Pasos")
+        step_title.setObjectName("loadOrderStepTitle")
+        step_layout.addWidget(step_title)
+        self.step_buttons: list[QPushButton] = []
+        for index, label in enumerate(("Transporte", "Destinos", "Productos", "Revisar")):
+            button = QPushButton(f"{index + 1}  {label}")
+            button.setObjectName(f"loadOrderStepButton{index}")
+            button.setProperty("stepNav", True)
+            button.setCheckable(True)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, row=index: self._go_to_step(row))
+            self.step_buttons.append(button)
+            step_layout.addWidget(button)
+        step_layout.addStretch(1)
 
         self.step_stack = QStackedWidget()
         self.step_stack.setObjectName("loadOrderEntryStepStack")
@@ -926,7 +943,6 @@ class LoadOrderEntryDialog(QDialog):
         review_layout.addWidget(self.review_table)
         self.step_stack.addWidget(review)
 
-        self.step_list.setCurrentRow(0)
         root.addWidget(body, 1)
 
         self.feedback = QLabel("")
@@ -946,7 +962,6 @@ class LoadOrderEntryDialog(QDialog):
         footer.addWidget(save_button)
         root.addLayout(footer)
 
-        self.step_list.currentRowChanged.connect(self._go_to_step)
         self.previous_step_button.clicked.connect(self._previous_step)
         self.next_step_button.clicked.connect(self._next_step)
         add_destination_button.clicked.connect(self._add_destination)
@@ -967,9 +982,9 @@ class LoadOrderEntryDialog(QDialog):
             index = 0
         if index >= self.step_stack.count():
             index = self.step_stack.count() - 1
-        if self.step_list.currentRow() != index:
-            self.step_list.setCurrentRow(index)
         self.step_stack.setCurrentIndex(index)
+        for button_index, button in enumerate(self.step_buttons):
+            button.setChecked(button_index == index)
         self.previous_step_button.setEnabled(index > 0)
         self.next_step_button.setEnabled(index < self.step_stack.count() - 1)
 
@@ -1812,6 +1827,39 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 #formHint { color: #526174; font-size: 12px; }
 #dialogTitle { font-size: 20px; font-weight: 700; color: #111827; }
 #sectionTitle { font-size: 14px; font-weight: 700; color: #111827; }
+#loadOrderEntryStepList {
+    background: #ffffff;
+    border: 1px solid #d9e1ec;
+    border-radius: 8px;
+}
+#loadOrderStepTitle {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 6px 6px 6px;
+}
+QPushButton[stepNav="true"] {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    min-height: 34px;
+    padding: 7px 8px;
+    text-align: left;
+    font-weight: 700;
+}
+QPushButton[stepNav="true"]:hover {
+    background: #f8fafc;
+    border: 1px solid #d9e1ec;
+    border-left: 3px solid #94a3b8;
+}
+QPushButton[stepNav="true"]:checked {
+    background: #e8f1ff;
+    color: #0b6fdc;
+    border: 1px solid #b7d3f6;
+    border-left: 3px solid #0b6fdc;
+}
 #loadOrderDialogFeedback, #productDialogFeedback { color: #b45309; font-size: 12px; }
 #detailTitle { font-size: 16px; font-weight: 700; color: #111827; }
 #detailOrderNumber { color: #0b6fdc; font-size: 20px; font-weight: 700; margin-top: 6px; }

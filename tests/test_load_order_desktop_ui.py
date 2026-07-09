@@ -102,7 +102,7 @@ def test_product_dialog_prefills_price_from_client_price_list(db):
 
 
 def test_load_order_dialog_layout_keeps_work_sections_readable(db):
-    from PyQt5.QtWidgets import QApplication, QListWidget, QPushButton, QStackedWidget, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QPushButton, QStackedWidget, QTableWidget, QWidget
 
     from app.services.load_order_service import LoadOrderService
     from app.ui.desktop_app import LoadOrderEntryDialog
@@ -115,24 +115,23 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     # Issue #131: el alto minimo bajo de 760 a 600 para que el dialogo entre
     # en pantallas chicas; el QScrollArea central absorbe el overflow.
     assert 600 <= dialog.minimumHeight() < 760
-    steps = dialog.findChild(QListWidget, "loadOrderEntryStepList")
+    steps = dialog.findChild(QWidget, "loadOrderEntryStepList")
     stack = dialog.findChild(QStackedWidget, "loadOrderEntryStepStack")
+    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(4)]
     previous_button = dialog.findChild(QPushButton, "previousLoadOrderStepButton")
     next_button = dialog.findChild(QPushButton, "nextLoadOrderStepButton")
     assert steps is not None
     assert stack is not None
-    assert [steps.item(index).text() for index in range(steps.count())] == [
-        "1 Transporte",
-        "2 Destinos",
-        "3 Productos",
-        "4 Revisar",
-    ]
+    assert steps.maximumWidth() <= 190
+    assert [button.text() for button in step_buttons] == ["1  Transporte", "2  Destinos", "3  Productos", "4  Revisar"]
+    assert all(button.property("stepNav") is True for button in step_buttons)
+    assert step_buttons[0].isChecked() is True
     assert stack.count() == 4
     assert previous_button.isEnabled() is False
     assert next_button.isEnabled() is True
     next_button.click()
     app.processEvents()
-    assert steps.currentRow() == 1
+    assert step_buttons[1].isChecked() is True
     assert stack.currentIndex() == 1
     assert previous_button.isEnabled() is True
     assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").minimumHeight() >= 180
