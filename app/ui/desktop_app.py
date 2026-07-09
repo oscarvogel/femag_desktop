@@ -390,24 +390,7 @@ class FemagDesktopWindow(QMainWindow):
         )
         selected_order_id: dict[str, int | None] = {"value": None}
 
-        kpi_scroll = QScrollArea()
-        kpi_scroll.setObjectName("loadOrderKpiScroll")
-        kpi_scroll.setWidgetResizable(True)
-        kpi_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        kpi_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        kpi_scroll.setFrameShape(QFrame.NoFrame)
-        kpi_scroll.setMinimumHeight(96)
-        kpi_inner = QWidget()
-        kpi_inner.setObjectName("loadOrderKpiInner")
-        kpi_grid = QGridLayout(kpi_inner)
-        kpi_grid.setContentsMargins(0, 0, 0, 0)
-        kpi_grid.setSpacing(16)
-        for index, (label, value, helper) in enumerate(_load_order_kpis(service)):
-            card = _kpi_card(label, value, helper)
-            card.setMinimumWidth(180)
-            kpi_grid.addWidget(card, 0, index)
-        kpi_scroll.setWidget(kpi_inner)
-        layout.addWidget(kpi_scroll)
+        layout.addWidget(_load_order_metrics_strip(service))
 
         feedback = QLabel("")
         feedback.setObjectName("loadOrderFeedback")
@@ -723,6 +706,12 @@ def _kpi_card(title: str, value: str, helper: str) -> QFrame:
     return frame
 
 
+def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
+    metrics = QLabel("   ".join(f"{label}: {value}" for label, value, _helper in _load_order_kpis(service)))
+    metrics.setObjectName("loadOrderMetricsStrip")
+    return metrics
+
+
 def _action_button(object_name: str, text: str, *, secondary: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName(object_name)
@@ -734,7 +723,7 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
 def _inline_load_order_detail_panel() -> QFrame:
     panel = QFrame()
     panel.setObjectName("loadOrderInlineDetailPanel")
-    panel.setMinimumHeight(96)
+    panel.setMinimumHeight(58)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(14, 10, 14, 10)
     layout.setSpacing(6)
@@ -753,7 +742,7 @@ def _inline_load_order_detail_panel() -> QFrame:
     header.addStretch(1)
     header.addWidget(view_button)
     layout.addLayout(header)
-    summary = QLabel("Seleccione una orden para ver cliente, destino y producto.")
+    summary = QLabel("Seleccione una orden para ver el resumen operativo.")
     summary.setObjectName("inlineDetailSummary")
     summary.setWordWrap(True)
     transport = QLabel("-")
@@ -782,7 +771,10 @@ def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -
     labels["number"].setText(_format_order_number(order.order_number))
     labels["status"].setText(_display_status(order.status))
     labels["status"].setProperty("statusKey", _status_key(order.status))
-    labels["summary"].setText(f"{_order_destinations_text(order)} | {_order_products_text(order)}")
+    labels["summary"].setText(
+        f"{_summarize_order_clients(order)} | {_summarize_order_deliveries(order)} | "
+        f"{_summarize_order_products(order)}"
+    )
     labels["transport"].setText(
         f"{order.date.strftime('%d/%m/%Y')} | {order.driver.name} | "
         f"{order.carrier.name} | {order.truck.domain} | "
@@ -794,7 +786,7 @@ def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -
 def _clear_inline_load_order_detail(labels: dict[str, QLabel]) -> None:
     labels["number"].setText("OC-000000")
     labels["status"].setText("-")
-    labels["summary"].setText("Seleccione una orden para ver cliente, destino y producto.")
+    labels["summary"].setText("Seleccione una orden para ver el resumen operativo.")
     labels["transport"].setText("-")
     labels["observations"].setText("")
 
@@ -1829,6 +1821,12 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 #statusbar { background: #ffffff; color: #64748b; border-top: 1px solid #d9e1ec; }
 #heading { font-size: 25px; font-weight: 700; margin-bottom: 0; color: #111827; }
 #subheading { color: #526174; margin-bottom: 6px; }
+#loadOrderMetricsStrip {
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px 4px 2px;
+}
 #card, #kpiCard, #contentPanel, #detailPanel, #loadOrderInlineDetailPanel, #formSection {
     background: #ffffff; border: 1px solid #d9e1ec; border-radius: 8px;
 }
@@ -1856,7 +1854,7 @@ QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14
 #inlineDetailTitle { color: #334155; font-size: 13px; font-weight: 700; }
 #inlineDetailOrderNumber { color: #0b6fdc; font-size: 15px; font-weight: 700; }
 #inlineDetailOrderStatus { color: #64748b; font-size: 13px; font-weight: 700; }
-#inlineDetailSummary { color: #172033; font-size: 13px; font-weight: 600; }
+#inlineDetailSummary { color: #172033; font-size: 12px; font-weight: 600; }
 #inlineDetailTransport, #inlineDetailObservations { color: #526174; font-size: 12px; }
 #badgePendiente, #badgeEmitida, #badgeEncarga, #badgeEntregada, #badgeAnulada {
     border-radius: 8px; padding: 4px 8px; font-weight: 700; max-width: 120px;

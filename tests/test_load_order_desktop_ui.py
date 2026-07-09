@@ -394,7 +394,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
 
 
 def test_load_order_detail_panel_keeps_long_summary_readable(db):
-    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QScrollArea, QTableWidget
 
     from app.models.load_orders import LoadOrder
     from app.models.security import User, UserProfile
@@ -438,15 +438,19 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
     app.processEvents()
 
+    metrics = window.findChild(QLabel, "loadOrderMetricsStrip")
     panel = window.findChild(QFrame, "loadOrderInlineDetailPanel")
     button = window.findChild(QPushButton, "viewLoadOrderDetailButton")
     labels: dict[str, QLabel] = panel.property("detailLabels")
 
+    assert window.findChild(QScrollArea, "loadOrderKpiScroll") is None
+    assert "Pendientes: " in metrics.text()
+    assert "Emitidas hoy: " in metrics.text()
     assert button.isEnabled() is True
     assert labels["summary"].wordWrap() is True
     assert labels["transport"].wordWrap() is True
     assert "ISSUE169 Cliente Norte" in labels["summary"].text()
-    assert "ISSUE169 Producto forestal" in labels["summary"].text()
+    assert "Posadas" in labels["summary"].text()
     assert "ISSUE169 Chofer Demo" in labels["transport"].text()
 
     dialog = LoadOrderDetailDialog(LoadOrder.select().first(), window)
