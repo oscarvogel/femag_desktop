@@ -36,18 +36,21 @@ def test_driver_can_be_filtered_by_carrier_and_truck(db):
 
 
 def test_driver_model_allows_pending_carrier_and_own_cuit(db):
-    from app.models.masters import Driver
+    from app.models.masters import Carrier, Driver
+    from app.services.master_service import MasterService
 
     driver = Driver.create(
         name="Chofer pendiente",
         carrier=None,
         cuit="27123456789",
     )
+    carrier = Carrier.create(name="Transporte posterior")
 
     stored = Driver.get_by_id(driver.id)
 
     assert stored.carrier is None
     assert stored.cuit == "27123456789"
+    assert MasterService(current_user="test").is_driver_valid_for_carrier(stored, carrier) is False
 
 
 def test_truck_and_driver_require_carrier(db):
