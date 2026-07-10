@@ -13,6 +13,7 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
         CREATE TABLE driver (
             id INTEGER PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
+            carrier_id INTEGER NOT NULL,
             created_at DATETIME,
             updated_at DATETIME
         )
@@ -21,11 +22,12 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
 
     ensure_runtime_schema(db)
 
-    column_names = {column.name for column in db.get_columns("driver")}
+    columns = {column.name: column for column in db.get_columns("driver")}
 
-    assert "carrier_id" in column_names
-    assert "cuit" in column_names
-    assert "available" in column_names
+    assert "carrier_id" in columns
+    assert columns["carrier_id"].null is True
+    assert "cuit" in columns
+    assert "available" in columns
 
 
 def test_driver_schema_allows_null_carrier_and_cuit(db):

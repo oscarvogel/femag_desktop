@@ -8,6 +8,7 @@ from peewee import (
     IntegerField,
     TextField,
 )
+from playhouse.migrate import SqliteMigrator, migrate
 
 from app.models import ALL_MODELS
 
@@ -33,11 +34,14 @@ def _ensure_model_columns(database, model) -> None:
             )
             _backfill_column_default(database, table_name, column_name, field)
             continue
-        if field.null and existing_column.null is False and _supports_modify_column(database):
-            database.execute_sql(
-                f"ALTER TABLE `{_escape_identifier(table_name)}` "
-                f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
-            )
+        if field.null and existing_column.null is False:
+            if _supports_modify_column(database):
+                database.execute_sql(
+                    f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                    f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
+                )
+            elif database.__class__.__name__ == "SqliteDatabase":
+                migrate(SqliteMigrator(database).drop_not_null(table_name, column_name))
 
 
 def _backfill_column_default(database, table_name: str, column_name: str, field) -> None:
