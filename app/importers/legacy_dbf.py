@@ -84,11 +84,12 @@ class LegacyDbfMasterImporter:
     def _import_drivers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
         source_id = self._required(row, "drivers", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "drivers", "NOMBRE", "CHOFER")
-        carrier_source_id = self._required(row, "drivers", "TRANSP", "TRANSPORTISTA", "CARRIER")
-        carrier = self._get_carrier(source_system, carrier_source_id)
+        carrier_source_id = self._value(row, "TRANSP", "TRANSPORTISTA", "CARRIER")
+        carrier = self._get_carrier(source_system, carrier_source_id) if carrier_source_id else None
         values = {
             "name": name,
             "carrier": carrier,
+            "cuit": self._clean_cuit(self._value(row, "CUIT", "CUITCHOFER")) or None,
             "document": self._value(row, "DNI", "DOCUMENTO", "DOC"),
             "phone": self._value(row, "TELEFONO", "TEL", "PHONE"),
         }

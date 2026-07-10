@@ -93,6 +93,75 @@ def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
     assert ImportBatch.select().count() == 2
 
 
+def test_legacy_dbf_imports_driver_without_carrier_and_preserves_cuit(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver, Truck
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {
+                    "CODIGO": "0001",
+                    "NOMBRE": "Chofer Legacy",
+                    "CUIT": "20-12345678-3",
+                    "CHASIS": "ABC123",
+                    "ACOPLADO": "DEF456",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    driver = Driver.get()
+
+    assert result["drivers"]["created"] == 1
+    assert result["drivers"]["errors"] == []
+    assert driver.carrier is None
+    assert driver.cuit == "20123456783"
+    assert Truck.select().count() == 0
+
+
+def test_legacy_dbf_driver_with_unknown_explicit_carrier_is_reported(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {
+                    "CODIGO": "0002",
+                    "NOMBRE": "Chofer con referencia invalida",
+                    "CUIT": "20-98765432-1",
+                    "TRANSP": "T999",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert result["drivers"]["created"] == 0
+    assert result["drivers"]["errors"] == [
+        {"source_id": "0002", "message": "No existe transportista legacy T999."}
+    ]
+    assert Driver.select().count() == 0
+
+
+def test_legacy_dbf_driver_without_carrier_is_idempotent(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    importer = LegacyDbfMasterImporter()
+    row = {"CODIGO": "0003", "NOMBRE": "Chofer Repetido", "CUIT": "27-11111111-9"}
+
+    first = importer.import_rows({"drivers": [row]}, source_system="legacy_dbf")
+    second = importer.import_rows({"drivers": [row]}, source_system="legacy_dbf")
+
+    assert first["drivers"]["created"] == 1
+    assert second["drivers"]["updated"] == 1
+    assert Driver.select().count() == 1
+    assert Driver.get().carrier is None
+
+
 def test_legacy_dbf_master_import_adopts_existing_natural_key_with_trace(db):
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import Client
