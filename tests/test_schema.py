@@ -10,21 +10,49 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     db.connect(reuse_if_open=True)
     db.execute_sql(
         """
-        CREATE TABLE driver (
+        CREATE TABLE carrier (
             id INTEGER PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL UNIQUE,
             created_at DATETIME,
             updated_at DATETIME
         )
         """
     )
+    db.execute_sql(
+        """
+        CREATE TABLE driver (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            carrier_id INTEGER NOT NULL REFERENCES carrier(id),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """
+    )
+    db.execute_sql("INSERT INTO carrier (id, name) VALUES (1, 'Transporte existente')")
+    db.execute_sql("INSERT INTO driver (id, name, carrier_id) VALUES (1, 'Chofer existente', 1)")
 
     ensure_runtime_schema(db)
 
-    column_names = {column.name for column in db.get_columns("driver")}
+    columns = {column.name: column for column in db.get_columns("driver")}
 
-    assert "carrier_id" in column_names
-    assert "available" in column_names
+    assert "carrier_id" in columns
+    assert columns["carrier_id"].null is True
+    assert "cuit" in columns
+    assert "available" in columns
+    assert db.execute_sql("SELECT name, carrier_id FROM driver WHERE id = 1").fetchone() == (
+        "Chofer existente",
+        1,
+    )
+    assert any(index.unique for index in db.get_indexes("driver"))
+    assert any(foreign_key.column == "carrier_id" for foreign_key in db.get_foreign_keys("driver"))
+
+
+def test_driver_schema_allows_null_carrier_and_cuit(db):
+    columns = {column.name: column for column in db.get_columns("driver")}
+
+    assert columns["carrier_id"].null is True
+    assert columns["cuit"].null is True
 
 
 def test_ensure_runtime_schema_relaxes_nullable_columns_for_mysql_tables():

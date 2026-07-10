@@ -78,7 +78,7 @@ class MasterService:
         return self.valid_drivers_for_carrier(truck.carrier)
 
     def is_driver_valid_for_carrier(self, driver: Driver, carrier: Carrier) -> bool:
-        return bool(driver.active and driver.carrier.id == carrier.id)
+        return bool(driver.active and driver.carrier_id is not None and driver.carrier_id == carrier.id)
 
     def is_driver_valid_for_truck(self, driver: Driver, truck: Truck) -> bool:
         return self.is_driver_valid_for_carrier(driver, truck.carrier)

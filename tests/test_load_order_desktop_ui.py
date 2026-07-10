@@ -248,17 +248,14 @@ def test_load_order_dialog_driver_autofills_carrier_and_filters_trucks(db):
 
 
 def test_load_order_dialog_rejects_driver_without_carrier(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
 
-    from app.models.masters import Carrier, Driver, Truck
+    from app.models.masters import Driver
     from app.services.load_order_service import LoadOrderService
     from app.ui.desktop_app import LoadOrderEntryDialog
 
     app = QApplication.instance() or QApplication([])
-    carrier = Carrier.create(name="Transporte Test UI")
-    driver = Driver.create(name="Chofer Sin Transporte", carrier=carrier)
-    truck = Truck.create(domain="TRK-TEST", carrier=carrier)
-    carrier.delete_instance()
+    driver = Driver.create(name="Chofer Sin Transporte", carrier=None, cuit="20123456783")
 
     dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_issue65"), "ui_issue65")
     app.processEvents()
@@ -266,12 +263,14 @@ def test_load_order_dialog_rejects_driver_without_carrier(db):
     driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
     carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
     truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
+    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
 
     _set_combo(driver_combo, driver.id)
     app.processEvents()
 
     assert carrier_combo.currentData() is None
-    assert truck_combo.findData(truck.id) == -1
+    assert truck_combo.count() == 1
+    assert feedback.text() == "El chofer seleccionado no tiene transportista asociado."
 
 
 def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
