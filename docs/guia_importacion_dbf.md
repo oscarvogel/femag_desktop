@@ -23,6 +23,12 @@ Desde la app de escritorio:
 3. Confirmar `Encoding` y `Sistema origen`.
 4. Ejecutar `Importar DBF` y revisar el resumen por entidad.
 
+Para los DBF observados del sistema anterior, `chofer.dbf` puede no informar el
+transportista. En ese caso el chofer se importa con estado `Sin asignar`; su
+campo `CUIT` se conserva como CUIT propio del chofer y no se usa para inferir
+una relacion con `transporte.dbf`. El transportista debe asignarse manualmente
+desde Maestros antes de usar ese chofer en una orden de carga.
+
 Desde consola:
 
 Configurar la base destino de FEMAG con las variables habituales y ejecutar solo las entidades disponibles:
@@ -57,6 +63,9 @@ Cada corrida crea un `ImportBatch` con estado y resumen.
 - Confirmar encoding real de los DBF antes de produccion.
 - Confirmar nombres de campos legacy antes de una corrida operativa.
 - No guardar DBF reales en el repositorio.
+- No inferir transportistas por coincidencias de `CODIGO` o `CUIT`: una
+  referencia explicita inexistente se informa como error y una referencia
+  ausente deja al chofer sin asignar.
 
 ## Entidades posteriores
 
