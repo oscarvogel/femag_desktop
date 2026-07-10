@@ -24,7 +24,15 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     column_names = {column.name for column in db.get_columns("driver")}
 
     assert "carrier_id" in column_names
+    assert "cuit" in column_names
     assert "available" in column_names
+
+
+def test_driver_schema_allows_null_carrier_and_cuit(db):
+    columns = {column.name: column for column in db.get_columns("driver")}
+
+    assert columns["carrier_id"].null is True
+    assert columns["cuit"].null is True
 
 
 def test_ensure_runtime_schema_relaxes_nullable_columns_for_mysql_tables():

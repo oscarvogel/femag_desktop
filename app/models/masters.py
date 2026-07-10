@@ -73,7 +73,8 @@ class Carrier(BaseModel):
 
 class Driver(BaseModel):
     name = CharField(unique=True)
-    carrier = ForeignKeyField(Carrier, backref="drivers")
+    carrier = ForeignKeyField(Carrier, backref="drivers", null=True)
+    cuit = CharField(null=True)
     document = CharField(null=True)
     phone = CharField(null=True)
     active = BooleanField(default=True)
