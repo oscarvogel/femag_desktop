@@ -41,7 +41,7 @@ def _ensure_model_columns(database, model) -> None:
                     f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
                 )
             elif database.__class__.__name__ == "SqliteDatabase":
-                migrate(SqliteMigrator(database).drop_not_null(table_name, column_name))
+                _sqlite_drop_not_null(database, table_name, column_name)
 
 
 def _backfill_column_default(database, table_name: str, column_name: str, field) -> None:
@@ -81,3 +81,14 @@ def _escape_identifier(value: str) -> str:
 
 def _supports_modify_column(database) -> bool:
     return database.__class__.__name__ == "MySQLDatabase"
+
+
+def _sqlite_drop_not_null(database, table_name: str, column_name: str) -> None:
+    foreign_keys_were_enabled = bool(database.execute_sql("PRAGMA foreign_keys").fetchone()[0])
+    if foreign_keys_were_enabled:
+        database.execute_sql("PRAGMA foreign_keys = OFF")
+    try:
+        migrate(SqliteMigrator(database).drop_not_null(table_name, column_name))
+    finally:
+        if foreign_keys_were_enabled:
+            database.execute_sql("PRAGMA foreign_keys = ON")
