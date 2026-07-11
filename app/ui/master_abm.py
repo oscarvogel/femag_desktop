@@ -122,6 +122,7 @@ def build_master_abm_page(
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
+    page.refresh = refresh
     refresh()
     return page
 
@@ -997,5 +998,6 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     toggle_place_btn.clicked.connect(toggle_place_active)
     client_table.currentCellChanged.connect(lambda *_: refresh_places())
 
+    page.refresh = refresh_clients
     refresh_clients()
     return page

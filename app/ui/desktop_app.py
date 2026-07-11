@@ -267,6 +267,7 @@ class FemagDesktopWindow(QMainWindow):
         if route in self._route_indexes:
             self._current_route = route
             self.stack.setCurrentIndex(self._route_indexes[route])
+            self._refresh_route(route)
 
     def _navigate_to_route(self, route: str) -> None:
         for i in range(self.nav.count()):
@@ -274,6 +275,19 @@ class FemagDesktopWindow(QMainWindow):
             if item and item.data(Qt.UserRole) == route:
                 self.nav.setCurrentRow(i)
                 return
+
+    def _refresh_route(self, route: str) -> None:
+        page_index = self._route_indexes.get(route)
+        if page_index is None:
+            return
+        page = self.stack.widget(page_index)
+        refresh = getattr(page, "refresh", None)
+        if callable(refresh):
+            refresh()
+
+    def _refresh_master_routes(self) -> None:
+        for route in ("clients", "addresses", "products", "carriers", "drivers", "trucks"):
+            self._refresh_route(route)
 
     def _handle_dashboard_new_load_order(self) -> None:
         self._navigate_to_route("load_orders")
@@ -757,6 +771,7 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.setText(f"No se pudo importar: {exc}")
                 return
             _fill_legacy_import_summary(table, summary)
+            self._refresh_master_routes()
             feedback.setText("Importación finalizada. Revise el resumen y los errores por entidad.")
 
         run_button.clicked.connect(run_import)
