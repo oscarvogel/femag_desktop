@@ -47,6 +47,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services import account_statement_print_service
+from app.services import global_search_service
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.dashboard import DashboardService, future_module_message
@@ -166,9 +167,10 @@ class FemagDesktopWindow(QMainWindow):
         title.setObjectName("appTitle")
         search = QLineEdit()
         search.setObjectName("globalSearch")
-        search.setPlaceholderText("Buscar en FEMAG...")
+        search.setPlaceholderText("Buscar ordenes o clientes...")
         search.setMinimumWidth(360)
         search.setMaximumWidth(520)
+        search.returnPressed.connect(lambda: self._on_global_search(search))
         notifications = QPushButton("Avisos")
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
@@ -323,6 +325,34 @@ class FemagDesktopWindow(QMainWindow):
 
     def _handle_dashboard_register_payment(self) -> None:
         self._open_payment_dialog(preset_client=None)
+
+    def _on_global_search(self, search_input: QLineEdit) -> None:
+        query = search_input.text().strip()
+        if not query:
+            return
+        results = global_search_service.global_search(query)
+        total = sum(len(v) for v in results.values())
+        if total == 0:
+            search_input.setStyleSheet("")
+            search_input.setText("")
+            search_input.setPlaceholderText("Sin resultados. Presione Escape para limpiar.")
+            return
+        dialog = _SearchResultsDialog(results, parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            result = dialog.selected_result()
+            if result:
+                self._navigate_to_search_result(result)
+
+    def _navigate_to_search_result(self, result: dict) -> None:
+        route = result.get("route")
+        if route == "load_orders":
+            self._navigate_to_route("load_orders")
+        elif route == "clients":
+            from app.ui.master_abm import master_abm_configs
+            config = master_abm_configs().get("clients")
+            if config and hasattr(config, "search_and_select"):
+                config.search_and_select(result["ref"])
+            self._navigate_to_route("clients")
 
     def _customer_ledger_page(self) -> QWidget:
         return CustomerLedgerPage(
@@ -1894,6 +1924,41 @@ def _has_printed_load_order(order: LoadOrder) -> bool:
         )
     except (InterfaceError, OperationalError):
         return False
+
+
+class _SearchResultsDialog(QDialog):
+    def __init__(self, results: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Resultados de busqueda")
+        self.setMinimumWidth(520)
+        self.setMaximumWidth(640)
+        self._selected = None
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        for group_key in ("ordenes", "clientes"):
+            items = results.get(group_key, [])
+            if not items:
+                continue
+            group_label = QLabel("Ordenes de carga" if group_key == "ordenes" else "Clientes")
+            group_label.setStyleSheet("font-weight: bold; font-size: 10pt; color: #1e293b;")
+            layout.addWidget(group_label)
+            for item in items:
+                btn = QPushButton(item["label"])
+                btn.setObjectName("searchResultItem")
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(lambda checked, r=item: self._select(r))
+                layout.addWidget(btn)
+
+        if not any(results.values()):
+            layout.addWidget(QLabel("Sin resultados."))
+
+    def _select(self, result: dict) -> None:
+        self._selected = result
+        self.accept()
+
+    def selected_result(self) -> dict | None:
+        return self._selected
 
 
 def _open_print_output(path: Path) -> None:
