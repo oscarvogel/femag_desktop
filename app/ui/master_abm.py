@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from peewee import InterfaceError, OperationalError
+from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -448,7 +448,8 @@ class DriverEntryDialog(QDialog):
         if self.record_id is None:
             return
         driver = Driver.get_by_id(self.record_id)
-        _set_combo(self.carrier_combo, driver.carrier.id)
+        if driver.carrier_id is not None:
+            _set_combo(self.carrier_combo, driver.carrier_id)
         self.name_input.setText(driver.name)
         self.document_input.setText(driver.document or "")
         self.phone_input.setText(driver.phone or "")
@@ -792,10 +793,10 @@ def _driver_rows() -> list[list[object]]:
             [
                 driver.id,
                 driver.name,
-                driver.carrier.name,
+                driver.carrier.name if driver.carrier_id is not None else "Sin asignar",
                 "Disponible" if driver.available and driver.active else "No disponible",
             ]
-            for driver in Driver.select().join(Carrier).order_by(Driver.name).limit(50)
+            for driver in Driver.select().join(Carrier, JOIN.LEFT_OUTER).order_by(Driver.name).limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []

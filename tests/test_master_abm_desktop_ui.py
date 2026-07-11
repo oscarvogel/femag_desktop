@@ -220,6 +220,23 @@ def test_desktop_exposes_minimal_master_abm_pages(db):
     assert readonly_window._route_indexes["load_orders"] >= 0
 
 
+def test_driver_abm_lists_and_opens_unassigned_driver(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.masters import Driver
+    from app.ui.master_abm import DriverEntryDialog, _driver_rows
+
+    app = QApplication.instance() or QApplication([])
+    driver = Driver.create(name="Chofer Legacy Sin Asignar", carrier=None, cuit="20123456783")
+
+    rows = _driver_rows()
+    dialog = DriverEntryDialog(current_user="ui_issue165", record_id=driver.id)
+    app.processEvents()
+
+    assert [driver.id, "Chofer Legacy Sin Asignar", "Sin asignar", "Disponible"] in rows
+    assert dialog.findChild(QComboBox, "driverCarrierInput").currentData() is None
+
+
 def test_desktop_sidebar_groups_transport_abms_without_breaking_routes(db):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QListWidget, QPushButton
@@ -473,7 +490,7 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
     truck_column = headers.index("Camión / patente")
 
-    assert table.rowCount() == 1
+    assert table.rowCount() == 2
     assert table.item(0, truck_column).text() == "ORD123"
 
 

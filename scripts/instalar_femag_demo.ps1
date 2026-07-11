@@ -168,7 +168,7 @@ try {
         $EnvFile = Join-Path $RepoDir ".env"
         [System.IO.File]::WriteAllLines($EnvFile, @(
             "FEMAG_DB_ENGINE=sqlite",
-            "FEMAG_SQLITE_PATH=$DemoDatabasePath",
+            "FEMAG_SQLITE_PATH=femag_demo.sqlite3",
             "FEMAG_DEMO=1"
         ), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
         $env:FEMAG_ENV_FILE = $EnvFile

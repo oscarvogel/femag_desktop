@@ -1,6 +1,7 @@
-from peewee import BooleanField, CharField, FloatField, ForeignKeyField, IntegerField, TextField
+from peewee import BooleanField, CharField, DateTimeField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
+from app.models.system import ImportBatch
 
 
 class TipoIVA(BaseModel):
@@ -23,6 +24,11 @@ class Client(BaseModel):
     active = BooleanField(default=True)
     descuento_porcentaje = FloatField(default=0.0)
     lista_precios = IntegerField(default=1)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_clients", null=True)
 
 
 class ClientAddress(BaseModel):
@@ -46,6 +52,11 @@ class Product(BaseModel):
     precio_lista_3 = FloatField(default=0.0)
     precio_lista_4 = FloatField(default=0.0)
     tipo_iva = ForeignKeyField(TipoIVA, backref="products", null=True)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_products", null=True)
 
 
 class Carrier(BaseModel):
@@ -53,21 +64,37 @@ class Carrier(BaseModel):
     cuit = CharField(null=True)
     phone = CharField(null=True)
     active = BooleanField(default=True)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_carriers", null=True)
 
 
 class Driver(BaseModel):
     name = CharField(unique=True)
-    carrier = ForeignKeyField(Carrier, backref="drivers")
+    carrier = ForeignKeyField(Carrier, backref="drivers", null=True)
+    cuit = CharField(null=True)
     document = CharField(null=True)
     phone = CharField(null=True)
     active = BooleanField(default=True)
     available = BooleanField(default=True)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_drivers", null=True)
 
 
 class Truck(BaseModel):
     domain = CharField(unique=True)
     carrier = ForeignKeyField(Carrier, backref="trucks")
     active = BooleanField(default=True)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_trucks", null=True)
 
 
 class PalletType(BaseModel):
