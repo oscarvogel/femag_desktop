@@ -278,6 +278,25 @@ class FemagDesktopWindow(QMainWindow):
             if item and item.data(Qt.UserRole) == route:
                 self.nav.setCurrentRow(i)
                 return
+        self._expand_group_for_route(route)
+        for i in range(self.nav.count()):
+            item = self.nav.item(i)
+            if item and item.data(Qt.UserRole) == route:
+                self.nav.setCurrentRow(i)
+                return
+
+    def _expand_group_for_route(self, route: str) -> None:
+        if not self.shell or not self.shell.sidebar:
+            return
+        for section in self.shell.sidebar.sections:
+            for item in section.items:
+                if not item.children:
+                    continue
+                for child in item.children:
+                    if child.route_key == route and item.title not in self._expanded_sidebar_groups:
+                        self._expanded_sidebar_groups.add(item.title)
+                        self._populate_sidebar()
+                        return
 
     def _refresh_route(self, route: str) -> None:
         page_index = self._route_indexes.get(route)
