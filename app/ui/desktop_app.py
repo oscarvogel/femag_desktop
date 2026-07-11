@@ -46,6 +46,7 @@ from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
+from app.services import account_statement_print_service
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.dashboard import DashboardService, future_module_message
@@ -327,8 +328,19 @@ class FemagDesktopWindow(QMainWindow):
         return CustomerLedgerPage(
             current_user=self.shell.username,
             register_payment_callback=self._open_payment_dialog,
+            print_statement_callback=self._print_account_statement,
             parent=self,
         )
+
+    def _print_account_statement(self, client) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            pdf_path = account_statement_print_service.export_account_statement(client, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, "Extracto", f"No se pudo generar el extracto: {exc}")
+            return
+        _open_print_output(pdf_path)
 
     def _open_payment_dialog(self, preset_client=None) -> None:
         try:
