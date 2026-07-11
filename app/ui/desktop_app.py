@@ -347,12 +347,8 @@ class FemagDesktopWindow(QMainWindow):
         route = result.get("route")
         if route == "load_orders":
             self._navigate_to_route("load_orders")
-        elif route == "clients":
-            from app.ui.master_abm import master_abm_configs
-            config = master_abm_configs().get("clients")
-            if config and hasattr(config, "search_and_select"):
-                config.search_and_select(result["ref"])
-            self._navigate_to_route("clients")
+        elif route in ("clients", "drivers", "carriers", "trucks"):
+            self._navigate_to_route(route)
 
     def _customer_ledger_page(self) -> QWidget:
         return CustomerLedgerPage(
@@ -1936,11 +1932,18 @@ class _SearchResultsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        for group_key in ("ordenes", "clientes"):
+        _group_labels = {
+            "ordenes": "Ordenes de carga",
+            "clientes": "Clientes",
+            "choferes": "Choferes",
+            "transportistas": "Transportistas",
+            "camiones": "Camiones",
+        }
+        for group_key in ("ordenes", "clientes", "choferes", "transportistas", "camiones"):
             items = results.get(group_key, [])
             if not items:
                 continue
-            group_label = QLabel("Ordenes de carga" if group_key == "ordenes" else "Clientes")
+            group_label = QLabel(_group_labels[group_key])
             group_label.setStyleSheet("font-weight: bold; font-size: 10pt; color: #1e293b;")
             layout.addWidget(group_label)
             for item in items:

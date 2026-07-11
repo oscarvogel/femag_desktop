@@ -1,4 +1,11 @@
-from app.services.global_search_service import global_search, search_clients, search_orders
+from app.services.global_search_service import (
+    global_search,
+    search_carriers,
+    search_clients,
+    search_drivers,
+    search_orders,
+    search_trucks,
+)
 
 
 def test_search_orders_empty_query_returns_empty(db):
@@ -91,3 +98,47 @@ def test_global_search_no_match_returns_empty_groups(db):
     results = global_search("zzznoexiste999")
     assert results["ordenes"] == []
     assert results["clientes"] == []
+    assert results["choferes"] == []
+    assert results["transportistas"] == []
+    assert results["camiones"] == []
+
+
+def test_search_drivers_finds_by_name(db):
+    from app.models.masters import Carrier, Driver
+
+    carrier = Carrier.create(name="Transporte Test")
+    Driver.create(name="Juan Perez", carrier=carrier)
+    results = search_drivers("Juan")
+    assert len(results) >= 1
+    assert results[0]["type"] == "chofer"
+
+
+def test_search_drivers_empty_query(db):
+    assert search_drivers("") == []
+
+
+def test_search_carriers_finds_by_name(db):
+    from app.models.masters import Carrier
+
+    Carrier.create(name="Transporte Rapido", cuit="30777777770")
+    results = search_carriers("Rapido")
+    assert len(results) >= 1
+    assert results[0]["type"] == "transportista"
+
+
+def test_search_carriers_empty_query(db):
+    assert search_carriers("") == []
+
+
+def test_search_trucks_finds_by_domain(db):
+    from app.models.masters import Carrier, Truck
+
+    carrier = Carrier.create(name="Transporte Test")
+    Truck.create(domain="AB123CD", carrier=carrier)
+    results = search_trucks("AB123")
+    assert len(results) >= 1
+    assert results[0]["type"] == "camion"
+
+
+def test_search_trucks_empty_query(db):
+    assert search_trucks("") == []

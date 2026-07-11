@@ -1,5 +1,5 @@
 from app.models.load_orders import LoadOrder
-from app.models.masters import Client
+from app.models.masters import Carrier, Client, Driver, Truck
 
 
 def _format_order_number(num: int) -> str:
@@ -65,8 +65,65 @@ def search_clients(query: str) -> list[dict]:
     return results
 
 
+def search_drivers(query: str) -> list[dict]:
+    q = query.strip().lower()
+    if not q:
+        return []
+    results = []
+    for driver in Driver.select():
+        text = f"{driver.name} {driver.document or ''} {driver.carrier.name if driver.carrier else ''}".lower()
+        if q in text:
+            results.append({
+                "type": "chofer",
+                "id": driver.id,
+                "label": f"{driver.name} ({driver.carrier.name if driver.carrier else 'sin transporte'})",
+                "route": "drivers",
+                "ref": driver.id,
+            })
+    return results
+
+
+def search_carriers(query: str) -> list[dict]:
+    q = query.strip().lower()
+    if not q:
+        return []
+    results = []
+    for carrier in Carrier.select():
+        text = f"{carrier.name} {carrier.cuit or ''}".lower()
+        if q in text:
+            results.append({
+                "type": "transportista",
+                "id": carrier.id,
+                "label": f"{carrier.name} ({carrier.cuit or '-'})",
+                "route": "carriers",
+                "ref": carrier.id,
+            })
+    return results
+
+
+def search_trucks(query: str) -> list[dict]:
+    q = query.strip().lower()
+    if not q:
+        return []
+    results = []
+    for truck in Truck.select():
+        text = f"{truck.domain} {truck.carrier.name if truck.carrier else ''}".lower()
+        if q in text:
+            results.append({
+                "type": "camion",
+                "id": truck.id,
+                "label": f"{truck.domain} ({truck.carrier.name if truck.carrier else 'sin transporte'})",
+                "route": "trucks",
+                "ref": truck.id,
+            })
+    return results
+
+
 def global_search(query: str) -> dict[str, list[dict]]:
     return {
         "ordenes": search_orders(query),
         "clientes": search_clients(query),
+        "choferes": search_drivers(query),
+        "transportistas": search_carriers(query),
+        "camiones": search_trucks(query),
     }
