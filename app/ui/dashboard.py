@@ -44,7 +44,7 @@ class DashboardService:
                 "ultimo_backup": last_backup.status if last_backup else "Sin registros",
                 "ordenes_hoy": LoadOrder.select().where(LoadOrder.date == date.today()).count(),
                 "ordenes_pendientes": LoadOrder.select()
-                .where(LoadOrder.status == LoadOrder.STATUS_PENDING)
+                .where(LoadOrder.status.not_in((LoadOrder.STATUS_ISSUED, *LoadOrder.FINAL_STATUSES)))
                 .count(),
                 "ordenes_cerradas": closed_orders,
                 "choferes_bloqueados": Driver.select().where(Driver.available == False).count(),  # noqa: E712

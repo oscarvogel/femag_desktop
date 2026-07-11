@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QCompleter,
     QComboBox,
     QDialog,
     QGridLayout,
@@ -122,6 +123,7 @@ def build_master_abm_page(
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
+    page.refresh = refresh
     refresh()
     return page
 
@@ -426,6 +428,7 @@ class DriverEntryDialog(QDialog):
         layout = _entry_layout(self, "Chofer")
         form = QGridLayout()
         self.carrier_combo = _combo("driverCarrierInput", _carrier_options())
+        _enable_combo_autocomplete(self.carrier_combo)
         self.name_input = QLineEdit()
         self.name_input.setObjectName("driverNameInput")
         self.document_input = QLineEdit()
@@ -455,7 +458,7 @@ class DriverEntryDialog(QDialog):
         self.phone_input.setText(driver.phone or "")
 
     def _save(self) -> None:
-        carrier_id = self.carrier_combo.currentData()
+        carrier_id = _combo_current_data_or_text_match(self.carrier_combo)
         name = self.name_input.text().strip()
         if carrier_id is None or not name:
             self.feedback.setText("Complete transportista y nombre del chofer.")
@@ -699,6 +702,31 @@ def _set_combo(combo: QComboBox, value: object) -> None:
     index = combo.findData(value)
     if index >= 0:
         combo.setCurrentIndex(index)
+
+
+def _enable_combo_autocomplete(combo: QComboBox) -> None:
+    combo.setEditable(True)
+    combo.setInsertPolicy(QComboBox.NoInsert)
+    combo.setMaxVisibleItems(12)
+    if combo.lineEdit() is not None:
+        combo.lineEdit().setClearButtonEnabled(True)
+        combo.lineEdit().setPlaceholderText("Buscar transportista...")
+    completer = QCompleter(combo.model(), combo)
+    completer.setCaseSensitivity(Qt.CaseInsensitive)
+    completer.setFilterMode(Qt.MatchContains)
+    completer.setCompletionMode(QCompleter.PopupCompletion)
+    combo.setCompleter(completer)
+
+
+def _combo_current_data_or_text_match(combo: QComboBox):
+    current_data = combo.currentData()
+    if current_data is not None:
+        return current_data
+    text = combo.currentText().strip()
+    if not text:
+        return None
+    index = combo.findText(text, Qt.MatchFixedString)
+    return combo.itemData(index) if index >= 0 else None
 
 
 def _price_list_options() -> list[tuple[int, str]]:
@@ -997,5 +1025,6 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     toggle_place_btn.clicked.connect(toggle_place_active)
     client_table.currentCellChanged.connect(lambda *_: refresh_places())
 
+    page.refresh = refresh_clients
     refresh_clients()
     return page

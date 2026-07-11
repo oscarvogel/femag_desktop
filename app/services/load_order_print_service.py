@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Client
@@ -366,7 +367,65 @@ class LoadOrderPrintService:
                 paths.append(self.export_budget(order, client, output_dir))
         return paths
 
-    def _budget_header(self, order: LoadOrder, client: Client) -> Table:
+    def export_combined_budget(self, order: LoadOrder, output_dir: str | Path) -> Path:
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        generated_at = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        target = path / f"presupuestos_orden_{order.order_number}_{generated_at}.pdf"
+        doc = SimpleDocTemplate(
+            str(target),
+            pagesize=A4,
+            rightMargin=14 * mm,
+            leftMargin=14 * mm,
+            topMargin=12 * mm,
+            bottomMargin=14 * mm,
+            title=f"Presupuestos OC {order.order_number}",
+        )
+        story = []
+        destinations = list(order.destinations.order_by(LoadOrderDestination.sequence))
+        for index, destination in enumerate(destinations):
+            if index:
+                story.append(PageBreak())
+            story.extend(self._budget_story(order, destination))
+        doc.build(story)
+        self.audit_service.record(
+            user=self.current_user,
+            module="Ordenes de carga",
+            action="presupuesto",
+            record_ref=f"LoadOrder:{order.id}",
+            new_value={
+                "file_path": str(target),
+                "destinations": [destination.id for destination in destinations],
+                "order_number": order.order_number,
+            },
+        )
+        return target
+
+    def _budget_story(self, order: LoadOrder, destination: LoadOrderDestination) -> list:
+        client = destination.client
+        address = destination.delivery_address
+        return [
+            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
+            Spacer(1, 5 * mm),
+            Paragraph(f"PRESUPUESTO - Orden de carga Nro. {order.order_number:04d}", self.styles["title"]),
+            self._budget_header(order, client, destination),
+            Spacer(1, 5 * mm),
+            Paragraph(f"Cliente: {client.name}", self.styles["section"]),
+            Paragraph(f"Destino: {address.province} - {address.city} - {address.address}", self.styles["normal"]),
+            Spacer(1, 3 * mm),
+            self._budget_detail_table(order, client, destination),
+            Spacer(1, 8 * mm),
+            self._budget_totals(order, client, destination),
+            Spacer(1, 15 * mm),
+            Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
+        ]
+
+    def _budget_header(
+        self,
+        order: LoadOrder,
+        client: Client,
+        destination: LoadOrderDestination | None = None,
+    ) -> Table:
         data = [[f"Fecha: {order.date:%d/%m/%Y}", f"Estado: Pendiente"]]
         table = Table(data, colWidths=[85 * mm, 85 * mm])
         table.setStyle(
@@ -380,7 +439,12 @@ class LoadOrderPrintService:
         )
         return table
 
-    def _budget_detail_table(self, order: LoadOrder, client: Client) -> Table:
+    def _budget_detail_table(
+        self,
+        order: LoadOrder,
+        client: Client,
+        destination: LoadOrderDestination | None = None,
+    ) -> Table:
         products = (
             LoadOrderProduct.select()
             .join(LoadOrderDestination)
@@ -389,6 +453,8 @@ class LoadOrderPrintService:
                 & (LoadOrderDestination.client == client)
             )
         )
+        if destination is not None:
+            products = products.where(LoadOrderProduct.destination == destination)
         header = [
             self._p("Cant.", bold=True),
             self._p("Producto", bold=True),
@@ -429,7 +495,12 @@ class LoadOrderPrintService:
         ]))
         return table
 
-    def _budget_totals(self, order: LoadOrder, client: Client) -> Table:
+    def _budget_totals(
+        self,
+        order: LoadOrder,
+        client: Client,
+        destination: LoadOrderDestination | None = None,
+    ) -> Table:
         products = (
             LoadOrderProduct.select()
             .join(LoadOrderDestination)
@@ -438,6 +509,8 @@ class LoadOrderPrintService:
                 & (LoadOrderDestination.client == client)
             )
         )
+        if destination is not None:
+            products = products.where(LoadOrderProduct.destination == destination)
         total_neto_subtotal = sum(p.neto_subtotal for p in products)
         total_descuento = sum(p.descuento_importe for p in products)
         total_neto_gravado = sum(p.neto_gravado for p in products)

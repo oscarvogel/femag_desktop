@@ -55,6 +55,10 @@ class LoadOrderOperationService:
         order = LoadOrder.get_by_id(order.id)
         return self.prints.export_budgets(order, self.prints_dir)
 
+    def export_combined_budget(self, order: LoadOrder) -> Path:
+        order = LoadOrder.get_by_id(order.id)
+        return self.prints.export_combined_budget(order, self.prints_dir)
+
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_CLOSED:

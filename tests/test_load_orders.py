@@ -416,6 +416,34 @@ def test_update_pending_order_replaces_destinations_and_products(db):
     assert [product.product.name for product in products] == ["Fecula de mandioca", "Almidon"]
     assert [product.quantity for product in products] == [100, 25]
 
+
+def test_update_legacy_unissued_order_as_pending(db):
+    from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+    order.status = "Preparacion"
+    order.save()
+
+    updated = service.update_order(
+        order,
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["other_product"], "quantity": 25}],
+            },
+        ],
+    )
+
+    product = LoadOrderProduct.get(LoadOrderProduct.order == updated)
+    assert LoadOrderDestination.select().where(LoadOrderDestination.order == updated).count() == 1
+    assert product.product == data["other_product"]
+    assert product.quantity == 25
+
+
 def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService

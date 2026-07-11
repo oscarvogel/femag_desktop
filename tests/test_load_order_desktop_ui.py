@@ -76,6 +76,132 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrderProduct.select().count() == 1
 
 
+def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Save Ready")
+    driver = Driver.create(name="Chofer Save Ready", carrier=carrier)
+    truck = Truck.create(domain="SR123AA", carrier=carrier)
+    client = Client.create(name="Cliente Save Ready", cuit="30712345001", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Save Ready",
+    )
+    product = Product.create(name="Producto Save Ready", unit="kg")
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_save_ready"), "ui_save_ready")
+    app.processEvents()
+    save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
+
+    assert save_button is not None
+    assert save_button.isEnabled() is False
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+    dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(0, 0)
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 125,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is True
+
+    dialog.findChild(QTableWidget, "loadOrderProductDraftTable").setCurrentCell(0, 0)
+    dialog.findChild(QPushButton, "removeLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert save_button.isEnabled() is False
+
+
+def test_load_order_dialog_selects_new_destination_for_next_product(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Multi Destino")
+    Driver.create(name="Chofer Multi Destino", carrier=carrier)
+    Truck.create(domain="MD123AA", carrier=carrier)
+    product = Product.create(name="Producto Multi Destino", unit="kg")
+    client_a = Client.create(name="Cliente Multi A", cuit="30712345011", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Multi A",
+    )
+    client_b = Client.create(name="Cliente Multi B", cuit="30712345012", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Multi B",
+    )
+
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_multi_dest"), "ui_multi_dest")
+    app.processEvents()
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_a.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_a.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client_b.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address_b.id)
+    dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
+    app.processEvents()
+
+    destination_table = dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable")
+    assert destination_table.currentRow() == 1
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 50,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert dialog.destinations[0]["products"] == []
+    assert len(dialog.destinations[1]["products"]) == 1
+
+
 def test_product_dialog_prefills_price_from_client_price_list(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox
 
@@ -102,7 +228,7 @@ def test_product_dialog_prefills_price_from_client_price_list(db):
 
 
 def test_load_order_dialog_layout_keeps_work_sections_readable(db):
-    from PyQt5.QtWidgets import QApplication, QScrollArea, QSplitter, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QPushButton, QStackedWidget, QTableWidget, QWidget
 
     from app.services.load_order_service import LoadOrderService
     from app.ui.desktop_app import LoadOrderEntryDialog
@@ -115,10 +241,28 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     # Issue #131: el alto minimo bajo de 760 a 600 para que el dialogo entre
     # en pantallas chicas; el QScrollArea central absorbe el overflow.
     assert 600 <= dialog.minimumHeight() < 760
-    assert dialog.findChild(QScrollArea, "loadOrderEntryScrollArea") is not None
-    assert dialog.findChild(QSplitter, "loadOrderEntryWorkSplitter") is not None
+    steps = dialog.findChild(QWidget, "loadOrderEntryStepList")
+    stack = dialog.findChild(QStackedWidget, "loadOrderEntryStepStack")
+    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(4)]
+    previous_button = dialog.findChild(QPushButton, "previousLoadOrderStepButton")
+    next_button = dialog.findChild(QPushButton, "nextLoadOrderStepButton")
+    assert steps is not None
+    assert stack is not None
+    assert steps.maximumWidth() <= 190
+    assert [button.text() for button in step_buttons] == ["1  Transporte", "2  Destinos", "3  Productos", "4  Revisar"]
+    assert all(button.property("stepNav") is True for button in step_buttons)
+    assert step_buttons[0].isChecked() is True
+    assert stack.count() == 4
+    assert previous_button.isEnabled() is False
+    assert next_button.isEnabled() is True
+    next_button.click()
+    app.processEvents()
+    assert step_buttons[1].isChecked() is True
+    assert stack.currentIndex() == 1
+    assert previous_button.isEnabled() is True
     assert dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").minimumHeight() >= 180
     assert dialog.findChild(QTableWidget, "loadOrderProductDraftTable").minimumHeight() >= 160
+    assert dialog.findChild(QTableWidget, "loadOrderReviewTable") is not None
 
 
 def test_load_order_dialog_keeps_save_and_cancel_visible_at_minimum_height(db):
@@ -342,7 +486,6 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     table = window.findChild(QTableWidget, "loadOrdersTable")
     feedback = window.findChild(QLabel, "loadOrderFeedback")
-    status = window.findChild(QLabel, "detailOrderStatus")
     table.setCurrentCell(0, 0)
 
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
@@ -354,7 +497,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
     assert "emitida" in feedback.text().lower()
-    assert status.text() == "Emitida"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Emitida"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == False))  # noqa: E712
@@ -378,7 +521,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ANNULLED
-    assert status.text() == "Anulada"
+    assert table.cellWidget(1, 0).property("detailLabels")["status"].text() == "Anulada"
     assert (
         ClientAccountMovement.select()
         .where((ClientAccountMovement.load_order == order) & (ClientAccountMovement.is_reversal == True))  # noqa: E712
@@ -390,6 +533,242 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     app.processEvents()
     assert "pdf generado correctamente" in feedback.text().lower()
     assert opened_outputs == [pdf_path, pdf_path, pdf_path]
+
+
+def test_load_order_detail_panel_keeps_long_summary_readable(db):
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QScrollArea, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderDetailDialog
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_detail_readable_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="ISSUE169 Transportista Norte con nombre largo")
+    driver = Driver.create(name="ISSUE169 Chofer Demo con nombre largo", carrier=carrier)
+    truck = Truck.create(domain="I69ABC", carrier=carrier)
+    client = Client.create(name="ISSUE169 Cliente Norte con nombre largo", cuit="30700016901", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 14 kilometro 169 acceso norte",
+    )
+    product = Product.create(name="ISSUE169 Producto forestal con descripcion larga", unit="kg")
+    product_b = Product.create(name="ISSUE169 Segundo producto", unit="bolsas")
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [{"product": product, "quantity": 42}, {"product": product_b, "quantity": 7}],
+            }
+        ],
+        pallets=[],
+    )
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    metrics = window.findChild(QLabel, "loadOrderMetricsStrip")
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    panel = window.findChild(QFrame, "loadOrderInlineDetailPanel")
+    button = window.findChild(QPushButton, "viewLoadOrderDetailButton")
+    labels: dict[str, QLabel] = panel.property("detailLabels")
+
+    assert window.findChild(QScrollArea, "loadOrderKpiScroll") is None
+    assert "Pendientes: " in metrics.text()
+    assert "Emitidas hoy: " in metrics.text()
+    assert table.rowCount() == 2
+    assert table.cellWidget(1, 0) is panel
+    assert table.rowSpan(1, 0) == 1
+    assert table.columnSpan(1, 0) == table.columnCount()
+    assert button.isEnabled() is True
+    assert not button.icon().isNull()
+    assert not window.findChild(QPushButton, "newLoadOrderButton").icon().isNull()
+    assert labels["summary"].wordWrap() is True
+    assert labels["transport"].wordWrap() is True
+    assert "ISSUE169 Cliente Norte" in labels["summary"].text()
+    assert "Posadas" in labels["summary"].text()
+    assert "ISSUE169 Chofer Demo" in labels["transport"].text()
+
+    dialog = LoadOrderDetailDialog(LoadOrder.select().first(), window)
+    detail_table = dialog.findChild(QTableWidget, "loadOrderDetailItemsTable")
+    assert dialog.findChild(QLabel, "detailOrderNumber").text() == "OC-000001"
+    assert detail_table.rowCount() == 2
+    assert [detail_table.horizontalHeaderItem(i).text() for i in range(detail_table.columnCount())] == [
+        "Cliente",
+        "Destino",
+        "Producto",
+        "Cantidad",
+        "Unidad",
+    ]
+    assert detail_table.item(0, 2).text() == "ISSUE169 Producto forestal con descripcion larga"
+    assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
+
+
+def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_budget_all_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Budget UI")
+    driver = Driver.create(name="Chofer Budget UI", carrier=carrier)
+    truck = Truck.create(domain="BUD123", carrier=carrier)
+    product_a = Product.create(name="Producto Budget A", unit="kg")
+    product_b = Product.create(name="Producto Budget B", unit="bolsas")
+    client_a = Client.create(name="Cliente Budget A", cuit="30700018801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Budget A",
+    )
+    client_b = Client.create(name="Cliente Budget B", cuit="30700018802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Budget B",
+    )
+    LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {"client": client_a, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
+        ],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    window.findChild(QPushButton, "budgetLoadOrderButton").click()
+    app.processEvents()
+
+    budget_paths = sorted(tmp_path.glob("presupuestos_orden_*.pdf"))
+    feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+
+    assert len(budget_paths) == 1
+    assert opened_outputs == budget_paths
+    assert "presupuestos_orden_1_" in feedback
+
+
+def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
+    from pypdf import PdfReader
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_budget_selection_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte Selection UI")
+    driver_a = Driver.create(name="Chofer Selection A", carrier=carrier)
+    driver_b = Driver.create(name="Chofer Selection B", carrier=carrier)
+    truck_a = Truck.create(domain="SEL123A", carrier=carrier)
+    truck_b = Truck.create(domain="SEL123B", carrier=carrier)
+    product = Product.create(name="Producto Selection", unit="kg")
+    client_a = Client.create(name="Cliente Selection A", cuit="30700028801", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta Selection A",
+    )
+    client_b = Client.create(name="Cliente Selection B", cuit="30700028802", iva_condition="RI")
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta Selection B",
+    )
+    client_c = Client.create(name="Cliente Selection C", cuit="30700028803", iva_condition="RI")
+    address_c = ClientAddress.create(
+        client=client_c,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta Selection C",
+    )
+    service = LoadOrderService(current_user=user.username)
+    first_order = service.create_order(
+        carrier=carrier,
+        driver=driver_a,
+        truck=truck_a,
+        destinations=[{"client": client_a, "delivery_address": address_a, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    second_order = service.create_order(
+        carrier=carrier,
+        driver=driver_b,
+        truck=truck_b,
+        destinations=[
+            {"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 2}]},
+            {"client": client_c, "delivery_address": address_c, "products": [{"product": product, "quantity": 3}]},
+        ],
+        pallets=[],
+    )
+    monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
+    opened_outputs = []
+    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+
+    assert table.item(0, 0).data(256) == second_order.id
+    assert table.cellWidget(1, 0).property("detailLabels")["number"].text() == "OC-000002"
+
+    table.setCurrentCell(2, 0)
+    app.processEvents()
+
+    assert table.item(1, 0).data(256) == first_order.id
+    assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
+
+    table.setCurrentCell(0, 0)
+    app.processEvents()
+    window.findChild(QPushButton, "budgetLoadOrderButton").click()
+    app.processEvents()
+
+    assert len(opened_outputs) == 1
+    reader = PdfReader(str(opened_outputs[0]))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "Cliente Selection B" in text
+    assert "Cliente Selection C" in text
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
@@ -581,6 +960,51 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
     assert "pendientes" in edit_button.toolTip().lower()
 
 
+def test_load_order_page_treats_legacy_unissued_status_as_actionable(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_legacy_draft_ui", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Transporte No Emitida UI")
+    driver = Driver.create(name="Chofer No Emitida UI", carrier=carrier)
+    truck = Truck.create(domain="BOR123", carrier=carrier)
+    client = Client.create(name="Cliente No Emitida UI", cuit="30700008830", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta No Emitida",
+    )
+    product = Product.create(name="Producto No Emitida UI", unit="kg")
+    order = LoadOrderService(current_user=user.username).create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
+        pallets=[],
+    )
+    order.status = "Preparacion"
+    order.save()
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    app.processEvents()
+
+    assert window.findChild(QPushButton, "issueLoadOrderButton").isEnabled() is True
+    assert window.findChild(QPushButton, "editLoadOrderButton").isEnabled() is True
+
+
 def test_load_order_page_closes_issued_order_and_releases_driver(db):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
@@ -697,13 +1121,13 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
     assert search_input is not None
     assert reprint_button is None or not reprint_button.isVisible()
     assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
-    assert table.rowCount() == 2
+    assert table.rowCount() == 3
 
     search_input.setText("Norte")
     search_button.click()
     app.processEvents()
 
-    assert table.rowCount() == 1
+    assert table.rowCount() == 2
     assert table.item(0, 0).data(Qt.UserRole) == order_a.id
     assert "1 resultado" in feedback.text().lower()
 
