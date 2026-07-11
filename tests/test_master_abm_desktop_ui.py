@@ -558,6 +558,44 @@ def test_drivers_abm_page_creates_edits_with_carrier_combo(db):
     assert table.item(0, 0).text() == "Chofer Demo UI Editado"
 
 
+def test_driver_carrier_combo_supports_autocomplete_when_editing(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+
+    from app.models.masters import Carrier, Driver
+    from app.ui.master_abm import DriverEntryDialog
+
+    first = Carrier.create(name="Transporte Norte Autocomplete")
+    target = Carrier.create(name="Logistica Sur Autocomplete")
+    driver = Driver.create(name="Chofer Autocomplete UI", carrier=first)
+
+    app = QApplication.instance() or QApplication([])
+    dialog = DriverEntryDialog(current_user="ui_driver_autocomplete", record_id=driver.id)
+    app.processEvents()
+    carrier_combo = dialog.findChild(QComboBox, "driverCarrierInput")
+
+    assert carrier_combo.isEditable() is True
+    assert carrier_combo.completer() is not None
+    assert carrier_combo.completer().filterMode() == Qt.MatchContains
+    assert carrier_combo.completer().caseSensitivity() == Qt.CaseInsensitive
+
+    carrier_combo.setEditText("sur autocomplete")
+    carrier_combo.completer().setCompletionPrefix("sur autocomplete")
+    matches = [
+        carrier_combo.completer().completionModel().index(row, 0).data()
+        for row in range(carrier_combo.completer().completionModel().rowCount())
+    ]
+    assert "Logistica Sur Autocomplete" in matches
+
+    carrier_combo.setCurrentIndex(carrier_combo.findData(target.id))
+    dialog.findChild(QLineEdit, "driverNameInput").setText("Chofer Autocomplete Editado")
+    dialog.findChild(QPushButton, "saveDriverButton").click()
+
+    driver = Driver.get_by_id(driver.id)
+    assert driver.carrier == target
+    assert driver.name == "Chofer Autocomplete Editado"
+
+
 def test_trucks_abm_page_creates_edits_with_carrier_combo(db):
     from PyQt5.QtWidgets import QComboBox, QLineEdit, QPushButton, QTableWidget
 
