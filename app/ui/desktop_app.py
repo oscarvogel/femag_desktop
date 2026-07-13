@@ -5,7 +5,7 @@ from pathlib import Path
 import webbrowser
 
 from peewee import InterfaceError, OperationalError
-from PyQt5.QtCore import QDate, QSignalBlocker, Qt
+from PyQt5.QtCore import QDate, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -46,7 +46,9 @@ from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
+from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
+from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.customer_payment_dialog import ClientPaymentDialog
@@ -58,6 +60,39 @@ from app.ui.master_abm import build_client_abm_page, build_master_abm_page, mast
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
+
+
+class _AccountStatementMailSignals(QObject):
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+
+class _AccountStatementMailWorker(QRunnable):
+    def __init__(self, *, client_name: str, recipient: str, pdf_path: Path):
+        super().__init__()
+        self.client_name = client_name
+        self.recipient = recipient
+        self.pdf_path = pdf_path
+        self.signals = _AccountStatementMailSignals()
+
+    def run(self) -> None:
+        try:
+            account_statement_mail_service.send_account_statement(
+                client_name=self.client_name,
+                recipient=self.recipient,
+                pdf_path=self.pdf_path,
+            )
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+        else:
+            self.signals.succeeded.emit(self.recipient)
+        finally:
+            self.signals.finished.emit()
+
+
+def _start_mail_worker(worker: QRunnable) -> None:
+    QThreadPool.globalInstance().start(worker)
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
@@ -374,6 +409,8 @@ class FemagDesktopWindow(QMainWindow):
             current_user=self.shell.username,
             register_payment_callback=self._open_payment_dialog,
             print_statement_callback=self._print_account_statement,
+            whatsapp_statement_callback=self._share_account_statement_whatsapp,
+            email_statement_callback=self._email_account_statement,
             parent=self,
         )
 
@@ -386,6 +423,72 @@ class FemagDesktopWindow(QMainWindow):
             QMessageBox.warning(self, "Extracto", f"No se pudo generar el extracto: {exc}")
             return
         _open_print_output(pdf_path)
+
+    def _share_account_statement_whatsapp(self, client) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            whatsapp_url = account_statement_share_service.build_whatsapp_url(
+                client.name, client.phone
+            )
+            pdf_path = account_statement_print_service.export_account_statement(
+                client, self._print_output_dir
+            )
+            if not webbrowser.open(whatsapp_url):
+                raise RuntimeError("No se pudo abrir WhatsApp en este equipo.")
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "WhatsApp",
+            "Se abrio el chat del cliente. Adjunte manualmente este PDF:\n"
+            f"{pdf_path}",
+        )
+
+    def _email_account_statement(self, client) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        recipient = (client.email or "").strip()
+        if not recipient:
+            QMessageBox.warning(
+                self, "Correo", "El cliente no tiene un correo electronico configurado."
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Enviar extracto",
+            f"¿Enviar el extracto de cuenta corriente a {recipient}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            pdf_path = account_statement_print_service.export_account_statement(
+                client, self._print_output_dir
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Correo", str(exc))
+            return
+        worker = _AccountStatementMailWorker(
+            client_name=client.name,
+            recipient=recipient,
+            pdf_path=pdf_path,
+        )
+        workers = getattr(self, "_account_statement_mail_workers", set())
+        self._account_statement_mail_workers = workers
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda address: QMessageBox.information(
+                self, "Correo", f"El extracto fue enviado correctamente a {address}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(self, "Correo", message)
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        _start_mail_worker(worker)
 
     def _open_payment_dialog(self, preset_client=None) -> None:
         try:
