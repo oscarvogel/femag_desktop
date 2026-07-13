@@ -56,3 +56,71 @@ def test_payment_dialog_opens_and_registers(db):
     assert payment is not None
     assert payment.amount == 250.0
     assert payment.client == client
+
+
+def test_customer_ledger_share_buttons_dispatch_selected_client(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Contacto",
+        cuit="30777777770",
+        iva_condition="RI",
+        phone="0376 15 4123456",
+        email="cliente@example.com",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="load_order_documental",
+        total_amount=100,
+        currency="ARS",
+        description="Movimiento",
+        source_ref="test:1",
+        created_by="admin",
+    )
+    whatsapp_clients = []
+    email_clients = []
+    page = CustomerLedgerPage(
+        current_user="admin",
+        whatsapp_statement_callback=whatsapp_clients.append,
+        email_statement_callback=email_clients.append,
+    )
+    app.processEvents()
+
+    assert page.whatsapp_statement_button.isEnabled()
+    assert page.email_statement_button.isEnabled()
+    page.whatsapp_statement_button.click()
+    page.email_statement_button.click()
+
+    assert whatsapp_clients == [client]
+    assert email_clients == [client]
+
+
+def test_customer_ledger_share_buttons_require_callbacks(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente", cuit="30777777771", iva_condition="RI")
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="load_order_documental",
+        total_amount=100,
+        currency="ARS",
+        description="Movimiento",
+        source_ref="test:2",
+        created_by="admin",
+    )
+
+    page = CustomerLedgerPage(current_user="admin")
+    app.processEvents()
+
+    assert not page.whatsapp_statement_button.isEnabled()
+    assert not page.email_statement_button.isEnabled()

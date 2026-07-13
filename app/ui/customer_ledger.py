@@ -53,12 +53,23 @@ def _apply_color_to_label(label: QLabel, color: QColor) -> None:
 
 
 class CustomerLedgerPage(QWidget):
-    def __init__(self, *, current_user: str, register_payment_callback=None, print_statement_callback=None, parent=None):
+    def __init__(
+        self,
+        *,
+        current_user: str,
+        register_payment_callback=None,
+        print_statement_callback=None,
+        whatsapp_statement_callback=None,
+        email_statement_callback=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setObjectName("customerLedgerPage")
         self.current_user = current_user
         self.register_payment_callback = register_payment_callback
         self.print_statement_callback = print_statement_callback
+        self.whatsapp_statement_callback = whatsapp_statement_callback
+        self.email_statement_callback = email_statement_callback
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -154,6 +165,18 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_button.setEnabled(False)
         self.print_statement_button.clicked.connect(self._on_print_statement)
         header_row.addWidget(self.print_statement_button)
+
+        self.whatsapp_statement_button = QPushButton("Abrir WhatsApp")
+        self.whatsapp_statement_button.setObjectName("customerLedgerWhatsAppStatementButton")
+        self.whatsapp_statement_button.setEnabled(False)
+        self.whatsapp_statement_button.clicked.connect(self._on_whatsapp_statement)
+        header_row.addWidget(self.whatsapp_statement_button)
+
+        self.email_statement_button = QPushButton("Enviar por correo")
+        self.email_statement_button.setObjectName("customerLedgerEmailStatementButton")
+        self.email_statement_button.setEnabled(False)
+        self.email_statement_button.clicked.connect(self._on_email_statement)
+        header_row.addWidget(self.email_statement_button)
         layout.addLayout(header_row)
 
         # Highlighted balance card
@@ -343,18 +366,39 @@ class CustomerLedgerPage(QWidget):
                 self.movements_table.setItem(row_index, column, cell)
         self.register_payment_button.setEnabled(self.register_payment_callback is not None)
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
+        self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
+        self.email_statement_button.setEnabled(self.email_statement_callback is not None)
+
+    def _selected_client(self) -> Client | None:
+        current = self.clients_table.currentRow()
+        if current < 0:
+            return None
+        item = self.clients_table.item(current, 0)
+        if item is None:
+            return None
+        return Client.get_by_id(item.data(Qt.UserRole))
 
     def _on_print_statement(self) -> None:
         if self.print_statement_callback is None:
             return
-        current = self.clients_table.currentRow()
-        if current < 0:
+        client = self._selected_client()
+        if client is None:
             return
-        item = self.clients_table.item(current, 0)
-        if item is None:
-            return
-        client = Client.get_by_id(item.data(Qt.UserRole))
         self.print_statement_callback(client)
+
+    def _on_whatsapp_statement(self) -> None:
+        if self.whatsapp_statement_callback is None:
+            return
+        client = self._selected_client()
+        if client is not None:
+            self.whatsapp_statement_callback(client)
+
+    def _on_email_statement(self) -> None:
+        if self.email_statement_callback is None:
+            return
+        client = self._selected_client()
+        if client is not None:
+            self.email_statement_callback(client)
 
     def _clear_detail(self) -> None:
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
@@ -365,16 +409,14 @@ class CustomerLedgerPage(QWidget):
         self.empty_label.hide()
         self.register_payment_button.setEnabled(False)
         self.print_statement_button.setEnabled(False)
+        self.whatsapp_statement_button.setEnabled(False)
+        self.email_statement_button.setEnabled(False)
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
             return
-        current = self.clients_table.currentRow()
-        if current < 0:
+        client = self._selected_client()
+        if client is None:
             return
-        item = self.clients_table.item(current, 0)
-        if item is None:
-            return
-        client = Client.get_by_id(item.data(Qt.UserRole))
         self.register_payment_callback(client)
         self.refresh()
