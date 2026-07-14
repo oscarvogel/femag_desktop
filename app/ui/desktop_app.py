@@ -57,6 +57,7 @@ from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
+from app.ui.pallet_composition import PalletCompositionWidget
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -1314,7 +1315,7 @@ class LoadOrderEntryDialog(QDialog):
         step_title.setObjectName("loadOrderStepTitle")
         step_layout.addWidget(step_title)
         self.step_buttons: list[QPushButton] = []
-        for index, label in enumerate(("Transporte", "Destinos", "Productos", "Revisar")):
+        for index, label in enumerate(("Transporte", "Destinos", "Productos", "Pallets", "Revisar")):
             button = QPushButton(f"{index + 1}  {label}")
             button.setObjectName(f"loadOrderStepButton{index}")
             button.setProperty("stepNav", True)
@@ -1419,6 +1420,15 @@ class LoadOrderEntryDialog(QDialog):
         product_layout.addWidget(self.product_table)
         self.step_stack.addWidget(product)
 
+        pallet_step = QFrame()
+        pallet_step.setObjectName("formSection")
+        pallet_layout = QVBoxLayout(pallet_step)
+        pallet_layout.setContentsMargins(12, 12, 12, 12)
+        pallet_layout.setSpacing(8)
+        self.pallet_widget = PalletCompositionWidget(destinations=self.destinations)
+        pallet_layout.addWidget(self.pallet_widget)
+        self.step_stack.addWidget(pallet_step)
+
         review = QFrame()
         review.setObjectName("formSection")
         review_layout = QVBoxLayout(review)
@@ -1427,6 +1437,10 @@ class LoadOrderEntryDialog(QDialog):
         review_title = QLabel("Revisar orden")
         review_title.setObjectName("sectionTitle")
         review_layout.addWidget(review_title)
+        self.review_kg_label = QLabel("TOTAL DE LA ORDEN: 0,000 kg")
+        self.review_kg_label.setObjectName("loadOrderReviewTotalKg")
+        self.review_kg_label.setStyleSheet("font-size: 28px; font-weight: 900; color: #173a59;")
+        review_layout.addWidget(self.review_kg_label)
         self.review_table = QTableWidget(0, 6)
         self.review_table.setObjectName("loadOrderReviewTable")
         self.review_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total"))
@@ -1528,6 +1542,26 @@ class LoadOrderEntryDialog(QDialog):
             for destination in self.order.destinations.order_by()
         ]
         self._render_destinations()
+        self.pallet_widget.load_pallets(
+            [
+                {
+                    "sequence": pallet.sequence,
+                    "pallet_type_id": pallet.pallet_type_id,
+                    "allocations": [
+                        {
+                            "client_id": allocation.destination.client.id,
+                            "address_id": allocation.destination.delivery_address.id,
+                            "product_id": allocation.product.id,
+                            "product_label": allocation.product.name,
+                            "quantity": float(allocation.quantity),
+                            "peso_unitario_kg": allocation.peso_unitario_kg,
+                        }
+                        for allocation in pallet.allocations
+                    ],
+                }
+                for pallet in self.order.pallets.order_by()
+            ]
+        )
         self._render_review()
         self._update_save_button_state()
 
@@ -1669,6 +1703,7 @@ class LoadOrderEntryDialog(QDialog):
         if self.destinations and self.destination_table.currentRow() < 0:
             self.destination_table.setCurrentCell(0, 0)
         self._render_products(self.destination_table.currentRow())
+        self.pallet_widget.set_destinations(self.destinations)
         self._render_review()
         self._update_save_button_state()
 
@@ -1712,6 +1747,8 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
+        if hasattr(self, "pallet_widget"):
+            self.review_kg_label.setText(f"TOTAL DE LA ORDEN: {self.pallet_widget.total_kg_label.text()}")
         self._update_save_button_state()
 
     def _is_ready_to_save(self) -> bool:
@@ -1779,13 +1816,35 @@ class LoadOrderEntryDialog(QDialog):
                         ],
                     }
                 )
+            pallets = []
+            for pallet in self.pallet_widget.pallet_drafts():
+                pallet_type_id = pallet.get("pallet_type_id")
+                allocations = []
+                for allocation in pallet.get("allocations") or []:
+                    address = ClientAddress.get_by_id(allocation["address_id"])
+                    allocations.append(
+                        {
+                            "client": address.client,
+                            "delivery_address": address,
+                            "product": Product.get_by_id(allocation["product_id"]),
+                            "quantity": allocation["quantity"],
+                            "peso_unitario_kg": allocation.get("peso_unitario_kg"),
+                        }
+                    )
+                pallets.append(
+                    {
+                        "sequence": pallet["sequence"],
+                        "pallet_type": PalletType.get_by_id(pallet_type_id) if pallet_type_id else None,
+                        "allocations": allocations,
+                    }
+                )
             if self.order is None:
                 self.created_order = self.service.create_order(
                     carrier=Carrier.get_by_id(self.carrier_combo.currentData()),
                     driver=Driver.get_by_id(self.driver_combo.currentData()),
                     truck=Truck.get_by_id(self.truck_combo.currentData()),
                     destinations=destinations,
-                    pallets=[],
+                    pallets=pallets,
                     observations=self.observations_input.text().strip() or None,
                     order_date=self.order_date.date().toPyDate(),
                 )
@@ -1796,7 +1855,7 @@ class LoadOrderEntryDialog(QDialog):
                     driver=Driver.get_by_id(self.driver_combo.currentData()),
                     truck=Truck.get_by_id(self.truck_combo.currentData()),
                     destinations=destinations,
-                    pallets=[],
+                    pallets=pallets,
                     observations=self.observations_input.text().strip() or None,
                     date=self.order_date.date().toPyDate(),
                 )

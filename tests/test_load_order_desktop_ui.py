@@ -13,6 +13,106 @@ def _assert_combo_disabled(combo):
     assert not combo.isEnabled(), f"Expected {combo.objectName()} to be disabled"
 
 
+def _complete_order_for_issue(order, current_user):
+    from app.services.load_order_service import LoadOrderService
+
+    allocations = []
+    for line in order.products:
+        product = line.product
+        if product.peso_unitario_kg == 0:
+            product.peso_unitario_kg = 1
+            product.save()
+        allocations.append(
+            {
+                "client": line.destination.client,
+                "delivery_address": line.destination.delivery_address,
+                "product": product,
+                "quantity": line.quantity,
+            }
+        )
+    LoadOrderService(current_user=current_user).update_order(
+        order,
+        pallets=[{"sequence": 1, "pallet_type": None, "allocations": allocations}],
+    )
+    return order
+
+
+def test_load_order_dialog_integrates_pallet_cards_and_persists_draft(db):
+    from decimal import Decimal
+
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.models.load_orders import LoadOrderPalletAllocation
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte UI kilos")
+    driver = Driver.create(name="Chofer UI kilos", carrier=carrier)
+    truck = Truck.create(domain="KGUI123", carrier=carrier)
+    client = Client.create(name="Cliente UI kilos", cuit="30712345991", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta kilos",
+    )
+    product = Product.create(
+        name="Producto UI kilos",
+        unit="bolsa",
+        peso_unitario_kg=Decimal("25.000"),
+    )
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="ui_kilos"), "ui_kilos")
+    app.processEvents()
+
+    assert [button.text().split("  ", 1)[1] for button in dialog.step_buttons] == [
+        "Transporte",
+        "Destinos",
+        "Productos",
+        "Pallets",
+        "Revisar",
+    ]
+    _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
+    dialog.destinations = [
+        {
+            "client_id": client.id,
+            "address_id": address.id,
+            "client_label": client.name,
+            "address_label": address.address,
+            "products": [
+                {
+                    "product_id": product.id,
+                    "product_label": product.name,
+                    "quantity": 40,
+                    "unit": product.unit,
+                    "precio_neto_unitario": 0,
+                    "descuento_porcentaje": 0,
+                    "iva_porcentaje": 21,
+                    "total": 0,
+                }
+            ],
+        }
+    ]
+    dialog._render_destinations()
+    dialog.pallet_widget.add_pallet()
+    dialog.pallet_widget.add_allocation(1, address.id, product.id, 40)
+
+    assert dialog.pallet_widget.total_kg_label.text() == "1.000,000 kg"
+    dialog._save()
+
+    assert dialog.created_order is not None
+    assert LoadOrderPalletAllocation.select().count() == 1
+    assert dialog.service.composition(dialog.created_order).total_kg == Decimal("1000.000")
+
+    edit = LoadOrderEntryDialog(dialog.service, "ui_kilos", order=dialog.created_order)
+    app.processEvents()
+    assert edit.pallet_widget.total_kg_label.text() == "1.000,000 kg"
+    assert edit.pallet_widget.card_for_sequence(1).property("compositionState") == "complete"
+
+
 def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
 
@@ -243,16 +343,22 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     assert 600 <= dialog.minimumHeight() < 760
     steps = dialog.findChild(QWidget, "loadOrderEntryStepList")
     stack = dialog.findChild(QStackedWidget, "loadOrderEntryStepStack")
-    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(4)]
+    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(5)]
     previous_button = dialog.findChild(QPushButton, "previousLoadOrderStepButton")
     next_button = dialog.findChild(QPushButton, "nextLoadOrderStepButton")
     assert steps is not None
     assert stack is not None
     assert steps.maximumWidth() <= 190
-    assert [button.text() for button in step_buttons] == ["1  Transporte", "2  Destinos", "3  Productos", "4  Revisar"]
+    assert [button.text() for button in step_buttons] == [
+        "1  Transporte",
+        "2  Destinos",
+        "3  Productos",
+        "4  Pallets",
+        "5  Revisar",
+    ]
     assert all(button.property("stepNav") is True for button in step_buttons)
     assert step_buttons[0].isChecked() is True
-    assert stack.count() == 4
+    assert stack.count() == 5
     assert previous_button.isEnabled() is False
     assert next_button.isEnabled() is True
     next_button.click()
@@ -478,6 +584,7 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
         destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
         pallets=[],
     )
+    _complete_order_for_issue(order, user.username)
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
@@ -944,6 +1051,7 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
         destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
         pallets=[],
     )
+    _complete_order_for_issue(order, user.username)
     LoadOrderOperationService(current_user=user.username).issue(order)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
@@ -1039,6 +1147,7 @@ def test_load_order_page_closes_issued_order_and_releases_driver(db):
         destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 1}]}],
         pallets=[],
     )
+    _complete_order_for_issue(order, user.username)
     LoadOrderOperationService(current_user=user.username).issue(order)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
