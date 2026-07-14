@@ -118,6 +118,51 @@ def test_pallet_cards_show_large_live_kilos_and_completion_state(db):
     assert widget.summary_label.text() == "2 pallets · 2 completos · 0 pendientes"
 
 
+def test_selected_product_suggests_pending_quantity_and_prevents_excess(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallet()
+    widget.destination_combo.setCurrentIndex(
+        widget.destination_combo.findData(destination["address_id"])
+    )
+    widget.product_combo.setCurrentIndex(widget.product_combo.findData(product["product_id"]))
+    app.processEvents()
+
+    assert widget.quantity_input.value() == 40
+    assert widget.quantity_input.maximum() == 40
+    assert widget.quantity_input.isReadOnly() is False
+
+    widget.quantity_input.setValue(10)
+    widget._add_from_editor()
+    app.processEvents()
+
+    assert widget.quantity_input.value() == 30
+    assert widget.quantity_input.maximum() == 30
+
+    widget.add_pallet()
+    app.processEvents()
+
+    assert widget.quantity_input.value() == 30
+    assert widget.quantity_input.maximum() == 30
+    widget.quantity_input.setValue(999)
+    assert widget.quantity_input.value() == 30
+    widget._add_from_editor()
+    app.processEvents()
+
+    assert widget.quantity_input.value() == 0
+    assert widget.quantity_input.maximum() == 0
+    assert widget.add_allocation_button.isEnabled() is False
+    assert widget.pallet_drafts()[0]["allocations"][0]["quantity"] == 10
+    assert widget.pallet_drafts()[1]["allocations"][0]["quantity"] == 30
+
+
 def test_pallet_widget_supports_mixed_clients_and_serializes_draft(db):
     from PyQt5.QtWidgets import QApplication
 

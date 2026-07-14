@@ -198,7 +198,8 @@ class PalletCompositionWidget(QWidget):
         self.remove_allocation_button.clicked.connect(self._remove_selected_allocation)
         editor.addWidget(self.remove_allocation_button)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
-        self.product_combo.currentIndexChanged.connect(self._update_editor_actions)
+        self.product_combo.currentIndexChanged.connect(self._suggest_remaining_quantity)
+        self.quantity_input.valueChanged.connect(self._update_editor_actions)
         self.allocation_table.currentCellChanged.connect(
             lambda _row, _column, _previous_row, _previous_column: self._update_editor_actions()
         )
@@ -441,6 +442,43 @@ class PalletCompositionWidget(QWidget):
         destination = self._destination(address_id)
         for product in destination.get("products") or []:
             self.product_combo.addItem(product["product_label"], product["product_id"])
+        self._suggest_remaining_quantity()
+
+    def _remaining_quantity(self, address_id: int, product_id: int) -> Decimal:
+        destination = self._destination(address_id)
+        requested = Decimal(
+            str(
+                next(
+                    product["quantity"]
+                    for product in destination.get("products") or []
+                    if product["product_id"] == product_id
+                )
+            )
+        )
+        assigned = sum(
+            (
+                Decimal(str(allocation["quantity"]))
+                for pallet in self._pallets
+                for allocation in pallet["allocations"]
+                if allocation["address_id"] == address_id and allocation["product_id"] == product_id
+            ),
+            Decimal("0"),
+        )
+        return max(requested - assigned, Decimal("0"))
+
+    def _suggest_remaining_quantity(self) -> None:
+        address_id = self.destination_combo.currentData()
+        product_id = self.product_combo.currentData()
+        if address_id is None or product_id is None:
+            self.quantity_input.setRange(0.001, 999999999)
+            self._update_editor_actions()
+            return
+        remaining = self._remaining_quantity(address_id, product_id)
+        if remaining > 0:
+            self.quantity_input.setRange(0.001, float(remaining))
+        else:
+            self.quantity_input.setRange(0, 0)
+        self.quantity_input.setValue(float(remaining))
         self._update_editor_actions()
 
     def _add_from_editor(self) -> None:
@@ -450,7 +488,10 @@ class PalletCompositionWidget(QWidget):
         product_id = self.product_combo.currentData()
         if address_id is None or product_id is None:
             return
-        self.add_allocation(self._selected_sequence, address_id, product_id, self.quantity_input.value())
+        quantity = Decimal(str(self.quantity_input.value()))
+        if quantity <= 0 or quantity > self._remaining_quantity(address_id, product_id):
+            return
+        self.add_allocation(self._selected_sequence, address_id, product_id, quantity)
 
     def _remove_selected_allocation(self) -> None:
         if self._selected_sequence is None:
@@ -496,7 +537,7 @@ class PalletCompositionWidget(QWidget):
             )
             for column, value in enumerate(values):
                 self.allocation_table.setItem(row, column, QTableWidgetItem(value))
-        self._update_editor_actions()
+        self._suggest_remaining_quantity()
 
     def _update_editor_actions(self) -> None:
         has_pallet = self._selected_sequence is not None
