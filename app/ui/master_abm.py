@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import Qt
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import (
     QCompleter,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -148,7 +150,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "products": MasterAbmConfig(
             "Productos",
-            ["Producto", "Unidad", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
+            ["Producto", "Unidad", "Peso unitario", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             _product_rows,
             ProductEntryDialog,
             "newProductButton",
@@ -564,6 +566,11 @@ class ProductEntryDialog(QDialog):
         self.name_input.setObjectName("productNameInput")
         self.unit_input = QLineEdit()
         self.unit_input.setObjectName("productUnitInput")
+        self.weight_input = QDoubleSpinBox()
+        self.weight_input.setObjectName("productWeightKgInput")
+        self.weight_input.setRange(0, 999999999)
+        self.weight_input.setDecimals(3)
+        self.weight_input.setSuffix(" kg")
         self.price_list_1_input = QLineEdit()
         self.price_list_1_input.setObjectName("productPriceList1Input")
         self.price_list_2_input = QLineEdit()
@@ -576,14 +583,16 @@ class ProductEntryDialog(QDialog):
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Unidad"), 1, 0)
         form.addWidget(self.unit_input, 1, 1)
-        form.addWidget(QLabel("Lista 1"), 2, 0)
-        form.addWidget(self.price_list_1_input, 2, 1)
-        form.addWidget(QLabel("Lista 2"), 3, 0)
-        form.addWidget(self.price_list_2_input, 3, 1)
-        form.addWidget(QLabel("Lista 3"), 4, 0)
-        form.addWidget(self.price_list_3_input, 4, 1)
-        form.addWidget(QLabel("Lista 4"), 5, 0)
-        form.addWidget(self.price_list_4_input, 5, 1)
+        form.addWidget(QLabel("Peso unitario"), 2, 0)
+        form.addWidget(self.weight_input, 2, 1)
+        form.addWidget(QLabel("Lista 1"), 3, 0)
+        form.addWidget(self.price_list_1_input, 3, 1)
+        form.addWidget(QLabel("Lista 2"), 4, 0)
+        form.addWidget(self.price_list_2_input, 4, 1)
+        form.addWidget(QLabel("Lista 3"), 5, 0)
+        form.addWidget(self.price_list_3_input, 5, 1)
+        form.addWidget(QLabel("Lista 4"), 6, 0)
+        form.addWidget(self.price_list_4_input, 6, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveProductButton", self._save)
@@ -595,6 +604,7 @@ class ProductEntryDialog(QDialog):
         product = Product.get_by_id(self.record_id)
         self.name_input.setText(product.name)
         self.unit_input.setText(product.unit)
+        self.weight_input.setValue(float(product.peso_unitario_kg))
         self.price_list_1_input.setText(_money_text(product.precio_lista_1 or product.precio_neto_base))
         self.price_list_2_input.setText(_money_text(product.precio_lista_2))
         self.price_list_3_input.setText(_money_text(product.precio_lista_3))
@@ -614,11 +624,17 @@ class ProductEntryDialog(QDialog):
                 "precio_lista_4": _parse_float(self.price_list_4_input.text()),
             }
             if self.record_id is None:
-                self.saved_record = MasterService(self.current_user).create_product(name, unit, **prices)
+                self.saved_record = MasterService(self.current_user).create_product(
+                    name,
+                    unit,
+                    peso_unitario_kg=Decimal(str(self.weight_input.value())),
+                    **prices,
+                )
             else:
                 product = Product.get_by_id(self.record_id)
                 product.name = name
                 product.unit = unit
+                product.peso_unitario_kg = Decimal(str(self.weight_input.value())).quantize(Decimal("0.001"))
                 product.precio_neto_base = prices["precio_lista_1"]
                 product.precio_lista_1 = prices["precio_lista_1"]
                 product.precio_lista_2 = prices["precio_lista_2"]
@@ -803,6 +819,11 @@ def _product_rows() -> list[list[object]]:
                 product.id,
                 product.name,
                 product.unit,
+                (
+                    f"{product.peso_unitario_kg:.3f} kg"
+                    if product.peso_unitario_kg > 0
+                    else "Peso pendiente"
+                ),
                 _money_text(product.precio_lista_1 or product.precio_neto_base),
                 _money_text(product.precio_lista_2),
                 _money_text(product.precio_lista_3),

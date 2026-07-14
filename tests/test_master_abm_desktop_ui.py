@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -686,6 +687,32 @@ def test_product_dialog_saves_four_price_lists(db):
 
     product = Product.get_by_id(product.id)
     assert product.precio_lista_3 == 145
+
+
+def test_product_dialog_creates_edits_and_lists_unit_weight(db):
+    from PyQt5.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QPushButton
+
+    from app.models.masters import Product
+    from app.ui.master_abm import ProductEntryDialog, _product_rows
+
+    app = QApplication.instance() or QApplication([])
+    dialog = ProductEntryDialog(current_user="ui_weight")
+    app.processEvents()
+    dialog.findChild(QLineEdit, "productNameInput").setText("Cal pesada")
+    dialog.findChild(QLineEdit, "productUnitInput").setText("bolsa")
+    dialog.findChild(QDoubleSpinBox, "productWeightKgInput").setValue(20.5)
+    dialog.findChild(QPushButton, "saveProductButton").click()
+
+    product = Product.get(Product.name == "Cal pesada")
+    assert product.peso_unitario_kg == Decimal("20.500")
+    assert _product_rows()[0][3] == "20.500 kg"
+
+    edit = ProductEntryDialog(current_user="ui_weight", record_id=product.id)
+    assert edit.findChild(QDoubleSpinBox, "productWeightKgInput").value() == 20.5
+    edit.findChild(QDoubleSpinBox, "productWeightKgInput").setValue(0)
+    edit.findChild(QPushButton, "saveProductButton").click()
+
+    assert _product_rows()[0][3] == "Peso pendiente"
 
 def test_client_dialog_saves_assigned_price_list(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
