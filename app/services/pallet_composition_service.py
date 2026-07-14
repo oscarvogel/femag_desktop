@@ -13,6 +13,10 @@ def _decimal(value) -> Decimal:
     return Decimal(str(value)).quantize(QUANTUM)
 
 
+def _quantity_text(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
 @dataclass(frozen=True)
 class RequestedLine:
     destination_id: int
@@ -135,7 +139,7 @@ class PalletCompositionService:
                 issues.append(
                     CompositionIssue(
                         "pending",
-                        f"{label}: faltan asignar {difference:g} unidades.",
+                        f"{label}: faltan asignar {_quantity_text(difference)} unidades.",
                         key[0],
                         key[1],
                         difference,
@@ -146,7 +150,7 @@ class PalletCompositionService:
                 issues.append(
                     CompositionIssue(
                         "excess",
-                        f"{label}: se excede lo solicitado en {excess:g} unidades.",
+                        f"{label}: se excede lo solicitado en {_quantity_text(excess)} unidades.",
                         key[0],
                         key[1],
                         excess,

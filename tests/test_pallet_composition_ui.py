@@ -65,6 +65,36 @@ def _destinations(db):
     ]
 
 
+def test_empty_state_guides_first_pallet_and_disables_editor_actions(db):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    app.processEvents()
+
+    empty_state = widget.findChild(QLabel, "palletCompositionEmptyState")
+    assert "Todavia no agregaste pallets" in empty_state.text()
+    assert "45 unidades pendientes" in empty_state.text()
+    assert widget.summary_label.text() == "45 unidades pendientes"
+    assert widget.quantity_input.value() == 1
+    assert widget.findChild(QPushButton, "addPalletCardButton").text() == "Agregar primer pallet"
+    assert widget.destination_combo.isEnabled() is False
+    assert widget.product_combo.isEnabled() is False
+    assert widget.quantity_input.isEnabled() is False
+    assert widget.findChild(QPushButton, "addPalletAllocationButton").isEnabled() is False
+    assert widget.findChild(QPushButton, "removePalletAllocationButton").isEnabled() is False
+
+    widget.add_pallet()
+    app.processEvents()
+
+    assert widget.findChild(QLabel, "palletCompositionEmptyState") is None
+    assert widget.findChild(QPushButton, "addPalletCardButton").text() == "+ Agregar pallet"
+    assert widget.destination_combo.isEnabled() is True
+    assert widget.quantity_input.isEnabled() is True
+
+
 def test_pallet_cards_show_large_live_kilos_and_completion_state(db):
     from PyQt5.QtWidgets import QApplication
 

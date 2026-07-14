@@ -40,7 +40,7 @@ def _complete_order_for_issue(order, current_user):
 def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(db):
     from decimal import Decimal
 
-    from PyQt5.QtWidgets import QApplication, QComboBox
+    from PyQt5.QtWidgets import QApplication, QComboBox, QPushButton
 
     from app.models.load_orders import LoadOrderPalletAllocation
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -104,7 +104,10 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
 
     pallets = LoadOrderPalletDialog(dialog.service, dialog.created_order)
     app.processEvents()
+    save_pallets = pallets.findChild(QPushButton, "saveLoadOrderPalletsButton")
+    assert save_pallets.isEnabled() is False
     pallets.pallet_widget.add_pallet()
+    assert save_pallets.isEnabled() is True
     pallets.pallet_widget.add_allocation(1, address.id, product.id, 40)
     assert pallets.pallet_widget.total_kg_label.text() == "1.000,000 kg"
     pallets._save()

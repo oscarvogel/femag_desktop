@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -33,6 +34,11 @@ def _kg_text(value) -> str:
     whole, fraction = f"{decimal_value:.3f}".split(".")
     grouped = f"{int(whole):,}".replace(",", ".")
     return f"{grouped},{fraction} kg"
+
+
+def _quantity_text(value) -> str:
+    decimal_value = Decimal(str(value))
+    return format(decimal_value.normalize(), "f")
 
 
 class PalletCard(QFrame):
@@ -84,6 +90,8 @@ class PalletCard(QFrame):
 
 
 class PalletCompositionWidget(QWidget):
+    composition_changed = pyqtSignal()
+
     def __init__(self, *, destinations: list[dict] | None = None, parent=None):
         super().__init__(parent)
         self.setObjectName("palletCompositionWidget")
@@ -111,19 +119,22 @@ class PalletCompositionWidget(QWidget):
         total_frame = QFrame()
         total_frame.setObjectName("loadOrderKgTotalFrame")
         total_frame.setStyleSheet(
-            "QFrame#loadOrderKgTotalFrame { background: #173a59; border-radius: 12px; } "
-            "QLabel { color: white; }"
+            "QFrame#loadOrderKgTotalFrame { background-color: #173a59; border: 0; border-radius: 12px; }"
         )
         total_layout = QVBoxLayout(total_frame)
         total_caption = QLabel("TOTAL DE LA ORDEN")
         total_caption.setAlignment(Qt.AlignCenter)
+        total_caption.setStyleSheet("color: #ffffff; background: transparent; border: 0;")
         self.total_kg_label = QLabel("0,000 kg")
         self.total_kg_label.setObjectName("loadOrderTotalKg")
         self.total_kg_label.setAlignment(Qt.AlignCenter)
-        self.total_kg_label.setStyleSheet("font-size: 38px; font-weight: 900;")
+        self.total_kg_label.setStyleSheet(
+            "font-size: 38px; font-weight: 900; color: #ffffff; background: transparent; border: 0;"
+        )
         self.summary_label = QLabel("0 pallets · 0 completos · 0 pendientes")
         self.summary_label.setObjectName("loadOrderPalletSummary")
         self.summary_label.setAlignment(Qt.AlignCenter)
+        self.summary_label.setStyleSheet("color: #ffffff; background: transparent; border: 0;")
         total_layout.addWidget(total_caption)
         total_layout.addWidget(self.total_kg_label)
         total_layout.addWidget(self.summary_label)
@@ -139,10 +150,10 @@ class PalletCompositionWidget(QWidget):
         scroll.setWidget(self.card_container)
         left_layout.addWidget(scroll, 1)
 
-        add_pallet_button = QPushButton("+ Agregar pallet")
-        add_pallet_button.setObjectName("addPalletCardButton")
-        add_pallet_button.clicked.connect(self.add_pallet)
-        left_layout.addWidget(add_pallet_button)
+        self.add_pallet_button = QPushButton("Agregar primer pallet")
+        self.add_pallet_button.setObjectName("addPalletCardButton")
+        self.add_pallet_button.clicked.connect(self.add_pallet)
+        left_layout.addWidget(self.add_pallet_button)
 
         self.issue_label = QLabel("")
         self.issue_label.setObjectName("palletCompositionIssues")
@@ -170,22 +181,27 @@ class PalletCompositionWidget(QWidget):
         self.quantity_input.setObjectName("palletAllocationQuantityInput")
         self.quantity_input.setRange(0.001, 999999999)
         self.quantity_input.setDecimals(3)
+        self.quantity_input.setValue(1)
         editor.addWidget(self.quantity_input)
-        add_allocation_button = QPushButton("Agregar mercaderia")
-        add_allocation_button.setObjectName("addPalletAllocationButton")
-        add_allocation_button.clicked.connect(self._add_from_editor)
-        editor.addWidget(add_allocation_button)
+        self.add_allocation_button = QPushButton("Agregar mercaderia")
+        self.add_allocation_button.setObjectName("addPalletAllocationButton")
+        self.add_allocation_button.clicked.connect(self._add_from_editor)
+        editor.addWidget(self.add_allocation_button)
         self.allocation_table = QTableWidget(0, 4)
         self.allocation_table.setObjectName("palletAllocationTable")
         self.allocation_table.setHorizontalHeaderLabels(("Cliente / destino", "Articulo", "Cantidad", "Kg"))
         self.allocation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.allocation_table.verticalHeader().setVisible(False)
         editor.addWidget(self.allocation_table, 1)
-        remove_button = QPushButton("Quitar asignacion")
-        remove_button.setObjectName("removePalletAllocationButton")
-        remove_button.clicked.connect(self._remove_selected_allocation)
-        editor.addWidget(remove_button)
+        self.remove_allocation_button = QPushButton("Quitar asignacion")
+        self.remove_allocation_button.setObjectName("removePalletAllocationButton")
+        self.remove_allocation_button.clicked.connect(self._remove_selected_allocation)
+        editor.addWidget(self.remove_allocation_button)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
+        self.product_combo.currentIndexChanged.connect(self._update_editor_actions)
+        self.allocation_table.currentCellChanged.connect(
+            lambda _row, _column, _previous_row, _previous_column: self._update_editor_actions()
+        )
         root.addWidget(self.editor_panel, 2)
 
     def set_destinations(self, destinations: list[dict]) -> None:
@@ -209,6 +225,7 @@ class PalletCompositionWidget(QWidget):
         self._pallets.append({"sequence": sequence, "pallet_type_id": None, "allocations": []})
         self._selected_sequence = sequence
         self._refresh()
+        self.composition_changed.emit()
         return sequence
 
     def add_allocation(self, sequence: int, address_id: int, product_id: int, quantity) -> None:
@@ -241,6 +258,7 @@ class PalletCompositionWidget(QWidget):
             )
         self._selected_sequence = sequence
         self._refresh()
+        self.composition_changed.emit()
 
     def load_pallets(self, pallets: list[dict]) -> None:
         self._pallets = []
@@ -342,18 +360,42 @@ class PalletCompositionWidget(QWidget):
                 states[sequence] = "incomplete"
         complete_count = sum(state == "complete" for state in states.values())
         pending_count = len(self._pallets) - complete_count
-        self.summary_label.setText(
-            f"{len(self._pallets)} pallets · {complete_count} "
-            f"{'completo' if complete_count == 1 else 'completos'} · {pending_count} "
-            f"{'pendiente' if pending_count == 1 else 'pendientes'}"
+        if not self._pallets:
+            self.summary_label.setText(f"{_quantity_text(result.pending_quantity)} unidades pendientes")
+        else:
+            self.summary_label.setText(
+                f"{len(self._pallets)} pallets · {complete_count} "
+                f"{'completo' if complete_count == 1 else 'completos'} · {pending_count} "
+                f"{'pendiente' if pending_count == 1 else 'pendientes'}"
+            )
+        self.issue_label.setText(
+            "\n".join(issue.message for issue in result.issues if issue.code != "no_pallets")
+            if self._pallets
+            else ""
         )
-        self.issue_label.setText("\n".join(issue.message for issue in result.issues))
         while self.card_grid.count():
             item = self.card_grid.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
         self._cards = {}
         result_by_sequence = {pallet.sequence: pallet for pallet in result.pallets}
+        if not self._pallets:
+            empty_state = QLabel(
+                "Todavia no agregaste pallets.\n"
+                f"Hay {_quantity_text(result.pending_quantity)} unidades pendientes de asignar."
+            )
+            empty_state.setObjectName("palletCompositionEmptyState")
+            empty_state.setAlignment(Qt.AlignCenter)
+            empty_state.setWordWrap(True)
+            empty_state.setMinimumSize(520, 180)
+            empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            empty_state.setStyleSheet(
+                "color: #526174; font-size: 16px; font-weight: 600; padding: 40px; "
+                "background: transparent; border: 0;"
+            )
+            self.card_grid.addWidget(empty_state, 0, 0, 1, 3)
         for index, pallet in enumerate(self._pallets):
             card = PalletCard(pallet["sequence"])
             pallet_result = result_by_sequence[pallet["sequence"]]
@@ -368,6 +410,7 @@ class PalletCompositionWidget(QWidget):
             card.selected.connect(self._select_pallet)
             self.card_grid.addWidget(card, index // 3, index % 3)
             self._cards[pallet["sequence"]] = card
+        self.add_pallet_button.setText("+ Agregar pallet" if self._pallets else "Agregar primer pallet")
         self._render_editor()
 
     def _select_pallet(self, sequence: int) -> None:
@@ -393,10 +436,12 @@ class PalletCompositionWidget(QWidget):
         self.product_combo.clear()
         self.product_combo.addItem("", None)
         if address_id is None:
+            self._update_editor_actions()
             return
         destination = self._destination(address_id)
         for product in destination.get("products") or []:
             self.product_combo.addItem(product["product_label"], product["product_id"])
+        self._update_editor_actions()
 
     def _add_from_editor(self) -> None:
         if self._selected_sequence is None:
@@ -415,14 +460,30 @@ class PalletCompositionWidget(QWidget):
         if 0 <= row < len(pallet["allocations"]):
             pallet["allocations"].pop(row)
             self._refresh()
+            self.composition_changed.emit()
 
     def _render_editor(self) -> None:
         if self._selected_sequence is None:
-            self.editor_title.setText("Seleccione un pallet")
+            self.editor_title.setText("Agregue un pallet para comenzar")
             self.allocation_table.setRowCount(0)
+            for control in (
+                self.destination_combo,
+                self.product_combo,
+                self.quantity_input,
+                self.allocation_table,
+            ):
+                control.setEnabled(False)
+            self._update_editor_actions()
             return
         pallet = self._pallet(self._selected_sequence)
         self.editor_title.setText(f"PALLET {self._selected_sequence}")
+        for control in (
+            self.destination_combo,
+            self.product_combo,
+            self.quantity_input,
+            self.allocation_table,
+        ):
+            control.setEnabled(True)
         self.allocation_table.setRowCount(len(pallet["allocations"]))
         for row, allocation in enumerate(pallet["allocations"]):
             destination = self._destination(allocation["address_id"])
@@ -435,3 +496,17 @@ class PalletCompositionWidget(QWidget):
             )
             for column, value in enumerate(values):
                 self.allocation_table.setItem(row, column, QTableWidgetItem(value))
+        self._update_editor_actions()
+
+    def _update_editor_actions(self) -> None:
+        has_pallet = self._selected_sequence is not None
+        can_add = (
+            has_pallet
+            and self.destination_combo.currentData() is not None
+            and self.product_combo.currentData() is not None
+            and self.quantity_input.value() > 0
+        )
+        self.add_allocation_button.setEnabled(can_add)
+        self.remove_allocation_button.setEnabled(
+            has_pallet and self.allocation_table.currentRow() >= 0
+        )

@@ -8,8 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from peewee import SqliteDatabase
-from PyQt5.QtCore import QPoint
-from PyQt5.QtGui import QColor, QImage, QPainter
+from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import QApplication
 
 from app.config.database import bind_database
@@ -181,11 +180,7 @@ def _show_dialog(dialog, app, *, step: int | None = None) -> None:
 def _capture(widget, target: Path) -> None:
     widget.repaint()
     QApplication.processEvents()
-    opaque_image = QImage(widget.size(), QImage.Format_RGB32)
-    opaque_image.fill(QColor("white"))
-    painter = QPainter(opaque_image)
-    widget.render(painter, QPoint())
-    painter.end()
+    opaque_image = widget.grab().toImage().convertToFormat(QImage.Format_RGB32)
     if not opaque_image.save(str(target), "PNG"):
         raise RuntimeError(f"No se pudo guardar {target}")
 
@@ -216,6 +211,11 @@ def generate(output_dir: Path) -> list[Path]:
         destinations=_service_destinations(data),
         pallets=[],
     )
+    empty_pallet_dialog = LoadOrderPalletDialog(service, order)
+    _show_dialog(empty_pallet_dialog, app)
+    _capture(empty_pallet_dialog, targets[0])
+    empty_pallet_dialog.close()
+
     PermissionService().seed_defaults()
     profile = UserProfile.get(UserProfile.name == "Administrador")
     user = User.create(username="captura178_admin", password_hash="x", profile=profile)

@@ -1357,12 +1357,14 @@ class LoadOrderPalletDialog(QDialog):
         footer = QHBoxLayout()
         footer.addStretch(1)
         cancel_button = _action_button("cancelLoadOrderPalletsButton", "Cancelar", secondary=True)
-        save_button = _action_button("saveLoadOrderPalletsButton", "Guardar pallets")
+        self.save_button = _action_button("saveLoadOrderPalletsButton", "Guardar pallets")
+        self.save_button.setEnabled(False)
         footer.addWidget(cancel_button)
-        footer.addWidget(save_button)
+        footer.addWidget(self.save_button)
         root.addLayout(footer)
         cancel_button.clicked.connect(self.reject)
-        save_button.clicked.connect(self._save)
+        self.save_button.clicked.connect(self._save)
+        self.pallet_widget.composition_changed.connect(lambda: self.save_button.setEnabled(True))
 
     def _destination_drafts(self) -> list[dict]:
         return [

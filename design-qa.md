@@ -2,6 +2,7 @@
 
 - Source visual truth: `C:\Users\OSCAR24\.codex\generated_images\019f6253-33ae-7421-ad68-a15261b0d169\exec-fd6bb544-d09b-4b43-a533-d23b3fdfd2ac.png`
 - Implementation screenshot: `docs/screenshots/issue_178_pallet_composition/02_panel_lateral_pallet_mixto.png`
+- Empty-state screenshot: `docs/screenshots/issue_178_pallet_composition/01_nueva_orden_grilla_pallets.png`
 - Viewport: source 1440x1024; implementation 1440x900 desktop window.
 - State: saved pending order with no pallets and the contextual `Armar pallets` action.
 
@@ -23,6 +24,7 @@ The order row was checked at full resolution. `Sin preparar`, `Pendiente`, and `
 
 1. Initial implementation kept driver, carrier and truck as main table columns and placed `Armar pallets` in the toolbar. This drifted from the selected concept and made the table crowded.
 2. The main row was reduced to order, customer/destination/product, pallet preparation, state and contextual action. Transport information remains in the existing expanded detail. The post-fix screenshot is the implementation evidence listed above.
+3. Manual review rejected the initial pallet dialog because it exposed enabled editor actions before a pallet existed and rendered the total with poor contrast. The empty state now shows pending units centrally, uses `Agregar primer pallet`, disables the editor and save action, starts quantity at 1, and gives the total explicit high-contrast colors. The post-fix evidence is the empty-state screenshot listed above.
 
 ## Verification limits
 
