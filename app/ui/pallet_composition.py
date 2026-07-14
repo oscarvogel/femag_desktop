@@ -188,25 +188,21 @@ class PalletCompositionWidget(QWidget):
         self.add_allocation_button.setObjectName("addPalletAllocationButton")
         self.add_allocation_button.clicked.connect(self._add_from_editor)
         editor.addWidget(self.add_allocation_button)
-        self.allocation_table = QTableWidget(0, 4)
+        self.allocation_table = QTableWidget(0, 5)
         self.allocation_table.setObjectName("palletAllocationTable")
-        self.allocation_table.setHorizontalHeaderLabels(("Cliente / destino", "Articulo", "Cantidad", "Kg"))
+        self.allocation_table.setHorizontalHeaderLabels(
+            ("Cliente / destino", "Articulo", "Cantidad", "Kg", "Accion")
+        )
         self.allocation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.allocation_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.allocation_table.verticalHeader().setVisible(False)
         self.allocation_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.allocation_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.allocation_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         editor.addWidget(self.allocation_table, 1)
-        self.remove_allocation_button = QPushButton("Quitar producto del pallet")
-        self.remove_allocation_button.setObjectName("removePalletAllocationButton")
-        self.remove_allocation_button.clicked.connect(self._remove_selected_allocation)
-        editor.addWidget(self.remove_allocation_button)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
         self.product_combo.currentIndexChanged.connect(self._suggest_remaining_quantity)
         self.quantity_input.valueChanged.connect(self._update_editor_actions)
-        self.allocation_table.currentCellChanged.connect(
-            lambda _row, _column, _previous_row, _previous_column: self._update_editor_actions()
-        )
         root.addWidget(self.editor_panel, 2)
 
     def set_destinations(self, destinations: list[dict]) -> None:
@@ -497,10 +493,9 @@ class PalletCompositionWidget(QWidget):
             return
         self.add_allocation(self._selected_sequence, address_id, product_id, quantity)
 
-    def _remove_selected_allocation(self) -> None:
+    def _remove_allocation(self, row: int) -> None:
         if self._selected_sequence is None:
             return
-        row = self.allocation_table.currentRow()
         pallet = self._pallet(self._selected_sequence)
         if 0 <= row < len(pallet["allocations"]):
             pallet["allocations"].pop(row)
@@ -542,6 +537,13 @@ class PalletCompositionWidget(QWidget):
             )
             for column, value in enumerate(values):
                 self.allocation_table.setItem(row, column, QTableWidgetItem(value))
+            remove_button = QPushButton("Quitar")
+            remove_button.setObjectName(f"removePalletProductButton_{row}")
+            remove_button.setToolTip("Quitar este producto del pallet")
+            remove_button.clicked.connect(
+                lambda _checked=False, allocation_row=row: self._remove_allocation(allocation_row)
+            )
+            self.allocation_table.setCellWidget(row, 4, remove_button)
         if pallet["allocations"]:
             self.allocation_table.selectRow(min(max(selected_row, 0), len(pallet["allocations"]) - 1))
         self._suggest_remaining_quantity()
@@ -555,6 +557,3 @@ class PalletCompositionWidget(QWidget):
             and self.quantity_input.value() > 0
         )
         self.add_allocation_button.setEnabled(can_add)
-        self.remove_allocation_button.setEnabled(
-            has_pallet and self.allocation_table.currentRow() >= 0
-        )
