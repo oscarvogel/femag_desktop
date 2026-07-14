@@ -126,3 +126,43 @@ def test_pallet_cards_show_individual_invalid_and_complete_states(db):
     assert widget.card_for_sequence(1).property("compositionState") == "invalid"
     assert widget.card_for_sequence(2).property("compositionState") == "complete"
     assert widget.summary_label.text() == "2 pallets · 1 completo · 1 pendiente"
+
+
+def test_zero_weight_marks_only_the_pallet_with_that_snapshot(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.load_pallets(
+        [
+            {
+                "sequence": 1,
+                "allocations": [{
+                    "client_id": destination["client_id"],
+                    "address_id": destination["address_id"],
+                    "product_id": product["product_id"],
+                    "quantity": 20,
+                    "peso_unitario_kg": Decimal("0.000"),
+                }],
+            },
+            {
+                "sequence": 2,
+                "allocations": [{
+                    "client_id": destination["client_id"],
+                    "address_id": destination["address_id"],
+                    "product_id": product["product_id"],
+                    "quantity": 20,
+                    "peso_unitario_kg": Decimal("25.000"),
+                }],
+            },
+        ]
+    )
+    app.processEvents()
+
+    assert widget.card_for_sequence(1).property("compositionState") == "incomplete"
+    assert widget.card_for_sequence(2).property("compositionState") == "complete"

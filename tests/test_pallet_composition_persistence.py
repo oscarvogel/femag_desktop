@@ -105,6 +105,11 @@ def test_create_order_persists_mixed_pallets_and_weight_snapshots(db):
     service.update_order(order, destinations=_destinations(data))
     assert service.composition(order).total_kg == Decimal("1050.000")
 
+    edited_pallets = service._persisted_pallet_payload(order)
+    edited_pallets[0]["allocations"][0]["peso_unitario_kg"] = Decimal("999.000")
+    service.update_order(order, pallets=edited_pallets)
+    assert service.composition(order).total_kg == Decimal("1050.000")
+
 
 def test_create_order_allows_pending_but_rejects_excess_assignments(db):
     from app.services.load_order_service import LoadOrderService

@@ -311,25 +311,35 @@ class PalletCompositionWidget(QWidget):
             pallets=self._domain_pallets(),
         )
         self.total_kg_label.setText(_kg_text(result.total_kg))
-        invalid_keys = {
-            (issue.destination_id, issue.product_id)
-            for issue in result.issues
-            if issue.code == "excess"
-        }
         pending_keys = {
             (issue.destination_id, issue.product_id)
             for issue in result.issues
-            if issue.code in {"pending", "zero_weight"}
+            if issue.code == "pending"
         }
         states = {}
-        for pallet in self._pallets:
+        requested_by_key = {
+            (line.destination_id, line.product_id): line.quantity
+            for line in self._requested_lines()
+        }
+        assigned_by_key = {key: Decimal("0.000") for key in requested_by_key}
+        pallet_keys = {}
+        for pallet in sorted(self._pallets, key=lambda item: item["sequence"]):
             keys = {(item["address_id"], item["product_id"]) for item in pallet["allocations"]}
-            if keys & invalid_keys:
-                states[pallet["sequence"]] = "invalid"
-            elif not keys or keys & pending_keys:
-                states[pallet["sequence"]] = "incomplete"
-            else:
-                states[pallet["sequence"]] = "complete"
+            pallet_keys[pallet["sequence"]] = keys
+            state = "incomplete" if not keys else "complete"
+            for allocation in pallet["allocations"]:
+                key = (allocation["address_id"], allocation["product_id"])
+                assigned_by_key[key] = assigned_by_key.get(key, Decimal("0.000")) + Decimal(
+                    str(allocation["quantity"])
+                )
+                if assigned_by_key[key] > requested_by_key.get(key, Decimal("0.000")):
+                    state = "invalid"
+                elif allocation["peso_unitario_kg"] <= 0 and state != "invalid":
+                    state = "incomplete"
+            states[pallet["sequence"]] = state
+        for sequence, keys in pallet_keys.items():
+            if states[sequence] == "complete" and keys & pending_keys:
+                states[sequence] = "incomplete"
         complete_count = sum(state == "complete" for state in states.values())
         pending_count = len(self._pallets) - complete_count
         self.summary_label.setText(

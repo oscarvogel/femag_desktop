@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from app.config.database import database_proxy
 from app.models.load_orders import (
@@ -95,6 +96,7 @@ class LoadOrderService:
         pallets = changes.pop("pallets", None)
         normalized_destinations = None
         normalized_pallets = None
+        weight_snapshots = self._pallet_weight_snapshots(order)
         if destinations is not None:
             if not order.is_unissued:
                 raise ValueError("Solo se pueden editar clientes y productos de ordenes pendientes.")
@@ -108,13 +110,17 @@ class LoadOrderService:
                 normalized_pallets = self._validate_pallets(
                     self._persisted_pallet_payload(order),
                     normalized_destinations,
-                    preserve_weight_snapshots=True,
+                    weight_snapshots=weight_snapshots,
                 )
         if pallets is not None:
             if not order.is_unissued:
                 raise ValueError("Solo se pueden editar pallets de ordenes pendientes.")
             pallet_destinations = normalized_destinations or self._persisted_destination_payload(order)
-            normalized_pallets = self._validate_pallets(pallets, pallet_destinations)
+            normalized_pallets = self._validate_pallets(
+                pallets,
+                pallet_destinations,
+                weight_snapshots=weight_snapshots,
+            )
         new_driver = changes.get("driver")
         candidate_carrier = changes.get("carrier", order.carrier)
         candidate_driver = changes.get("driver", order.driver)
@@ -316,7 +322,7 @@ class LoadOrderService:
         pallets: list[dict],
         destinations: list[dict],
         *,
-        preserve_weight_snapshots: bool = False,
+        weight_snapshots: dict[tuple[int, int, int], Decimal] | None = None,
     ) -> list[dict]:
         normalized: list[dict] = []
         valid_lines = {
@@ -367,10 +373,9 @@ class LoadOrderService:
                             "delivery_address": address,
                             "product": product,
                             "quantity": quantity,
-                            "peso_unitario_kg": (
-                                allocation["peso_unitario_kg"]
-                                if preserve_weight_snapshots
-                                else product.peso_unitario_kg
+                            "peso_unitario_kg": (weight_snapshots or {}).get(
+                                (sequence, address.id, product.id),
+                                product.peso_unitario_kg,
                             ),
                         }
                     )
@@ -428,6 +433,14 @@ class LoadOrderService:
             }
             for pallet in order.pallets.order_by(LoadOrderPallet.sequence)
         ]
+
+    def _pallet_weight_snapshots(self, order: LoadOrder) -> dict[tuple[int, int, int], Decimal]:
+        return {
+            (pallet.sequence, allocation.destination.delivery_address.id, allocation.product.id):
+                allocation.peso_unitario_kg
+            for pallet in order.pallets
+            for allocation in pallet.allocations
+        }
 
     def _requested_lines(self, destinations: list[dict]) -> list[RequestedLine]:
         return [
