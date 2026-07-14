@@ -18,7 +18,7 @@ def _order():
     carrier = Carrier.create(name="Transporte Norte")
     driver = Driver.create(name="Juan Perez", carrier=carrier)
     truck = Truck.create(domain="AB123CD", carrier=carrier)
-    product = Product.create(name="Fecula", unit="kg")
+    product = Product.create(name="Fecula", unit="kg", peso_unitario_kg=2.5)
     pallet = PalletType.create(type="Comun", measure="1x1", weight=12.5)
     return LoadOrderService(current_user="admin").create_order(
         client=client,
@@ -27,7 +27,20 @@ def _order():
         driver=driver,
         truck=truck,
         products=[{"product": product, "quantity": 1000}],
-        pallets=[{"pallet_type": pallet, "measure": "1x1", "weight": 12.5, "quantity": 8}],
+        pallets=[
+            {
+                "sequence": 1,
+                "pallet_type": pallet,
+                "allocations": [
+                    {
+                        "client": client,
+                        "delivery_address": address,
+                        "product": product,
+                        "quantity": 1000,
+                    }
+                ],
+            }
+        ],
         observations="Imprimir con hoja resumen",
     )
 
@@ -63,6 +76,8 @@ def test_print_service_exports_load_order_pdf_with_real_format_fields(db, tmp_pa
     assert "Transporte Norte" in text
     assert "Juan Perez" in text
     assert "AB123CD" in text
+    assert "TOTAL MERCADERIA:" in text
+    assert "2.500,000 kg" in text
     assert "Imprimir con hoja resumen" in text
     assert "Firma del encargado de carga" in text
     assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 1

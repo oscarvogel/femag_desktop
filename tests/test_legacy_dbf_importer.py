@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 
 def test_legacy_dbf_master_import_creates_traceable_records(db):
@@ -49,7 +50,24 @@ def test_legacy_dbf_master_import_creates_traceable_records(db):
     assert driver.carrier == carrier
     assert truck.domain == "AB123CD"
     assert product.unit == "kg"
+    assert product.peso_unitario_kg == Decimal("0.000")
     assert json.loads(batch.summary)["clients"]["created"] == 1
+
+
+def test_legacy_product_reimport_preserves_manually_entered_weight(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Product
+
+    importer = LegacyDbfMasterImporter()
+    rows = {"products": [{"CODIGO": "P001", "NOMBRE": "Fecula", "UNIDAD": "kg"}]}
+    importer.import_rows(rows, source_system="legacy_dbf")
+    product = Product.get()
+    product.peso_unitario_kg = Decimal("25.000")
+    product.save()
+
+    importer.import_rows(rows, source_system="legacy_dbf")
+
+    assert Product.get_by_id(product.id).peso_unitario_kg == Decimal("25.000")
 
 
 def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
