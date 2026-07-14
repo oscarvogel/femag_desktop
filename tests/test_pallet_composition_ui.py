@@ -163,6 +163,38 @@ def test_selected_product_suggests_pending_quantity_and_prevents_excess(db):
     assert widget.pallet_drafts()[1]["allocations"][0]["quantity"] == 30
 
 
+def test_added_allocation_is_selected_and_can_be_removed(db):
+    from PyQt5.QtWidgets import QApplication, QAbstractItemView
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallet()
+    widget.destination_combo.setCurrentIndex(
+        widget.destination_combo.findData(destination["address_id"])
+    )
+    widget.product_combo.setCurrentIndex(widget.product_combo.findData(product["product_id"]))
+    widget.quantity_input.setValue(10)
+    widget._add_from_editor()
+    app.processEvents()
+
+    assert widget.allocation_table.selectionBehavior() == QAbstractItemView.SelectRows
+    assert widget.allocation_table.currentRow() == 0
+    assert widget.remove_allocation_button.text() == "Quitar producto del pallet"
+    assert widget.remove_allocation_button.isEnabled() is True
+
+    widget.remove_allocation_button.click()
+    app.processEvents()
+
+    assert widget.pallet_drafts()[0]["allocations"] == []
+    assert widget.quantity_input.value() == 40
+    assert widget.remove_allocation_button.isEnabled() is False
+
+
 def test_pallet_widget_supports_mixed_clients_and_serializes_draft(db):
     from PyQt5.QtWidgets import QApplication
 

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -192,8 +193,11 @@ class PalletCompositionWidget(QWidget):
         self.allocation_table.setHorizontalHeaderLabels(("Cliente / destino", "Articulo", "Cantidad", "Kg"))
         self.allocation_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.allocation_table.verticalHeader().setVisible(False)
+        self.allocation_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.allocation_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.allocation_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         editor.addWidget(self.allocation_table, 1)
-        self.remove_allocation_button = QPushButton("Quitar asignacion")
+        self.remove_allocation_button = QPushButton("Quitar producto del pallet")
         self.remove_allocation_button.setObjectName("removePalletAllocationButton")
         self.remove_allocation_button.clicked.connect(self._remove_selected_allocation)
         editor.addWidget(self.remove_allocation_button)
@@ -525,6 +529,7 @@ class PalletCompositionWidget(QWidget):
             self.allocation_table,
         ):
             control.setEnabled(True)
+        selected_row = self.allocation_table.currentRow()
         self.allocation_table.setRowCount(len(pallet["allocations"]))
         for row, allocation in enumerate(pallet["allocations"]):
             destination = self._destination(allocation["address_id"])
@@ -537,6 +542,8 @@ class PalletCompositionWidget(QWidget):
             )
             for column, value in enumerate(values):
                 self.allocation_table.setItem(row, column, QTableWidgetItem(value))
+        if pallet["allocations"]:
+            self.allocation_table.selectRow(min(max(selected_row, 0), len(pallet["allocations"]) - 1))
         self._suggest_remaining_quantity()
 
     def _update_editor_actions(self) -> None:
