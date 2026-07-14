@@ -73,3 +73,24 @@ def test_reconcile_without_pallets_is_an_incomplete_draft():
     assert result.is_complete is False
     assert result.can_issue is False
     assert [issue.code for issue in result.issues] == ["no_pallets", "pending"]
+
+
+def test_reconcile_counts_clients_not_delivery_addresses_and_rejects_negative_weight():
+    result = PalletCompositionService().reconcile(
+        requested=[
+            RequestedLine(1, 10, Decimal("1"), "Cliente A / Destino 1"),
+            RequestedLine(2, 20, Decimal("1"), "Cliente A / Destino 2"),
+        ],
+        pallets=[
+            PalletDraft(
+                sequence=1,
+                allocations=(
+                    AllocationDraft(1, 10, Decimal("1"), Decimal("2"), client_id=99),
+                    AllocationDraft(2, 20, Decimal("1"), Decimal("-1"), client_id=99),
+                ),
+            )
+        ],
+    )
+
+    assert result.pallets[0].client_count == 1
+    assert [issue.code for issue in result.issues] == ["zero_weight"]

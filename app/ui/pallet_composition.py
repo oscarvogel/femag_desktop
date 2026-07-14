@@ -297,6 +297,7 @@ class PalletCompositionWidget(QWidget):
                         quantity=allocation["quantity"],
                         peso_unitario_kg=allocation["peso_unitario_kg"],
                         label=allocation.get("product_label", ""),
+                        client_id=allocation.get("client_id"),
                     )
                     for allocation in pallet["allocations"]
                 ),
@@ -310,12 +311,31 @@ class PalletCompositionWidget(QWidget):
             pallets=self._domain_pallets(),
         )
         self.total_kg_label.setText(_kg_text(result.total_kg))
-        invalid = any(issue.code == "excess" for issue in result.issues)
-        pending = any(issue.code in {"pending", "zero_weight", "no_pallets"} for issue in result.issues)
-        complete_count = len(self._pallets) if not invalid and not pending else 0
+        invalid_keys = {
+            (issue.destination_id, issue.product_id)
+            for issue in result.issues
+            if issue.code == "excess"
+        }
+        pending_keys = {
+            (issue.destination_id, issue.product_id)
+            for issue in result.issues
+            if issue.code in {"pending", "zero_weight"}
+        }
+        states = {}
+        for pallet in self._pallets:
+            keys = {(item["address_id"], item["product_id"]) for item in pallet["allocations"]}
+            if keys & invalid_keys:
+                states[pallet["sequence"]] = "invalid"
+            elif not keys or keys & pending_keys:
+                states[pallet["sequence"]] = "incomplete"
+            else:
+                states[pallet["sequence"]] = "complete"
+        complete_count = sum(state == "complete" for state in states.values())
         pending_count = len(self._pallets) - complete_count
         self.summary_label.setText(
-            f"{len(self._pallets)} pallets · {complete_count} completos · {pending_count} pendientes"
+            f"{len(self._pallets)} pallets · {complete_count} "
+            f"{'completo' if complete_count == 1 else 'completos'} · {pending_count} "
+            f"{'pendiente' if pending_count == 1 else 'pendientes'}"
         )
         self.issue_label.setText("\n".join(issue.message for issue in result.issues))
         while self.card_grid.count():
@@ -334,7 +354,7 @@ class PalletCompositionWidget(QWidget):
             card.client_count_label.setText(
                 f"{pallet_result.client_count} cliente" + ("s" if pallet_result.client_count != 1 else "")
             )
-            card.set_state("invalid" if invalid else ("incomplete" if pending else "complete"))
+            card.set_state(states[pallet["sequence"]])
             card.selected.connect(self._select_pallet)
             self.card_grid.addWidget(card, index // 3, index % 3)
             self._cards[pallet["sequence"]] = card

@@ -8,7 +8,6 @@ from peewee import (
     ForeignKeyField,
     IntegerField,
     TextField,
-    fn,
 )
 from playhouse.migrate import SqliteMigrator, migrate
 
@@ -21,35 +20,61 @@ def ensure_runtime_schema(database) -> None:
         _ensure_model_columns(database, model)
     if hasattr(database, "atomic"):
         _normalize_legacy_pallet_rows(database)
+    if hasattr(database, "get_indexes"):
+        _ensure_pallet_sequence_index(database)
+
+
+def _ensure_pallet_sequence_index(database) -> None:
+    table_name = "loadorderpallet"
+    if any(
+        index.unique and set(index.columns) == {"order_id", "sequence"}
+        for index in database.get_indexes(table_name)
+    ):
+        return
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `loadorderpallet_order_id_sequence` "
+        "ON `loadorderpallet` (`order_id`, `sequence`)"
+    )
 
 
 def _normalize_legacy_pallet_rows(database) -> None:
     from app.models.load_orders import LoadOrderPallet
 
-    legacy_rows = list(LoadOrderPallet.select().where(LoadOrderPallet.quantity > 1).order_by(LoadOrderPallet.id))
-    if not legacy_rows:
+    order_ids = [
+        row.order_id
+        for row in LoadOrderPallet.select(LoadOrderPallet.order).distinct()
+    ]
+    if not order_ids:
         return
     with database.atomic():
-        for row in legacy_rows:
-            original_quantity = row.quantity
-            maximum_sequence = (
-                LoadOrderPallet.select(fn.MAX(LoadOrderPallet.sequence))
-                .where(LoadOrderPallet.order == row.order)
-                .scalar()
-                or 0
+        for order_id in order_ids:
+            rows = list(
+                LoadOrderPallet.select()
+                .where(LoadOrderPallet.order == order_id)
+                .order_by(LoadOrderPallet.id)
             )
-            row.quantity = 1
-            row.save()
-            for offset in range(1, original_quantity):
-                LoadOrderPallet.create(
-                    order=row.order,
-                    pallet_type=row.pallet_type,
-                    sequence=maximum_sequence + offset,
-                    measure=row.measure,
-                    weight=row.weight,
-                    quantity=1,
-                    observations=row.observations,
-                )
+            expanded_rows = []
+            for temporary_sequence, row in enumerate(rows, start=1):
+                original_quantity = max(int(row.quantity or 1), 1)
+                row.sequence = -temporary_sequence
+                row.quantity = 1
+                row.save()
+                expanded_rows.append(row)
+                for _ in range(1, original_quantity):
+                    expanded_rows.append(
+                        LoadOrderPallet.create(
+                            order=order_id,
+                            pallet_type=row.pallet_type,
+                            sequence=-(len(rows) + len(expanded_rows)),
+                            measure=row.measure,
+                            weight=row.weight,
+                            quantity=1,
+                            observations=row.observations,
+                        )
+                    )
+            for sequence, row in enumerate(expanded_rows, start=1):
+                row.sequence = sequence
+                row.save()
 
 
 def _ensure_model_columns(database, model) -> None:

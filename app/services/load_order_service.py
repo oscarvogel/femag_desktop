@@ -108,6 +108,7 @@ class LoadOrderService:
                 normalized_pallets = self._validate_pallets(
                     self._persisted_pallet_payload(order),
                     normalized_destinations,
+                    preserve_weight_snapshots=True,
                 )
         if pallets is not None:
             if not order.is_unissued:
@@ -310,7 +311,13 @@ class LoadOrderService:
             )
         return normalized
 
-    def _validate_pallets(self, pallets: list[dict], destinations: list[dict]) -> list[dict]:
+    def _validate_pallets(
+        self,
+        pallets: list[dict],
+        destinations: list[dict],
+        *,
+        preserve_weight_snapshots: bool = False,
+    ) -> list[dict]:
         normalized: list[dict] = []
         valid_lines = {
             (destination["client"].id, destination["delivery_address"].id, product["product"].id): (
@@ -360,7 +367,11 @@ class LoadOrderService:
                             "delivery_address": address,
                             "product": product,
                             "quantity": quantity,
-                            "peso_unitario_kg": allocation.get("peso_unitario_kg", product.peso_unitario_kg),
+                            "peso_unitario_kg": (
+                                allocation["peso_unitario_kg"]
+                                if preserve_weight_snapshots
+                                else product.peso_unitario_kg
+                            ),
                         }
                     )
                 normalized.append(
@@ -443,6 +454,7 @@ class LoadOrderService:
                         product_id=allocation["product"].id,
                         quantity=allocation["quantity"],
                         peso_unitario_kg=allocation["peso_unitario_kg"],
+                        client_id=allocation["client"].id,
                         label=(
                             f"{allocation['client'].name} / {allocation['delivery_address'].address} / "
                             f"{allocation['product'].name}"
@@ -614,6 +626,7 @@ class LoadOrderService:
                         product_id=allocation.product.id,
                         quantity=allocation.quantity,
                         peso_unitario_kg=allocation.peso_unitario_kg,
+                        client_id=allocation.destination.client.id,
                         label=(
                             f"{allocation.destination.client.name} / "
                             f"{allocation.destination.delivery_address.address} / {allocation.product.name}"

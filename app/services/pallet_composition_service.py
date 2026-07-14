@@ -31,6 +31,7 @@ class AllocationDraft:
     quantity: Decimal
     peso_unitario_kg: Decimal
     label: str = ""
+    client_id: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "quantity", _decimal(self.quantity))
@@ -101,21 +102,21 @@ class PalletCompositionService:
         zero_weight_keys: set[tuple[int, int]] = set()
         for pallet in pallets:
             total_kg = Decimal("0.000")
-            destination_ids: set[int] = set()
+            client_ids: set[int] = set()
             for allocation in pallet.allocations:
                 key = (allocation.destination_id, allocation.product_id)
                 assigned_by_key[key] = _decimal(assigned_by_key[key] + allocation.quantity)
                 labels.setdefault(key, allocation.label)
-                destination_ids.add(allocation.destination_id)
+                client_ids.add(allocation.client_id or allocation.destination_id)
                 total_kg = _decimal(total_kg + allocation.kilos)
-                if allocation.quantity > 0 and allocation.peso_unitario_kg == 0:
+                if allocation.quantity > 0 and allocation.peso_unitario_kg <= 0:
                     zero_weight_keys.add(key)
             pallet_results.append(
                 PalletResult(
                     sequence=pallet.sequence,
                     total_kg=total_kg,
                     allocation_count=len(pallet.allocations),
-                    client_count=len(destination_ids),
+                    client_count=len(client_ids),
                 )
             )
 

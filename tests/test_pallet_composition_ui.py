@@ -107,3 +107,22 @@ def test_pallet_widget_supports_mixed_clients_and_serializes_draft(db):
     assert widget.card_for_sequence(1).client_count_label.text() == "2 clientes"
     assert widget.card_for_sequence(1).property("compositionState") == "incomplete"
     assert "300,000 kg" in widget.total_kg_label.text()
+
+
+def test_pallet_cards_show_individual_invalid_and_complete_states(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallet()
+    widget.add_allocation(1, destinations[0]["address_id"], destinations[0]["products"][0]["product_id"], 41)
+    widget.add_pallet()
+    widget.add_allocation(2, destinations[1]["address_id"], destinations[1]["products"][0]["product_id"], 5)
+    app.processEvents()
+
+    assert widget.card_for_sequence(1).property("compositionState") == "invalid"
+    assert widget.card_for_sequence(2).property("compositionState") == "complete"
+    assert widget.summary_label.text() == "2 pallets · 1 completo · 1 pendiente"

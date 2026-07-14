@@ -102,6 +102,9 @@ def test_create_order_persists_mixed_pallets_and_weight_snapshots(db):
     data["product_a"].save()
     assert service.composition(order).total_kg == Decimal("1050.000")
 
+    service.update_order(order, destinations=_destinations(data))
+    assert service.composition(order).total_kg == Decimal("1050.000")
+
 
 def test_create_order_allows_pending_but_rejects_excess_assignments(db):
     from app.services.load_order_service import LoadOrderService
@@ -137,6 +140,28 @@ def test_create_order_allows_pending_but_rejects_excess_assignments(db):
                 }
             ],
         )
+
+
+def test_create_order_ignores_payload_weight_and_snapshots_product_master(db):
+    from app.models.load_orders import LoadOrderPalletAllocation
+    from app.services.load_order_service import LoadOrderService
+
+    data = _data()
+    data["product_a"].peso_unitario_kg = Decimal("0.000")
+    data["product_a"].save()
+    allocation = _allocation(data, "client_a", "address_a", "product_a", 40)
+    allocation["peso_unitario_kg"] = Decimal("999.000")
+
+    order = LoadOrderService(current_user="pallets").create_order(
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        destinations=_destinations(data),
+        pallets=[{"sequence": 1, "allocations": [allocation]}],
+    )
+
+    saved = LoadOrderPalletAllocation.get()
+    assert saved.peso_unitario_kg == Decimal("0.000")
 
 
 def test_updating_requested_merchandise_preserves_valid_pallet_assignments(db):
