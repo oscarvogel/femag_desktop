@@ -34,7 +34,8 @@ def _kg_text(value) -> str:
     decimal_value = Decimal(str(value)).quantize(Decimal("0.001"))
     whole, fraction = f"{decimal_value:.3f}".split(".")
     grouped = f"{int(whole):,}".replace(",", ".")
-    return f"{grouped},{fraction} kg"
+    significant_fraction = fraction.rstrip("0")
+    return f"{grouped}{',' + significant_fraction if significant_fraction else ''} kg"
 
 
 def _quantity_text(value) -> str:
@@ -55,7 +56,7 @@ class PalletCard(QFrame):
         layout.setContentsMargins(14, 14, 14, 14)
         self.title_label = QLabel(f"PALLET {sequence}")
         self.title_label.setStyleSheet("font-weight: 800; font-size: 15px;")
-        self.kg_label = QLabel("0,000 kg")
+        self.kg_label = QLabel("0 kg")
         self.kg_label.setAlignment(Qt.AlignCenter)
         self.kg_label.setStyleSheet("font-weight: 900; font-size: 27px;")
         self.article_count_label = QLabel("0 articulos")
@@ -126,7 +127,7 @@ class PalletCompositionWidget(QWidget):
         total_caption = QLabel("TOTAL DE LA ORDEN")
         total_caption.setAlignment(Qt.AlignCenter)
         total_caption.setStyleSheet("color: #ffffff; background: transparent; border: 0;")
-        self.total_kg_label = QLabel("0,000 kg")
+        self.total_kg_label = QLabel("0 kg")
         self.total_kg_label.setObjectName("loadOrderTotalKg")
         self.total_kg_label.setAlignment(Qt.AlignCenter)
         self.total_kg_label.setStyleSheet(

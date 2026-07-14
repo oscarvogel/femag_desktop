@@ -65,6 +65,14 @@ def _destinations(db):
     ]
 
 
+def test_kg_text_hides_zero_decimals_and_keeps_real_precision():
+    from app.ui.pallet_composition import _kg_text
+
+    assert _kg_text(200) == "200 kg"
+    assert _kg_text(Decimal("200.500")) == "200,5 kg"
+    assert _kg_text(Decimal("1234.125")) == "1.234,125 kg"
+
+
 def test_empty_state_guides_first_pallet_and_disables_editor_actions(db):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
 
@@ -138,7 +146,7 @@ def test_pallet_cards_show_large_live_kilos_and_completion_state(db):
 
     assert widget.objectName() == "palletCompositionWidget"
     assert widget.total_kg_label.objectName() == "loadOrderTotalKg"
-    assert widget.total_kg_label.text() == "1.050,000 kg"
+    assert widget.total_kg_label.text() == "1.050 kg"
     assert widget.card_for_sequence(1).property("compositionState") == "complete"
     assert widget.card_for_sequence(2).property("compositionState") == "complete"
     assert widget.card_for_sequence(1).width() == widget.card_for_sequence(1).height()
@@ -242,7 +250,7 @@ def test_pallet_widget_supports_mixed_clients_and_serializes_draft(db):
     assert len(draft[0]["allocations"]) == 2
     assert widget.card_for_sequence(1).client_count_label.text() == "2 clientes"
     assert widget.card_for_sequence(1).property("compositionState") == "incomplete"
-    assert "300,000 kg" in widget.total_kg_label.text()
+    assert "300 kg" in widget.total_kg_label.text()
 
 
 def test_pallet_cards_show_individual_invalid_and_complete_states(db):

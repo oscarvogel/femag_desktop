@@ -109,7 +109,7 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
     pallets.pallet_widget.add_pallet()
     assert save_pallets.isEnabled() is True
     pallets.pallet_widget.add_allocation(1, address.id, product.id, 40)
-    assert pallets.pallet_widget.total_kg_label.text() == "1.000,000 kg"
+    assert pallets.pallet_widget.total_kg_label.text() == "1.000 kg"
     pallets._save()
 
     assert LoadOrderPalletAllocation.select().count() == 1
