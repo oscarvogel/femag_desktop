@@ -86,7 +86,7 @@ class PalletCard(QFrame):
         self.status_label.setText(label)
         self.setStyleSheet(
             f"QFrame#{self.objectName()} {{ background: {background}; border: 3px solid {border}; "
-            "border-radius: 14px; }} QLabel { border: none; background: transparent; }"
+            "border-radius: 14px; } QLabel { border: none; background: transparent; }"
         )
 
 

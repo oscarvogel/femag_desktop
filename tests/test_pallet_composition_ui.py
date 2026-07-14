@@ -95,6 +95,33 @@ def test_empty_state_guides_first_pallet_and_disables_editor_actions(db):
     assert widget.quantity_input.isEnabled() is True
 
 
+def test_pallet_card_stylesheet_does_not_emit_qt_parse_warnings():
+    from PyQt5.QtCore import qInstallMessageHandler
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCard
+
+    app = QApplication.instance() or QApplication([])
+    messages = []
+
+    def capture_message(_message_type, _context, message):
+        messages.append(message)
+
+    previous_handler = qInstallMessageHandler(capture_message)
+    try:
+        card = PalletCard(1)
+        card.show()
+        for state in ("complete", "incomplete", "invalid"):
+            card.set_state(state)
+            card.repaint()
+            app.processEvents()
+        card.close()
+    finally:
+        qInstallMessageHandler(previous_handler)
+
+    assert not [message for message in messages if "Could not parse stylesheet" in message]
+
+
 def test_pallet_cards_show_large_live_kilos_and_completion_state(db):
     from PyQt5.QtWidgets import QApplication
 
