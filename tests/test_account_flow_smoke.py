@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pytest import approx
+from conftest import _complete_order_for_issue
 
 from app.models.accounting import ClientAccountMovement
 from app.models.payments import ClientPayment
@@ -56,6 +57,7 @@ def test_full_account_flow_smoke(db):
     assert client_balance(client) == 0.0
 
     # 2. Emitir OC -> debito por el total valorizado.
+    _complete_order_for_issue(order)
     LoadOrderOperationService(current_user="admin").issue(order)
     expected_total = 10 * 1000 * 1.21  # 12100.0
     assert client_balance(client) == approx(expected_total)

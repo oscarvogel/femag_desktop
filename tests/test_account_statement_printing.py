@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from pypdf import PdfReader
+from conftest import _complete_order_for_issue
 
 
 def _pdf_text(path: Path) -> str:
@@ -43,6 +44,7 @@ def test_export_account_statement_with_load_order_movement(db, tmp_path):
         client=client, delivery_address=address, carrier=carrier, driver=driver, truck=truck,
         products=[{"product": product, "quantity": 500}],
     )
+    _complete_order_for_issue(order)
     LoadOrderOperationService(current_user="admin").issue(order)
 
     pdf_path = account_statement_print_service.export_account_statement(client, tmp_path)

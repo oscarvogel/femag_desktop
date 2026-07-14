@@ -1,4 +1,5 @@
 import os
+from conftest import _complete_order_for_issue
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -30,6 +31,7 @@ def test_customer_ledger_page_renders_with_movement(db):
         destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 10}]}],
         pallets=[],
     )
+    _complete_order_for_issue(order)
     LoadOrderOperationService(current_user="admin").issue(order)
     ClientPaymentService(current_user="admin").register_payment(client=client, amount=5000)
 

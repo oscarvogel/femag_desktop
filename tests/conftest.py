@@ -89,3 +89,27 @@ def _valid_order_payload(data):
         "products": [{"product": data["product"], "quantity": 100}],
         "pallets": [],
     }
+
+
+def _complete_order_for_issue(order, current_user="admin"):
+    from app.services.load_order_service import LoadOrderService
+
+    allocations = []
+    for line in order.products:
+        product = line.product
+        if product.peso_unitario_kg == 0:
+            product.peso_unitario_kg = 1
+            product.save()
+        allocations.append(
+            {
+                "client": line.destination.client,
+                "delivery_address": line.destination.delivery_address,
+                "product": product,
+                "quantity": line.quantity,
+            }
+        )
+    LoadOrderService(current_user=current_user).update_order(
+        order,
+        pallets=[{"sequence": 1, "pallet_type": None, "allocations": allocations}],
+    )
+    return order
