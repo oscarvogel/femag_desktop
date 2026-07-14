@@ -264,7 +264,8 @@ def generate(output_dir: Path) -> list[Path]:
     targets.append(output_dir / "03_editar_orden_reconstruida.png")
     _capture(edit_dialog, targets[-1])
 
-    edit_dialog.pallet_widget.add_allocation(1, data["address_a"].id, data["cement"].id, 1)
+    edit_dialog.pallet_widget.add_allocation(2, data["address_a"].id, data["cement"].id, 1)
+    edit_dialog.pallet_widget._select_pallet(2)
     app.processEvents()
     targets.append(output_dir / "04_estado_rojo_excedente.png")
     _capture(edit_dialog, targets[-1])
