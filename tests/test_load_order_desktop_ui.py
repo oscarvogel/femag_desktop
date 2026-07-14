@@ -37,7 +37,7 @@ def _complete_order_for_issue(order, current_user):
     return order
 
 
-def test_load_order_dialog_integrates_pallet_cards_and_persists_draft(db):
+def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(db):
     from decimal import Decimal
 
     from PyQt5.QtWidgets import QApplication, QComboBox
@@ -45,7 +45,7 @@ def test_load_order_dialog_integrates_pallet_cards_and_persists_draft(db):
     from app.models.load_orders import LoadOrderPalletAllocation
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
-    from app.ui.desktop_app import LoadOrderEntryDialog
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderPalletDialog
 
     app = QApplication.instance() or QApplication([])
     carrier = Carrier.create(name="Transporte UI kilos")
@@ -71,9 +71,9 @@ def test_load_order_dialog_integrates_pallet_cards_and_persists_draft(db):
         "Transporte",
         "Destinos",
         "Productos",
-        "Pallets",
         "Revisar",
     ]
+    assert dialog.findChild(QComboBox, "palletProductInput") is None
     _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
     _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
     dialog.destinations = [
@@ -97,20 +97,20 @@ def test_load_order_dialog_integrates_pallet_cards_and_persists_draft(db):
         }
     ]
     dialog._render_destinations()
-    dialog.pallet_widget.add_pallet()
-    dialog.pallet_widget.add_allocation(1, address.id, product.id, 40)
-
-    assert dialog.pallet_widget.total_kg_label.text() == "1.000,000 kg"
     dialog._save()
 
     assert dialog.created_order is not None
+    assert LoadOrderPalletAllocation.select().count() == 0
+
+    pallets = LoadOrderPalletDialog(dialog.service, dialog.created_order)
+    app.processEvents()
+    pallets.pallet_widget.add_pallet()
+    pallets.pallet_widget.add_allocation(1, address.id, product.id, 40)
+    assert pallets.pallet_widget.total_kg_label.text() == "1.000,000 kg"
+    pallets._save()
+
     assert LoadOrderPalletAllocation.select().count() == 1
     assert dialog.service.composition(dialog.created_order).total_kg == Decimal("1000.000")
-
-    edit = LoadOrderEntryDialog(dialog.service, "ui_kilos", order=dialog.created_order)
-    app.processEvents()
-    assert edit.pallet_widget.total_kg_label.text() == "1.000,000 kg"
-    assert edit.pallet_widget.card_for_sequence(1).property("compositionState") == "complete"
 
 
 def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
@@ -343,7 +343,7 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
     assert 600 <= dialog.minimumHeight() < 760
     steps = dialog.findChild(QWidget, "loadOrderEntryStepList")
     stack = dialog.findChild(QStackedWidget, "loadOrderEntryStepStack")
-    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(5)]
+    step_buttons = [dialog.findChild(QPushButton, f"loadOrderStepButton{index}") for index in range(4)]
     previous_button = dialog.findChild(QPushButton, "previousLoadOrderStepButton")
     next_button = dialog.findChild(QPushButton, "nextLoadOrderStepButton")
     assert steps is not None
@@ -353,12 +353,11 @@ def test_load_order_dialog_layout_keeps_work_sections_readable(db):
         "1  Transporte",
         "2  Destinos",
         "3  Productos",
-        "4  Pallets",
-        "5  Revisar",
+        "4  Revisar",
     ]
     assert all(button.property("stepNav") is True for button in step_buttons)
     assert step_buttons[0].isChecked() is True
-    assert stack.count() == 5
+    assert stack.count() == 4
     assert previous_button.isEnabled() is False
     assert next_button.isEnabled() is True
     next_button.click()
@@ -596,9 +595,8 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     table.setCurrentCell(0, 0)
 
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
-    assert "Camión / patente" in headers
-    truck_column = headers.index("Camión / patente")
-    assert table.item(0, truck_column).text() == "UI123AA"
+    assert "Preparación de pallets" in headers
+    assert "Acción" in headers
 
     window.findChild(QPushButton, "issueLoadOrderButton").click()
     app.processEvents()
@@ -704,6 +702,12 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert button.isEnabled() is True
     assert not button.icon().isNull()
     assert not window.findChild(QPushButton, "newLoadOrderButton").icon().isNull()
+    headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
+    action_column = headers.index("Acción")
+    pallets_button = table.cellWidget(0, action_column)
+    assert pallets_button.isEnabled() is True
+    assert pallets_button.text() == "Armar pallets"
+    assert table.item(0, headers.index("Preparación de pallets")).text() == "Sin preparar"
     assert labels["summary"].wordWrap() is True
     assert labels["transport"].wordWrap() is True
     assert "ISSUE169 Cliente Norte" in labels["summary"].text()

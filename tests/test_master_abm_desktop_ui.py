@@ -489,10 +489,12 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
     app.processEvents()
     table = window.findChild(QTableWidget, "loadOrdersTable")
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
-    truck_column = headers.index("Camión / patente")
-
+    assert "Preparación de pallets" in headers
     assert table.rowCount() == 2
-    assert table.item(0, truck_column).text() == "ORD123"
+    table.setCurrentCell(0, 0)
+    app.processEvents()
+    detail = table.cellWidget(1, 0)
+    assert "ORD123" in detail.property("detailLabels")["transport"].text()
 
 
 def test_carriers_abm_page_creates_edits_and_refreshes_grid(db):

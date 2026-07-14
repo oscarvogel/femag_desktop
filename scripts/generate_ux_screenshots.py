@@ -8,14 +8,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from peewee import SqliteDatabase
-from PyQt5.QtGui import QImage
+from PyQt5.QtCore import QPoint
+from PyQt5.QtGui import QColor, QImage, QPainter
 from PyQt5.QtWidgets import QApplication
 
 from app.config.database import bind_database
 from app.models import ALL_MODELS
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.security import User, UserProfile
 from app.services.load_order_service import LoadOrderService
-from app.ui.desktop_app import LoadOrderEntryDialog
+from app.services.permission_service import PermissionService
+from app.ui.desktop_app import FemagDesktopWindow, LoadOrderEntryDialog, LoadOrderPalletDialog
 
 
 DEFAULT_OUTPUT = Path("docs") / "screenshots" / "issue_178_pallet_composition"
@@ -167,17 +170,22 @@ def _pallet_payload(data):
     ]
 
 
-def _show_dialog(dialog, app) -> None:
+def _show_dialog(dialog, app, *, step: int | None = None) -> None:
     dialog.resize(1180, 700)
     dialog.show()
-    dialog._go_to_step(3)
+    if step is not None:
+        dialog._go_to_step(step)
     app.processEvents()
 
 
 def _capture(widget, target: Path) -> None:
     widget.repaint()
     QApplication.processEvents()
-    opaque_image = widget.grab().toImage().convertToFormat(QImage.Format_RGB32)
+    opaque_image = QImage(widget.size(), QImage.Format_RGB32)
+    opaque_image.fill(QColor("white"))
+    painter = QPainter(opaque_image)
+    widget.render(painter, QPoint())
+    painter.end()
     if not opaque_image.save(str(target), "PNG"):
         raise RuntimeError(f"No se pudo guardar {target}")
 
@@ -197,59 +205,8 @@ def generate(output_dir: Path) -> list[Path]:
     _set_combo(new_dialog.truck_combo, data["truck"].id)
     new_dialog.destinations = _destination_drafts(data)
     new_dialog._render_destinations()
-    new_dialog.pallet_widget.load_pallets(
-        [
-            {
-                "sequence": 1,
-                "allocations": [
-                    {
-                        "client_id": data["client_a"].id,
-                        "address_id": data["address_a"].id,
-                        "product_id": data["cement"].id,
-                        "product_label": data["cement"].name,
-                        "quantity": 25,
-                        "peso_unitario_kg": data["cement"].peso_unitario_kg,
-                    },
-                    {
-                        "client_id": data["client_b"].id,
-                        "address_id": data["address_b"].id,
-                        "product_id": data["adhesive"].id,
-                        "product_label": data["adhesive"].name,
-                        "quantity": 20,
-                        "peso_unitario_kg": data["adhesive"].peso_unitario_kg,
-                    },
-                ],
-            },
-            {
-                "sequence": 2,
-                "allocations": [
-                    {
-                        "client_id": data["client_a"].id,
-                        "address_id": data["address_a"].id,
-                        "product_id": data["cement"].id,
-                        "product_label": data["cement"].name,
-                        "quantity": 15,
-                        "peso_unitario_kg": data["cement"].peso_unitario_kg,
-                    },
-                    {
-                        "client_id": data["client_a"].id,
-                        "address_id": data["address_a"].id,
-                        "product_id": data["lime"].id,
-                        "product_label": data["lime"].name,
-                        "quantity": 15,
-                        "peso_unitario_kg": data["lime"].peso_unitario_kg,
-                    },
-                ],
-            },
-        ]
-    )
-    _show_dialog(new_dialog, app)
+    _show_dialog(new_dialog, app, step=3)
     targets = [output_dir / "01_nueva_orden_grilla_pallets.png"]
-    _capture(new_dialog, targets[-1])
-
-    new_dialog.pallet_widget._select_pallet(1)
-    app.processEvents()
-    targets.append(output_dir / "02_panel_lateral_pallet_mixto.png")
     _capture(new_dialog, targets[-1])
 
     order = service.create_order(
@@ -257,13 +214,31 @@ def generate(output_dir: Path) -> list[Path]:
         driver=data["driver"],
         truck=data["truck"],
         destinations=_service_destinations(data),
-        pallets=_pallet_payload(data),
+        pallets=[],
     )
-    edit_dialog = LoadOrderEntryDialog(service, "captura178", order=order)
-    _show_dialog(edit_dialog, app)
-    targets.append(output_dir / "03_editar_orden_reconstruida.png")
-    _capture(edit_dialog, targets[-1])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="captura178_admin", password_hash="x", profile=profile)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    window.resize(1440, 900)
+    window._navigate_to_route("load_orders")
+    window.show()
+    app.processEvents()
+    targets.append(output_dir / "02_panel_lateral_pallet_mixto.png")
+    _capture(window, targets[-1])
+    window.close()
 
+    order = service.update_order(order, pallets=_pallet_payload(data))
+    pallet_dialog = LoadOrderPalletDialog(service, order)
+    _show_dialog(pallet_dialog, app)
+    pallet_dialog.pallet_widget._select_pallet(1)
+    app.processEvents()
+    targets.append(output_dir / "03_editar_orden_reconstruida.png")
+    _capture(pallet_dialog, targets[-1])
+
+    pallet_dialog.close()
+    edit_dialog = LoadOrderPalletDialog(service, order)
+    _show_dialog(edit_dialog, app)
     edit_dialog.pallet_widget.add_allocation(2, data["address_a"].id, data["cement"].id, 1)
     edit_dialog.pallet_widget._select_pallet(2)
     app.processEvents()

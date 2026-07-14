@@ -620,7 +620,9 @@ class FemagDesktopWindow(QMainWindow):
         table = QTableWidget(0, len(spec.table_columns))
         table.setObjectName("loadOrdersTable")
         table.setHorizontalHeaderLabels(spec.table_columns)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        for column, width in enumerate((105, 90, 135, 135, 135, 190, 105, 145)):
+            table.setColumnWidth(column, width)
         table.verticalHeader().setVisible(False)
         table.setShowGrid(False)
         table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -653,16 +655,24 @@ class FemagDesktopWindow(QMainWindow):
                         _summarize_order_clients(order),
                         _summarize_order_deliveries(order),
                         _summarize_order_products(order),
-                        str(sum(pallet.quantity for pallet in order.pallets)),
-                        order.driver.name,
-                        order.carrier.name,
-                        order.truck.domain,
+                        _load_order_pallet_progress(service, order),
                         _display_status(order.status),
+                        "",
                     )
                     for column, value in enumerate(values):
                         table.setItem(visual_row, column, QTableWidgetItem(value))
                     table.item(visual_row, 0).setData(Qt.UserRole, order.id)
-                    table.item(visual_row, 9).setForeground(_status_color(order.status))
+                    table.item(visual_row, 6).setForeground(_status_color(order.status))
+                    pallet_action = _action_button(
+                        f"prepareLoadOrderPalletsButton{order.id}",
+                        _load_order_pallet_action_text(service, order),
+                        secondary=bool(order.pallets.exists()),
+                    )
+                    pallet_action.setEnabled(order.is_unissued)
+                    pallet_action.clicked.connect(
+                        lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
+                    )
+                    table.setCellWidget(visual_row, 7, pallet_action)
                     if order.id == selected_id:
                         selected_row = visual_row
                         visual_row += 1
@@ -753,6 +763,26 @@ class FemagDesktopWindow(QMainWindow):
                 selected_order_id["value"] = dialog.created_order.id
                 refresh()
                 feedback.setText(f"Orden {_format_order_number(dialog.created_order.order_number)} actualizada.")
+
+        def open_pallets_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para preparar sus pallets.")
+                return
+            if not order.is_unissued:
+                feedback.setText("Solo se pueden modificar pallets de ordenes pendientes.")
+                return
+            dialog = LoadOrderPalletDialog(service, order, self)
+            if dialog.exec_() == QDialog.Accepted:
+                selected_order_id["value"] = order.id
+                refresh()
+                feedback.setText(
+                    f"Pallets de la orden {_format_order_number(order.order_number)} guardados."
+                )
+
+        def open_pallets_for_order(order_id: int) -> None:
+            selected_order_id["value"] = order_id
+            open_pallets_dialog()
 
         def issue() -> None:
             order = selected_order()
@@ -983,6 +1013,30 @@ def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
     metrics = QLabel("   ".join(f"{label}: {value}" for label, value, _helper in _load_order_kpis(service)))
     metrics.setObjectName("loadOrderMetricsStrip")
     return metrics
+
+
+def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
+    composition = service.composition(order)
+    pallet_count = len(composition.pallets)
+    if pallet_count == 0:
+        return "Sin preparar"
+    if composition.can_issue:
+        return f"{pallet_count} pallet" + ("s · Completo" if pallet_count != 1 else " · Completo")
+    if any(issue.code == "excess" for issue in composition.issues):
+        return f"{pallet_count} pallet" + ("s · Revisar exceso" if pallet_count != 1 else " · Revisar exceso")
+    if composition.pending_quantity > 0:
+        return f"{pallet_count} pallet" + (
+            f"s · Faltan {composition.pending_quantity:g}" if pallet_count != 1 else f" · Faltan {composition.pending_quantity:g}"
+        )
+    return f"{pallet_count} pallet" + ("s · Revisar pesos" if pallet_count != 1 else " · Revisar pesos")
+
+
+def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
+    if not order.pallets.exists():
+        return "Armar pallets"
+    if service.composition(order).can_issue:
+        return "Ver pallets"
+    return "Continuar"
 
 
 def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
@@ -1265,6 +1319,124 @@ def _load_order_transport_rows(order: LoadOrder) -> list[tuple[str, str]]:
     ]
 
 
+class LoadOrderPalletDialog(QDialog):
+    """Composes pallets only after the commercial order already exists."""
+
+    def __init__(self, service: LoadOrderService, order: LoadOrder, parent=None):
+        super().__init__(parent)
+        self.service = service
+        self.order = LoadOrder.get_by_id(order.id)
+        self.setObjectName("loadOrderPalletDialog")
+        self.setWindowTitle("Preparacion de pallets")
+        self.setMinimumSize(980, 600)
+        self.resize(1100, 660)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 14)
+        root.setSpacing(12)
+        title = QLabel("Preparacion de pallets")
+        title.setObjectName("dialogTitle")
+        root.addWidget(title)
+        subtitle = QLabel(
+            f"Orden {_format_order_number(self.order.order_number)} guardada. "
+            "Distribuya ahora la mercaderia entre los pallets."
+        )
+        subtitle.setObjectName("formHint")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        self.pallet_widget = PalletCompositionWidget(destinations=self._destination_drafts())
+        self.pallet_widget.load_pallets(self._pallet_drafts())
+        root.addWidget(self.pallet_widget, 1)
+
+        self.feedback = QLabel("")
+        self.feedback.setObjectName("loadOrderPalletDialogFeedback")
+        self.feedback.setWordWrap(True)
+        root.addWidget(self.feedback)
+
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        cancel_button = _action_button("cancelLoadOrderPalletsButton", "Cancelar", secondary=True)
+        save_button = _action_button("saveLoadOrderPalletsButton", "Guardar pallets")
+        footer.addWidget(cancel_button)
+        footer.addWidget(save_button)
+        root.addLayout(footer)
+        cancel_button.clicked.connect(self.reject)
+        save_button.clicked.connect(self._save)
+
+    def _destination_drafts(self) -> list[dict]:
+        return [
+            {
+                "client_id": destination.client.id,
+                "address_id": destination.delivery_address.id,
+                "client_label": destination.client.name,
+                "address_label": (
+                    f"{destination.delivery_address.client.name} - "
+                    f"{destination.delivery_address.address}, {destination.delivery_address.city}"
+                ),
+                "products": [
+                    {
+                        "product_id": line.product.id,
+                        "product_label": line.product.name,
+                        "quantity": line.quantity,
+                        "unit": line.unit,
+                    }
+                    for line in destination.products
+                ],
+            }
+            for destination in self.order.destinations.order_by()
+        ]
+
+    def _pallet_drafts(self) -> list[dict]:
+        return [
+            {
+                "sequence": pallet.sequence,
+                "pallet_type_id": pallet.pallet_type_id,
+                "allocations": [
+                    {
+                        "client_id": allocation.destination.client.id,
+                        "address_id": allocation.destination.delivery_address.id,
+                        "product_id": allocation.product.id,
+                        "product_label": allocation.product.name,
+                        "quantity": float(allocation.quantity),
+                        "peso_unitario_kg": allocation.peso_unitario_kg,
+                    }
+                    for allocation in pallet.allocations
+                ],
+            }
+            for pallet in self.order.pallets.order_by()
+        ]
+
+    def _save(self) -> None:
+        try:
+            pallets = []
+            for pallet in self.pallet_widget.pallet_drafts():
+                allocations = []
+                for allocation in pallet.get("allocations") or []:
+                    address = ClientAddress.get_by_id(allocation["address_id"])
+                    allocations.append(
+                        {
+                            "client": address.client,
+                            "delivery_address": address,
+                            "product": Product.get_by_id(allocation["product_id"]),
+                            "quantity": allocation["quantity"],
+                            "peso_unitario_kg": allocation.get("peso_unitario_kg"),
+                        }
+                    )
+                pallet_type_id = pallet.get("pallet_type_id")
+                pallets.append(
+                    {
+                        "sequence": pallet["sequence"],
+                        "pallet_type": PalletType.get_by_id(pallet_type_id) if pallet_type_id else None,
+                        "allocations": allocations,
+                    }
+                )
+            self.order = self.service.update_order(self.order, pallets=pallets)
+            self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
 class LoadOrderEntryDialog(QDialog):
     def __init__(self, service: LoadOrderService, current_user: str, parent=None, *, order: LoadOrder | None = None):
         super().__init__(parent)
@@ -1315,7 +1487,7 @@ class LoadOrderEntryDialog(QDialog):
         step_title.setObjectName("loadOrderStepTitle")
         step_layout.addWidget(step_title)
         self.step_buttons: list[QPushButton] = []
-        for index, label in enumerate(("Transporte", "Destinos", "Productos", "Pallets", "Revisar")):
+        for index, label in enumerate(("Transporte", "Destinos", "Productos", "Revisar")):
             button = QPushButton(f"{index + 1}  {label}")
             button.setObjectName(f"loadOrderStepButton{index}")
             button.setProperty("stepNav", True)
@@ -1420,15 +1592,6 @@ class LoadOrderEntryDialog(QDialog):
         product_layout.addWidget(self.product_table)
         self.step_stack.addWidget(product)
 
-        pallet_step = QFrame()
-        pallet_step.setObjectName("formSection")
-        pallet_layout = QVBoxLayout(pallet_step)
-        pallet_layout.setContentsMargins(12, 12, 12, 12)
-        pallet_layout.setSpacing(8)
-        self.pallet_widget = PalletCompositionWidget(destinations=self.destinations)
-        pallet_layout.addWidget(self.pallet_widget)
-        self.step_stack.addWidget(pallet_step)
-
         review = QFrame()
         review.setObjectName("formSection")
         review_layout = QVBoxLayout(review)
@@ -1437,10 +1600,12 @@ class LoadOrderEntryDialog(QDialog):
         review_title = QLabel("Revisar orden")
         review_title.setObjectName("sectionTitle")
         review_layout.addWidget(review_title)
-        self.review_kg_label = QLabel("TOTAL DE LA ORDEN: 0,000 kg")
-        self.review_kg_label.setObjectName("loadOrderReviewTotalKg")
-        self.review_kg_label.setStyleSheet("font-size: 28px; font-weight: 900; color: #173a59;")
-        review_layout.addWidget(self.review_kg_label)
+        preparation_hint = QLabel(
+            "La orden se guarda primero. Luego use 'Armar pallets' desde el listado de ordenes."
+        )
+        preparation_hint.setObjectName("loadOrderPalletPreparationHint")
+        preparation_hint.setWordWrap(True)
+        review_layout.addWidget(preparation_hint)
         self.review_table = QTableWidget(0, 6)
         self.review_table.setObjectName("loadOrderReviewTable")
         self.review_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total"))
@@ -1542,26 +1707,6 @@ class LoadOrderEntryDialog(QDialog):
             for destination in self.order.destinations.order_by()
         ]
         self._render_destinations()
-        self.pallet_widget.load_pallets(
-            [
-                {
-                    "sequence": pallet.sequence,
-                    "pallet_type_id": pallet.pallet_type_id,
-                    "allocations": [
-                        {
-                            "client_id": allocation.destination.client.id,
-                            "address_id": allocation.destination.delivery_address.id,
-                            "product_id": allocation.product.id,
-                            "product_label": allocation.product.name,
-                            "quantity": float(allocation.quantity),
-                            "peso_unitario_kg": allocation.peso_unitario_kg,
-                        }
-                        for allocation in pallet.allocations
-                    ],
-                }
-                for pallet in self.order.pallets.order_by()
-            ]
-        )
         self._render_review()
         self._update_save_button_state()
 
@@ -1703,7 +1848,6 @@ class LoadOrderEntryDialog(QDialog):
         if self.destinations and self.destination_table.currentRow() < 0:
             self.destination_table.setCurrentCell(0, 0)
         self._render_products(self.destination_table.currentRow())
-        self.pallet_widget.set_destinations(self.destinations)
         self._render_review()
         self._update_save_button_state()
 
@@ -1747,8 +1891,6 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
-        if hasattr(self, "pallet_widget"):
-            self.review_kg_label.setText(f"TOTAL DE LA ORDEN: {self.pallet_widget.total_kg_label.text()}")
         self._update_save_button_state()
 
     def _is_ready_to_save(self) -> bool:
@@ -1816,35 +1958,13 @@ class LoadOrderEntryDialog(QDialog):
                         ],
                     }
                 )
-            pallets = []
-            for pallet in self.pallet_widget.pallet_drafts():
-                pallet_type_id = pallet.get("pallet_type_id")
-                allocations = []
-                for allocation in pallet.get("allocations") or []:
-                    address = ClientAddress.get_by_id(allocation["address_id"])
-                    allocations.append(
-                        {
-                            "client": address.client,
-                            "delivery_address": address,
-                            "product": Product.get_by_id(allocation["product_id"]),
-                            "quantity": allocation["quantity"],
-                            "peso_unitario_kg": allocation.get("peso_unitario_kg"),
-                        }
-                    )
-                pallets.append(
-                    {
-                        "sequence": pallet["sequence"],
-                        "pallet_type": PalletType.get_by_id(pallet_type_id) if pallet_type_id else None,
-                        "allocations": allocations,
-                    }
-                )
             if self.order is None:
                 self.created_order = self.service.create_order(
                     carrier=Carrier.get_by_id(self.carrier_combo.currentData()),
                     driver=Driver.get_by_id(self.driver_combo.currentData()),
                     truck=Truck.get_by_id(self.truck_combo.currentData()),
                     destinations=destinations,
-                    pallets=pallets,
+                    pallets=[],
                     observations=self.observations_input.text().strip() or None,
                     order_date=self.order_date.date().toPyDate(),
                 )
@@ -1855,7 +1975,6 @@ class LoadOrderEntryDialog(QDialog):
                     driver=Driver.get_by_id(self.driver_combo.currentData()),
                     truck=Truck.get_by_id(self.truck_combo.currentData()),
                     destinations=destinations,
-                    pallets=pallets,
                     observations=self.observations_input.text().strip() or None,
                     date=self.order_date.date().toPyDate(),
                 )
