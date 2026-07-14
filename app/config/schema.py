@@ -3,10 +3,12 @@ from peewee import (
     CharField,
     DateField,
     DateTimeField,
+    DecimalField,
     FloatField,
     ForeignKeyField,
     IntegerField,
     TextField,
+    fn,
 )
 from playhouse.migrate import SqliteMigrator, migrate
 
@@ -17,6 +19,37 @@ def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    if hasattr(database, "atomic"):
+        _normalize_legacy_pallet_rows(database)
+
+
+def _normalize_legacy_pallet_rows(database) -> None:
+    from app.models.load_orders import LoadOrderPallet
+
+    legacy_rows = list(LoadOrderPallet.select().where(LoadOrderPallet.quantity > 1).order_by(LoadOrderPallet.id))
+    if not legacy_rows:
+        return
+    with database.atomic():
+        for row in legacy_rows:
+            original_quantity = row.quantity
+            maximum_sequence = (
+                LoadOrderPallet.select(fn.MAX(LoadOrderPallet.sequence))
+                .where(LoadOrderPallet.order == row.order)
+                .scalar()
+                or 0
+            )
+            row.quantity = 1
+            row.save()
+            for offset in range(1, original_quantity):
+                LoadOrderPallet.create(
+                    order=row.order,
+                    pallet_type=row.pallet_type,
+                    sequence=maximum_sequence + offset,
+                    measure=row.measure,
+                    weight=row.weight,
+                    quantity=1,
+                    observations=row.observations,
+                )
 
 
 def _ensure_model_columns(database, model) -> None:
@@ -68,6 +101,8 @@ def _field_sql(field) -> str:
         return "DATETIME"
     if isinstance(field, DateField):
         return "DATE"
+    if isinstance(field, DecimalField):
+        return f"DECIMAL({field.max_digits},{field.decimal_places})"
     if isinstance(field, FloatField):
         return "DOUBLE"
     if isinstance(field, IntegerField):

@@ -1,6 +1,7 @@
 from datetime import date
+from decimal import Decimal
 
-from peewee import CharField, DateField, FloatField, ForeignKeyField, IntegerField, TextField
+from peewee import CharField, DateField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
@@ -70,11 +71,34 @@ class LoadOrderProduct(BaseModel):
 
 class LoadOrderPallet(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="pallets", on_delete="CASCADE")
-    pallet_type = ForeignKeyField(PalletType, backref="load_order_details")
-    measure = CharField()
-    weight = FloatField()
-    quantity = IntegerField()
+    pallet_type = ForeignKeyField(PalletType, backref="load_order_details", null=True)
+    sequence = IntegerField(default=1)
+    measure = CharField(default="")
+    weight = FloatField(default=0.0)
+    quantity = IntegerField(default=1)
     observations = TextField(null=True)
+
+    @property
+    def kilos(self) -> Decimal:
+        return sum((allocation.kilos for allocation in self.allocations), Decimal("0.000"))
+
+    class Meta:
+        indexes = ((('order', 'sequence'), True),)
+
+
+class LoadOrderPalletAllocation(BaseModel):
+    pallet = ForeignKeyField(LoadOrderPallet, backref="allocations", on_delete="CASCADE")
+    destination = ForeignKeyField(LoadOrderDestination, backref="pallet_allocations", on_delete="CASCADE")
+    product = ForeignKeyField(Product, backref="pallet_allocations")
+    quantity = DecimalField(max_digits=14, decimal_places=3)
+    peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3)
+
+    @property
+    def kilos(self) -> Decimal:
+        return (self.quantity * self.peso_unitario_kg).quantize(Decimal("0.001"))
+
+    class Meta:
+        indexes = ((('pallet', 'destination', 'product'), True),)
 
 
 class LoadOrderStatusHistory(BaseModel):
