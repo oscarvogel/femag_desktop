@@ -872,6 +872,9 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
 
     assert table.item(1, 0).data(256) == first_order.id
     assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
+    assert table.columnSpan(0, 0) == 1
+    assert table.columnSpan(1, 0) == 1
+    assert table.columnSpan(2, 0) == table.columnCount()
 
     table.setCurrentCell(0, 0)
     app.processEvents()

@@ -645,6 +645,8 @@ class FemagDesktopWindow(QMainWindow):
             selected_ids = {selected_id} if selected_id is not None else set()
             refreshing_selection["value"] = True
             try:
+                table.clearSpans()
+                table.setRowCount(0)
                 table.setRowCount(len(rows) + len(selected_ids))
                 visual_row = 0
                 selected_row = 0
