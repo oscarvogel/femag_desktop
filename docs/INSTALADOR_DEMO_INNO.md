@@ -1,60 +1,69 @@
-# Instalador FEMAG Desktop DEMO con Inno Setup
+# Instalador autonomo FEMAG Desktop DEMO
 
-Este instalador es exclusivo para demostraciones comerciales. Se identifica como
-`FEMAG Desktop DEMO`, usa SQLite local, abre la aplicacion con `--demo-ui` y se
-instala por usuario en una carpeta separada de cualquier futura version productiva.
+Este instalador es exclusivo para demostraciones comerciales. Instala la
+aplicacion, Python y todas sus dependencias dentro del paquete generado. La PC
+cliente no necesita Git, Python, winget, acceso a GitHub ni Internet.
 
-## Requisitos para compilar
+## Compilar en la PC de desarrollo
+
+Requisitos exclusivos de la PC que genera el instalador:
 
 - Windows 10 u 11.
+- Python 3.12 y el entorno `.venv` del proyecto.
 - Inno Setup 6.
-- Acceso al repositorio para que el bootstrap prepare la demo.
-
-## Compilar
+- Internet solamente para instalar dependencias de compilacion si faltan.
 
 Desde la raiz del repositorio:
 
 ```powershell
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\FEMAG_Desktop_Demo.iss
+.\scripts\build_demo_installer.ps1
+```
+
+Si las dependencias ya estan instaladas:
+
+```powershell
+.\scripts\build_demo_installer.ps1 -SkipInstallDependencies
 ```
 
 El resultado se genera en:
 
 ```text
-installer\output\FEMAG_Desktop_DEMO_Setup.exe
+installer\output\FEMAG_Desktop_DEMO_Standalone_Setup.exe
 ```
 
-Para validar una rama antes de mergearla:
+## Requisitos de la PC cliente
 
-```powershell
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DSourceBranch=codex/issue-186-inno-demo-installer" installer\FEMAG_Desktop_Demo.iss
-```
-
-La compilacion normal usa `main`. El parametro de rama se reserva para validar
-un PR y no debe usarse para una entrega final.
+- Windows 10 u 11 de 64 bits.
+- No requiere Git.
+- No requiere Python.
+- No requiere winget.
+- No requiere Internet ni acceso a GitHub.
+- No requiere permisos de administrador para la instalacion normal por usuario.
 
 ## Diferencias visibles respecto de produccion
 
 - Producto: `FEMAG Desktop DEMO`.
-- Instalador: `FEMAG_Desktop_DEMO_Setup.exe`.
+- Instalador: `FEMAG_Desktop_DEMO_Standalone_Setup.exe`.
 - Carpeta: `%LOCALAPPDATA%\Programs\FEMAG Desktop DEMO`.
 - Accesos directos: `FEMAG Desktop DEMO`.
-- Base: SQLite local con datos sinteticos.
-- Inicio: siempre `pythonw.exe -m app.main --demo-ui`.
+- Base: `data\femag_demo.sqlite3`, creada localmente con datos sinteticos.
+- Inicio: el ejecutable embebido abre siempre el modo `--demo-ui`.
 - Desinstalacion independiente mediante Aplicaciones instaladas de Windows.
 
-## Requisitos de la PC donde se instala
+La demo usa usuario `demo` y clave `demo`. El instalador no contiene
+credenciales ni datos productivos.
 
-La preparacion inicial requiere Internet. El bootstrap verifica Git y Python
-3.12, intenta instalarlos con `winget` si faltan, descarga el repositorio,
-crea `.venv`, instala dependencias, genera la base demo y ejecuta el smoke.
+## Validacion de humo del paquete
 
-El instalador no contiene credenciales ni datos productivos. La demo usa usuario
-`demo` y clave `demo`.
+El ejecutable empaquetado admite `--smoke` para validacion tecnica:
+
+```powershell
+& ".\dist\FEMAG Desktop DEMO\FEMAG Desktop DEMO.exe" --smoke
+```
+
+El resultado esperado es `FEMAG smoke OK`.
 
 ## Limitaciones actuales
 
-- El ejecutable no tiene firma digital.
-- La primera instalacion requiere Internet.
-- No es un paquete autonomo: Python y las dependencias se preparan en destino.
+- El ejecutable no tiene firma digital y Windows puede mostrar SmartScreen.
 - La validacion final debe realizarse en una PC Windows limpia antes de entregarlo.

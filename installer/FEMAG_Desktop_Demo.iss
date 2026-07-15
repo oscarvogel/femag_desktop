@@ -1,10 +1,6 @@
 #define MyAppName "FEMAG Desktop DEMO"
 #define MyAppVersion "2026.07.15-demo"
 #define MyAppPublisher "Vogel Consultoria"
-#ifndef SourceBranch
-  #define SourceBranch "main"
-#endif
-
 [Setup]
 AppId={{F4E7A5EE-3E2E-4A5D-8A28-DA9E741EDE01}
 AppName={#MyAppName}
@@ -17,7 +13,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=output
-OutputBaseFilename=FEMAG_Desktop_DEMO_Setup
+OutputBaseFilename=FEMAG_Desktop_DEMO_Standalone_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -30,25 +26,23 @@ ArchitecturesAllowed=x64compatible
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Files]
-Source: "..\scripts\instalar_femag_demo.ps1"; DestDir: "{app}\bootstrap"; Flags: ignoreversion
-Source: "abrir_femag_demo.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\FEMAG Desktop DEMO\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\FEMAG Desktop DEMO"; Filename: "{app}\abrir_femag_demo.cmd"; WorkingDir: "{app}"
-Name: "{autodesktop}\FEMAG Desktop DEMO"; Filename: "{app}\abrir_femag_demo.cmd"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{autoprograms}\Desinstalar FEMAG Desktop DEMO"; Filename: "{uninstallexe}"
 
 [Tasks]
 Name: "desktopicon"; Description: "Crear acceso directo de FEMAG Desktop DEMO en el escritorio"; GroupDescription: "Accesos directos:"; Flags: checkedonce
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\bootstrap\instalar_femag_demo.ps1"" -Branch ""{#SourceBranch}"" -InstallDir ""{app}\app"" -SkipUi"; StatusMsg: "Preparando FEMAG Desktop DEMO y sus datos SQLite..."; Flags: waituntilterminated
-Filename: "{app}\abrir_femag_demo.cmd"; Description: "Abrir FEMAG Desktop DEMO"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\FEMAG Desktop DEMO.exe"; Description: "Abrir FEMAG Desktop DEMO"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\app"
-Type: filesandordirs; Name: "{app}\bootstrap"
-Type: files; Name: "{app}\abrir_femag_demo.cmd"
+Type: filesandordirs; Name: "{app}\data"
+Type: filesandordirs; Name: "{app}\outputs"
+Type: filesandordirs; Name: "{app}\backups"
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
