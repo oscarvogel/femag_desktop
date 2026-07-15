@@ -90,6 +90,69 @@ def test_driver_schema_allows_null_carrier_and_cuit(db):
     assert columns["cuit"].null is True
 
 
+def test_runtime_schema_maps_decimal_fields_with_declared_precision():
+    from app.config.schema import _field_sql
+    from app.models.masters import Product
+
+    assert _field_sql(Product.peso_unitario_kg) == "DECIMAL(12,3)"
+
+
+def test_runtime_schema_expands_legacy_aggregated_pallet_rows(db):
+    from app.config.schema import _normalize_legacy_pallet_rows
+    from app.models.load_orders import LoadOrder, LoadOrderPallet
+    from app.models.masters import Carrier, Driver, PalletType, Truck
+
+    carrier = Carrier.create(name="Transporte migracion")
+    driver = Driver.create(name="Chofer migracion", carrier=carrier)
+    truck = Truck.create(domain="MIG123", carrier=carrier)
+    pallet_type = PalletType.create(type="Legacy", measure="1x1", weight=0)
+    order = LoadOrder.create(order_number=501, carrier=carrier, driver=driver, truck=truck)
+    LoadOrderPallet.create(
+        order=order,
+        pallet_type=pallet_type,
+        sequence=1,
+        measure="1x1",
+        weight=0,
+        quantity=3,
+    )
+
+    _normalize_legacy_pallet_rows(db)
+
+    rows = [
+        (row.sequence, row.quantity)
+        for row in LoadOrderPallet.select().where(LoadOrderPallet.order == order).order_by(LoadOrderPallet.sequence)
+    ]
+    assert rows == [(1, 1), (2, 1), (3, 1)]
+
+
+def test_runtime_schema_resequences_multiple_legacy_pallet_rows(db):
+    from app.config.schema import _ensure_pallet_sequence_index, _normalize_legacy_pallet_rows
+    from app.models.load_orders import LoadOrder, LoadOrderPallet
+    from app.models.masters import Carrier, Driver, Truck
+
+    carrier = Carrier.create(name="Transporte migracion multiple")
+    driver = Driver.create(name="Chofer migracion multiple", carrier=carrier)
+    truck = Truck.create(domain="MIG456", carrier=carrier)
+    order = LoadOrder.create(order_number=502, carrier=carrier, driver=driver, truck=truck)
+    first = LoadOrderPallet.create(order=order, sequence=1, quantity=1)
+    second = LoadOrderPallet.create(order=order, sequence=2, quantity=2)
+    db.execute_sql("DROP INDEX `loadorderpallet_order_id_sequence`")
+    db.execute_sql("UPDATE loadorderpallet SET sequence = 1 WHERE order_id = ?", (order.id,))
+
+    _normalize_legacy_pallet_rows(db)
+    _ensure_pallet_sequence_index(db)
+
+    rows = list(
+        LoadOrderPallet.select()
+        .where(LoadOrderPallet.order == order)
+        .order_by(LoadOrderPallet.sequence)
+    )
+    assert [row.sequence for row in rows] == [1, 2, 3]
+    assert [row.quantity for row in rows] == [1, 1, 1]
+    assert {first.id, second.id}.issubset({row.id for row in rows})
+    assert any(index.unique for index in db.get_indexes("loadorderpallet"))
+
+
 def test_ensure_runtime_schema_relaxes_nullable_columns_for_mysql_tables():
     from collections import namedtuple
 

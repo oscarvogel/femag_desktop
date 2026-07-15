@@ -30,6 +30,10 @@ class LoadOrderOperationService:
             raise ValueError("No se puede emitir una orden cerrada.")
         if order.status == LoadOrder.STATUS_ISSUED:
             raise ValueError("La orden ya esta emitida.")
+        composition = self.load_orders.composition(order)
+        if not composition.can_issue:
+            details = " ".join(issue.message for issue in composition.issues)
+            raise ValueError(f"No se puede emitir la orden: {details}")
         issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
         self.account_ledger.generate_for_load_order(issued)
         return issued

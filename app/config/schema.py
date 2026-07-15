@@ -3,6 +3,7 @@ from peewee import (
     CharField,
     DateField,
     DateTimeField,
+    DecimalField,
     FloatField,
     ForeignKeyField,
     IntegerField,
@@ -17,6 +18,63 @@ def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    if hasattr(database, "atomic"):
+        _normalize_legacy_pallet_rows(database)
+    if hasattr(database, "get_indexes"):
+        _ensure_pallet_sequence_index(database)
+
+
+def _ensure_pallet_sequence_index(database) -> None:
+    table_name = "loadorderpallet"
+    if any(
+        index.unique and set(index.columns) == {"order_id", "sequence"}
+        for index in database.get_indexes(table_name)
+    ):
+        return
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `loadorderpallet_order_id_sequence` "
+        "ON `loadorderpallet` (`order_id`, `sequence`)"
+    )
+
+
+def _normalize_legacy_pallet_rows(database) -> None:
+    from app.models.load_orders import LoadOrderPallet
+
+    order_ids = [
+        row.order_id
+        for row in LoadOrderPallet.select(LoadOrderPallet.order).distinct()
+    ]
+    if not order_ids:
+        return
+    with database.atomic():
+        for order_id in order_ids:
+            rows = list(
+                LoadOrderPallet.select()
+                .where(LoadOrderPallet.order == order_id)
+                .order_by(LoadOrderPallet.id)
+            )
+            expanded_rows = []
+            for temporary_sequence, row in enumerate(rows, start=1):
+                original_quantity = max(int(row.quantity or 1), 1)
+                row.sequence = -temporary_sequence
+                row.quantity = 1
+                row.save()
+                expanded_rows.append(row)
+                for _ in range(1, original_quantity):
+                    expanded_rows.append(
+                        LoadOrderPallet.create(
+                            order=order_id,
+                            pallet_type=row.pallet_type,
+                            sequence=-(len(rows) + len(expanded_rows)),
+                            measure=row.measure,
+                            weight=row.weight,
+                            quantity=1,
+                            observations=row.observations,
+                        )
+                    )
+            for sequence, row in enumerate(expanded_rows, start=1):
+                row.sequence = sequence
+                row.save()
 
 
 def _ensure_model_columns(database, model) -> None:
@@ -68,6 +126,8 @@ def _field_sql(field) -> str:
         return "DATETIME"
     if isinstance(field, DateField):
         return "DATE"
+    if isinstance(field, DecimalField):
+        return f"DECIMAL({field.max_digits},{field.decimal_places})"
     if isinstance(field, FloatField):
         return "DOUBLE"
     if isinstance(field, IntegerField):

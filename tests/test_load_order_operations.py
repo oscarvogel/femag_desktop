@@ -4,6 +4,56 @@ from conftest import _valid_order_payload, _master_data
 import pytest
 
 
+def _complete_order_payload(data):
+    data["product"].peso_unitario_kg = 2.5
+    data["product"].save()
+    payload = _valid_order_payload(data)
+    payload["pallets"] = [
+        {
+            "sequence": 1,
+            "pallet_type": data["pallet"],
+            "allocations": [
+                {
+                    "client": data["client"],
+                    "delivery_address": data["address"],
+                    "product": data["product"],
+                    "quantity": 100,
+                }
+            ],
+        }
+    ]
+    return payload
+
+
+def test_issue_blocks_incomplete_composition_before_status_change(db, tmp_path):
+    from app.models.accounting import ClientAccountMovement
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
+
+    with pytest.raises(ValueError, match="No se puede emitir.*faltan asignar"):
+        LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).issue(order)
+
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_PENDING
+    assert ClientAccountMovement.select().count() == 0
+
+
+def test_issue_accepts_complete_composition(db, tmp_path):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    order = LoadOrderService(current_user="admin").create_order(**_complete_order_payload(data))
+
+    issued = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).issue(order)
+
+    assert issued.status == LoadOrder.STATUS_ISSUED
+
+
 
 def test_operational_flow_emits_prints_again_and_annuls_order(db, tmp_path):
     from app.models.audit import AuditLog
@@ -12,7 +62,7 @@ def test_operational_flow_emits_prints_again_and_annuls_order(db, tmp_path):
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
-    order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
+    order = LoadOrderService(current_user="admin").create_order(**_complete_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
 
     issued = operations.issue(order)

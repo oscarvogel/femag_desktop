@@ -106,11 +106,9 @@ def build_load_order_workspace_spec() -> LoadOrderWorkspaceSpec:
             "Clientes",
             "Destinos",
             "Productos",
-            "Pallets",
-            "Chofer",
-            "Transportista",
-            "Camión / patente",
+            "Preparación de pallets",
             "Estado",
+            "Acción",
         ),
         detail_fields=(
             "Fecha de orden",

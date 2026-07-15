@@ -18,6 +18,7 @@ from app.models.load_orders import (
     LoadOrderBudgetStatus,
     LoadOrderDestination,
     LoadOrderPallet,
+    LoadOrderPalletAllocation,
     LoadOrderProduct,
     LoadOrderStatusHistory,
 )
@@ -46,6 +47,7 @@ ALL_MODELS = [
     LoadOrderDestination,
     LoadOrderProduct,
     LoadOrderPallet,
+    LoadOrderPalletAllocation,
     LoadOrderStatusHistory,
     LoadOrderBudgetStatus,
     AppParameter,

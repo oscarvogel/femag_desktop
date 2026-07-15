@@ -12,7 +12,7 @@ def test_account_movements_have_physical_duplicate_protection(db):
 
     data = _multi_client_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
-    issued = LoadOrderOperationService(current_user="admin").issue(order)
+    issued = _issue_complete(LoadOrderOperationService(current_user="admin"), order)
     original = ClientAccountMovement.get()
 
     try:
@@ -42,7 +42,7 @@ def test_issued_load_order_generates_movement_with_valued_amount(db):
     data = _multi_client_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
 
-    issued = LoadOrderOperationService(current_user="admin").issue(order)
+    issued = _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     movement = ClientAccountMovement.get()
     assert issued.status == LoadOrder.STATUS_ISSUED
@@ -85,7 +85,7 @@ def test_issued_load_order_movement_amount_matches_client_total_single_client(db
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     movement = ClientAccountMovement.get()
     assert movement.total_amount == approx(50 * 20000 * 0.9 * 1.21)
@@ -124,7 +124,7 @@ def test_multi_client_load_order_generates_one_valued_movement_per_client(db):
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     movements = list(ClientAccountMovement.select().order_by(ClientAccountMovement.client))
     assert len(movements) == 2
@@ -173,7 +173,7 @@ def test_multi_client_movement_amounts_match_consolidated_totals(db):
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     movements = {m.client.name: m for m in ClientAccountMovement.select()}
 
@@ -217,7 +217,7 @@ def test_same_client_multiple_destinations_one_consolidated_movement(db):
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     assert ClientAccountMovement.select().count() == 1
     movement = ClientAccountMovement.get()
@@ -232,7 +232,7 @@ def test_issuing_twice_does_not_duplicate_account_movements(db):
 
     data = _multi_client_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
-    issued = LoadOrderOperationService(current_user="admin").issue(order)
+    issued = _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     AccountLedgerService(current_user="admin").generate_for_load_order(issued)
 
@@ -248,7 +248,7 @@ def test_annulling_load_order_reverses_account_movements(db):
     data = _multi_client_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin")
-    issued = operations.issue(order)
+    issued = _issue_complete(operations, order)
 
     annulled = operations.annul(issued, can_annul=True)
 
@@ -271,7 +271,7 @@ def test_annulling_twice_does_not_duplicate_reversal_movements(db):
     data = _multi_client_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin")
-    issued = operations.issue(order)
+    issued = _issue_complete(operations, order)
     annulled = operations.annul(issued, can_annul=True)
 
     AccountLedgerService(current_user="admin").reverse_for_load_order(annulled)
@@ -355,7 +355,7 @@ def test_issued_order_sets_budget_status_to_applied(db):
     budget = LoadOrderBudgetStatus.get()
     assert budget.status == LoadOrderBudgetStatus.STATUS_PENDING
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     budget = LoadOrderBudgetStatus.get()
     assert budget.status == LoadOrderBudgetStatus.STATUS_APPLIED
@@ -381,7 +381,7 @@ def test_issued_order_with_two_clients_sets_both_budgets_to_applied(db):
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     budgets = list(LoadOrderBudgetStatus.select())
     assert len(budgets) == 2
@@ -423,7 +423,7 @@ def test_end_to_end_multi_client_budget_and_account_ledger(db, tmp_path):
     operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
 
     budget_path = operations.export_combined_budget(order)
-    issued = operations.issue(order)
+    issued = _issue_complete(operations, order)
 
     movements = list(
         ClientAccountMovement.select()
@@ -454,7 +454,7 @@ def test_annulling_resets_budget_status_to_pending_via_recreate(db):
     data = _master_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin")
-    issued = operations.issue(order)
+    issued = _issue_complete(operations, order)
 
     budget = LoadOrderBudgetStatus.get()
     assert budget.status == LoadOrderBudgetStatus.STATUS_APPLIED
@@ -490,7 +490,7 @@ def test_client_balance_reflects_issued_order_movement(db):
         pallets=[],
     )
 
-    LoadOrderOperationService(current_user="admin").issue(order)
+    _issue_complete(LoadOrderOperationService(current_user="admin"), order)
 
     total_debit = (
         ClientAccountMovement
@@ -502,3 +502,26 @@ def test_client_balance_reflects_issued_order_movement(db):
         .scalar()
     )
     assert total_debit == approx(10 * 1000 * 1.21)
+
+
+def _issue_complete(operations, order):
+    order = type(order).get_by_id(order.id)
+    allocations = []
+    for line in order.products:
+        product = line.product
+        if product.peso_unitario_kg == 0:
+            product.peso_unitario_kg = 1
+            product.save()
+        allocations.append(
+            {
+                "client": line.destination.client,
+                "delivery_address": line.destination.delivery_address,
+                "product": product,
+                "quantity": line.quantity,
+            }
+        )
+    operations.load_orders.update_order(
+        order,
+        pallets=[{"sequence": 1, "pallet_type": None, "allocations": allocations}],
+    )
+    return operations.issue(order)

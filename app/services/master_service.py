@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from app.models.masters import Carrier, Driver, OperationalService, PalletType, Product, Truck
 from app.services.audit_service import AuditService
 
@@ -21,21 +23,30 @@ class MasterService:
         name: str,
         unit: str,
         *,
+        peso_unitario_kg: Decimal = Decimal("0.000"),
         precio_lista_1: float = 0.0,
         precio_lista_2: float = 0.0,
         precio_lista_3: float = 0.0,
         precio_lista_4: float = 0.0,
     ) -> Product:
+        peso_unitario_kg = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
+        if peso_unitario_kg < 0:
+            raise ValueError("El peso unitario no puede ser negativo.")
         row = Product.create(
             name=name,
             unit=unit,
+            peso_unitario_kg=peso_unitario_kg,
             precio_neto_base=precio_lista_1,
             precio_lista_1=precio_lista_1,
             precio_lista_2=precio_lista_2,
             precio_lista_3=precio_lista_3,
             precio_lista_4=precio_lista_4,
         )
-        self._record("Product", row, {"name": name, "unit": unit})
+        self._record(
+            "Product",
+            row,
+            {"name": name, "unit": unit, "peso_unitario_kg": str(peso_unitario_kg)},
+        )
         return row
 
     def create_driver(

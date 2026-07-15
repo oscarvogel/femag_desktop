@@ -118,9 +118,15 @@ def _ensure_demo_masters() -> dict:
     )
 
     iva_default = TipoIVA.iva_default()
-    product_bolsa = _ensure_demo_product("ISSUE73 Producto bolsa", "bolsas", iva_default, (900.0, 950.0, 1000.0, 1050.0))
-    product_pack = _ensure_demo_product("ISSUE73 Producto pack", "packs", iva_default, (1200.0, 1300.0, 1400.0, 1500.0))
-    product_granel = _ensure_demo_product("ISSUE73 Producto granel", "kg", iva_default, (180.0, 190.0, 200.0, 210.0))
+    product_bolsa = _ensure_demo_product(
+        "ISSUE73 Producto bolsa", "bolsas", 25.0, iva_default, (900.0, 950.0, 1000.0, 1050.0)
+    )
+    product_pack = _ensure_demo_product(
+        "ISSUE73 Producto pack", "packs", 10.0, iva_default, (1200.0, 1300.0, 1400.0, 1500.0)
+    )
+    product_granel = _ensure_demo_product(
+        "ISSUE73 Producto granel", "kg", 1.0, iva_default, (180.0, 190.0, 200.0, 210.0)
+    )
 
     return {
         "carrier": carrier,
@@ -137,11 +143,18 @@ def _ensure_demo_masters() -> dict:
     }
 
 
-def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tuple[float, float, float, float]) -> Product:
+def _ensure_demo_product(
+    name: str,
+    unit: str,
+    peso_unitario_kg: float,
+    iva_default: TipoIVA,
+    prices: tuple[float, float, float, float],
+) -> Product:
     product, _ = Product.get_or_create(
         name=name,
         defaults={
             "unit": unit,
+            "peso_unitario_kg": peso_unitario_kg,
             "precio_neto_base": prices[0],
             "precio_lista_1": prices[0],
             "precio_lista_2": prices[1],
@@ -151,6 +164,7 @@ def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tup
         },
     )
     product.unit = unit
+    product.peso_unitario_kg = peso_unitario_kg
     product.precio_neto_base = prices[0]
     product.precio_lista_1 = prices[0]
     product.precio_lista_2 = prices[1]
@@ -207,7 +221,50 @@ def _create_load_order(username: str, masters: dict) -> LoadOrder:
                 "products": [{"product": masters["product_bolsa"], "quantity": 75, "observations": "Sur"}],
             },
         ],
-        pallets=[],
+        pallets=[
+            {
+                "sequence": 1,
+                "pallet_type": None,
+                "allocations": [
+                    {
+                        "client": masters["client_norte"],
+                        "delivery_address": masters["address_norte_a"],
+                        "product": masters["product_bolsa"],
+                        "quantity": 120,
+                    },
+                    {
+                        "client": masters["client_norte"],
+                        "delivery_address": masters["address_norte_a"],
+                        "product": masters["product_pack"],
+                        "quantity": 30,
+                    },
+                    {
+                        "client": masters["client_sur"],
+                        "delivery_address": masters["address_sur"],
+                        "product": masters["product_bolsa"],
+                        "quantity": 25,
+                    },
+                ],
+            },
+            {
+                "sequence": 2,
+                "pallet_type": None,
+                "allocations": [
+                    {
+                        "client": masters["client_norte"],
+                        "delivery_address": masters["address_norte_b"],
+                        "product": masters["product_granel"],
+                        "quantity": 2500,
+                    },
+                    {
+                        "client": masters["client_sur"],
+                        "delivery_address": masters["address_sur"],
+                        "product": masters["product_bolsa"],
+                        "quantity": 50,
+                    },
+                ],
+            },
+        ],
         observations="Demo integral issue #73: orden multi-cliente/multi-destino documental.",
     )
 

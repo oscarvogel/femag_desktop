@@ -37,7 +37,14 @@ def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     assert refreshed_driver.available is False
     assert LoadOrder.select().count() == 1
     assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 2
-    assert LoadOrderPallet.select().where(LoadOrderPallet.order == order).count() == 1
+    pallets = list(
+        LoadOrderPallet.select()
+        .where(LoadOrderPallet.order == order)
+        .order_by(LoadOrderPallet.sequence)
+    )
+    assert len(pallets) == 10
+    assert [pallet.sequence for pallet in pallets] == list(range(1, 11))
+    assert {pallet.quantity for pallet in pallets} == {1}
     assert AuditLog.select().where(AuditLog.module == "Ordenes de carga").count() >= 2
 
 def test_create_load_order_with_one_client_and_multiple_products_in_destination(db):

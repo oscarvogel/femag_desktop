@@ -1,3 +1,8 @@
+from decimal import Decimal
+
+import pytest
+
+
 def test_master_service_creates_operational_masters_and_audits(db):
     from app.models.audit import AuditLog
     from app.services.master_service import MasterService
@@ -54,8 +59,6 @@ def test_driver_model_allows_pending_carrier_and_own_cuit(db):
 
 
 def test_truck_and_driver_require_carrier(db):
-    import pytest
-
     from app.services.master_service import MasterService
 
     service = MasterService(current_user="admin")
@@ -65,3 +68,26 @@ def test_truck_and_driver_require_carrier(db):
 
     with pytest.raises(ValueError, match="transportista"):
         service.create_truck("AB123CD", carrier=None)
+
+
+def test_create_product_accepts_unit_weight(db):
+    from app.services.master_service import MasterService
+
+    product = MasterService(current_user="admin").create_product(
+        "Cemento",
+        "bolsa",
+        peso_unitario_kg=Decimal("25.000"),
+    )
+
+    assert product.peso_unitario_kg == Decimal("25.000")
+
+
+def test_create_product_rejects_negative_weight(db):
+    from app.services.master_service import MasterService
+
+    with pytest.raises(ValueError, match="peso.*no puede ser negativo"):
+        MasterService(current_user="admin").create_product(
+            "Invalido",
+            "unidad",
+            peso_unitario_kg=Decimal("-0.001"),
+        )

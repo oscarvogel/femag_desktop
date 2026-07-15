@@ -1,4 +1,6 @@
-from peewee import BooleanField, CharField, DateTimeField, FloatField, ForeignKeyField, IntegerField, TextField
+from decimal import Decimal
+
+from peewee import BooleanField, CharField, DateTimeField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
 from app.models.system import ImportBatch
@@ -45,6 +47,7 @@ class ClientAddress(BaseModel):
 class Product(BaseModel):
     name = CharField(unique=True)
     unit = CharField()
+    peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
     active = BooleanField(default=True)
     precio_neto_base = FloatField(default=0.0)
     precio_lista_1 = FloatField(default=0.0)

@@ -190,6 +190,7 @@ class LoadOrderPrintService:
             [self._p("Empresa de transporte:", bold=True), self._p(order.carrier.name)],
             [self._p("Dominio del vehiculo:", bold=True), self._p(order.truck.domain)],
             [self._p("Nombre del chofer:", bold=True), self._p(order.driver.name)],
+            [self._p("TOTAL MERCADERIA:", bold=True), self._p(self._kg_text(self._merchandise_kg_total(order)), bold=True)],
             [self._p("Vehiculo limpio y apto:", bold=True), self._p("Si / No")],
         ]
         table = Table(data, colWidths=[58 * mm, 112 * mm])
@@ -282,6 +283,13 @@ class LoadOrderPrintService:
 
     def _pallet_total(self, order: LoadOrder) -> float:
         return float(sum(pallet.quantity for pallet in order.pallets))
+
+    def _merchandise_kg_total(self, order: LoadOrder):
+        return sum((pallet.kilos for pallet in order.pallets), 0)
+
+    def _kg_text(self, value) -> str:
+        whole, fraction = f"{value:.3f}".split(".")
+        return f"{int(whole):,}".replace(",", ".") + f",{fraction} kg"
 
     def _row_destination(self, order: LoadOrder, destination) -> str:
         if destination is None:
