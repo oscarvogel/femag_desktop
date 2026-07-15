@@ -30,7 +30,11 @@ python -m app.main --smoke
 
 Smoke check de la app en modo normal.
 
-TODO: confirmar en cada PR si este comando existe y si no requiere configuracion local adicional.
+```bash
+python scripts/femag_operational_smoke.py
+```
+
+Smoke operativo demo/local para #105. Crea una base SQLite descartable con datos sinteticos `ISSUE105`, valida maestros minimos, orden de carga, impresion PDF, cierre/liberacion de chofer, cuenta corriente y pago. No usa datos reales ni areas protegidas.
 
 ## Validaciones futuras u opcionales
 
