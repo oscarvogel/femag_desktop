@@ -8,8 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows" if os.name == "nt" else "offs
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from peewee import SqliteDatabase
-from PyQt5.QtGui import QImage
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QColor, QImage, QPixmap
+from PyQt5.QtWidgets import QApplication, QPushButton
 
 from app.config.database import bind_database
 from app.models import ALL_MODELS
@@ -177,10 +177,32 @@ def _show_dialog(dialog, app, *, step: int | None = None) -> None:
     app.processEvents()
 
 
-def _capture(widget, target: Path) -> None:
+def _capture(widget, target: Path, *, render_canvas: bool = False) -> None:
     widget.repaint()
     QApplication.processEvents()
-    opaque_image = widget.grab().toImage().convertToFormat(QImage.Format_RGB32)
+    if render_canvas:
+        action_buttons = [
+            button for button in widget.findChildren(QPushButton) if button.text() == "Quitar"
+        ]
+        for button in action_buttons:
+            button.hide()
+        QApplication.processEvents()
+        canvas = QPixmap(widget.size())
+        canvas.fill(QColor("white"))
+        widget.render(canvas)
+        opaque_image = canvas.toImage().convertToFormat(QImage.Format_RGB32)
+        for button in action_buttons:
+            button.show()
+    else:
+        opaque_image = widget.grab().toImage().convertToFormat(QImage.Format_RGB32)
+    sampled_pixels = [
+        opaque_image.pixelColor(x, y)
+        for x in range(0, opaque_image.width(), 10)
+        for y in range(0, opaque_image.height(), 10)
+    ]
+    black_pixels = sum(color.red() < 8 and color.green() < 8 and color.blue() < 8 for color in sampled_pixels)
+    if black_pixels > len(sampled_pixels) // 5:
+        raise RuntimeError(f"La captura contiene regiones negras anormales: {target}")
     if not opaque_image.save(str(target), "PNG"):
         raise RuntimeError(f"No se pudo guardar {target}")
 
@@ -243,7 +265,7 @@ def generate(output_dir: Path) -> list[Path]:
     edit_dialog.pallet_widget._select_pallet(2)
     app.processEvents()
     targets.append(output_dir / "04_estado_rojo_excedente.png")
-    _capture(edit_dialog, targets[-1])
+    _capture(edit_dialog, targets[-1], render_canvas=True)
 
     new_dialog.close()
     edit_dialog.close()
