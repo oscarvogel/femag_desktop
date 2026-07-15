@@ -845,7 +845,10 @@ def _driver_rows() -> list[list[object]]:
                 driver.carrier.name if driver.carrier_id is not None else "Sin asignar",
                 "Disponible" if driver.available and driver.active else "No disponible",
             ]
-            for driver in Driver.select().join(Carrier, JOIN.LEFT_OUTER).order_by(Driver.name).limit(50)
+            for driver in Driver.select(Driver, Carrier)
+            .join(Carrier, JOIN.LEFT_OUTER)
+            .order_by(Driver.name)
+            .limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []
