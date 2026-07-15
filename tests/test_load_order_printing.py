@@ -50,6 +50,101 @@ def _pdf_text(path: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def test_print_service_formats_kilos_without_insignificant_zeroes():
+    from decimal import Decimal
+
+    from app.services.load_order_print_service import LoadOrderPrintService
+
+    service = LoadOrderPrintService(current_user="admin")
+
+    assert service._kg_text(Decimal("300.000")) == "300 kg"
+    assert service._kg_text(Decimal("300.500")) == "300,5 kg"
+    assert service._kg_text(Decimal("1250.750")) == "1.250,75 kg"
+
+
+def test_print_service_lists_real_pallet_sequences_per_destination(db, tmp_path):
+    from decimal import Decimal
+
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.load_order_service import LoadOrderService
+
+    client = Client.create(name="Cliente pallets PDF", cuit="30700018101", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Entrega PDF",
+    )
+    carrier = Carrier.create(name="Transporte pallets PDF")
+    driver = Driver.create(name="Chofer pallets PDF", carrier=carrier)
+    truck = Truck.create(domain="PDF181", carrier=carrier)
+    product_a = Product.create(
+        name="Fecula de maiz PDF",
+        unit="kg",
+        peso_unitario_kg=Decimal("1.000"),
+    )
+    product_b = Product.create(
+        name="Fecula de mandioca PDF",
+        unit="kg",
+        peso_unitario_kg=Decimal("1.000"),
+    )
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [
+                    {"product": product_a, "quantity": 100},
+                    {"product": product_b, "quantity": 200},
+                ],
+            }
+        ],
+        pallets=[
+            {
+                "sequence": 1,
+                "allocations": [
+                    {
+                        "client": client,
+                        "delivery_address": address,
+                        "product": product_a,
+                        "quantity": 50,
+                    }
+                ],
+            },
+            {
+                "sequence": 3,
+                "allocations": [
+                    {
+                        "client": client,
+                        "delivery_address": address,
+                        "product": product_a,
+                        "quantity": 50,
+                    },
+                    {
+                        "client": client,
+                        "delivery_address": address,
+                        "product": product_b,
+                        "quantity": 200,
+                    },
+                ],
+            },
+        ],
+    )
+
+    pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(order, tmp_path)
+    text = _pdf_text(pdf_path)
+    normalized_text = " ".join(text.split())
+
+    assert "300 kg" in normalized_text
+    assert "1, 3" in normalized_text
+    assert "2 pallets" in normalized_text
+
+
 def test_print_service_exports_load_order_pdf_with_real_format_fields(db, tmp_path):
     from app.models.audit import AuditLog
     from app.services.load_order_print_service import LoadOrderPrintService
@@ -77,7 +172,7 @@ def test_print_service_exports_load_order_pdf_with_real_format_fields(db, tmp_pa
     assert "Juan Perez" in text
     assert "AB123CD" in text
     assert "TOTAL MERCADERIA:" in text
-    assert "2.500,000 kg" in text
+    assert "2.500 kg" in text
     assert "Imprimir con hoja resumen" in text
     assert "Firma del encargado de carga" in text
     assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 1
