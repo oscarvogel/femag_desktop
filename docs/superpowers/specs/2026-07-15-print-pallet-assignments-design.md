@@ -25,4 +25,3 @@ Corregir la presentación del total de mercadería y reemplazar el reparto propo
 - Pruebas unitarias del formato de kilos.
 - PDF con productos repartidos entre más de un pallet y extracción de texto.
 - Suite del servicio de impresión, compileall y smoke.
-
