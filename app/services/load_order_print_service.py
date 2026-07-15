@@ -137,7 +137,7 @@ class LoadOrderPrintService:
                 [
                     self._p(row["destination"]),
                     *(_quantity(row["articles"].get(article, 0.0)) for article in article_columns),
-                    _quantity(row["pallet"]),
+                    self._p(row["pallet"]),
                     self._p(row["detail"]),
                     "-",
                     "-",
@@ -145,12 +145,12 @@ class LoadOrderPrintService:
             )
             for article in article_columns:
                 totals[article] += row["articles"].get(article, 0.0)
-            totals["pallet"] += row["pallet"]
+        used_pallets = self._used_pallet_total(order)
         rows.append(
             [
                 self._p("TOTALES", bold=True),
                 *(_quantity(totals[article]) for article in article_columns),
-                _quantity(totals["pallet"]),
+                self._p(f"{used_pallets} pallet" + ("s" if used_pallets != 1 else ""), bold=True),
                 "",
                 "",
                 "",
@@ -254,16 +254,22 @@ class LoadOrderPrintService:
         return {
             "destination": destination_label,
             "articles": articles,
-            "pallet": self._pallet_share_for_products(order, products),
+            "pallet": self._pallet_sequences_for_products(order, products),
             "detail": " / ".join(detail_items) if detail_items else "-",
         }
 
-    def _pallet_share_for_products(self, order: LoadOrder, products: list) -> float:
-        total_quantity = sum(product.quantity for product in order.products)
-        if not total_quantity:
-            return 0.0
-        row_quantity = sum(product.quantity for product in products)
-        return round(self._pallet_total(order) * (row_quantity / total_quantity), 2)
+    def _pallet_sequences_for_products(self, order: LoadOrder, products: list) -> str:
+        row_lines = {(product.destination_id, product.product_id) for product in products}
+        sequences = {
+            pallet.sequence
+            for pallet in order.pallets
+            for allocation in pallet.allocations
+            if (allocation.destination_id, allocation.product_id) in row_lines
+        }
+        return ", ".join(str(sequence) for sequence in sorted(sequences)) or "-"
+
+    def _used_pallet_total(self, order: LoadOrder) -> int:
+        return sum(1 for pallet in order.pallets if pallet.allocations.exists())
 
     def _article_columns(self, order: LoadOrder) -> list[str]:
         articles = []
@@ -289,7 +295,10 @@ class LoadOrderPrintService:
 
     def _kg_text(self, value) -> str:
         whole, fraction = f"{value:.3f}".split(".")
-        return f"{int(whole):,}".replace(",", ".") + f",{fraction} kg"
+        fraction = fraction.rstrip("0")
+        localized_whole = f"{int(whole):,}".replace(",", ".")
+        localized_fraction = f",{fraction}" if fraction else ""
+        return f"{localized_whole}{localized_fraction} kg"
 
     def _row_destination(self, order: LoadOrder, destination) -> str:
         if destination is None:
