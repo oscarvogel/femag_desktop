@@ -670,7 +670,7 @@ class FemagDesktopWindow(QMainWindow):
                         _load_order_pallet_action_text(service, order),
                         secondary=bool(order.pallets.exists()),
                     )
-                    pallet_action.setEnabled(order.is_unissued)
+                    pallet_action.setEnabled(order.is_unissued or order.pallets.exists())
                     pallet_action.clicked.connect(
                         lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
                     )
@@ -771,10 +771,11 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.setText("Seleccione una orden para preparar sus pallets.")
                 return
-            if not order.is_unissued:
-                feedback.setText("Solo se pueden modificar pallets de ordenes pendientes.")
+            if not order.is_unissued and not order.pallets.exists():
+                feedback.setText("La orden seleccionada no tiene pallets para consultar.")
                 return
-            dialog = LoadOrderPalletDialog(service, order, self)
+            read_only = not order.is_unissued
+            dialog = LoadOrderPalletDialog(service, order, self, read_only=read_only)
             if dialog.exec_() == QDialog.Accepted:
                 selected_order_id["value"] = order.id
                 refresh()
@@ -1035,9 +1036,11 @@ def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> 
 
 def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
     if not order.pallets.exists():
-        return "Armar pallets"
-    if service.composition(order).can_issue:
+        return "Armar pallets" if order.is_unissued else "Sin pallets"
+    if not order.is_unissued:
         return "Ver pallets"
+    if service.composition(order).can_issue:
+        return "Editar pallets"
     return "Continuar"
 
 
@@ -1324,31 +1327,47 @@ def _load_order_transport_rows(order: LoadOrder) -> list[tuple[str, str]]:
 class LoadOrderPalletDialog(QDialog):
     """Composes pallets only after the commercial order already exists."""
 
-    def __init__(self, service: LoadOrderService, order: LoadOrder, parent=None):
+    def __init__(
+        self,
+        service: LoadOrderService,
+        order: LoadOrder,
+        parent=None,
+        *,
+        read_only: bool = False,
+    ):
         super().__init__(parent)
         self.service = service
         self.order = LoadOrder.get_by_id(order.id)
+        self.read_only = read_only
         self.setObjectName("loadOrderPalletDialog")
-        self.setWindowTitle("Preparacion de pallets")
+        self.setWindowTitle("Detalle de pallets" if read_only else "Preparacion de pallets")
         self.setMinimumSize(980, 600)
         self.resize(1100, 660)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 14)
         root.setSpacing(12)
-        title = QLabel("Preparacion de pallets")
+        title = QLabel("Detalle de pallets" if read_only else "Preparacion de pallets")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
-        subtitle = QLabel(
-            f"Orden {_format_order_number(self.order.order_number)} guardada. "
-            "Distribuya ahora la mercaderia entre los pallets."
-        )
+        if read_only:
+            subtitle_text = (
+                f"Orden {_format_order_number(self.order.order_number)}. "
+                "Composicion guardada disponible solo para consulta."
+            )
+        else:
+            subtitle_text = (
+                f"Orden {_format_order_number(self.order.order_number)} guardada. "
+                "Distribuya ahora la mercaderia entre los pallets."
+            )
+        subtitle = QLabel(subtitle_text)
         subtitle.setObjectName("formHint")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         self.pallet_widget = PalletCompositionWidget(destinations=self._destination_drafts())
         self.pallet_widget.load_pallets(self._pallet_drafts())
+        self.pallet_widget.setEnabled(not read_only)
         root.addWidget(self.pallet_widget, 1)
 
         self.feedback = QLabel("")
@@ -1358,15 +1377,20 @@ class LoadOrderPalletDialog(QDialog):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
-        cancel_button = _action_button("cancelLoadOrderPalletsButton", "Cancelar", secondary=True)
-        self.save_button = _action_button("saveLoadOrderPalletsButton", "Guardar pallets")
-        self.save_button.setEnabled(False)
-        footer.addWidget(cancel_button)
-        footer.addWidget(self.save_button)
+        if read_only:
+            close_button = _action_button("closeLoadOrderPalletsButton", "Cerrar", secondary=True)
+            footer.addWidget(close_button)
+            close_button.clicked.connect(self.reject)
+        else:
+            cancel_button = _action_button("cancelLoadOrderPalletsButton", "Cancelar", secondary=True)
+            self.save_button = _action_button("saveLoadOrderPalletsButton", "Guardar pallets")
+            self.save_button.setEnabled(False)
+            footer.addWidget(cancel_button)
+            footer.addWidget(self.save_button)
+            cancel_button.clicked.connect(self.reject)
+            self.save_button.clicked.connect(self._save)
+            self.pallet_widget.composition_changed.connect(lambda: self.save_button.setEnabled(True))
         root.addLayout(footer)
-        cancel_button.clicked.connect(self.reject)
-        self.save_button.clicked.connect(self._save)
-        self.pallet_widget.composition_changed.connect(lambda: self.save_button.setEnabled(True))
 
     def _destination_drafts(self) -> list[dict]:
         return [
