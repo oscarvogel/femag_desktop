@@ -115,6 +115,14 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
     assert LoadOrderPalletAllocation.select().count() == 1
     assert dialog.service.composition(dialog.created_order).total_kg == Decimal("1000.000")
 
+    read_only = LoadOrderPalletDialog(dialog.service, dialog.created_order, read_only=True)
+    app.processEvents()
+
+    assert read_only.windowTitle() == "Detalle de pallets"
+    assert read_only.findChild(QPushButton, "saveLoadOrderPalletsButton") is None
+    assert read_only.findChild(QPushButton, "closeLoadOrderPalletsButton").text() == "Cerrar"
+    assert read_only.pallet_widget.isEnabled() is False
+
 
 def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
@@ -872,6 +880,9 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
 
     assert table.item(1, 0).data(256) == first_order.id
     assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
+    assert table.columnSpan(0, 0) == 1
+    assert table.columnSpan(1, 0) == 1
+    assert table.columnSpan(2, 0) == table.columnCount()
 
     table.setCurrentCell(0, 0)
     app.processEvents()
@@ -1026,6 +1037,7 @@ def test_load_order_page_edits_pending_order_adding_destination_and_product(db, 
 
 
 def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
+    from PyQt5.QtCore import QTimer
     from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
 
     from app.models.security import User, UserProfile
@@ -1068,11 +1080,31 @@ def test_load_order_page_disables_emit_and_edit_for_issued_order(db):
 
     issue_button = window.findChild(QPushButton, "issueLoadOrderButton")
     edit_button = window.findChild(QPushButton, "editLoadOrderButton")
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
+    pallets_button = table.cellWidget(0, headers.index("Acción"))
 
     assert issue_button.isEnabled() is False
     assert edit_button.isEnabled() is False
     assert "emitida" in issue_button.toolTip().lower()
     assert "pendientes" in edit_button.toolTip().lower()
+    assert pallets_button.text() == "Ver pallets"
+    assert pallets_button.isEnabled() is True
+
+    opened_modes = []
+
+    def inspect_pallet_dialog():
+        dialog = app.activeModalWidget()
+        assert dialog is not None
+        opened_modes.append(dialog.read_only)
+        assert dialog.findChild(QPushButton, "saveLoadOrderPalletsButton") is None
+        dialog.reject()
+
+    QTimer.singleShot(0, inspect_pallet_dialog)
+    pallets_button.click()
+    app.processEvents()
+
+    assert opened_modes == [True]
 
 
 def test_load_order_page_treats_legacy_unissued_status_as_actionable(db):
