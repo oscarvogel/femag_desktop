@@ -111,6 +111,54 @@ def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
     assert ImportBatch.select().count() == 2
 
 
+def test_legacy_client_import_creates_fiscal_and_delivery_addresses_without_overwriting_them(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import ClientAddress
+
+    importer = LegacyDbfMasterImporter()
+    row = {
+        "CODIGO": "C001",
+        "NOMBRE": "Cliente Norte",
+        "CUIT": "30-71111111-8",
+        "DOMICILIO": "Ruta 12 Km 8",
+        "CODPOS": "3300",
+        "IMPOSITIVO": "Posadas",
+    }
+
+    importer.import_rows({"clients": [row]}, source_system="legacy_dbf")
+
+    addresses = list(ClientAddress.select().order_by(ClientAddress.address_type))
+    assert [(address.address_type, address.address) for address in addresses] == [
+        ("entrega", "Ruta 12 Km 8"),
+        ("fiscal", "Ruta 12 Km 8"),
+    ]
+    assert all(address.province == "Sin especificar" for address in addresses)
+    assert all(address.city == "Posadas" for address in addresses)
+    assert all(address.is_primary for address in addresses)
+    assert all(address.observations == "Código postal: 3300" for address in addresses)
+
+    addresses[0].address = "Domicilio editado manualmente"
+    addresses[0].save()
+    importer.import_rows({"clients": [row]}, source_system="legacy_dbf")
+
+    assert ClientAddress.select().count() == 2
+    assert ClientAddress.get_by_id(addresses[0].id).address == "Domicilio editado manualmente"
+
+
+def test_legacy_client_without_address_imports_without_creating_empty_addresses(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Client, ClientAddress
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {"clients": [{"CODIGO": "C001", "NOMBRE": "Cliente Norte", "CUIT": "30-71111111-8"}]},
+        source_system="legacy_dbf",
+    )
+
+    assert result["clients"]["created"] == 1
+    assert Client.select().count() == 1
+    assert ClientAddress.select().count() == 0
+
+
 def test_legacy_dbf_imports_driver_without_carrier_and_preserves_cuit(db):
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import Driver, Truck

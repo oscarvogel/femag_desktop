@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models.base import utc_now
-from app.models.masters import Carrier, Client, Driver, Product, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.system import ImportBatch
 
 
@@ -80,7 +80,35 @@ class LegacyDbfMasterImporter:
             "email": self._value(row, "EMAIL", "MAIL"),
             "contact": self._value(row, "CONTACTO"),
         }
-        return ImportOutcome(self._upsert(Client, {"cuit": cuit}, values, source_system, source_id, batch))
+        action = self._upsert(Client, {"cuit": cuit}, values, source_system, source_id, batch)
+        client = Client.get(Client.cuit == cuit)
+        self._ensure_client_addresses(client, row)
+        return ImportOutcome(action)
+
+    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> None:
+        address = self._value(row, "DOMICILIO", "DIRECCION", "ADDRESS")
+        if not address:
+            return
+
+        city = self._value(row, "IMPOSITIVO", "CIUDAD", "CITY", default="Sin especificar")
+        postal_code = self._value(row, "CODPOS", "CODIGOPOSTAL", "CP")
+        observations = f"Código postal: {postal_code}" if postal_code else None
+        existing_types = {
+            item.address_type
+            for item in ClientAddress.select(ClientAddress.address_type).where(ClientAddress.client == client)
+        }
+        for address_type in ("fiscal", "entrega"):
+            if address_type in existing_types:
+                continue
+            ClientAddress.create(
+                client=client,
+                address_type=address_type,
+                province="Sin especificar",
+                city=city,
+                address=address,
+                is_primary=True,
+                observations=observations,
+            )
 
     def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "carriers", "CODIGO", "ID", "IDLEGACY")
