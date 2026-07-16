@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
-import re
 
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import Qt
@@ -911,7 +911,7 @@ def _driver_rows() -> list[list[object]]:
                     driver.name,
                     driver.carrier.name if driver.carrier_id is not None else "Sin asignar",
                     truck.domain if truck is not None else "",
-                    truck.trailer_domain or "" if truck is not None else "",
+                    (truck.trailer_domain or "") if truck is not None else "",
                     relationship_state,
                 ]
             )

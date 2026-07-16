@@ -68,7 +68,7 @@ class LegacyDbfMasterImporter:
         batch.save()
         return summary
 
-    def _import_clients(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
+    def _import_clients(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "clients", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "clients", "RAZON", "NOMBRE", "CLIENTE")
         cuit = self._clean_cuit(self._required(row, "clients", "CUIT", "CUITCLI"))
@@ -82,7 +82,7 @@ class LegacyDbfMasterImporter:
         }
         return ImportOutcome(self._upsert(Client, {"cuit": cuit}, values, source_system, source_id, batch))
 
-    def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
+    def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "carriers", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "carriers", "NOMBRE", "RAZON", "TRANSPORTISTA")
         values = {
@@ -92,7 +92,7 @@ class LegacyDbfMasterImporter:
         }
         return ImportOutcome(self._upsert(Carrier, {"name": name}, values, source_system, source_id, batch))
 
-    def _import_drivers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
+    def _import_drivers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "drivers", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "drivers", "NOMBRE", "CHOFER")
         existing_driver = (
@@ -129,7 +129,7 @@ class LegacyDbfMasterImporter:
         related_actions = (("trucks", truck_action),) if truck_action is not None else ()
         return ImportOutcome(action, warnings + truck_warnings, related_actions)
 
-    def _import_trucks(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
+    def _import_trucks(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "trucks", "CODIGO", "ID", "IDLEGACY")
         domain = self._clean_domain(self._required(row, "trucks", "PATENTE", "DOMINIO", "DOMAIN"))
         carrier_source_id = self._required(row, "trucks", "TRANSP", "TRANSPORTISTA", "CARRIER")
@@ -137,7 +137,7 @@ class LegacyDbfMasterImporter:
         values = {"domain": domain, "carrier": carrier}
         return ImportOutcome(self._upsert(Truck, {"domain": domain}, values, source_system, source_id, batch))
 
-    def _import_products(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
+    def _import_products(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "products", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "products", "NOMBRE", "PRODUCTO", "DESCRIP")
         values = {"name": name, "unit": self._value(row, "UNIDAD", "UNI", default="unidad")}
