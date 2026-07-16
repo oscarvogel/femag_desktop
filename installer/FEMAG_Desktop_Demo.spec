@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = collect_submodules("pyqt5libs")
 datas = collect_data_files("pyqt5libs")
+datas += [("../app/ui/assets/branding", "app/ui/assets/branding")]
 
 
 a = Analysis(
@@ -36,6 +37,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="../app/ui/assets/branding/femag.ico",
 )
 
 coll = COLLECT(
