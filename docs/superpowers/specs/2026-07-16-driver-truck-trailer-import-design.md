@@ -16,13 +16,16 @@ puedan inferir con seguridad.
 
 - `transporte.dbf` contiene 14 transportistas con `CODIGO`, `NOMBRE` y `CUIT`.
 - `chofer.dbf` contiene 22 choferes.
-- `chofer.CODIGO` coincide con `transporte.CODIGO` en la mayoría de los casos.
-- El CUIT permite resolver coincidencias adicionales cuando el código no
-  coincide.
+- `chofer.CODIGO` y `transporte.CODIGO` comparten numeración, pero ocho códigos
+  de la muestra pertenecen a personas distintas y no son una relación segura.
+- Un código solo es aceptable cuando coincide también el CUIT normalizado o,
+  si falta CUIT en uno de los lados, el nombre normalizado.
+- El CUIT permite resolver coincidencias adicionales cuando el código no es
+  válido.
 - `chofer.CHASIS` contiene la patente del tractor habitual.
 - `chofer.ACOPLADO` contiene la patente del acoplado habitual.
-- En la muestra actual, 17 de 22 choferes encuentran transportista por código o
-  CUIT. Los restantes deben importarse sin transportista.
+- Con la regla segura, 9 de 22 choferes encuentran transportista: 5 por código
+  validado y 4 por CUIT. Los 13 restantes deben importarse sin transportista.
 - Existen patentes repetidas entre choferes; representan un mismo camión y no
   deben generar duplicados.
 
@@ -53,8 +56,11 @@ ABM adicional.
 ## Orden y reglas de importación
 
 1. Importar transportistas antes de choferes.
-2. Para cada chofer, buscar transportista primero por `CODIGO`.
-3. Si no hay coincidencia por código, buscar por CUIT normalizado.
+2. Para cada chofer, buscar transportista primero por `CODIGO`, pero aceptar la
+   coincidencia solamente si también coincide el CUIT normalizado o, cuando
+   falte CUIT en alguno de los lados, el nombre normalizado.
+3. Si el código no existe o no supera esa validación, buscar por CUIT
+   normalizado.
 4. Si no existe una coincidencia única, importar el chofer con transportista
    vacío y agregar una advertencia al resumen.
 5. Normalizar `CHASIS` eliminando espacios y signos, y convirtiendo a mayúsculas.
@@ -79,6 +85,8 @@ ABM adicional.
   primer valor válido y se informa el conflicto.
 - Una coincidencia por CUIT solo es válida cuando identifica exactamente un
   transportista.
+- La coincidencia numérica de `CODIGO` sin identidad compatible nunca crea una
+  relación y debe generar una advertencia de colisión.
 - No se crea un transportista ficticio como “Sin identificar”.
 
 ## Resumen de importación
