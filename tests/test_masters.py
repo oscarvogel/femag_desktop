@@ -40,6 +40,18 @@ def test_driver_can_be_filtered_by_carrier_and_truck(db):
     assert service.is_driver_valid_for_truck(north_driver, truck) is True
 
 
+def test_master_service_creates_trailer_and_habitual_truck_relationship(db):
+    from app.services.master_service import MasterService
+
+    service = MasterService(current_user="admin")
+    carrier = service.create_carrier("Transporte habitual")
+    truck = service.create_truck("AB123CD", carrier=carrier, trailer_domain="EF456GH")
+    driver = service.create_driver("Chofer habitual", carrier=carrier, usual_truck=truck)
+
+    assert truck.trailer_domain == "EF456GH"
+    assert driver.usual_truck == truck
+
+
 def test_driver_model_allows_pending_carrier_and_own_cuit(db):
     from app.models.masters import Carrier, Driver
     from app.services.master_service import MasterService

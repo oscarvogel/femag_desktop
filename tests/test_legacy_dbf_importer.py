@@ -136,7 +136,11 @@ def test_legacy_dbf_imports_driver_without_carrier_and_preserves_cuit(db):
     assert result["drivers"]["errors"] == []
     assert driver.carrier is None
     assert driver.cuit == "20123456783"
-    assert Truck.select().count() == 0
+    truck = Truck.get()
+    assert driver.usual_truck == truck
+    assert truck.domain == "ABC123"
+    assert truck.trailer_domain == "DEF456"
+    assert truck.carrier is None
 
 
 def test_legacy_dbf_driver_with_unknown_explicit_carrier_is_reported(db):
@@ -178,6 +182,246 @@ def test_legacy_dbf_driver_without_carrier_is_idempotent(db):
     assert second["drivers"]["updated"] == 1
     assert Driver.select().count() == 1
     assert Driver.get().carrier is None
+
+
+def test_legacy_driver_code_requires_compatible_cuit(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "0004", "NOMBRE": "Vogel Ricardo", "CUIT": "20-23737702-9"}
+            ],
+            "drivers": [
+                {"CODIGO": "0004", "NOMBRE": "Bosing Sergio", "CUIT": "20-30717891-6"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_code_collision", "source_id": "0004"}
+    ]
+
+
+def test_legacy_driver_uses_unique_carrier_cuit_when_code_collides(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "0009", "NOMBRE": "Mendieta Gabriel", "CUIT": "20-24834384-3"},
+                {"CODIGO": "0012", "NOMBRE": "Petrasek Jose", "CUIT": "23-17829761-9"},
+            ],
+            "drivers": [
+                {"CODIGO": "0012", "NOMBRE": "Mendieta Gabriel", "CUIT": "20-24834384-3"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier.source_id == "0009"
+    assert result["drivers"]["warnings"] == []
+
+
+def test_legacy_driver_without_safe_carrier_is_imported_with_warning(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {"CODIGO": "0015", "NOMBRE": "Chofer sin relacion", "CUIT": "20-11111111-1"}
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["created"] == 1
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_not_found", "source_id": "0015"}
+    ]
+
+
+def test_legacy_driver_ambiguous_carrier_cuit_is_not_assigned(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "T1", "NOMBRE": "Transporte Uno", "CUIT": "30-71111111-8"},
+                {"CODIGO": "T2", "NOMBRE": "Transporte Dos", "CUIT": "30-71111111-8"},
+            ],
+            "drivers": [
+                {"CODIGO": "D1", "NOMBRE": "Chofer ambiguo", "CUIT": "30-71111111-8"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_cuit_ambiguous", "source_id": "D1"}
+    ]
+
+
+def test_legacy_driver_creates_habitual_truck_and_trailer(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "0001", "NOMBRE": "Aguirre Jorge", "CUIT": "20-26565521-2"}
+            ],
+            "drivers": [
+                {
+                    "CODIGO": "0001",
+                    "NOMBRE": "Aguirre Jorge",
+                    "CUIT": "20-26565521-2",
+                    "CHASIS": " ab 123 cd ",
+                    "ACOPLADO": " de 456 fg ",
+                }
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    driver = Driver.get()
+    assert driver.usual_truck.domain == "AB123CD"
+    assert driver.usual_truck.trailer_domain == "DE456FG"
+    assert driver.usual_truck.carrier == driver.carrier
+    assert result["trucks"]["created"] == 1
+
+
+def test_legacy_drivers_reuse_same_normalized_habitual_truck(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver, Truck
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {"CODIGO": "0011", "NOMBRE": "Chofer Uno", "CHASIS": "LAB956", "ACOPLADO": "AB225BM"},
+                {"CODIGO": "0014", "NOMBRE": "Chofer Dos", "CHASIS": " lab-956 ", "ACOPLADO": "AB225BM"},
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    truck = Truck.get()
+    assert Truck.select().count() == 1
+    assert Driver.select().where(Driver.usual_truck == truck).count() == 2
+    assert result["trucks"]["created"] == 1
+    assert result["trucks"]["updated"] == 1
+
+
+def test_unmatched_legacy_driver_still_creates_unassigned_habitual_truck(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver, Truck
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {
+                    "CODIGO": "0015",
+                    "NOMBRE": "Chofer sin transporte",
+                    "CHASIS": "GWA390",
+                    "ACOPLADO": "GWA396",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    driver = Driver.get()
+    truck = Truck.get()
+    assert driver.carrier is None
+    assert truck.carrier is None
+    assert driver.usual_truck == truck
+    assert result["trucks"]["created"] == 1
+
+
+def test_legacy_habitual_truck_conflicts_are_reported_without_overwrite(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Carrier, Truck
+
+    existing_carrier = Carrier.create(name="Transportista existente")
+    truck = Truck.create(
+        domain="CON123",
+        trailer_domain="OLD456",
+        carrier=existing_carrier,
+    )
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "NUEVO", "NOMBRE": "Transportista nuevo", "CUIT": "30-70000000-1"}
+            ],
+            "drivers": [
+                {
+                    "CODIGO": "NUEVO",
+                    "NOMBRE": "Transportista nuevo",
+                    "CUIT": "30-70000000-1",
+                    "CHASIS": "CON123",
+                    "ACOPLADO": "NEW789",
+                }
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    truck = Truck.get_by_id(truck.id)
+    warning_codes = {warning["code"] for warning in result["drivers"]["warnings"]}
+    assert truck.carrier == existing_carrier
+    assert truck.trailer_domain == "OLD456"
+    assert warning_codes == {"truck_carrier_conflict", "truck_trailer_conflict"}
+
+
+def test_legacy_habitual_truck_import_is_idempotent(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver, Truck
+
+    importer = LegacyDbfMasterImporter()
+    rows = {
+        "drivers": [
+            {"CODIGO": "0020", "NOMBRE": "Chofer repetido", "CHASIS": "AC141CA", "ACOPLADO": "AC476IH"}
+        ]
+    }
+    first = importer.import_rows(rows, source_system="legacy_dbf")
+    second = importer.import_rows(rows, source_system="legacy_dbf")
+
+    assert Driver.select().count() == 1
+    assert Truck.select().count() == 1
+    assert first["trucks"]["created"] == 1
+    assert second["trucks"]["updated"] == 1
+    assert second["drivers"]["warnings"] == [
+        {"code": "carrier_not_found", "source_id": "0020"}
+    ]
+
+
+def test_legacy_reimport_preserves_manually_completed_driver_relationships(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Carrier, Driver, Truck
+
+    importer = LegacyDbfMasterImporter()
+    row = {"CODIGO": "0015", "NOMBRE": "Chofer corregido"}
+    importer.import_rows({"drivers": [row]}, source_system="legacy_dbf")
+    manual_carrier = Carrier.create(name="Transportista corregido")
+    manual_truck = Truck.create(domain="MAN123", trailer_domain="MAN456", carrier=manual_carrier)
+    driver = Driver.get()
+    driver.carrier = manual_carrier
+    driver.usual_truck = manual_truck
+    driver.save()
+
+    importer.import_rows({"drivers": [row]}, source_system="legacy_dbf")
+
+    driver = Driver.get_by_id(driver.id)
+    assert driver.carrier == manual_carrier
+    assert driver.usual_truck == manual_truck
 
 
 def test_legacy_dbf_master_import_adopts_existing_natural_key_with_trace(db):

@@ -943,9 +943,11 @@ class FemagDesktopWindow(QMainWindow):
         feedback.setWordWrap(True)
         layout.addWidget(feedback)
 
-        table = QTableWidget(0, 5)
+        table = QTableWidget(0, 6)
         table.setObjectName("legacyDbfImportSummaryTable")
-        table.setHorizontalHeaderLabels(["Entidad", "Creados", "Actualizados", "Omitidos", "Errores"])
+        table.setHorizontalHeaderLabels(
+            ["Entidad", "Creados", "Actualizados", "Omitidos", "Advertencias", "Errores"]
+        )
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(table, 1)
 
@@ -966,7 +968,16 @@ class FemagDesktopWindow(QMainWindow):
                 return
             _fill_legacy_import_summary(table, summary)
             self._refresh_master_routes()
-            feedback.setText("Importación finalizada. Revise el resumen y los errores por entidad.")
+            warning_count = sum(
+                len(values.get("warnings", []))
+                for values in summary.values()
+                if isinstance(values, dict)
+            )
+            warning_label = "advertencia" if warning_count == 1 else "advertencias"
+            feedback.setText(
+                f"Importación finalizada con {warning_count} {warning_label}. "
+                "Revise el resumen, las advertencias y los errores por entidad."
+            )
 
         run_button.clicked.connect(run_import)
         return page
@@ -1155,17 +1166,26 @@ def _fill_legacy_import_summary(table: QTableWidget, summary: dict) -> None:
     for row, (entity, label) in enumerate(labels.items()):
         values = summary.get(entity, {})
         errors = values.get("errors", [])
+        warnings = values.get("warnings", [])
         cells = [
             label,
             str(values.get("created", 0)),
             str(values.get("updated", 0)),
             str(values.get("skipped", 0)),
+            str(len(warnings)),
             str(len(errors)),
         ]
         for column, value in enumerate(cells):
             table.setItem(row, column, QTableWidgetItem(value))
+        if warnings:
+            table.item(row, 4).setToolTip(
+                "; ".join(
+                    f"{warning.get('code', 'warning')} ({warning.get('source_id', '-')})"
+                    for warning in warnings
+                )
+            )
         if errors:
-            table.item(row, 4).setToolTip("; ".join(str(error.get("message", error)) for error in errors))
+            table.item(row, 5).setToolTip("; ".join(str(error.get("message", error)) for error in errors))
 
 
 def _detail_panel(spec) -> QFrame:

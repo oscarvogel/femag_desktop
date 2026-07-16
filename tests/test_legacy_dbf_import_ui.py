@@ -59,7 +59,13 @@ def test_legacy_dbf_import_page_runs_importer_and_shows_summary(db, monkeypatch)
             return {
                 "clients": {"created": 2, "updated": 1, "skipped": 0, "errors": []},
                 "carriers": {"created": 1, "updated": 0, "skipped": 0, "errors": []},
-                "drivers": {"created": 0, "updated": 0, "skipped": 0, "errors": []},
+                "drivers": {
+                    "created": 1,
+                    "updated": 0,
+                    "skipped": 0,
+                    "errors": [],
+                    "warnings": [{"code": "carrier_not_found", "source_id": "0015"}],
+                },
                 "trucks": {"created": 0, "updated": 0, "skipped": 0, "errors": []},
                 "products": {"created": 3, "updated": 0, "skipped": 0, "errors": []},
             }
@@ -88,8 +94,12 @@ def test_legacy_dbf_import_page_runs_importer_and_shows_summary(db, monkeypatch)
     table = window.findChild(QTableWidget, "legacyDbfImportSummaryTable")
     assert "Importación finalizada" in feedback.text()
     assert table.rowCount() == 5
+    assert table.columnCount() == 6
+    assert table.horizontalHeaderItem(4).text() == "Advertencias"
     assert table.item(0, 0).text() == "Clientes"
     assert table.item(0, 1).text() == "2"
+    assert table.item(2, 4).text() == "1"
+    assert "1 advertencia" in feedback.text()
 
 
 def test_legacy_dbf_import_refreshes_master_grids(db, monkeypatch):

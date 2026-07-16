@@ -68,11 +68,15 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     ensure_runtime_schema(db)
 
     columns = {column.name: column for column in db.get_columns("driver")}
+    truck_columns = {column.name: column for column in db.get_columns("truck")}
 
     assert "carrier_id" in columns
     assert columns["carrier_id"].null is True
     assert "cuit" in columns
     assert "available" in columns
+    assert columns["usual_truck_id"].null is True
+    assert truck_columns["trailer_domain"].null is True
+    assert truck_columns["carrier_id"].null is True
     assert db.execute_sql("SELECT name, carrier_id FROM driver WHERE id = 1").fetchone() == (
         "Chofer existente",
         1,
