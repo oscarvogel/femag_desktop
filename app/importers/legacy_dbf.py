@@ -95,21 +95,39 @@ class LegacyDbfMasterImporter:
     def _import_drivers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
         source_id = self._required(row, "drivers", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "drivers", "NOMBRE", "CHOFER")
+        existing_driver = (
+            Driver.select()
+            .where((Driver.source_system == source_system) & (Driver.source_id == source_id))
+            .first()
+        ) or Driver.select().where(Driver.name == name).first()
         explicit_carrier_source_id = self._value(row, "TRANSP", "TRANSPORTISTA", "CARRIER")
         if explicit_carrier_source_id:
             carrier = self._get_carrier(source_system, explicit_carrier_source_id)
             warnings = ()
         else:
             carrier, warnings = self._resolve_driver_carrier(row, source_system)
+        if carrier is None and existing_driver is not None and existing_driver.carrier_id is not None:
+            carrier = existing_driver.carrier
+        usual_truck, truck_action, truck_warnings = self._upsert_habitual_truck(
+            row,
+            carrier,
+            source_system,
+            source_id,
+            batch,
+        )
+        if usual_truck is None and existing_driver is not None and existing_driver.usual_truck_id is not None:
+            usual_truck = existing_driver.usual_truck
         values = {
             "name": name,
             "carrier": carrier,
+            "usual_truck": usual_truck,
             "cuit": self._clean_cuit(self._value(row, "CUIT", "CUITCHOFER")) or None,
             "document": self._value(row, "DNI", "DOCUMENTO", "DOC"),
             "phone": self._value(row, "TELEFONO", "TEL", "PHONE"),
         }
         action = self._upsert(Driver, {"name": name}, values, source_system, source_id, batch)
-        return ImportOutcome(action, warnings)
+        related_actions = (("trucks", truck_action),) if truck_action is not None else ()
+        return ImportOutcome(action, warnings + truck_warnings, related_actions)
 
     def _import_trucks(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> str:
         source_id = self._required(row, "trucks", "CODIGO", "ID", "IDLEGACY")
@@ -146,6 +164,56 @@ class LegacyDbfMasterImporter:
         if by_code is not None:
             return None, ({"code": "carrier_code_collision", "source_id": source_id},)
         return None, ({"code": "carrier_not_found", "source_id": source_id},)
+
+    def _upsert_habitual_truck(
+        self,
+        row: dict[str, Any],
+        carrier: Carrier | None,
+        source_system: str,
+        driver_source_id: str,
+        batch: ImportBatch,
+    ) -> tuple[Truck | None, str | None, tuple[dict[str, str], ...]]:
+        domain = self._clean_domain(self._value(row, "CHASIS"))
+        trailer_domain = self._clean_domain(self._value(row, "ACOPLADO")) or None
+        if not domain:
+            warnings = (
+                ({"code": "habitual_truck_missing", "source_id": driver_source_id},)
+                if "CHASIS" in row
+                else ()
+            )
+            return None, None, warnings
+
+        now = utc_now()
+        warnings: list[dict[str, str]] = []
+        truck = Truck.select().where(Truck.domain == domain).first()
+        if truck is None:
+            truck = Truck.create(
+                domain=domain,
+                trailer_domain=trailer_domain,
+                carrier=carrier,
+                source_system=source_system,
+                source_id=f"driver:{driver_source_id}",
+                imported_at=now,
+                updated_from_source_at=now,
+                last_import_batch=batch,
+            )
+            return truck, "created", ()
+
+        if truck.carrier_id is None and carrier is not None:
+            truck.carrier = carrier
+        elif carrier is not None and truck.carrier_id != carrier.id:
+            warnings.append({"code": "truck_carrier_conflict", "source_id": driver_source_id})
+
+        if not truck.trailer_domain and trailer_domain:
+            truck.trailer_domain = trailer_domain
+        elif trailer_domain and truck.trailer_domain != trailer_domain:
+            warnings.append({"code": "truck_trailer_conflict", "source_id": driver_source_id})
+
+        if truck.source_system == source_system and truck.source_id == f"driver:{driver_source_id}":
+            truck.updated_from_source_at = now
+            truck.last_import_batch = batch
+        truck.save()
+        return truck, "updated", tuple(warnings)
 
     def _find_carrier_by_source_id(self, source_system: str, source_id: str) -> Carrier | None:
         if not source_id:
