@@ -1,7 +1,7 @@
 # Diseño — identidad visual FEMAG en aplicación e instaladores
 
-**Fecha:** 2026-07-16  
-**Issue:** #190  
+**Fecha:** 2026-07-16
+**Issue:** #190
 **Decisión aprobada:** enfoque 1, familia de assets fiel al original y composición equilibrada.
 
 ## Objetivo
