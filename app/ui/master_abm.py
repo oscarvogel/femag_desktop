@@ -23,7 +23,19 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.masters import (
+    CLIENT_ADDRESS_TYPE_DELIVERY,
+    CLIENT_ADDRESS_TYPE_FISCAL,
+    CLIENT_ADDRESS_TYPE_SHARED,
+    Carrier,
+    Client,
+    ClientAddress,
+    Driver,
+    Product,
+    Truck,
+    client_address_has_delivery_function,
+    client_address_type_label,
+)
 from app.services.client_service import ClientService
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
@@ -275,12 +287,16 @@ class ClientAddressEntryDialog(QDialog):
         self._load_record()
 
     def _build(self) -> None:
-        layout = _entry_layout(self, "Domicilio de entrega")
+        layout = _entry_layout(self, "Domicilio")
         form = QGridLayout()
         self.client_combo = _combo("addressClientInput", _client_options())
         self.type_combo = _combo(
             "addressTypeInput",
-            [("entrega", "Entrega"), ("fiscal", "Fiscal")],
+            [
+                (CLIENT_ADDRESS_TYPE_DELIVERY, client_address_type_label(CLIENT_ADDRESS_TYPE_DELIVERY)),
+                (CLIENT_ADDRESS_TYPE_FISCAL, client_address_type_label(CLIENT_ADDRESS_TYPE_FISCAL)),
+                (CLIENT_ADDRESS_TYPE_SHARED, client_address_type_label(CLIENT_ADDRESS_TYPE_SHARED)),
+            ],
             include_empty=False,
         )
         self.province_input = QLineEdit()
@@ -337,18 +353,19 @@ class ClientAddressEntryDialog(QDialog):
                     province,
                     city,
                     street,
-                    is_primary=address_type == "entrega",
+                    is_primary=client_address_has_delivery_function(address_type),
                 )
             else:
                 address = ClientAddress.get_by_id(self.record_id)
-                address.client = client
-                address.address_type = address_type
-                address.active = bool(self.active_combo.currentData())
-                address.province = province
-                address.city = city
-                address.address = street
-                address.save()
-                self.saved_record = address
+                self.saved_record = ClientService(self.current_user).update_address(
+                    address,
+                    client=client,
+                    address_type=address_type,
+                    province=province,
+                    city=city,
+                    address=street,
+                    active=bool(self.active_combo.currentData()),
+                )
             self.accept()
         except Exception as exc:
             self.feedback.setText(str(exc))
@@ -856,7 +873,7 @@ def _address_rows() -> list[list[object]]:
             [
                 address.id,
                 address.client.name,
-                address.address_type,
+                client_address_type_label(address.address_type),
                 address.city,
                 address.address,
                 "Activo" if address.active else "Inactivo",
@@ -951,6 +968,7 @@ def _client_address_rows(client_id: int) -> list[list[object]]:
         return [
             [
                 address.id,
+                client_address_type_label(address.address_type),
                 address.address,
                 address.city,
                 address.province,
@@ -965,7 +983,7 @@ def _client_address_rows(client_id: int) -> list[list[object]]:
 
 
 def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
-    page = _page("Clientes", "ABM de clientes con lugares de entrega")
+    page = _page("Clientes", "ABM de clientes con domicilios")
     layout = page.layout()
     can_create = _can_use_menu_action(user, "Maestros", "crear", "Clientes")
     can_modify = _can_use_menu_action(user, "Maestros", "modificar", "Clientes")
@@ -991,7 +1009,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_table.setSelectionBehavior(QTableWidget.SelectRows)
     layout.addWidget(client_table, 1)
 
-    separator = QLabel("Lugares de entrega")
+    separator = QLabel("Domicilios")
     separator.setObjectName("sectionTitle")
     layout.addWidget(separator)
 
@@ -1008,10 +1026,13 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     place_actions.addStretch(1)
     layout.addLayout(place_actions)
 
-    places_table = QTableWidget(0, 4)
+    places_table = QTableWidget(0, 5)
     places_table.setObjectName("clientPlacesTable")
-    places_table.setHorizontalHeaderLabels(["Direccion", "Ciudad", "Provincia", "Estado"])
-    places_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    places_table.setHorizontalHeaderLabels(["Tipo", "Direccion", "Ciudad", "Provincia", "Estado"])
+    places_header = places_table.horizontalHeader()
+    places_header.setSectionResizeMode(QHeaderView.Stretch)
+    places_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    places_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
     places_table.verticalHeader().setVisible(False)
     places_table.setSelectionBehavior(QTableWidget.SelectRows)
     layout.addWidget(places_table, 1)
@@ -1043,7 +1064,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
         cid = selected_client_id()
         if cid is None:
             places_table.setRowCount(0)
-            places_feedback.setText("Seleccione un cliente para ver sus lugares de entrega.")
+            places_feedback.setText("Seleccione un cliente para ver sus domicilios.")
             return
         rows = _client_address_rows(cid)
         places_table.setRowCount(len(rows))
@@ -1054,9 +1075,9 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
             if places_table.item(row_index, 0):
                 places_table.item(row_index, 0).setData(Qt.UserRole, row_id)
         if not rows:
-            places_feedback.setText("Este cliente no tiene lugares de entrega cargados.")
+            places_feedback.setText("Este cliente no tiene domicilios cargados.")
         else:
-            client_feedback.setText("")
+            places_feedback.setText("")
 
     def open_new_client() -> None:
         if not can_create:

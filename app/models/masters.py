@@ -6,6 +6,28 @@ from app.models.base import BaseModel
 from app.models.system import ImportBatch
 
 
+CLIENT_ADDRESS_TYPE_FISCAL = "fiscal"
+CLIENT_ADDRESS_TYPE_DELIVERY = "entrega"
+CLIENT_ADDRESS_TYPE_SHARED = "fiscal_entrega"
+CLIENT_ADDRESS_TYPE_LABELS = {
+    CLIENT_ADDRESS_TYPE_FISCAL: "Fiscal",
+    CLIENT_ADDRESS_TYPE_DELIVERY: "Entrega",
+    CLIENT_ADDRESS_TYPE_SHARED: "Fiscal / Entrega",
+}
+
+
+def client_address_type_label(address_type: str) -> str:
+    return CLIENT_ADDRESS_TYPE_LABELS.get(address_type, address_type)
+
+
+def client_address_has_fiscal_function(address_type: str) -> bool:
+    return address_type in {CLIENT_ADDRESS_TYPE_FISCAL, CLIENT_ADDRESS_TYPE_SHARED}
+
+
+def client_address_has_delivery_function(address_type: str) -> bool:
+    return address_type in {CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED}
+
+
 class TipoIVA(BaseModel):
     nombre = CharField(unique=True)
     porcentaje = FloatField()

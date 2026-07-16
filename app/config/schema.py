@@ -20,9 +20,19 @@ def ensure_runtime_schema(database) -> None:
         _ensure_model_columns(database, model)
     if hasattr(database, "atomic"):
         _normalize_legacy_pallet_rows(database)
+        _consolidate_shared_client_addresses(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
     _ensure_sqlite_index_integrity(database)
+
+
+def _consolidate_shared_client_addresses(database) -> None:
+    from app.models.masters import Client
+    from app.services.client_service import ClientService
+
+    with database.atomic():
+        for client in Client.select().order_by(Client.id):
+            ClientService.consolidate_identical_fiscal_delivery(client)
 
 
 def _ensure_sqlite_index_integrity(database) -> None:

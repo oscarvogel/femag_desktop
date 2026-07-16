@@ -1480,6 +1480,28 @@ def test_demo_seed_address_options_without_client_returns_all_active(db):
     assert len(options) == 3
 
 
+def test_address_options_include_shared_and_exclude_fiscal_only(db):
+    from app.models.masters import Client, ClientAddress
+    from app.ui.desktop_app import _address_options
+
+    client = Client.create(name="Cliente Tipos", cuit="30700000222", iva_condition="RI")
+    fiscal = ClientAddress.create(
+        client=client, address_type="fiscal", province="Misiones", city="Posadas", address="Fiscal"
+    )
+    shared = ClientAddress.create(
+        client=client,
+        address_type="fiscal_entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Compartido",
+    )
+
+    ids = [address_id for address_id, _label in _address_options(client_id=client.id)]
+
+    assert shared.id in ids
+    assert fiscal.id not in ids
+
+
 def test_demo_load_order_dialog_shows_correct_addresses_per_client(db):
     import os
 
