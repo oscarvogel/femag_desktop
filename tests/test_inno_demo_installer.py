@@ -41,6 +41,17 @@ def test_build_contract_packages_python_runtime_before_inno() -> None:
     assert "FEMAG_Desktop_Demo.iss" in build
 
 
+def test_installer_and_executable_use_shared_femag_branding() -> None:
+    spec = SPEC.read_text(encoding="utf-8")
+    iss = ISS.read_text(encoding="utf-8")
+
+    assert '("../app/ui/assets/branding", "app/ui/assets/branding")' in spec
+    assert 'icon="../app/ui/assets/branding/femag.ico"' in spec
+    assert "SetupIconFile=..\\app\\ui\\assets\\branding\\femag.ico" in iss
+    assert 'UninstallDisplayIcon={app}\\FEMAG Desktop DEMO.exe' in iss
+    assert 'IconFilename: "{app}\\FEMAG Desktop DEMO.exe"' in iss
+
+
 def test_standalone_requirements_are_documented() -> None:
     content = DOC.read_text(encoding="utf-8")
 

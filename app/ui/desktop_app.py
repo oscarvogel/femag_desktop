@@ -51,6 +51,7 @@ from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
@@ -104,6 +105,7 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
         if demo_mode:
             _seed_demo_masters()
     app = QApplication.instance() or QApplication([])
+    app.setWindowIcon(femag_icon())
     login = LoginWindow(demo_mode=demo_mode)
     if login.show() != QDialog.Accepted:
         return 0
@@ -137,6 +139,10 @@ class FemagDesktopWindow(QMainWindow):
         self.user = user
         self.shell = ShellBuilder(user=user, demo_mode=demo_mode).shell_spec
         self.setWindowTitle("FEMAG Desktop")
+        self.setWindowIcon(femag_icon())
+        app = QApplication.instance()
+        if app is not None:
+            app.setWindowIcon(femag_icon())
         self.resize(1280, 820)
         self.setStyleSheet(STYLES)
         self.stack = QStackedWidget()
@@ -199,8 +205,10 @@ class FemagDesktopWindow(QMainWindow):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(22, 10, 22, 10)
         layout.setSpacing(16)
-        title = QLabel(self.shell.app_name)
-        title.setObjectName("appTitle")
+        title = QLabel()
+        title.setObjectName("topbarBrandLogo")
+        title.setAccessibleName("Logo FEMAG")
+        title.setPixmap(load_brand_pixmap("femag-logo-ui.png", width=126, height=64))
         search = QLineEdit()
         search.setObjectName("globalSearch")
         search.setPlaceholderText("Buscar ordenes o clientes...")
@@ -225,12 +233,25 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(user)
         return bar
 
-    def _sidebar(self) -> QListWidget:
+    def _sidebar(self) -> QWidget:
+        container = QFrame()
+        container.setObjectName("sidebarContainer")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 14, 12, 10)
+        layout.setSpacing(12)
+        logo = QLabel()
+        logo.setObjectName("sidebarBrandLogo")
+        logo.setAccessibleName("Logo FEMAG")
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=154, height=92))
+        logo.setMinimumHeight(92)
+        layout.addWidget(logo)
         self.nav.setObjectName("sidebar")
-        self.nav.setFixedWidth(250)
+        container.setFixedWidth(250)
         self.nav.setSpacing(4)
         self._populate_sidebar()
-        return self.nav
+        layout.addWidget(self.nav, 1)
+        return container
 
     def _populate_sidebar(self) -> None:
         with QSignalBlocker(self.nav):
@@ -2619,7 +2640,9 @@ def _demo_data_exists() -> bool:
 STYLES = """
 QWidget { background: #f6f8fb; color: #172033; font-family: Arial; font-size: 14px; }
 #topbar { background: #ffffff; border-bottom: 1px solid #d9e1ec; min-height: 68px; }
-#appTitle { font-size: 25px; font-weight: 700; color: #0f172a; }
+#topbarBrandLogo { background: transparent; }
+#sidebarContainer { background: #0f172a; }
+#sidebarBrandLogo { background: transparent; }
 #globalSearch { background: #ffffff; border: 1px solid #d9e1ec; border-radius: 8px; padding: 10px 14px; color: #334155; }
 #topbarIconButton { background: #ffffff; color: #516174; border: 1px solid transparent; padding: 8px 10px; }
 #topbarIconButton:hover { border: 1px solid #d9e1ec; background: #f8fafc; }

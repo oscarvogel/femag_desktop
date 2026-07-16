@@ -31,6 +31,10 @@ El resultado se genera en:
 installer\output\FEMAG_Desktop_DEMO_Standalone_Setup.exe
 ```
 
+El ejecutable, el instalador y sus accesos directos usan el icono compartido
+`app/ui/assets/branding/femag.ico`. El futuro instalador productivo debe reutilizar
+este mismo contrato de branding, sin duplicar ni redibujar la marca.
+
 ## Requisitos de la PC cliente
 
 - Windows 10 u 11 de 64 bits.

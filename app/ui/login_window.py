@@ -2,6 +2,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout
 
 from app.services.auth_service import AuthService
+from app.ui.branding import femag_icon, load_brand_pixmap
 
 
 class LoginWindow(QDialog):
@@ -10,9 +11,11 @@ class LoginWindow(QDialog):
         self.authenticated_user = None
         self.demo_mode = demo_mode
         self.setWindowTitle("FEMAG Desktop - Inicio de sesion")
-        self.setFixedSize(460, 440)
+        self.setWindowIcon(femag_icon())
+        self.setFixedWidth(460)
         self.setStyleSheet(self._STYLES)
         self._build()
+        self.setFixedHeight(self.minimumSizeHint().height())
 
     def _build(self):
         root = QVBoxLayout()
@@ -24,6 +27,16 @@ class LoginWindow(QDialog):
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(40, 36, 40, 28)
         outer_layout.setSpacing(0)
+
+        logo = QLabel()
+        logo.setObjectName("loginBrandLogo")
+        logo.setAccessibleName("Logo FEMAG")
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setPixmap(load_brand_pixmap("femag-logo-ui.png", width=270, height=150))
+        logo.setMinimumHeight(150)
+        outer_layout.addWidget(logo)
+
+        outer_layout.addSpacing(12)
 
         title = QLabel("FEMAG Desktop")
         title.setObjectName("loginTitle")
@@ -142,6 +155,9 @@ class LoginWindow(QDialog):
         font-size: 24px;
         font-weight: 700;
         color: #0f172a;
+    }
+    #loginBrandLogo {
+        background: transparent;
     }
     #loginSubtitle {
         font-size: 13px;

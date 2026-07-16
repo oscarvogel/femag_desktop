@@ -21,6 +21,8 @@ SetupLogging=yes
 UninstallDisplayName=FEMAG Desktop DEMO
 Uninstallable=yes
 ArchitecturesAllowed=x64compatible
+SetupIconFile=..\app\ui\assets\branding\femag.ico
+UninstallDisplayIcon={app}\FEMAG Desktop DEMO.exe
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
@@ -29,8 +31,8 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Source: "..\dist\FEMAG Desktop DEMO\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"; IconFilename: "{app}\FEMAG Desktop DEMO.exe"
+Name: "{autodesktop}\FEMAG Desktop DEMO"; Filename: "{app}\FEMAG Desktop DEMO.exe"; WorkingDir: "{app}"; IconFilename: "{app}\FEMAG Desktop DEMO.exe"; Tasks: desktopicon
 Name: "{autoprograms}\Desinstalar FEMAG Desktop DEMO"; Filename: "{uninstallexe}"
 
 [Tasks]
