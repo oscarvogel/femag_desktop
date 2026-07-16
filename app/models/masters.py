@@ -74,9 +74,22 @@ class Carrier(BaseModel):
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_carriers", null=True)
 
 
+class Truck(BaseModel):
+    domain = CharField(unique=True)
+    trailer_domain = CharField(null=True)
+    carrier = ForeignKeyField(Carrier, backref="trucks", null=True)
+    active = BooleanField(default=True)
+    source_system = CharField(null=True)
+    source_id = CharField(null=True)
+    imported_at = DateTimeField(null=True)
+    updated_from_source_at = DateTimeField(null=True)
+    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_trucks", null=True)
+
+
 class Driver(BaseModel):
     name = CharField(unique=True)
     carrier = ForeignKeyField(Carrier, backref="drivers", null=True)
+    usual_truck = ForeignKeyField(Truck, backref="usual_drivers", null=True)
     cuit = CharField(null=True)
     document = CharField(null=True)
     phone = CharField(null=True)
@@ -87,17 +100,6 @@ class Driver(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_drivers", null=True)
-
-
-class Truck(BaseModel):
-    domain = CharField(unique=True)
-    carrier = ForeignKeyField(Carrier, backref="trucks")
-    active = BooleanField(default=True)
-    source_system = CharField(null=True)
-    source_id = CharField(null=True)
-    imported_at = DateTimeField(null=True)
-    updated_from_source_at = DateTimeField(null=True)
-    last_import_batch = ForeignKeyField(ImportBatch, backref="imported_trucks", null=True)
 
 
 class PalletType(BaseModel):

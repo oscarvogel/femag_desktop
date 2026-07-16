@@ -39,6 +39,19 @@ def test_product_weight_defaults_to_zero(db):
     assert product.peso_unitario_kg == Decimal("0.000")
 
 
+def test_driver_can_reference_habitual_truck_and_trailer(db):
+    from app.models.masters import Carrier, Driver, Truck
+
+    carrier = Carrier.create(name="Transporte habitual")
+    truck = Truck.create(domain="ABC123", trailer_domain="DEF456", carrier=carrier)
+    driver = Driver.create(name="Chofer habitual", carrier=carrier, usual_truck=truck)
+
+    stored = Driver.get_by_id(driver.id)
+
+    assert stored.usual_truck == truck
+    assert stored.usual_truck.trailer_domain == "DEF456"
+
+
 def test_pallet_allocation_snapshots_weight_and_calculates_kg(db):
     from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderPallet, LoadOrderPalletAllocation
     from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, Truck
