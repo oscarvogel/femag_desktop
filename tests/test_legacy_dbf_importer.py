@@ -111,7 +111,7 @@ def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
     assert ImportBatch.select().count() == 2
 
 
-def test_legacy_client_import_creates_fiscal_and_delivery_addresses_without_overwriting_them(db):
+def test_legacy_client_import_creates_one_shared_address_without_overwriting_it(db):
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import ClientAddress
 
@@ -127,22 +127,86 @@ def test_legacy_client_import_creates_fiscal_and_delivery_addresses_without_over
 
     importer.import_rows({"clients": [row]}, source_system="legacy_dbf")
 
-    addresses = list(ClientAddress.select().order_by(ClientAddress.address_type))
-    assert [(address.address_type, address.address) for address in addresses] == [
-        ("entrega", "Ruta 12 Km 8"),
-        ("fiscal", "Ruta 12 Km 8"),
-    ]
-    assert all(address.province == "Sin especificar" for address in addresses)
-    assert all(address.city == "Posadas" for address in addresses)
-    assert all(address.is_primary for address in addresses)
-    assert all(address.observations == "Código postal: 3300" for address in addresses)
+    address = ClientAddress.get()
+    assert address.address_type == "fiscal_entrega"
+    assert address.address == "Ruta 12 Km 8"
+    assert address.province == "Sin especificar"
+    assert address.city == "Posadas"
+    assert address.is_primary is True
+    assert address.observations == "Código postal: 3300"
 
-    addresses[0].address = "Domicilio editado manualmente"
-    addresses[0].save()
+    address.address = "Domicilio editado manualmente"
+    address.save()
     importer.import_rows({"clients": [row]}, source_system="legacy_dbf")
 
+    assert ClientAddress.select().count() == 1
+    assert ClientAddress.get_by_id(address.id).address == "Domicilio editado manualmente"
+
+
+def test_legacy_client_import_consolidates_identical_fiscal_and_delivery_addresses(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Cliente Norte", cuit="30711111118", iva_condition="RI")
+    values = {
+        "client": client,
+        "province": "Sin especificar",
+        "city": "Posadas",
+        "address": "Ruta 12 Km 8",
+        "is_primary": True,
+        "observations": "Código postal: 3300",
+    }
+    ClientAddress.create(address_type="fiscal", **values)
+    ClientAddress.create(address_type="entrega", **values)
+
+    LegacyDbfMasterImporter().import_rows(
+        {
+            "clients": [
+                {
+                    "CODIGO": "C001",
+                    "NOMBRE": "Cliente Norte",
+                    "CUIT": "30-71111111-8",
+                    "DOMICILIO": "Ruta 12 Km 8",
+                    "CODPOS": "3300",
+                    "IMPOSITIVO": "Posadas",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert ClientAddress.select().count() == 1
+    assert ClientAddress.get().address_type == "fiscal_entrega"
+
+
+def test_legacy_client_import_preserves_different_fiscal_and_delivery_addresses(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Cliente Norte", cuit="30711111118", iva_condition="RI")
+    ClientAddress.create(
+        client=client, address_type="fiscal", province="Misiones", city="Posadas", address="Fiscal"
+    )
+    ClientAddress.create(
+        client=client, address_type="entrega", province="Misiones", city="Obera", address="Entrega"
+    )
+
+    LegacyDbfMasterImporter().import_rows(
+        {
+            "clients": [
+                {
+                    "CODIGO": "C001",
+                    "NOMBRE": "Cliente Norte",
+                    "CUIT": "30-71111111-8",
+                    "DOMICILIO": "Fiscal",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
     assert ClientAddress.select().count() == 2
-    assert ClientAddress.get_by_id(addresses[0].id).address == "Domicilio editado manualmente"
+    assert {address.address_type for address in ClientAddress.select()} == {"fiscal", "entrega"}
 
 
 def test_legacy_client_without_address_imports_without_creating_empty_addresses(db):

@@ -1,5 +1,5 @@
 #define MyAppName "FEMAG Desktop DEMO"
-#define MyAppVersion "2026.07.16-demo"
+#define MyAppVersion "2026.07.16-demo.2"
 #define MyAppPublisher "Vogel Consultoria"
 [Setup]
 AppId={{F4E7A5EE-3E2E-4A5D-8A28-DA9E741EDE01}

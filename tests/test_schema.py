@@ -99,6 +99,28 @@ def test_driver_schema_allows_null_carrier_and_cuit(db):
     assert columns["cuit"].null is True
 
 
+def test_runtime_schema_consolidates_identical_fiscal_and_delivery_addresses(db):
+    from app.config.schema import ensure_runtime_schema
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Cliente Migración", cuit="30700000444", iva_condition="RI")
+    values = dict(
+        client=client,
+        province="Sin especificar",
+        city="Posadas",
+        address="Ruta 12",
+        observations="Código postal: 3300",
+        is_primary=True,
+    )
+    ClientAddress.create(address_type="fiscal", **values)
+    ClientAddress.create(address_type="entrega", **values)
+
+    ensure_runtime_schema(db)
+
+    assert ClientAddress.select().where(ClientAddress.client == client).count() == 1
+    assert ClientAddress.get(ClientAddress.client == client).address_type == "fiscal_entrega"
+
+
 def test_runtime_schema_maps_decimal_fields_with_declared_precision():
     from app.config.schema import _field_sql
     from app.models.masters import Product

@@ -829,13 +829,15 @@ def test_master_abm_documents_autoabm_debt():
 
 
 def test_client_abm_page_shows_addresses_for_selected_client(db):
-    from PyQt5.QtWidgets import QTableWidget
+    from PyQt5.QtWidgets import QHeaderView, QLabel, QTableWidget
 
     from app.models.masters import Client, ClientAddress
 
     client = Client.create(name="Z Cliente Places", cuit="30700000993", iva_condition="RI")
-    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Posadas", address="Ruta A")
-    ClientAddress.create(client=client, address_type="entrega", province="Misiones", city="Eldorado", address="Ruta B")
+    ClientAddress.create(client=client, address_type="fiscal", province="Misiones", city="Posadas", address="Ruta A")
+    ClientAddress.create(
+        client=client, address_type="fiscal_entrega", province="Misiones", city="Eldorado", address="Ruta B"
+    )
 
     app, window = _admin_window("admin_client_places")
 
@@ -856,10 +858,19 @@ def test_client_abm_page_shows_addresses_for_selected_client(db):
     assert places_table is not None
     assert places_table.rowCount() == 2
     headers = [places_table.horizontalHeaderItem(c).text() for c in range(places_table.columnCount())]
-    assert "Estado" in headers
-    addr_items = [places_table.item(r, 0).text() for r in range(places_table.rowCount())]
+    assert headers == ["Tipo", "Direccion", "Ciudad", "Provincia", "Estado"]
+    assert places_table.horizontalHeader().sectionResizeMode(0) == QHeaderView.ResizeToContents
+    assert places_table.horizontalHeader().sectionResizeMode(1) == QHeaderView.Stretch
+    assert places_table.horizontalHeader().sectionResizeMode(4) == QHeaderView.ResizeToContents
+    assert {places_table.item(r, 0).text() for r in range(places_table.rowCount())} == {
+        "Fiscal",
+        "Fiscal / Entrega",
+    }
+    addr_items = [places_table.item(r, 1).text() for r in range(places_table.rowCount())]
     assert "Ruta A" in addr_items
     assert "Ruta B" in addr_items
+    assert window.findChild(QLabel, "clientPlacesFeedback").text() == ""
+    assert "Domicilios" in {label.text() for label in window.findChildren(QLabel)}
 
 
 def test_client_abm_can_add_address_from_client_page(db):
@@ -881,7 +892,10 @@ def test_client_abm_can_add_address_from_client_page(db):
     app.processEvents()
 
     def fill_place(dialog):
-        _set_combo(dialog.findChild(QComboBox, "addressTypeInput"), "entrega")
+        type_combo = dialog.findChild(QComboBox, "addressTypeInput")
+        assert type_combo.findData("fiscal_entrega") >= 0
+        assert type_combo.itemText(type_combo.findData("fiscal_entrega")) == "Fiscal / Entrega"
+        _set_combo(type_combo, "entrega")
         dialog.findChild(QLineEdit, "addressProvinceInput").setText("Misiones")
         dialog.findChild(QLineEdit, "addressCityInput").setText("Posadas")
         dialog.findChild(QLineEdit, "addressStreetInput").setText("Ruta Nueva")
@@ -894,7 +908,7 @@ def test_client_abm_can_add_address_from_client_page(db):
     assert address.active is True
     places_table = window.findChild(QTableWidget, "clientPlacesTable")
     assert places_table.rowCount() == 1
-    assert places_table.item(0, 0).text() == "Ruta Nueva"
+    assert places_table.item(0, 1).text() == "Ruta Nueva"
 
 
 def test_client_abm_can_edit_existing_address(db):
@@ -915,7 +929,7 @@ def test_client_abm_can_edit_existing_address(db):
 
     places_table = window.findChild(QTableWidget, "clientPlacesTable")
     assert places_table.rowCount() == 1
-    assert places_table.item(0, 0).text() == "Ruta Original"
+    assert places_table.item(0, 1).text() == "Ruta Original"
     places_table.setCurrentCell(0, 0)
 
     def fill_edit(dialog):
@@ -926,7 +940,7 @@ def test_client_abm_can_edit_existing_address(db):
 
     address = ClientAddress.get(ClientAddress.client == client)
     assert address.address == "Ruta Editada"
-    assert places_table.item(0, 0).text() == "Ruta Editada"
+    assert places_table.item(0, 1).text() == "Ruta Editada"
 
 
 def test_client_abm_can_toggle_address_active_from_page(db):
@@ -947,7 +961,7 @@ def test_client_abm_can_toggle_address_active_from_page(db):
 
     places_table = window.findChild(QTableWidget, "clientPlacesTable")
     assert places_table.rowCount() == 1
-    assert places_table.item(0, 3).text() == "Activo"
+    assert places_table.item(0, 4).text() == "Activo"
     places_table.setCurrentCell(0, 0)
 
     toggle_btn = window.findChild(QPushButton, "toggleClientPlaceButton")
@@ -956,14 +970,14 @@ def test_client_abm_can_toggle_address_active_from_page(db):
 
     address = ClientAddress.get(ClientAddress.client == client)
     assert address.active is False
-    assert places_table.item(0, 3).text() == "Inactivo"
+    assert places_table.item(0, 4).text() == "Inactivo"
 
     toggle_btn.click()
     app.processEvents()
 
     address = ClientAddress.get(ClientAddress.client == client)
     assert address.active is True
-    assert places_table.item(0, 3).text() == "Activo"
+    assert places_table.item(0, 4).text() == "Activo"
 
 
 def test_client_abm_shows_inactive_and_active_addresses(db):
@@ -985,6 +999,6 @@ def test_client_abm_shows_inactive_and_active_addresses(db):
 
     places_table = window.findChild(QTableWidget, "clientPlacesTable")
     assert places_table.rowCount() == 2
-    statuses = [places_table.item(r, 3).text() for r in range(places_table.rowCount())]
+    statuses = [places_table.item(r, 4).text() for r in range(places_table.rowCount())]
     assert "Activo" in statuses
     assert "Inactivo" in statuses

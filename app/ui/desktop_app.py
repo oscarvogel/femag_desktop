@@ -40,7 +40,18 @@ from app.config.schema import ensure_runtime_schema
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
+from app.models.masters import (
+    CLIENT_ADDRESS_TYPE_DELIVERY,
+    CLIENT_ADDRESS_TYPE_SHARED,
+    Carrier,
+    Client,
+    ClientAddress,
+    Driver,
+    PalletType,
+    Product,
+    TipoIVA,
+    Truck,
+)
 from app.services.auth_service import AuthService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
@@ -2451,7 +2462,10 @@ def _client_options() -> list[tuple[int, str]]:
 
 def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
     try:
-        query = ClientAddress.select().join(Client).where(ClientAddress.active == True)  # noqa: E712
+        query = ClientAddress.select().join(Client).where(
+            (ClientAddress.active == True)  # noqa: E712
+            & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
+        )
         if client_id is not None:
             query = query.where(ClientAddress.client == client_id)
         return [
