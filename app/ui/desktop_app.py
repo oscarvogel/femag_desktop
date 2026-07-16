@@ -2478,7 +2478,7 @@ def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
 
 def _product_options() -> list[tuple[int, str]]:
     try:
-        return [(product.id, product.name) for product in Product.select().where(Product.active == True).order_by(Product.name)]  # noqa: E712
+        return [(product.id, product.name) for product in Product.select().where((Product.active == True) & (Product.product_kind == "producto")).order_by(Product.name)]  # noqa: E712
     except (InterfaceError, OperationalError):
         return []
 

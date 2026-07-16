@@ -14,6 +14,18 @@ CLIENT_ADDRESS_TYPE_LABELS = {
     CLIENT_ADDRESS_TYPE_DELIVERY: "Entrega",
     CLIENT_ADDRESS_TYPE_SHARED: "Fiscal / Entrega",
 }
+PRODUCT_KIND_PRODUCT = "producto"
+PRODUCT_KIND_SERVICE = "servicio"
+PRODUCT_KIND_FINANCIAL = "financiero"
+PRODUCT_KIND_INTERNAL = "interno"
+PRODUCT_KIND_REVIEW = "revisar"
+PRODUCT_KIND_LABELS = {
+    PRODUCT_KIND_PRODUCT: "Producto",
+    PRODUCT_KIND_SERVICE: "Servicio",
+    PRODUCT_KIND_FINANCIAL: "Financiero",
+    PRODUCT_KIND_INTERNAL: "Interno",
+    PRODUCT_KIND_REVIEW: "Revisar",
+}
 
 
 def client_address_type_label(address_type: str) -> str:
@@ -26,6 +38,14 @@ def client_address_has_fiscal_function(address_type: str) -> bool:
 
 def client_address_has_delivery_function(address_type: str) -> bool:
     return address_type in {CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED}
+
+
+def product_kind_label(product_kind: str | None) -> str:
+    return PRODUCT_KIND_LABELS.get(product_kind, product_kind or "Sin clasificar")
+
+
+def product_is_loadable(product: "Product") -> bool:
+    return product.product_kind == PRODUCT_KIND_PRODUCT
 
 
 class TipoIVA(BaseModel):
@@ -70,6 +90,10 @@ class Product(BaseModel):
     name = CharField(unique=True)
     unit = CharField()
     peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
+    product_kind = CharField(null=True, default=PRODUCT_KIND_PRODUCT)
+    classification_source = CharField(null=True)
+    weight_source = CharField(null=True)
+    review_required = BooleanField(default=True)
     active = BooleanField(default=True)
     precio_neto_base = FloatField(default=0.0)
     precio_lista_1 = FloatField(default=0.0)

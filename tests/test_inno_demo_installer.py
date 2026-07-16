@@ -13,7 +13,7 @@ def test_inno_installer_is_standalone_and_demo_only() -> None:
     content = ISS.read_text(encoding="utf-8")
 
     assert '#define MyAppName "FEMAG Desktop DEMO"' in content
-    assert '#define MyAppVersion "2026.07.16-demo.2"' in content
+    assert '#define MyAppVersion "2026.07.16-demo.3"' in content
     assert "DefaultDirName={localappdata}\\Programs\\FEMAG Desktop DEMO" in content
     assert "OutputBaseFilename=FEMAG_Desktop_DEMO_Standalone_Setup" in content
     assert "PrivilegesRequired=lowest" in content

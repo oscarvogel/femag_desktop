@@ -19,11 +19,35 @@ def ensure_runtime_schema(database) -> None:
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
     if hasattr(database, "atomic"):
+        _backfill_product_classification(database)
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
     _ensure_sqlite_index_integrity(database)
+
+
+def _backfill_product_classification(database) -> None:
+    from app.models.masters import Product
+    from app.services.product_classification_service import analyze_legacy_product
+
+    with database.atomic():
+        for product in Product.select().order_by(Product.id):
+            inference = analyze_legacy_product(product.name)
+            if product.classification_source != "manual":
+                product.product_kind = inference.product_kind
+                product.classification_source = "inferido"
+            if product.weight_source != "manual":
+                if product.weight_source is None and product.peso_unitario_kg and product.peso_unitario_kg > 0:
+                    product.weight_source = "manual"
+                else:
+                    product.peso_unitario_kg = inference.peso_unitario_kg
+                    product.weight_source = "inferido"
+            product.review_required = (
+                product.product_kind == "revisar"
+                or (product.product_kind == "producto" and product.peso_unitario_kg <= 0)
+            )
+            product.save()
 
 
 def _consolidate_shared_client_addresses(database) -> None:

@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.models.masters import Carrier, Driver, OperationalService, PalletType, Product, Truck
+from app.models.masters import PRODUCT_KIND_LABELS, Carrier, Driver, OperationalService, PalletType, Product, Truck
 from app.services.audit_service import AuditService
 
 
@@ -28,14 +28,21 @@ class MasterService:
         precio_lista_2: float = 0.0,
         precio_lista_3: float = 0.0,
         precio_lista_4: float = 0.0,
+        product_kind: str = "producto",
     ) -> Product:
         peso_unitario_kg = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if peso_unitario_kg < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
+        if product_kind not in PRODUCT_KIND_LABELS:
+            raise ValueError("La clasificación del artículo no es válida.")
         row = Product.create(
             name=name,
             unit=unit,
             peso_unitario_kg=peso_unitario_kg,
+            product_kind=product_kind,
+            classification_source="manual",
+            weight_source="manual",
+            review_required=False,
             precio_neto_base=precio_lista_1,
             precio_lista_1=precio_lista_1,
             precio_lista_2=precio_lista_2,
@@ -48,6 +55,22 @@ class MasterService:
             {"name": name, "unit": unit, "peso_unitario_kg": str(peso_unitario_kg)},
         )
         return row
+
+    def update_product(self, product: Product, name: str, unit: str, *, peso_unitario_kg=Decimal("0"), product_kind="producto", **prices) -> Product:
+        weight = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
+        if weight < 0:
+            raise ValueError("El peso unitario no puede ser negativo.")
+        if product_kind not in PRODUCT_KIND_LABELS:
+            raise ValueError("La clasificación del artículo no es válida.")
+        product.name, product.unit = name, unit
+        product.peso_unitario_kg, product.product_kind = weight, product_kind
+        product.classification_source = product.weight_source = "manual"
+        product.review_required = False
+        for field in ("precio_lista_1", "precio_lista_2", "precio_lista_3", "precio_lista_4"):
+            setattr(product, field, float(prices.get(field, 0.0)))
+        product.precio_neto_base = product.precio_lista_1
+        product.save()
+        return product
 
     def create_driver(
         self,
