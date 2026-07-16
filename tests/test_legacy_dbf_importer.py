@@ -180,6 +180,92 @@ def test_legacy_dbf_driver_without_carrier_is_idempotent(db):
     assert Driver.get().carrier is None
 
 
+def test_legacy_driver_code_requires_compatible_cuit(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "0004", "NOMBRE": "Vogel Ricardo", "CUIT": "20-23737702-9"}
+            ],
+            "drivers": [
+                {"CODIGO": "0004", "NOMBRE": "Bosing Sergio", "CUIT": "20-30717891-6"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_code_collision", "source_id": "0004"}
+    ]
+
+
+def test_legacy_driver_uses_unique_carrier_cuit_when_code_collides(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "0009", "NOMBRE": "Mendieta Gabriel", "CUIT": "20-24834384-3"},
+                {"CODIGO": "0012", "NOMBRE": "Petrasek Jose", "CUIT": "23-17829761-9"},
+            ],
+            "drivers": [
+                {"CODIGO": "0012", "NOMBRE": "Mendieta Gabriel", "CUIT": "20-24834384-3"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier.source_id == "0009"
+    assert result["drivers"]["warnings"] == []
+
+
+def test_legacy_driver_without_safe_carrier_is_imported_with_warning(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "drivers": [
+                {"CODIGO": "0015", "NOMBRE": "Chofer sin relacion", "CUIT": "20-11111111-1"}
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["created"] == 1
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_not_found", "source_id": "0015"}
+    ]
+
+
+def test_legacy_driver_ambiguous_carrier_cuit_is_not_assigned(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Driver
+
+    result = LegacyDbfMasterImporter().import_rows(
+        {
+            "carriers": [
+                {"CODIGO": "T1", "NOMBRE": "Transporte Uno", "CUIT": "30-71111111-8"},
+                {"CODIGO": "T2", "NOMBRE": "Transporte Dos", "CUIT": "30-71111111-8"},
+            ],
+            "drivers": [
+                {"CODIGO": "D1", "NOMBRE": "Chofer ambiguo", "CUIT": "30-71111111-8"}
+            ],
+        },
+        source_system="legacy_dbf",
+    )
+
+    assert Driver.get().carrier is None
+    assert result["drivers"]["warnings"] == [
+        {"code": "carrier_cuit_ambiguous", "source_id": "D1"}
+    ]
+
+
 def test_legacy_dbf_master_import_adopts_existing_natural_key_with_trace(db):
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import Client
