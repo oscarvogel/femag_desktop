@@ -1,6 +1,19 @@
 import pytest
 from conftest import _master_data, _multi_client_data, _valid_order_payload
 
+
+def test_load_order_rejects_billable_service_as_product(db):
+    from app.models.masters import Product
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = Product.create(name="FLETE", unit="servicio", product_kind="servicio")
+    payload = _valid_order_payload(data)
+    payload["products"] = [{"product": service, "quantity": 1}]
+
+    with pytest.raises(ValueError, match="no está habilitado para órdenes de carga"):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
 def test_create_load_order_with_products_pallets_blocks_driver_and_audits(db):
     from app.models.audit import AuditLog
     from app.models.load_orders import LoadOrder, LoadOrderPallet, LoadOrderProduct

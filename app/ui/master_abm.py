@@ -27,6 +27,7 @@ from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_FISCAL,
     CLIENT_ADDRESS_TYPE_SHARED,
+    PRODUCT_KIND_LABELS,
     Carrier,
     Client,
     ClientAddress,
@@ -35,6 +36,8 @@ from app.models.masters import (
     Truck,
     client_address_has_delivery_function,
     client_address_type_label,
+    product_is_loadable,
+    product_kind_label,
 )
 from app.services.client_service import ClientService
 from app.services.master_service import MasterService
@@ -163,7 +166,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "products": MasterAbmConfig(
             "Productos",
-            ["Producto", "Unidad", "Peso unitario", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
+            ["Producto", "Unidad", "Peso", "Clasificación", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             _product_rows,
             ProductEntryDialog,
             "newProductButton",
@@ -626,6 +629,10 @@ class ProductEntryDialog(QDialog):
         self.weight_input.setRange(0, 999999999)
         self.weight_input.setDecimals(3)
         self.weight_input.setSuffix(" kg")
+        self.kind_input = QComboBox()
+        self.kind_input.setObjectName("productKindInput")
+        for value, label in PRODUCT_KIND_LABELS.items():
+            self.kind_input.addItem(label, value)
         self.price_list_1_input = QLineEdit()
         self.price_list_1_input.setObjectName("productPriceList1Input")
         self.price_list_2_input = QLineEdit()
@@ -636,18 +643,20 @@ class ProductEntryDialog(QDialog):
         self.price_list_4_input.setObjectName("productPriceList4Input")
         form.addWidget(QLabel("Producto"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
-        form.addWidget(QLabel("Unidad"), 1, 0)
-        form.addWidget(self.unit_input, 1, 1)
-        form.addWidget(QLabel("Peso unitario"), 2, 0)
-        form.addWidget(self.weight_input, 2, 1)
-        form.addWidget(QLabel("Lista 1"), 3, 0)
-        form.addWidget(self.price_list_1_input, 3, 1)
-        form.addWidget(QLabel("Lista 2"), 4, 0)
-        form.addWidget(self.price_list_2_input, 4, 1)
-        form.addWidget(QLabel("Lista 3"), 5, 0)
-        form.addWidget(self.price_list_3_input, 5, 1)
-        form.addWidget(QLabel("Lista 4"), 6, 0)
-        form.addWidget(self.price_list_4_input, 6, 1)
+        form.addWidget(QLabel("Clasificación"), 1, 0)
+        form.addWidget(self.kind_input, 1, 1)
+        form.addWidget(QLabel("Unidad"), 2, 0)
+        form.addWidget(self.unit_input, 2, 1)
+        form.addWidget(QLabel("Peso unitario"), 3, 0)
+        form.addWidget(self.weight_input, 3, 1)
+        form.addWidget(QLabel("Lista 1"), 4, 0)
+        form.addWidget(self.price_list_1_input, 4, 1)
+        form.addWidget(QLabel("Lista 2"), 5, 0)
+        form.addWidget(self.price_list_2_input, 5, 1)
+        form.addWidget(QLabel("Lista 3"), 6, 0)
+        form.addWidget(self.price_list_3_input, 6, 1)
+        form.addWidget(QLabel("Lista 4"), 7, 0)
+        form.addWidget(self.price_list_4_input, 7, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveProductButton", self._save)
@@ -660,6 +669,7 @@ class ProductEntryDialog(QDialog):
         self.name_input.setText(product.name)
         self.unit_input.setText(product.unit)
         self.weight_input.setValue(float(product.peso_unitario_kg))
+        self.kind_input.setCurrentIndex(max(self.kind_input.findData(product.product_kind or "revisar"), 0))
         self.price_list_1_input.setText(_money_text(product.precio_lista_1 or product.precio_neto_base))
         self.price_list_2_input.setText(_money_text(product.precio_lista_2))
         self.price_list_3_input.setText(_money_text(product.precio_lista_3))
@@ -683,20 +693,15 @@ class ProductEntryDialog(QDialog):
                     name,
                     unit,
                     peso_unitario_kg=Decimal(str(self.weight_input.value())),
+                    product_kind=self.kind_input.currentData(),
                     **prices,
                 )
             else:
-                product = Product.get_by_id(self.record_id)
-                product.name = name
-                product.unit = unit
-                product.peso_unitario_kg = Decimal(str(self.weight_input.value())).quantize(Decimal("0.001"))
-                product.precio_neto_base = prices["precio_lista_1"]
-                product.precio_lista_1 = prices["precio_lista_1"]
-                product.precio_lista_2 = prices["precio_lista_2"]
-                product.precio_lista_3 = prices["precio_lista_3"]
-                product.precio_lista_4 = prices["precio_lista_4"]
-                product.save()
-                self.saved_record = product
+                self.saved_record = MasterService(self.current_user).update_product(
+                    Product.get_by_id(self.record_id), name, unit,
+                    peso_unitario_kg=Decimal(str(self.weight_input.value())),
+                    product_kind=self.kind_input.currentData(), **prices,
+                )
             self.accept()
         except Exception as exc:
             self.feedback.setText(str(exc))
@@ -899,6 +904,9 @@ def _product_rows() -> list[list[object]]:
                     if product.peso_unitario_kg > 0
                     else "Peso pendiente"
                 ),
+                product_kind_label(product.product_kind),
+                "Sí" if product_is_loadable(product) else "No",
+                "Pendiente" if product.review_required else "Confirmado",
                 _money_text(product.precio_lista_1 or product.precio_neto_base),
                 _money_text(product.precio_lista_2),
                 _money_text(product.precio_lista_3),

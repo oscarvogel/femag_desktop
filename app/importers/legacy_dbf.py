@@ -11,6 +11,7 @@ from app.models.base import utc_now
 from app.models.masters import Carrier, Client, Driver, Product, Truck
 from app.models.system import ImportBatch
 from app.services.client_service import ClientService
+from app.services.product_classification_service import analyze_legacy_product
 
 
 ENTITY_KEYS = ("clients", "carriers", "drivers", "trucks", "products")
@@ -160,7 +161,28 @@ class LegacyDbfMasterImporter:
     def _import_products(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "products", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "products", "NOMBRE", "PRODUCTO", "DESCRIP")
-        values = {"name": name, "unit": self._value(row, "UNIDAD", "UNI", default="unidad")}
+        existing = (
+            Product.select().where((Product.source_system == source_system) & (Product.source_id == source_id)).first()
+            or Product.select().where(Product.name == name).first()
+        )
+        inference = analyze_legacy_product(name)
+        if (
+            existing is not None
+            and existing.peso_unitario_kg > 0
+            and existing.peso_unitario_kg != inference.peso_unitario_kg
+            and existing.weight_source != "manual"
+        ):
+            existing.weight_source = "manual"
+            existing.save(only=[Product.weight_source])
+        legacy_unit = self._value(row, "UNIDADDGR", "UNIDAD", "UNI", default="unidad")
+        values = {"name": name, "unit": {"K": "kg", "U": "unidad"}.get(legacy_unit.upper(), legacy_unit)}
+        if existing is None or existing.classification_source != "manual":
+            values.update(product_kind=inference.product_kind, classification_source="inferido")
+        if existing is None or existing.weight_source != "manual":
+            values.update(peso_unitario_kg=inference.peso_unitario_kg, weight_source="inferido")
+        effective_kind = values.get("product_kind", existing.product_kind if existing else inference.product_kind)
+        effective_weight = values.get("peso_unitario_kg", existing.peso_unitario_kg if existing else inference.peso_unitario_kg)
+        values["review_required"] = effective_kind == "revisar" or (effective_kind == "producto" and effective_weight <= 0)
         return ImportOutcome(self._upsert(Product, {"name": name}, values, source_system, source_id, batch))
 
     def _resolve_driver_carrier(

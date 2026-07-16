@@ -155,6 +155,10 @@ def _ensure_demo_product(
         defaults={
             "unit": unit,
             "peso_unitario_kg": peso_unitario_kg,
+            "product_kind": "producto",
+            "classification_source": "manual",
+            "weight_source": "manual",
+            "review_required": False,
             "precio_neto_base": prices[0],
             "precio_lista_1": prices[0],
             "precio_lista_2": prices[1],
@@ -165,6 +169,10 @@ def _ensure_demo_product(
     )
     product.unit = unit
     product.peso_unitario_kg = peso_unitario_kg
+    product.product_kind = "producto"
+    product.classification_source = "manual"
+    product.weight_source = "manual"
+    product.review_required = False
     product.precio_neto_base = prices[0]
     product.precio_lista_1 = prices[0]
     product.precio_lista_2 = prices[1]

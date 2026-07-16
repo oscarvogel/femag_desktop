@@ -356,5 +356,5 @@ def _driver_options(carrier_id: int | None, truck_id: int | None) -> tuple[LoadO
 def _product_options() -> tuple[LoadOrderScreenOption, ...]:
     return tuple(
         LoadOrderScreenOption(product.id, product.name)
-        for product in Product.select().where(Product.active == True).order_by(Product.name)  # noqa: E712
+        for product in Product.select().where((Product.active == True) & (Product.product_kind == "producto")).order_by(Product.name)  # noqa: E712
     )

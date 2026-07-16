@@ -128,6 +128,26 @@ def test_runtime_schema_maps_decimal_fields_with_declared_precision():
     assert _field_sql(Product.peso_unitario_kg) == "DECIMAL(12,3)"
 
 
+def test_runtime_schema_backfills_product_classification_and_preserves_positive_weight(db):
+    from decimal import Decimal
+    from app.config.schema import ensure_runtime_schema
+    from app.models.masters import Product
+
+    inferred = Product.create(name="PACK 10 UNIDADES X 1 KG", unit="unidad")
+    manual_weight = Product.create(name="FECULA X 25 KG", unit="kg", peso_unitario_kg=Decimal("12.000"))
+
+    ensure_runtime_schema(db)
+    ensure_runtime_schema(db)
+
+    inferred = Product.get_by_id(inferred.id)
+    manual_weight = Product.get_by_id(manual_weight.id)
+    assert (inferred.product_kind, inferred.peso_unitario_kg, inferred.classification_source, inferred.weight_source) == (
+        "producto", Decimal("10.000"), "inferido", "inferido"
+    )
+    assert manual_weight.peso_unitario_kg == Decimal("12.000")
+    assert manual_weight.weight_source == "manual"
+
+
 def test_runtime_schema_expands_legacy_aggregated_pallet_rows(db):
     from app.config.schema import _normalize_legacy_pallet_rows
     from app.models.load_orders import LoadOrder, LoadOrderPallet

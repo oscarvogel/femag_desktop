@@ -305,6 +305,7 @@ class LoadOrderService:
                 raise ValueError("Cada producto de la orden debe ser un detalle valido.")
             product = self._require_instance(item.get("product"), Product, "producto")
             self._require_active(product, "producto")
+            self._require_loadable_product(product)
             quantity = item.get("quantity")
             if quantity is None or quantity <= 0:
                 raise ValueError("La cantidad de producto debe ser mayor a cero.")
@@ -358,6 +359,7 @@ class LoadOrderService:
                         allocation.get("delivery_address"), ClientAddress, "lugar de entrega"
                     )
                     product = self._require_instance(allocation.get("product"), Product, "producto")
+                    self._require_loadable_product(product)
                     key = (client.id, address.id, product.id)
                     if key not in valid_lines:
                         raise ValueError("La mercaderia asignada al pallet no pertenece a la orden.")
@@ -492,6 +494,10 @@ class LoadOrderService:
     def _require_active(self, value, label: str) -> None:
         if hasattr(value, "active") and value.active is False:
             raise ValueError(f"El {label} esta inactivo.")
+
+    def _require_loadable_product(self, product: Product) -> None:
+        if product.product_kind != "producto":
+            raise ValueError(f"El artículo '{product.name}' no está habilitado para órdenes de carga.")
 
     def _validate_order_date(self, value, *, allow_none: bool = True) -> date:
         if value is None:
