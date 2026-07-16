@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import re
 
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import Qt
@@ -158,7 +159,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "drivers": MasterAbmConfig(
             "Choferes",
-            ["Nombre", "Transportista", "Estado"],
+            ["Nombre", "Transportista", "Tractor", "Acoplado", "Estado de relación"],
             _driver_rows,
             DriverEntryDialog,
             "newDriverButton",
@@ -174,7 +175,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "trucks": MasterAbmConfig(
             "Camiones",
-            ["Patente", "Transportista", "Estado"],
+            ["Patente tractor", "Patente acoplado", "Transportista", "Estado"],
             _truck_rows,
             TruckEntryDialog,
             "newTruckButton",
@@ -431,6 +432,7 @@ class DriverEntryDialog(QDialog):
         form = QGridLayout()
         self.carrier_combo = _combo("driverCarrierInput", _carrier_options())
         _enable_combo_autocomplete(self.carrier_combo)
+        self.usual_truck_combo = _combo("driverUsualTruckInput", _truck_master_options())
         self.name_input = QLineEdit()
         self.name_input.setObjectName("driverNameInput")
         self.document_input = QLineEdit()
@@ -441,13 +443,27 @@ class DriverEntryDialog(QDialog):
         form.addWidget(self.carrier_combo, 0, 1)
         form.addWidget(QLabel("Nombre"), 1, 0)
         form.addWidget(self.name_input, 1, 1)
-        form.addWidget(QLabel("Documento"), 2, 0)
-        form.addWidget(self.document_input, 2, 1)
-        form.addWidget(QLabel("Telefono"), 3, 0)
-        form.addWidget(self.phone_input, 3, 1)
+        form.addWidget(QLabel("Camión habitual"), 2, 0)
+        form.addWidget(self.usual_truck_combo, 2, 1)
+        form.addWidget(QLabel("Documento"), 3, 0)
+        form.addWidget(self.document_input, 3, 1)
+        form.addWidget(QLabel("Telefono"), 4, 0)
+        form.addWidget(self.phone_input, 4, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveDriverButton", self._save)
+        self.carrier_combo.currentIndexChanged.connect(self._refresh_truck_options)
+
+    def _refresh_truck_options(self) -> None:
+        current_truck_id = self.usual_truck_combo.currentData()
+        carrier_id = _combo_current_data_or_text_match(self.carrier_combo)
+        _fill_combo(
+            self.usual_truck_combo,
+            _truck_master_options(carrier_id),
+            include_empty=True,
+        )
+        if current_truck_id is not None:
+            _set_combo(self.usual_truck_combo, current_truck_id)
 
     def _load_record(self) -> None:
         if self.record_id is None:
@@ -455,6 +471,9 @@ class DriverEntryDialog(QDialog):
         driver = Driver.get_by_id(self.record_id)
         if driver.carrier_id is not None:
             _set_combo(self.carrier_combo, driver.carrier_id)
+        self._refresh_truck_options()
+        if driver.usual_truck_id is not None:
+            _set_combo(self.usual_truck_combo, driver.usual_truck_id)
         self.name_input.setText(driver.name)
         self.document_input.setText(driver.document or "")
         self.phone_input.setText(driver.phone or "")
@@ -467,10 +486,16 @@ class DriverEntryDialog(QDialog):
             return
         try:
             carrier = Carrier.get_by_id(carrier_id)
+            usual_truck_id = self.usual_truck_combo.currentData()
+            usual_truck = Truck.get_by_id(usual_truck_id) if usual_truck_id is not None else None
+            if usual_truck is not None and usual_truck.carrier_id not in {None, carrier.id}:
+                self.feedback.setText("El camión habitual pertenece a otro transportista.")
+                return
             if self.record_id is None:
                 self.saved_record = MasterService(self.current_user).create_driver(
                     name,
                     carrier=carrier,
+                    usual_truck=usual_truck,
                     document=self.document_input.text().strip() or None,
                     phone=self.phone_input.text().strip() or None,
                 )
@@ -478,6 +503,7 @@ class DriverEntryDialog(QDialog):
                 driver = Driver.get_by_id(self.record_id)
                 driver.name = name
                 driver.carrier = carrier
+                driver.usual_truck = usual_truck
                 driver.document = self.document_input.text().strip() or None
                 driver.phone = self.phone_input.text().strip() or None
                 driver.save()
@@ -504,13 +530,17 @@ class TruckEntryDialog(QDialog):
         self.carrier_combo = _combo("truckCarrierInput", _carrier_options())
         self.domain_input = QLineEdit()
         self.domain_input.setObjectName("truckDomainInput")
+        self.trailer_domain_input = QLineEdit()
+        self.trailer_domain_input.setObjectName("truckTrailerDomainInput")
         self.active_combo = _combo("truckActiveInput", [(True, "Activo"), (False, "Inactivo")], include_empty=False)
         form.addWidget(QLabel("Transportista"), 0, 0)
         form.addWidget(self.carrier_combo, 0, 1)
         form.addWidget(QLabel("Patente"), 1, 0)
         form.addWidget(self.domain_input, 1, 1)
-        form.addWidget(QLabel("Estado"), 2, 0)
-        form.addWidget(self.active_combo, 2, 1)
+        form.addWidget(QLabel("Patente acoplado"), 2, 0)
+        form.addWidget(self.trailer_domain_input, 2, 1)
+        form.addWidget(QLabel("Estado"), 3, 0)
+        form.addWidget(self.active_combo, 3, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveTruckButton", self._save)
@@ -519,13 +549,16 @@ class TruckEntryDialog(QDialog):
         if self.record_id is None:
             return
         truck = Truck.get_by_id(self.record_id)
-        _set_combo(self.carrier_combo, truck.carrier.id)
+        if truck.carrier_id is not None:
+            _set_combo(self.carrier_combo, truck.carrier_id)
         self.domain_input.setText(truck.domain)
+        self.trailer_domain_input.setText(truck.trailer_domain or "")
         _set_combo(self.active_combo, truck.active)
 
     def _save(self) -> None:
         carrier_id = self.carrier_combo.currentData()
-        domain = self.domain_input.text().strip().upper()
+        domain = _normalize_domain(self.domain_input.text())
+        trailer_domain = _normalize_domain(self.trailer_domain_input.text()) or None
         if carrier_id is None and not _carrier_options():
             self.feedback.setText("Debe cargar un transportista antes de crear un camión.")
             return
@@ -535,10 +568,15 @@ class TruckEntryDialog(QDialog):
         try:
             carrier = Carrier.get_by_id(carrier_id)
             if self.record_id is None:
-                self.saved_record = MasterService(self.current_user).create_truck(domain, carrier=carrier)
+                self.saved_record = MasterService(self.current_user).create_truck(
+                    domain,
+                    carrier=carrier,
+                    trailer_domain=trailer_domain,
+                )
             else:
                 truck = Truck.get_by_id(self.record_id)
                 truck.domain = domain
+                truck.trailer_domain = trailer_domain
                 truck.carrier = carrier
                 truck.active = bool(self.active_combo.currentData())
                 truck.save()
@@ -782,6 +820,26 @@ def _carrier_options() -> list[tuple[int, str]]:
         return []
 
 
+def _truck_master_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
+    try:
+        query = Truck.select().where(Truck.active == True)  # noqa: E712
+        if carrier_id is not None:
+            query = query.where((Truck.carrier == carrier_id) | Truck.carrier.is_null(True))
+        return [
+            (
+                truck.id,
+                f"{truck.domain} · {truck.trailer_domain}" if truck.trailer_domain else truck.domain,
+            )
+            for truck in query.order_by(Truck.domain)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def _normalize_domain(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", value).upper()
+
+
 def _client_rows() -> list[list[object]]:
     try:
         return [
@@ -838,18 +896,26 @@ def _product_rows() -> list[list[object]]:
 
 def _driver_rows() -> list[list[object]]:
     try:
-        return [
-            [
-                driver.id,
-                driver.name,
-                driver.carrier.name if driver.carrier_id is not None else "Sin asignar",
-                "Disponible" if driver.available and driver.active else "No disponible",
-            ]
-            for driver in Driver.select(Driver, Carrier)
-            .join(Carrier, JOIN.LEFT_OUTER)
-            .order_by(Driver.name)
-            .limit(50)
-        ]
+        rows = []
+        for driver in Driver.select().order_by(Driver.name).limit(50):
+            truck = driver.usual_truck if driver.usual_truck_id is not None else None
+            if driver.carrier_id is None:
+                relationship_state = "Sin transportista"
+            elif truck is None:
+                relationship_state = "Sin tractor"
+            else:
+                relationship_state = "Completa"
+            rows.append(
+                [
+                    driver.id,
+                    driver.name,
+                    driver.carrier.name if driver.carrier_id is not None else "Sin asignar",
+                    truck.domain if truck is not None else "",
+                    truck.trailer_domain or "" if truck is not None else "",
+                    relationship_state,
+                ]
+            )
+        return rows
     except (InterfaceError, OperationalError):
         return []
 
@@ -867,8 +933,14 @@ def _carrier_rows() -> list[list[object]]:
 def _truck_rows() -> list[list[object]]:
     try:
         return [
-            [truck.id, truck.domain, truck.carrier.name, "Activo" if truck.active else "Inactivo"]
-            for truck in Truck.select().join(Carrier).order_by(Truck.domain).limit(50)
+            [
+                truck.id,
+                truck.domain,
+                truck.trailer_domain or "",
+                truck.carrier.name if truck.carrier_id is not None else "Sin asignar",
+                "Activo" if truck.active else "Inactivo",
+            ]
+            for truck in Truck.select().order_by(Truck.domain).limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []

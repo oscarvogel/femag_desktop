@@ -54,13 +54,28 @@ class MasterService:
         name: str,
         *,
         carrier: Carrier | None,
+        usual_truck: Truck | None = None,
         document: str | None = None,
         phone: str | None = None,
     ) -> Driver:
         if carrier is None:
             raise ValueError("El chofer debe estar asociado a un transportista.")
-        row = Driver.create(name=name, carrier=carrier, document=document, phone=phone)
-        self._record("Driver", row, {"name": name, "carrier_id": carrier.id})
+        row = Driver.create(
+            name=name,
+            carrier=carrier,
+            usual_truck=usual_truck,
+            document=document,
+            phone=phone,
+        )
+        self._record(
+            "Driver",
+            row,
+            {
+                "name": name,
+                "carrier_id": carrier.id,
+                "usual_truck_id": usual_truck.id if usual_truck is not None else None,
+            },
+        )
         return row
 
     def create_carrier(self, name: str, cuit: str | None = None, phone: str | None = None) -> Carrier:
@@ -68,11 +83,21 @@ class MasterService:
         self._record("Carrier", row, {"name": name, "cuit": cuit})
         return row
 
-    def create_truck(self, domain: str, carrier: Carrier | None) -> Truck:
+    def create_truck(
+        self,
+        domain: str,
+        carrier: Carrier | None,
+        *,
+        trailer_domain: str | None = None,
+    ) -> Truck:
         if carrier is None:
             raise ValueError("El camion debe estar asociado a un transportista.")
-        row = Truck.create(domain=domain, carrier=carrier)
-        self._record("Truck", row, {"domain": domain, "carrier_id": carrier.id})
+        row = Truck.create(domain=domain, trailer_domain=trailer_domain, carrier=carrier)
+        self._record(
+            "Truck",
+            row,
+            {"domain": domain, "trailer_domain": trailer_domain, "carrier_id": carrier.id},
+        )
         return row
 
     def valid_drivers_for_carrier(self, carrier: Carrier) -> list[Driver]:

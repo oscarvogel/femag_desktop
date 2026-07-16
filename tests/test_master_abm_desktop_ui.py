@@ -234,8 +234,84 @@ def test_driver_abm_lists_and_opens_unassigned_driver(db):
     dialog = DriverEntryDialog(current_user="ui_issue165", record_id=driver.id)
     app.processEvents()
 
-    assert [driver.id, "Chofer Legacy Sin Asignar", "Sin asignar", "Disponible"] in rows
+    assert [driver.id, "Chofer Legacy Sin Asignar", "Sin asignar", "", "", "Sin transportista"] in rows
     assert dialog.findChild(QComboBox, "driverCarrierInput").currentData() is None
+
+
+def test_driver_abm_shows_habitual_truck_trailer_and_relationship_state(db):
+    from app.models.masters import Carrier, Driver, Truck
+    from app.ui.master_abm import _driver_rows, master_abm_configs
+
+    carrier = Carrier.create(name="Transporte relaciones")
+    truck = Truck.create(domain="REL123", trailer_domain="REL456", carrier=carrier)
+    complete = Driver.create(name="Chofer completo", carrier=carrier, usual_truck=truck)
+    without_truck = Driver.create(name="Chofer sin tractor", carrier=carrier)
+
+    rows = _driver_rows()
+
+    assert master_abm_configs()["drivers"].columns == [
+        "Nombre",
+        "Transportista",
+        "Tractor",
+        "Acoplado",
+        "Estado de relación",
+    ]
+    assert [
+        complete.id,
+        "Chofer completo",
+        "Transporte relaciones",
+        "REL123",
+        "REL456",
+        "Completa",
+    ] in rows
+    assert [
+        without_truck.id,
+        "Chofer sin tractor",
+        "Transporte relaciones",
+        "",
+        "",
+        "Sin tractor",
+    ] in rows
+
+
+def test_driver_and_truck_dialogs_edit_habitual_relationship_fields(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.ui.master_abm import DriverEntryDialog, TruckEntryDialog
+
+    carrier = Carrier.create(name="Transporte dialogos")
+    truck = Truck.create(domain="DLG123", trailer_domain="DLG456", carrier=carrier)
+    driver = Driver.create(name="Chofer dialogos", carrier=carrier, usual_truck=truck)
+    app = QApplication.instance() or QApplication([])
+
+    driver_dialog = DriverEntryDialog(current_user="ui_issue188", record_id=driver.id)
+    app.processEvents()
+    assert driver_dialog.findChild(QComboBox, "driverUsualTruckInput").currentData() == truck.id
+
+    truck_dialog = TruckEntryDialog(current_user="ui_issue188", record_id=truck.id)
+    app.processEvents()
+    trailer_input = truck_dialog.findChild(QLineEdit, "truckTrailerDomainInput")
+    assert trailer_input.text() == "DLG456"
+    trailer_input.setText("new 789")
+    truck_dialog.findChild(QPushButton, "saveTruckButton").click()
+    assert Truck.get_by_id(truck.id).trailer_domain == "NEW789"
+
+
+def test_unassigned_imported_truck_dialog_opens_for_manual_correction(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit
+
+    from app.models.masters import Truck
+    from app.ui.master_abm import TruckEntryDialog
+
+    truck = Truck.create(domain="SIN123", trailer_domain="SIN456", carrier=None)
+    app = QApplication.instance() or QApplication([])
+
+    dialog = TruckEntryDialog(current_user="ui_issue188", record_id=truck.id)
+    app.processEvents()
+
+    assert dialog.findChild(QComboBox, "truckCarrierInput").currentData() is None
+    assert dialog.findChild(QLineEdit, "truckTrailerDomainInput").text() == "SIN456"
 
 
 def test_desktop_sidebar_groups_transport_abms_without_breaking_routes(db):
@@ -377,8 +453,9 @@ def test_trucks_abm_page_creates_edits_and_refreshes_grid(db):
     assert table.rowCount() == 1
     assert table.item(0, 0).data(Qt.UserRole) == truck.id
     assert table.item(0, 0).text() == "ABM123"
-    assert table.item(0, 1).text() == "Transporte Camiones UI"
-    assert table.item(0, 2).text() == "Activo"
+    assert table.item(0, 1).text() == ""
+    assert table.item(0, 2).text() == "Transporte Camiones UI"
+    assert table.item(0, 3).text() == "Activo"
 
     def fill_edit_truck():
         dialog = app.activeModalWidget()
@@ -396,7 +473,7 @@ def test_trucks_abm_page_creates_edits_and_refreshes_grid(db):
     assert truck.active is False
     assert table.rowCount() == 1
     assert table.item(0, 0).text() == "ABM456"
-    assert table.item(0, 2).text() == "Inactivo"
+    assert table.item(0, 3).text() == "Inactivo"
 
 
 def test_truck_dialog_without_carriers_shows_clear_message(db):
@@ -618,7 +695,8 @@ def test_trucks_abm_page_creates_edits_with_carrier_combo(db):
     truck = Truck.get(Truck.domain == "LUN123")
     assert truck.carrier == carrier
     assert table.item(0, 0).text() == "LUN123"
-    assert table.item(0, 1).text() == "Transportista Camion UI"
+    assert table.item(0, 1).text() == ""
+    assert table.item(0, 2).text() == "Transportista Camion UI"
 
     def fill_edit(dialog):
         dialog.findChild(QLineEdit, "truckDomainInput").setText("lun456")
