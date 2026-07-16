@@ -10,6 +10,10 @@ backups/
 .cursor/
 # Local runtime outputs
 outputs/
+# Inno Setup build artifacts (the reproducible source lives in installer/*.iss)
+installer/output/
+build/
+dist/
 # Demo/validation databases (see AGENTS.md areas protegidas: datos demo)
 femag_*.sqlite3
 femag_*.sqlite3-journal
