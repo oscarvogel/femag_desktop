@@ -22,6 +22,22 @@ def ensure_runtime_schema(database) -> None:
         _normalize_legacy_pallet_rows(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
+    _ensure_sqlite_index_integrity(database)
+
+
+def _ensure_sqlite_index_integrity(database) -> None:
+    if database.__class__.__name__ != "SqliteDatabase":
+        return
+    issues = [row[0] for row in database.execute_sql("PRAGMA integrity_check").fetchall()]
+    if issues == ["ok"]:
+        return
+    if issues and all("index" in issue.lower() for issue in issues):
+        database.execute_sql("REINDEX")
+        issues = [row[0] for row in database.execute_sql("PRAGMA integrity_check").fetchall()]
+        if issues == ["ok"]:
+            return
+    summary = "; ".join(issues[:3])
+    raise RuntimeError(f"La base SQLite no supera integrity_check: {summary}")
 
 
 def _ensure_pallet_sequence_index(database) -> None:

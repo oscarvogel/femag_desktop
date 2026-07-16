@@ -85,6 +85,11 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     assert any(foreign_key.column == "carrier_id" for foreign_key in db.get_foreign_keys("driver"))
     assert db.execute_sql("PRAGMA foreign_keys").fetchone()[0] == 1
     assert db.execute_sql("PRAGMA foreign_key_check").fetchall() == []
+    assert db.execute_sql("PRAGMA integrity_check").fetchall() == [("ok",)]
+    db.execute_sql(
+        "INSERT INTO driver (id, name, carrier_id, usual_truck_id) VALUES (2, 'Chofer nuevo', 1, 1)"
+    )
+    assert db.execute_sql("SELECT name FROM driver WHERE id = 2").fetchone() == ("Chofer nuevo",)
 
 
 def test_driver_schema_allows_null_carrier_and_cuit(db):
