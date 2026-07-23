@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from peewee import fn
+
 from app.models.masters import (
     PRODUCT_KIND_LABELS,
     Carrier,
@@ -102,6 +104,64 @@ class MasterService:
     def _validate_tipo_iva(tipo_iva: TipoIVA | None) -> None:
         if tipo_iva is None or not tipo_iva.activo:
             raise ValueError("Seleccione un tipo de IVA activo.")
+
+    def create_tipo_iva(self, nombre: str, porcentaje: float, *, activo: bool = True) -> TipoIVA:
+        nombre, porcentaje = self._validate_tipo_iva_values(nombre, porcentaje)
+        self._validate_unique_tipo_iva_name(nombre)
+        row = TipoIVA.create(nombre=nombre, porcentaje=porcentaje, activo=activo)
+        self._record(
+            "TipoIVA",
+            row,
+            {"nombre": nombre, "porcentaje": porcentaje, "activo": activo},
+        )
+        return row
+
+    def update_tipo_iva(
+        self,
+        tipo_iva: TipoIVA,
+        nombre: str,
+        porcentaje: float,
+        *,
+        activo: bool,
+    ) -> TipoIVA:
+        nombre, porcentaje = self._validate_tipo_iva_values(nombre, porcentaje)
+        self._validate_unique_tipo_iva_name(nombre, exclude_id=tipo_iva.id)
+        old_value = {
+            "nombre": tipo_iva.nombre,
+            "porcentaje": tipo_iva.porcentaje,
+            "activo": tipo_iva.activo,
+        }
+        tipo_iva.nombre = nombre
+        tipo_iva.porcentaje = porcentaje
+        tipo_iva.activo = activo
+        tipo_iva.save()
+        self.audit_service.record(
+            user=self.current_user,
+            module="Maestros",
+            action="modificar",
+            record_ref=f"TipoIVA:{tipo_iva.id}",
+            old_value=old_value,
+            new_value={"nombre": nombre, "porcentaje": porcentaje, "activo": activo},
+        )
+        return tipo_iva
+
+    @staticmethod
+    def _validate_tipo_iva_values(nombre: str, porcentaje: float) -> tuple[str, float]:
+        nombre = nombre.strip()
+        if not nombre:
+            raise ValueError("Complete el nombre del tipo de IVA.")
+        porcentaje = float(porcentaje)
+        if porcentaje < 0 or porcentaje > 100:
+            raise ValueError("El porcentaje de IVA debe estar entre 0 y 100.")
+        return nombre, porcentaje
+
+    @staticmethod
+    def _validate_unique_tipo_iva_name(nombre: str, *, exclude_id: int | None = None) -> None:
+        query = TipoIVA.select().where(fn.LOWER(TipoIVA.nombre) == nombre.lower())
+        if exclude_id is not None:
+            query = query.where(TipoIVA.id != exclude_id)
+        if query.exists():
+            raise ValueError("Ya existe un tipo de IVA con ese nombre.")
 
     def create_driver(
         self,

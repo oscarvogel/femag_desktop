@@ -376,7 +376,7 @@ class FemagDesktopWindow(QMainWindow):
             refresh()
 
     def _refresh_master_routes(self) -> None:
-        for route in ("clients", "addresses", "products", "carriers", "drivers", "trucks"):
+        for route in ("clients", "addresses", "products", "vat_types", "carriers", "drivers", "trucks"):
             self._refresh_route(route)
 
     def _handle_dashboard_new_load_order(self) -> None:

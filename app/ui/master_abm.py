@@ -173,6 +173,14 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             "newProductButton",
             "editProductButton",
         ),
+        "vat_types": MasterAbmConfig(
+            "Tipos de IVA",
+            ["Nombre", "Porcentaje", "Estado"],
+            _vat_type_rows,
+            VatTypeEntryDialog,
+            "newVatTypeButton",
+            "editVatTypeButton",
+        ),
         "drivers": MasterAbmConfig(
             "Choferes",
             ["Nombre", "Transportista", "Tractor", "Acoplado", "Estado de relación"],
@@ -731,6 +739,70 @@ class ProductEntryDialog(QDialog):
             self.feedback.setText(str(exc))
 
 
+class VatTypeEntryDialog(QDialog):
+    def __init__(self, *, current_user: str, record_id: int | None = None, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.record_id = record_id
+        self.saved_record: TipoIVA | None = None
+        self.setObjectName("vatTypeEntryDialog")
+        self.setWindowTitle("Tipo de IVA")
+        self._build()
+        self._load_record()
+
+    def _build(self) -> None:
+        layout = _entry_layout(self, "Tipo de IVA")
+        form = QGridLayout()
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("vatTypeNameInput")
+        self.percentage_input = QDoubleSpinBox()
+        self.percentage_input.setObjectName("vatTypePercentageInput")
+        self.percentage_input.setRange(0, 100)
+        self.percentage_input.setDecimals(2)
+        self.percentage_input.setSuffix(" %")
+        self.active_input = QComboBox()
+        self.active_input.setObjectName("vatTypeActiveInput")
+        self.active_input.addItem("Activo", True)
+        self.active_input.addItem("Inactivo", False)
+        form.addWidget(QLabel("Nombre"), 0, 0)
+        form.addWidget(self.name_input, 0, 1)
+        form.addWidget(QLabel("Porcentaje"), 1, 0)
+        form.addWidget(self.percentage_input, 1, 1)
+        form.addWidget(QLabel("Estado"), 2, 0)
+        form.addWidget(self.active_input, 2, 1)
+        layout.addLayout(form)
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveVatTypeButton", self._save)
+
+    def _load_record(self) -> None:
+        if self.record_id is None:
+            return
+        tipo_iva = TipoIVA.get_by_id(self.record_id)
+        self.name_input.setText(tipo_iva.nombre)
+        self.percentage_input.setValue(tipo_iva.porcentaje)
+        self.active_input.setCurrentIndex(max(self.active_input.findData(tipo_iva.activo), 0))
+
+    def _save(self) -> None:
+        try:
+            service = MasterService(self.current_user)
+            if self.record_id is None:
+                self.saved_record = service.create_tipo_iva(
+                    self.name_input.text(),
+                    self.percentage_input.value(),
+                    activo=bool(self.active_input.currentData()),
+                )
+            else:
+                self.saved_record = service.update_tipo_iva(
+                    TipoIVA.get_by_id(self.record_id),
+                    self.name_input.text(),
+                    self.percentage_input.value(),
+                    activo=bool(self.active_input.currentData()),
+                )
+            self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
 def _page(title: str, subtitle: str) -> QWidget:
     page = QWidget()
     layout = QVBoxLayout(page)
@@ -938,6 +1010,21 @@ def _product_rows() -> list[list[object]]:
                 "Activo" if product.active else "Inactivo",
             ]
             for product in Product.select().order_by(Product.name).limit(50)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def _vat_type_rows() -> list[list[object]]:
+    try:
+        return [
+            [
+                tipo_iva.id,
+                tipo_iva.nombre,
+                f"{tipo_iva.porcentaje:g}%",
+                "Activo" if tipo_iva.activo else "Inactivo",
+            ]
+            for tipo_iva in TipoIVA.select().order_by(TipoIVA.nombre).limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []
