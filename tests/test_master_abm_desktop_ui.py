@@ -769,6 +769,47 @@ def test_product_dialog_saves_four_price_lists(db):
     assert product.precio_lista_3 == 145
 
 
+def test_product_dialog_defaults_loads_and_changes_tipo_iva(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit, QPushButton
+
+    from app.models.masters import Product, TipoIVA
+    from app.ui.master_abm import ProductEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    iva_general = TipoIVA.iva_default()
+    iva_reducido = TipoIVA.create(nombre="IVA reducido", porcentaje=10.5)
+    TipoIVA.create(nombre="IVA inactivo", porcentaje=5.0, activo=False)
+
+    dialog = ProductEntryDialog(current_user="ui_product_iva")
+    app.processEvents()
+    iva_input = dialog.findChild(QComboBox, "productIvaTypeInput")
+    assert iva_input.currentData() == iva_general.id
+    assert iva_input.findData(iva_reducido.id) >= 0
+    assert iva_input.count() == 2
+
+    dialog.findChild(QLineEdit, "productNameInput").setText("Producto IVA UI")
+    dialog.findChild(QLineEdit, "productUnitInput").setText("kg")
+    _set_combo(iva_input, iva_reducido.id)
+    dialog.findChild(QPushButton, "saveProductButton").click()
+
+    product = Product.get(Product.name == "Producto IVA UI")
+    assert product.tipo_iva == iva_reducido
+
+    edit = ProductEntryDialog(current_user="ui_product_iva", record_id=product.id)
+    edit_iva_input = edit.findChild(QComboBox, "productIvaTypeInput")
+    assert edit_iva_input.currentData() == iva_reducido.id
+    _set_combo(edit_iva_input, iva_general.id)
+    edit.findChild(QPushButton, "saveProductButton").click()
+
+    assert Product.get_by_id(product.id).tipo_iva == iva_general
+
+    historical_product = Product.create(name="Producto histórico sin IVA", unit="kg", tipo_iva=None)
+    historical_edit = ProductEntryDialog(current_user="ui_product_iva", record_id=historical_product.id)
+    assert historical_edit.findChild(QComboBox, "productIvaTypeInput").currentData() == iva_general.id
+    historical_edit.findChild(QPushButton, "saveProductButton").click()
+    assert Product.get_by_id(historical_product.id).tipo_iva == iva_general
+
+
 def test_product_dialog_creates_edits_and_lists_unit_weight(db):
     from PyQt5.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QPushButton
 

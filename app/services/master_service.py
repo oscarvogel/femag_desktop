@@ -1,6 +1,15 @@
 from decimal import Decimal
 
-from app.models.masters import PRODUCT_KIND_LABELS, Carrier, Driver, OperationalService, PalletType, Product, Truck
+from app.models.masters import (
+    PRODUCT_KIND_LABELS,
+    Carrier,
+    Driver,
+    OperationalService,
+    PalletType,
+    Product,
+    TipoIVA,
+    Truck,
+)
 from app.services.audit_service import AuditService
 
 
@@ -29,12 +38,15 @@ class MasterService:
         precio_lista_3: float = 0.0,
         precio_lista_4: float = 0.0,
         product_kind: str = "producto",
+        tipo_iva: TipoIVA | None = None,
     ) -> Product:
         peso_unitario_kg = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if peso_unitario_kg < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        tipo_iva = tipo_iva or TipoIVA.iva_default()
+        self._validate_tipo_iva(tipo_iva)
         row = Product.create(
             name=name,
             unit=unit,
@@ -48,6 +60,7 @@ class MasterService:
             precio_lista_2=precio_lista_2,
             precio_lista_3=precio_lista_3,
             precio_lista_4=precio_lista_4,
+            tipo_iva=tipo_iva,
         )
         self._record(
             "Product",
@@ -56,14 +69,27 @@ class MasterService:
         )
         return row
 
-    def update_product(self, product: Product, name: str, unit: str, *, peso_unitario_kg=Decimal("0"), product_kind="producto", **prices) -> Product:
+    def update_product(
+        self,
+        product: Product,
+        name: str,
+        unit: str,
+        *,
+        peso_unitario_kg=Decimal("0"),
+        product_kind="producto",
+        tipo_iva: TipoIVA | None = None,
+        **prices,
+    ) -> Product:
         weight = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if weight < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        tipo_iva = tipo_iva or product.tipo_iva or TipoIVA.iva_default()
+        self._validate_tipo_iva(tipo_iva)
         product.name, product.unit = name, unit
         product.peso_unitario_kg, product.product_kind = weight, product_kind
+        product.tipo_iva = tipo_iva
         product.classification_source = product.weight_source = "manual"
         product.review_required = False
         for field in ("precio_lista_1", "precio_lista_2", "precio_lista_3", "precio_lista_4"):
@@ -71,6 +97,11 @@ class MasterService:
         product.precio_neto_base = product.precio_lista_1
         product.save()
         return product
+
+    @staticmethod
+    def _validate_tipo_iva(tipo_iva: TipoIVA | None) -> None:
+        if tipo_iva is None or not tipo_iva.activo:
+            raise ValueError("Seleccione un tipo de IVA activo.")
 
     def create_driver(
         self,
