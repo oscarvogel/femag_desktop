@@ -94,6 +94,35 @@ def test_create_product_accepts_unit_weight(db):
     assert product.peso_unitario_kg == Decimal("25.000")
 
 
+def test_create_and_update_product_persist_tipo_iva(db):
+    from app.models.masters import TipoIVA
+    from app.services.master_service import MasterService
+
+    service = MasterService(current_user="admin")
+    iva_reducido = TipoIVA.create(nombre="IVA reducido", porcentaje=10.5)
+    iva_general = TipoIVA.iva_default()
+
+    product = service.create_product("Producto gravado", "unidad", tipo_iva=iva_reducido)
+    assert product.tipo_iva == iva_reducido
+
+    service.update_product(product, product.name, product.unit, tipo_iva=iva_general)
+    assert product.tipo_iva == iva_general
+
+
+def test_create_product_rejects_inactive_tipo_iva(db):
+    from app.models.masters import TipoIVA
+    from app.services.master_service import MasterService
+
+    iva_inactivo = TipoIVA.create(nombre="IVA inactivo", porcentaje=5.0, activo=False)
+
+    with pytest.raises(ValueError, match="tipo de IVA activo"):
+        MasterService(current_user="admin").create_product(
+            "Producto invalido",
+            "unidad",
+            tipo_iva=iva_inactivo,
+        )
+
+
 def test_create_product_rejects_negative_weight(db):
     from app.services.master_service import MasterService
 
