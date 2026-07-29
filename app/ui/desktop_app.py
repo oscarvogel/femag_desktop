@@ -40,6 +40,7 @@ from app.config.schema import ensure_runtime_schema
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
+from app.models.payments import ClientPayment
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_SHARED,
@@ -57,11 +58,13 @@ from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
+from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.dashboard import DashboardService, future_module_message
@@ -444,6 +447,13 @@ class FemagDesktopWindow(QMainWindow):
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
             email_statement_callback=self._email_account_statement,
+            print_receipt_callback=(
+                self._print_payment_receipt
+                if _can_print_payment_receipts(self.user)
+                else None
+            ),
+            annul_payment_callback=self._annul_payment,
+            can_annul_payments=_can_annul_payments(self.user),
             parent=self,
         )
 
@@ -537,6 +547,40 @@ class FemagDesktopWindow(QMainWindow):
             payment = dialog.registered_payment()
             if payment is not None:
                 self._refresh_customer_ledger_after_payment()
+
+    def _print_payment_receipt(self, payment: ClientPayment) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            pdf_path = PaymentReceiptPrintService(
+                current_user=self.shell.username
+            ).export_pdf(payment, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, "Recibo", f"No se pudo generar el recibo: {exc}")
+            return
+        _open_print_output(pdf_path)
+
+    def _annul_payment(self, payment: ClientPayment) -> None:
+        dialog = AdminAuthorizationDialog(parent=self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        authorized_user = dialog.authorized_user()
+        if authorized_user is None:
+            return
+        try:
+            ClientPaymentService(current_user=self.shell.username).annul_payment(
+                payment,
+                authorized_by=authorized_user,
+                reason=dialog.reason(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Anular pago", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Anular pago",
+            f"El recibo {payment.receipt_number} fue anulado y revertido.",
+        )
 
     def _refresh_customer_ledger_after_payment(self) -> None:
         page = self.stack.widget(self._route_indexes.get("customer_ledger", -1))
@@ -2325,7 +2369,46 @@ def _can_annul_load_orders(user) -> bool:
     if user is None:
         return False
     try:
-        return PermissionService().has_permission(user, "Operaciones", "anular", "Órdenes de carga")
+        return PermissionService().has_permission(
+            user,
+            "Operaciones",
+            "anular",
+            "Órdenes de carga",
+        )
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _can_annul_payments(user) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(
+            user,
+            "Cuenta corriente",
+            "anular",
+            "Anulación de pagos",
+        )
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _can_print_payment_receipts(user) -> bool:
+    if user is None:
+        return False
+    try:
+        permissions = PermissionService()
+        return permissions.has_permission(
+            user,
+            "Cuenta corriente",
+            "imprimir",
+            "Recibos",
+        ) or permissions.has_permission(
+            user,
+            "Cuenta corriente",
+            "reimprimir",
+            "Recibos",
+        )
     except (InterfaceError, OperationalError):
         return False
 

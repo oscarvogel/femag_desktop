@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.models.masters import Client
+from app.models.payments import ClientPayment
 from app.services.ledger_query_service import (
     client_balance,
     client_balances,
@@ -30,6 +31,7 @@ MOVEMENT_TYPE_LABELS = {
     "load_order_documental": "Orden de carga",
     "load_order_documental_reversal": "Reverso OC",
     "payment": "Pago",
+    "payment_reversal": "Anulación de pago",
 }
 
 
@@ -61,6 +63,9 @@ class CustomerLedgerPage(QWidget):
         print_statement_callback=None,
         whatsapp_statement_callback=None,
         email_statement_callback=None,
+        print_receipt_callback=None,
+        annul_payment_callback=None,
+        can_annul_payments: bool = False,
         parent=None,
     ):
         super().__init__(parent)
@@ -70,6 +75,9 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_callback = print_statement_callback
         self.whatsapp_statement_callback = whatsapp_statement_callback
         self.email_statement_callback = email_statement_callback
+        self.print_receipt_callback = print_receipt_callback
+        self.annul_payment_callback = annul_payment_callback
+        self.can_annul_payments = can_annul_payments
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -100,6 +108,7 @@ class CustomerLedgerPage(QWidget):
     def _build_clients_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("customerLedgerClientsPanel")
+        panel.setMinimumWidth(310)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
@@ -179,6 +188,22 @@ class CustomerLedgerPage(QWidget):
         header_row.addWidget(self.email_statement_button)
         layout.addLayout(header_row)
 
+        payment_actions = QHBoxLayout()
+        payment_actions.addStretch(1)
+        self.print_receipt_button = QPushButton("Imprimir recibo")
+        self.print_receipt_button.setObjectName("customerLedgerPrintReceiptButton")
+        self.print_receipt_button.setEnabled(False)
+        self.print_receipt_button.clicked.connect(self._on_print_receipt)
+        payment_actions.addWidget(self.print_receipt_button)
+
+        self.annul_payment_button = QPushButton("Anular pago")
+        self.annul_payment_button.setObjectName("customerLedgerAnnulPaymentButton")
+        self.annul_payment_button.setVisible(self.can_annul_payments)
+        self.annul_payment_button.setEnabled(False)
+        self.annul_payment_button.clicked.connect(self._on_annul_payment)
+        payment_actions.addWidget(self.annul_payment_button)
+        layout.addLayout(payment_actions)
+
         # Highlighted balance card
         balance_card = QFrame()
         balance_card.setObjectName("customerLedgerBalanceCard")
@@ -226,6 +251,7 @@ class CustomerLedgerPage(QWidget):
         self.movements_table.setAlternatingRowColors(True)
         self.movements_table.setShowGrid(False)
         self.movements_table.verticalHeader().setDefaultSectionSize(26)
+        self.movements_table.currentCellChanged.connect(self._on_movement_selected)
         layout.addWidget(self.movements_table, 1)
 
         self.empty_label = QLabel(
@@ -337,6 +363,12 @@ class CustomerLedgerPage(QWidget):
         self.empty_label.setVisible(not bool(movements))
         for row_index, movement in enumerate(movements):
             type_label = MOVEMENT_TYPE_LABELS.get(movement.movement_type, movement.movement_type)
+            if (
+                movement.movement_type == "payment"
+                and movement.payment is not None
+                and movement.payment.status == ClientPayment.STATUS_ANNULLED
+            ):
+                type_label = "Pago anulado"
             reference = ""
             if movement.load_order is not None:
                 reference = f"OC-{movement.load_order.order_number:06d}"
@@ -346,7 +378,7 @@ class CustomerLedgerPage(QWidget):
             importe_text = f"${importe:,.2f}"
             saldo_text = f"${balances[row_index]:,.2f}"
             values = (
-                movement.created_at.strftime("%d/%m/%Y %H:%M"),
+                _display_datetime(movement.created_at),
                 type_label,
                 reference,
                 movement.description,
@@ -363,11 +395,18 @@ class CustomerLedgerPage(QWidget):
                     cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
                 # Tooltip con texto completo para todas las celdas
                 cell.setToolTip(value)
+                if (
+                    column == 0
+                    and movement.movement_type == "payment"
+                    and movement.payment is not None
+                ):
+                    cell.setData(Qt.UserRole, movement.payment.id)
                 self.movements_table.setItem(row_index, column, cell)
         self.register_payment_button.setEnabled(self.register_payment_callback is not None)
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
         self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
         self.email_statement_button.setEnabled(self.email_statement_callback is not None)
+        self._update_payment_actions()
 
     def _selected_client(self) -> Client | None:
         current = self.clients_table.currentRow()
@@ -411,6 +450,8 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_button.setEnabled(False)
         self.whatsapp_statement_button.setEnabled(False)
         self.email_statement_button.setEnabled(False)
+        self.print_receipt_button.setEnabled(False)
+        self.annul_payment_button.setEnabled(False)
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
@@ -420,3 +461,46 @@ class CustomerLedgerPage(QWidget):
             return
         self.register_payment_callback(client)
         self.refresh()
+
+    def _selected_payment(self) -> ClientPayment | None:
+        current = self.movements_table.currentRow()
+        if current < 0:
+            return None
+        item = self.movements_table.item(current, 0)
+        payment_id = item.data(Qt.UserRole) if item is not None else None
+        if payment_id is None:
+            return None
+        return ClientPayment.get_or_none(ClientPayment.id == payment_id)
+
+    def _on_movement_selected(self, *_args) -> None:
+        self._update_payment_actions()
+
+    def _update_payment_actions(self) -> None:
+        payment = self._selected_payment()
+        self.print_receipt_button.setEnabled(
+            payment is not None and self.print_receipt_callback is not None
+        )
+        self.annul_payment_button.setEnabled(
+            payment is not None
+            and payment.status == ClientPayment.STATUS_ACTIVE
+            and self.can_annul_payments
+            and self.annul_payment_callback is not None
+        )
+
+    def _on_print_receipt(self) -> None:
+        payment = self._selected_payment()
+        if payment is not None and self.print_receipt_callback is not None:
+            self.print_receipt_callback(payment)
+
+    def _on_annul_payment(self) -> None:
+        payment = self._selected_payment()
+        if payment is None or self.annul_payment_callback is None:
+            return
+        self.annul_payment_callback(payment)
+        self.refresh()
+
+
+def _display_datetime(value) -> str:
+    if value.tzinfo is not None:
+        value = value.astimezone()
+    return value.strftime("%d/%m/%Y %H:%M")
