@@ -35,6 +35,37 @@ class LoadOrderPrintService:
         )
         return target
 
+    def export_reprint(
+        self,
+        order: LoadOrder,
+        output_dir: str | Path,
+        *,
+        copy_number: int,
+        reprinted_at: datetime,
+    ) -> Path:
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        target = path / f"orden_carga_{order.order_number}_reimpresion_{copy_number}.pdf"
+        self._build_pdf(
+            order,
+            target,
+            reprint_copy=copy_number,
+            reprinted_at=reprinted_at,
+        )
+        self.audit_service.record(
+            user=self.current_user,
+            module="Ordenes de carga",
+            action="reimprimir",
+            record_ref=f"LoadOrder:{order.id}",
+            new_value={
+                "file_path": str(target),
+                "order_number": order.order_number,
+                "copy_number": copy_number,
+                "reprinted_at": reprinted_at.isoformat(timespec="seconds"),
+            },
+        )
+        return target
+
     def export_order(self, order: LoadOrder, output_dir: str | Path, *, reprint: bool = False) -> Path:
         return self.export_pdf(order, output_dir)
 
@@ -50,7 +81,14 @@ class LoadOrderPrintService:
     def render_summary(self, order: LoadOrder, *, reprint: bool = False) -> str:
         return self._legacy_html(order)
 
-    def _build_pdf(self, order: LoadOrder, target: Path) -> None:
+    def _build_pdf(
+        self,
+        order: LoadOrder,
+        target: Path,
+        *,
+        reprint_copy: int | None = None,
+        reprinted_at: datetime | None = None,
+    ) -> None:
         doc = SimpleDocTemplate(
             str(target),
             pagesize=A4,
@@ -67,6 +105,16 @@ class LoadOrderPrintService:
             self._header_table(order),
             Spacer(1, 5 * mm),
         ]
+        if reprint_copy is not None and reprinted_at is not None:
+            story.extend(
+                [
+                    Paragraph(
+                        f"REIMPRESIÓN - copia {reprint_copy} - {reprinted_at:%d/%m/%Y %H:%M}",
+                        self.styles["reprint"],
+                    ),
+                    Spacer(1, 3 * mm),
+                ]
+            )
         if order.status == LoadOrder.STATUS_ANNULLED:
             story.extend([Paragraph("ANULADA", self.styles["annulled"]), Spacer(1, 3 * mm)])
         story.extend(
@@ -596,6 +644,15 @@ def _styles() -> dict[str, ParagraphStyle]:
             textColor=colors.HexColor("#a00000"),
             alignment=TA_CENTER,
             leading=34,
+        ),
+        "reprint": ParagraphStyle(
+            "reprint",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            textColor=colors.HexColor("#9a3412"),
+            alignment=TA_CENTER,
+            leading=14,
         ),
         "normal": ParagraphStyle("normal", parent=base["Normal"], fontSize=9, leading=12),
         "cell": ParagraphStyle("cell", parent=base["Normal"], fontSize=6.8, leading=8),
