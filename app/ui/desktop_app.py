@@ -622,21 +622,34 @@ class FemagDesktopWindow(QMainWindow):
         close_button = _action_button("closeLoadOrderButton", "Cerrar")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
         print_button = _action_button("printLoadOrderButton", "Imprimir")
+        reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
         _set_button_icon(close_button, QStyle.SP_DialogCloseButton)
         _set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
+        _set_button_icon(reprint_button, QStyle.SP_BrowserReload)
         _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
+        can_reprint = _can_reprint_load_orders(self.user)
+        reprint_button.setVisible(can_reprint)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
         search_input.setMinimumWidth(220)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
         _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
-        for button in (new_button, edit_button, issue_button, close_button, print_button, budget_button, annul_button):
+        for button in (
+            new_button,
+            edit_button,
+            issue_button,
+            close_button,
+            print_button,
+            reprint_button,
+            budget_button,
+            annul_button,
+        ):
             actions.addWidget(button)
         actions.addStretch(1)
 
@@ -750,6 +763,8 @@ class FemagDesktopWindow(QMainWindow):
             edit_button.setToolTip("Seleccione una orden pendiente para editar.")
             close_button.setEnabled(False)
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
+            reprint_button.setEnabled(False)
+            reprint_button.setToolTip("Seleccione una orden con impresión original.")
 
         def set_action_state(order: LoadOrder) -> None:
             is_pending = order.is_unissued
@@ -757,6 +772,12 @@ class FemagDesktopWindow(QMainWindow):
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
             close_button.setEnabled(is_issued)
+            has_original_print = _has_printed_load_order(order)
+            reprint_button.setEnabled(can_reprint and has_original_print)
+            if has_original_print:
+                reprint_button.setToolTip("Generar una copia marcada de la impresión original.")
+            else:
+                reprint_button.setToolTip("Primero imprima la orden original.")
             if is_pending:
                 issue_button.setToolTip("Emitir la orden seleccionada.")
                 edit_button.setToolTip("Editar la orden pendiente seleccionada.")
@@ -877,6 +898,27 @@ class FemagDesktopWindow(QMainWindow):
                         f"PDF generado correctamente: {resolved_path}. "
                         f"No se pudo abrir automaticamente: {open_exc}"
                     )
+                set_action_state(order)
+            except Exception as exc:
+                feedback.setText(str(exc))
+
+        def reprint_order() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.setText("Seleccione una orden para reimprimir.")
+                return
+            try:
+                path = operation_service.reprint_order(order, can_reprint=can_reprint)
+                resolved_path = Path(path).resolve()
+                feedback.setText(f"Reimpresión generada correctamente: {resolved_path}")
+                try:
+                    _open_print_output(resolved_path)
+                except Exception as open_exc:
+                    feedback.setText(
+                        f"Reimpresión generada correctamente: {resolved_path}. "
+                        f"No se pudo abrir automaticamente: {open_exc}"
+                    )
+                set_action_state(order)
             except Exception as exc:
                 feedback.setText(str(exc))
 
@@ -914,6 +956,7 @@ class FemagDesktopWindow(QMainWindow):
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
         print_button.clicked.connect(print_order)
+        reprint_button.clicked.connect(reprint_order)
         budget_button.clicked.connect(print_budget)
         refresh()
         return page
@@ -2283,6 +2326,20 @@ def _can_annul_load_orders(user) -> bool:
         return False
     try:
         return PermissionService().has_permission(user, "Operaciones", "anular", "Órdenes de carga")
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _can_reprint_load_orders(user) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(
+            user,
+            "Operaciones",
+            "reimprimir",
+            "Órdenes de carga",
+        )
     except (InterfaceError, OperationalError):
         return False
 
