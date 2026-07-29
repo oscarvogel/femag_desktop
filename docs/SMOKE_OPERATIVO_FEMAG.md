@@ -23,7 +23,7 @@ py -3 scripts/femag_operational_smoke.py --database-path .tmp/issue_105.sqlite3 
 | App / schema | Cubierto | Abre SQLite local, crea schema runtime y permisos base. |
 | ABMs de transporte | Cubierto | Crea transportista, chofer y camion sinteticos. |
 | Cliente, lugar y producto demo | Cubierto | Crea cliente, direccion de entrega y producto sinteticos. |
-| Ordenes de carga | Cubierto | Crea orden, emite, imprime PDF y cierra. |
+| Ordenes de carga | Cubierto | Crea orden, prepara una composición completa de pallets, emite, imprime PDF y cierra. |
 | Liberacion de chofer | Cubierto | Verifica chofer disponible luego del cierre. |
 | Cuenta corriente y pagos | Cubierto | Emision genera saldo, pago sintetico lo deja en cero. |
 

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config.database import bind_database
 from app.config.schema import ensure_runtime_schema
 from app.models.load_orders import LoadOrder
-from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 from app.services.client_payment_service import ClientPaymentService
 from app.services.ledger_query_service import client_balance
 from app.services.load_order_operation_service import LoadOrderOperationService
@@ -68,9 +68,23 @@ def run_operational_smoke(
                     ],
                 }
             ],
-            pallets=[],
+            pallets=[
+                {
+                    "sequence": 1,
+                    "pallet_type": masters["pallet_type"],
+                    "allocations": [
+                        {
+                            "client": masters["client"],
+                            "delivery_address": masters["address"],
+                            "product": masters["product"],
+                            "quantity": 10,
+                        }
+                    ],
+                }
+            ],
             observations="Smoke operativo issue #105 con datos sinteticos.",
         )
+        composition = order_service.composition(order)
         issued = operation_service.issue(order)
         balance_after_issue = client_balance(masters["client"])
         order_pdf = operation_service.print_order(issued)
@@ -100,6 +114,8 @@ def run_operational_smoke(
             "driver": driver.name,
             "truck": masters["truck"].domain,
             "product": masters["product"].name,
+            "pallet_count": len(composition.pallets),
+            "total_pallet_kg": round(float(composition.total_kg), 3),
         }
         _write_report(result)
         return result
@@ -136,6 +152,7 @@ def _create_demo_masters() -> dict:
     product = Product.create(
         name="ISSUE105 Producto Smoke",
         unit="kg",
+        peso_unitario_kg=25.0,
         precio_neto_base=1000.0,
         precio_lista_1=1000.0,
         precio_lista_2=1000.0,
@@ -143,6 +160,7 @@ def _create_demo_masters() -> dict:
         precio_lista_4=1000.0,
         tipo_iva=iva,
     )
+    pallet_type = PalletType.create(type="ISSUE105 Pallet Smoke", measure="1x1", weight=12.5)
     return {
         "carrier": carrier,
         "driver": driver,
@@ -150,6 +168,7 @@ def _create_demo_masters() -> dict:
         "client": client,
         "address": address,
         "product": product,
+        "pallet_type": pallet_type,
     }
 
 
@@ -188,6 +207,8 @@ def _write_report(result: dict) -> Path:
                 f"- Chofer liberado: `{result['driver_released']}`",
                 f"- Camion: `{result['truck']}`",
                 f"- Producto: `{result['product']}`",
+                f"- Pallets preparados: `{result['pallet_count']}`",
+                f"- Peso total asignado: `{result['total_pallet_kg']:.3f} kg`",
                 f"- Saldo luego de emitir: `{result['balance_after_issue']:.2f}`",
                 f"- Recibo de pago: `{result['payment_receipt']}`",
                 f"- Saldo luego del pago: `{result['balance_after_payment']:.2f}`",
@@ -199,7 +220,7 @@ def _write_report(result: dict) -> Path:
                 "| App / schema | Cubierto | Abre SQLite local, crea schema runtime y permisos base. |",
                 "| ABMs de transporte | Cubierto | Crea transportista, chofer y camion sinteticos. |",
                 "| Cliente, lugar y producto demo | Cubierto | Crea cliente, direccion de entrega y producto sinteticos. |",
-                "| Ordenes de carga | Cubierto | Crea orden, emite, imprime PDF y cierra. |",
+                "| Ordenes de carga | Cubierto | Crea orden, prepara pallets, emite, imprime PDF y cierra. |",
                 "| Liberacion de chofer | Cubierto | Verifica chofer disponible luego del cierre. |",
                 "| Cuenta corriente y pagos | Cubierto | Emision genera saldo, pago sintetico lo deja en cero. |",
                 "",

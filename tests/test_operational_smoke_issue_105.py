@@ -18,6 +18,8 @@ def test_issue_105_operational_smoke_generates_reproducible_report(tmp_path):
     assert result["driver_released"] is True
     assert result["payment_receipt"].startswith("REC-")
     assert result["balance_after_payment"] == 0.0
+    assert result["pallet_count"] == 1
+    assert result["total_pallet_kg"] == 250.0
     assert result["order_pdf"].exists()
     assert result["order_pdf"].parent == evidence_dir
 
@@ -25,6 +27,8 @@ def test_issue_105_operational_smoke_generates_reproducible_report(tmp_path):
     assert "# Smoke operativo FEMAG" in report
     assert "No usa datos productivos" in report
     assert "Ordenes de carga" in report
+    assert "Pallets preparados: `1`" in report
+    assert "Peso total asignado: `250.000 kg`" in report
     assert "Cuenta corriente y pagos" in report
     assert "ABMs de transporte" in report
     assert "Remitos" in report
