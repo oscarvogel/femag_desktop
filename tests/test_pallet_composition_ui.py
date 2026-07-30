@@ -1,6 +1,8 @@
 import os
 from decimal import Decimal
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -310,3 +312,139 @@ def test_zero_weight_marks_only_the_pallet_with_that_snapshot(db):
 
     assert widget.card_for_sequence(1).property("compositionState") == "incomplete"
     assert widget.card_for_sequence(2).property("compositionState") == "complete"
+
+
+def test_add_pallets_in_bulk_creates_consecutive_cards_with_one_change_signal(db):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    spy = QSignalSpy(widget.composition_changed)
+
+    widget.bulk_pallet_count_input.setValue(19)
+    widget.add_pallet_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == list(range(1, 20))
+    assert widget.card_for_sequence(19).title_label.text() == "PALLET 19"
+    assert widget.summary_label.text().startswith("19 pallets")
+    assert len(spy) == 1
+
+    widget.bulk_pallet_count_input.setValue(3)
+    widget.add_pallet_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()][-3:] == [20, 21, 22]
+    assert len(spy) == 2
+
+
+def test_bulk_assignment_applies_one_client_product_to_existing_pallets(db):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(19)
+    widget.destination_combo.setCurrentIndex(
+        widget.destination_combo.findData(destination["address_id"])
+    )
+    widget.product_combo.setCurrentIndex(widget.product_combo.findData(product["product_id"]))
+    widget.bulk_start_input.setValue(1)
+    widget.bulk_target_count_input.setValue(10)
+    app.processEvents()
+
+    assert widget.bulk_quantity_input.value() == 4
+    assert "10 pallets x 4 = 40 unidades" in widget.bulk_preview_label.text()
+    spy = QSignalSpy(widget.composition_changed)
+    widget.bulk_assign_button.click()
+    app.processEvents()
+
+    drafts = widget.pallet_drafts()
+    assert all(len(pallet["allocations"]) == 1 for pallet in drafts[:10])
+    assert all(pallet["allocations"] == [] for pallet in drafts[10:])
+    assert {
+        allocation["client_id"]
+        for pallet in drafts[:10]
+        for allocation in pallet["allocations"]
+    } == {destination["client_id"]}
+    assert widget.total_kg_label.text() == "1.000 kg"
+    assert len(spy) == 1
+
+
+def test_bulk_assignment_rejects_excess_and_unknown_pallets(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+
+    with pytest.raises(ValueError, match="supera la cantidad pendiente"):
+        widget.add_allocations_bulk(
+            [1, 2],
+            destination["address_id"],
+            product["product_id"],
+            21,
+        )
+    with pytest.raises(ValueError, match="pallets inexistentes"):
+        widget.add_allocations_bulk(
+            [1, 3],
+            destination["address_id"],
+            product["product_id"],
+            1,
+        )
+
+
+def test_clear_all_allocations_keeps_cards_and_requires_confirmation(db, monkeypatch):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(3)
+    widget.add_allocation(
+        1,
+        destinations[0]["address_id"],
+        destinations[0]["products"][0]["product_id"],
+        20,
+    )
+    widget.add_allocation(
+        2,
+        destinations[1]["address_id"],
+        destinations[1]["products"][0]["product_id"],
+        5,
+    )
+    original_sequences = [pallet["sequence"] for pallet in widget.pallet_drafts()]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+    widget.clear_assignments_button.click()
+    assert sum(len(pallet["allocations"]) for pallet in widget.pallet_drafts()) == 2
+
+    spy = QSignalSpy(widget.composition_changed)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    widget.clear_assignments_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == original_sequences
+    assert all(pallet["allocations"] == [] for pallet in widget.pallet_drafts())
+    assert widget.total_kg_label.text() == "0 kg"
+    assert "3 pallets" in widget.summary_label.text()
+    assert "0 completos" in widget.summary_label.text()
+    assert "3 pendientes" in widget.summary_label.text()
+    assert widget.clear_assignments_button.isEnabled() is False
+    assert len(spy) == 1
