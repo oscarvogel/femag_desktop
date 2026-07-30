@@ -43,3 +43,28 @@ class AuthService:
             return user
         self.audit_service.record(user=username, module="Sistema", action="login fallido")
         return None
+
+    def authorize_administrator(self, username: str, password: str) -> User | None:
+        user = User.get_or_none(User.username == username, User.active == True)  # noqa: E712
+        valid_password = False
+        if user is not None:
+            try:
+                valid_password = self._verify_password(password, user.password_hash)
+            except (TypeError, ValueError):
+                valid_password = False
+        is_administrator = bool(
+            user is not None
+            and user.profile.name.strip().lower() == "administrador"
+        )
+        authorized = user if valid_password and is_administrator else None
+        self.audit_service.record(
+            user=username or None,
+            module="Sistema",
+            action=(
+                "autorizar administrador"
+                if authorized is not None
+                else "rechazar autorizacion administrador"
+            ),
+            record_ref=f"User:{user.id}" if user is not None else None,
+        )
+        return authorized

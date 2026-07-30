@@ -94,7 +94,7 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 | Transporte > Choferes | `drivers` | Real |
 | Transporte > Camiones | `trucks` | Real |
 | Productos | `products` | Real |
-| Cuenta corriente | `placeholder` | **Placeholder** — aunque hay `account_ledger_service` |
+| Cuenta corriente | `customer_ledger` | Real — saldos, movimientos, pagos, recibos y extractos |
 | Reportes | `placeholder` | **Placeholder** |
 | Configuración | `placeholder` | **Placeholder** |
 
@@ -107,8 +107,8 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 | Nuevo cliente | `clients.new` | Real |
 | Registrar remito | `(ninguna)` | **Placeholder** — botón deshabilitado |
 | F150 | `(ninguna)` | **Placeholder** — botón deshabilitado |
-| Registrar pago | `(ninguna)` | **Placeholder** — botón deshabilitado |
-| Cuenta corriente | `(ninguna)` | **Placeholder** — botón deshabilitado |
+| Registrar pago | `customer_ledger.register_payment` | Real |
+| Cuenta corriente | `customer_ledger.view` | Real |
 
 ---
 
@@ -205,7 +205,7 @@ La UI tiene `LoadOrderEntryDialog` con flujo:
 
 ---
 
-## 6. Cuenta corriente clientes (documental)
+## 6. Cuenta corriente, pagos y recibos
 
 | Aspecto | Estado |
 |---|---|
@@ -213,8 +213,12 @@ La UI tiene `LoadOrderEntryDialog` con flujo:
 | Creación | Al emitir orden → 1 movimiento por destino |
 | Reverso | Al anular orden → movimientos espejo con `is_reversal=True` |
 | Protección duplicados | Sí (idempotencia) |
-| UI | **Placeholder** — el sidebar redirige a pantalla placeholder |
-| Servicio | `AccountLedgerService` |
+| UI | Real — listado de clientes, saldos, movimientos y acciones |
+| Pagos | Registro manual con efectivo, transferencia, cheque u otros |
+| Recibos | Numeración correlativa y PDF individual |
+| Anulación | Credenciales de administrador, reversión contable y auditoría |
+| Consulta | El pago original queda visible como anulado junto con su reversión |
+| Servicios | `AccountLedgerService`, `ClientPaymentService`, `PaymentReceiptPrintService` |
 
 ---
 
@@ -337,7 +341,7 @@ Total: **114 passed** (al 28-Jun-2026)
 ### 9.3 Lo que NO cubren los tests
 
 - ❌ Impresión física PDF
-- ❌ Remitos / F150 / pagos / cuenta corriente UI (placeholder)
+- ❌ Remitos / F150 (placeholder)
 - ❌ Integración MySQL real (tests usan SQLite)
 - ❌ Rendición de transportistas
 - ❌ Importación DBF/MySQL
@@ -360,7 +364,7 @@ Esperado: salida limpia sin errores, exit code 0.
 py -3.12 -m pytest -q
 ```
 
-Esperado: 114 passed, 0 failed (con advertencias conocidas de .pytest_cache).
+Esperado: suite completa sin fallos; documentar cualquier warning conocido.
 
 ### 10.3 Compilación
 
@@ -496,6 +500,21 @@ py -3.12 -m app.main --ui
 1. Click en **Dashboard**
 2. Verificar que las tarjetas reflejan: órdenes pendientes, emitidas, cerradas, anuladas
 
+### 10.7 Circuito manual — pago, recibo y anulación
+
+1. Ingresar con un usuario administrador.
+2. Abrir **Cuenta corriente** y seleccionar un cliente con movimientos.
+3. Pulsar **Registrar pago**, completar importe, fecha, medio y referencia, y guardar.
+4. Verificar que aparece un movimiento `Pago` con recibo correlativo `REC-########`.
+5. Seleccionar el pago y pulsar **Imprimir recibo**.
+6. Verificar que se abre un PDF con cliente, CUIT, fecha, importe, medio y referencia.
+7. Seleccionar nuevamente el pago y pulsar **Anular pago**.
+8. Ingresar credenciales de un administrador activo y un motivo.
+9. Verificar que el movimiento original figura como `Pago anulado`, aparece una
+   `Anulación de pago` por el importe opuesto y el saldo vuelve al valor anterior.
+10. Imprimir otra vez el recibo y verificar la marca roja `ANULADO`, el administrador,
+    la fecha y el motivo.
+
 ---
 
 ## 11. Limitaciones conocidas
@@ -505,11 +524,9 @@ py -3.12 -m app.main --ui
 | **Login (UI)** | Pantalla de login funcional pero sin test automático | Login dialog existe pero no cubierto por tests |
 | **Remitos** | Placeholder | No se puede emitir remitos |
 | **F150** | Placeholder | No se puede generar F150 |
-| **Cuenta corriente UI** | Placeholder | No se puede consultar desde UI |
 | **Reportes** | Placeholder | No hay reportes |
 | **Configuración** | Placeholder | No hay pantalla de configuración |
-| **Pagos** | Placeholder | No hay registro de pagos |
-| **Impresión** | Solo HTML, sin PDF | No imprime en papel |
+| **Impresión física** | Depende de la asociación PDF del puesto | La generación PDF funciona; la impresión en papel depende del sistema operativo |
 | **Fiscal** | Sin integración AFIP/ARCA | No tiene validez fiscal |
 | **Importación** | Sin migración desde sistema anterior | No hay importación DBF/MySQL |
 | **Rendición** | Sin rendición de transportistas | No hay liquidación de viajes |
@@ -540,7 +557,7 @@ py -3.12 -m app.main --ui
 |---|---|
 | Loops completados | 4 (0, 1, 2, 3) |
 | Pantallas funcionales | 8 (dashboard, 6 ABMs, carga) |
-| Pantallas placeholder | 5 (remitos, F150, cta cte, reportes, config) |
+| Pantallas placeholder | 4 (remitos, F150, reportes, config) |
 | Tests | 114 |
 | Servicios | 13 |
 | Modelos | 18 |

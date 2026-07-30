@@ -23,9 +23,34 @@ def test_default_permissions_and_sensitive_actions(db):
         "reimprimir",
         "Órdenes de carga",
     )
+    assert permission_service.has_permission(
+        admin,
+        "Cuenta corriente",
+        "anular",
+        "Anulación de pagos",
+    )
+    assert not permission_service.has_permission(
+        secretary,
+        "Cuenta corriente",
+        "anular",
+        "Anulación de pagos",
+    )
+    assert permission_service.has_permission(
+        secretary,
+        "Cuenta corriente",
+        "imprimir",
+        "Recibos",
+    )
+    assert permission_service.has_permission(
+        viewer,
+        "Cuenta corriente",
+        "reimprimir",
+        "Recibos",
+    )
     assert not permission_service.has_permission(viewer, "Maestros", "crear")
     assert permission_service.has_permission(viewer, "Maestros", "ver", "Tipos de IVA")
     assert permission_service.requires_admin_password("anular remito")
+    assert permission_service.requires_admin_password("anular pago")
     assert not permission_service.requires_admin_password("reimprimir")
 
 

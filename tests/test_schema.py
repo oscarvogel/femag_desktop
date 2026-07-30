@@ -99,6 +99,42 @@ def test_driver_schema_allows_null_carrier_and_cuit(db):
     assert columns["cuit"].null is True
 
 
+def test_payment_schema_includes_annulment_tracking_columns(db):
+    columns = {column.name for column in db.get_columns("clientpayment")}
+
+    assert {
+        "status",
+        "annulled_at",
+        "annulled_by",
+        "annulment_reason",
+    }.issubset(columns)
+
+
+def test_runtime_schema_backfills_active_status_for_legacy_payments(db):
+    from app.config.schema import ensure_runtime_schema
+    from app.models.masters import Client
+    from app.services.client_payment_service import ClientPaymentService
+
+    client = Client.create(
+        name="Cliente Pago Legacy",
+        cuit="30700000999",
+        iva_condition="RI",
+    )
+    payment = ClientPaymentService(current_user="admin").register_payment(
+        client=client,
+        amount=100,
+    )
+    db.execute_sql("ALTER TABLE clientpayment DROP COLUMN status")
+
+    ensure_runtime_schema(db)
+
+    status = db.execute_sql(
+        "SELECT status FROM clientpayment WHERE id = ?",
+        (payment.id,),
+    ).fetchone()[0]
+    assert status == "activo"
+
+
 def test_runtime_schema_consolidates_identical_fiscal_and_delivery_addresses(db):
     from app.config.schema import ensure_runtime_schema
     from app.models.masters import Client, ClientAddress

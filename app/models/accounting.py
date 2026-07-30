@@ -10,6 +10,7 @@ class ClientAccountMovement(BaseModel):
     TYPE_LOAD_ORDER = "load_order_documental"
     TYPE_LOAD_ORDER_REVERSAL = "load_order_documental_reversal"
     TYPE_PAYMENT = "payment"
+    TYPE_PAYMENT_REVERSAL = "payment_reversal"
 
     client = ForeignKeyField(Client, backref="account_movements")
     load_order = ForeignKeyField(LoadOrder, backref="account_movements", null=True)
