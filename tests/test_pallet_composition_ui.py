@@ -454,11 +454,23 @@ def test_composition_widget_fits_in_notebook_viewport(db):
     """La pantalla de composicion de pallets debe entrar en notebooks 1280x720.
 
     Reportado en issue #208: la pantalla quedaba fuera de pantalla en pantallas
-    chicas porque las cards eran de tamano fijo (180x180) y el editor panel
-    pedia 300px minimos. El fix permite que las cards escalen entre 150 y 200
-    y envuelve el editor en un QScrollArea vertical.
+    chicas porque las cards eran de tamano fijo (180x180), el editor pedia
+    300px minimos, y el editor tenia todo el contenido apilado verticalmente.
+    El fix combina tres cambios:
+    - cards escalan entre 150 y 200 (siguen cuadradas)
+    - editor envuelto en un QScrollArea vertical
+    - contenido del editor distribuido en 3 tabs (Individual / Masiva / Asignaciones)
     """
-    from PyQt5.QtWidgets import QApplication, QScrollArea
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QComboBox,
+        QDoubleSpinBox,
+        QFrame,
+        QScrollArea,
+        QTabWidget,
+        QTableWidget,
+        QWidget,
+    )
 
     from app.ui.pallet_composition import PalletCompositionWidget
 
@@ -492,6 +504,35 @@ def test_composition_widget_fits_in_notebook_viewport(db):
     assert editor_scroll.widgetResizable() is True
     # Sin scroll horizontal (solo vertical) para no romper el layout lado a lado
     assert editor_scroll.horizontalScrollBarPolicy() == 1  # Qt.ScrollBarAlwaysOff
+
+    # El editor debe distribuir su contenido en 3 tabs (Individual / Masiva / Asignaciones)
+    # para que el alto total entre en notebooks chicas.
+    editor_tabs = widget.findChild(QTabWidget, "palletEditorTabs")
+    assert editor_tabs is not None, "El editor no tiene un QTabWidget"
+    assert editor_tabs.count() == 3, (
+        f"Se esperaban 3 tabs (Individual / Masiva / Asignaciones) pero hay {editor_tabs.count()}"
+    )
+    tab_labels = [editor_tabs.tabText(i) for i in range(editor_tabs.count())]
+    assert tab_labels == ["Individual", "Masiva", "Asignaciones"], (
+        f"Labels de tabs inesperados: {tab_labels}"
+    )
+
+    # Verificar que la tab Individual contiene los widgets de asignacion individual
+    tab_individual = widget.findChild(QWidget, "palletEditorTabIndividual")
+    assert tab_individual is not None
+    assert tab_individual.findChild(QComboBox, "palletDestinationInput") is not None
+    assert tab_individual.findChild(QComboBox, "palletProductInput") is not None
+    assert tab_individual.findChild(QDoubleSpinBox, "palletAllocationQuantityInput") is not None
+
+    # Verificar que la tab Masiva contiene el panel de bulk assignment
+    tab_masiva = widget.findChild(QWidget, "palletEditorTabBulk")
+    assert tab_masiva is not None
+    assert tab_masiva.findChild(QFrame, "bulkPalletAssignmentPanel") is not None
+
+    # Verificar que la tab Asignaciones contiene la tabla
+    tab_asignaciones = widget.findChild(QWidget, "palletEditorTabAllocations")
+    assert tab_asignaciones is not None
+    assert tab_asignaciones.findChild(QTableWidget, "palletAllocationTable") is not None
 
     # Caso realista: 10 pallets como los que genera la operacion bulk.
     # Las cards deben escalar al rango 150-200 y seguir siendo cuadradas.

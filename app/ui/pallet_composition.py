@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -206,25 +207,43 @@ class PalletCompositionWidget(QWidget):
         self.editor_title = QLabel("Seleccione un pallet")
         self.editor_title.setStyleSheet("font-size: 17px; font-weight: 800;")
         editor.addWidget(self.editor_title)
-        editor.addWidget(QLabel("Cliente / destino"))
+
+        # Distribuir el contenido del editor en 3 tabs para que entre
+        # en notebooks chicas. La tabla de asignaciones queda en su
+        # propia tab en vez de estar siempre visible abajo.
+        self.editor_tabs = QTabWidget()
+        self.editor_tabs.setObjectName("palletEditorTabs")
+
+        tab_individual = QWidget()
+        tab_individual.setObjectName("palletEditorTabIndividual")
+        layout_individual = QVBoxLayout(tab_individual)
+        layout_individual.setContentsMargins(0, 8, 0, 0)
+        layout_individual.addWidget(QLabel("Cliente / destino"))
         self.destination_combo = QComboBox()
         self.destination_combo.setObjectName("palletDestinationInput")
-        editor.addWidget(self.destination_combo)
-        editor.addWidget(QLabel("Articulo"))
+        layout_individual.addWidget(self.destination_combo)
+        layout_individual.addWidget(QLabel("Articulo"))
         self.product_combo = QComboBox()
         self.product_combo.setObjectName("palletProductInput")
-        editor.addWidget(self.product_combo)
-        editor.addWidget(QLabel("Cantidad"))
+        layout_individual.addWidget(self.product_combo)
+        layout_individual.addWidget(QLabel("Cantidad"))
         self.quantity_input = QDoubleSpinBox()
         self.quantity_input.setObjectName("palletAllocationQuantityInput")
         self.quantity_input.setRange(0.001, 999999999)
         self.quantity_input.setDecimals(3)
         self.quantity_input.setValue(1)
-        editor.addWidget(self.quantity_input)
+        layout_individual.addWidget(self.quantity_input)
         self.add_allocation_button = QPushButton("Agregar mercaderia")
         self.add_allocation_button.setObjectName("addPalletAllocationButton")
         self.add_allocation_button.clicked.connect(self._add_from_editor)
-        editor.addWidget(self.add_allocation_button)
+        layout_individual.addWidget(self.add_allocation_button)
+        layout_individual.addStretch(1)
+        self.editor_tabs.addTab(tab_individual, "Individual")
+
+        tab_masiva = QWidget()
+        tab_masiva.setObjectName("palletEditorTabBulk")
+        layout_masiva = QVBoxLayout(tab_masiva)
+        layout_masiva.setContentsMargins(0, 8, 0, 0)
         bulk_assignment = QFrame()
         bulk_assignment.setObjectName("bulkPalletAssignmentPanel")
         bulk_layout = QGridLayout(bulk_assignment)
@@ -256,7 +275,14 @@ class PalletCompositionWidget(QWidget):
         self.bulk_assign_button.setObjectName("assignPalletsBatchButton")
         self.bulk_assign_button.clicked.connect(self._assign_bulk_from_editor)
         bulk_layout.addWidget(self.bulk_assign_button, 6, 0, 1, 2)
-        editor.addWidget(bulk_assignment)
+        layout_masiva.addWidget(bulk_assignment)
+        layout_masiva.addStretch(1)
+        self.editor_tabs.addTab(tab_masiva, "Masiva")
+
+        tab_asignaciones = QWidget()
+        tab_asignaciones.setObjectName("palletEditorTabAllocations")
+        layout_asignaciones = QVBoxLayout(tab_asignaciones)
+        layout_asignaciones.setContentsMargins(0, 8, 0, 0)
         self.allocation_table = QTableWidget(0, 5)
         self.allocation_table.setObjectName("palletAllocationTable")
         self.allocation_table.setHorizontalHeaderLabels(
@@ -268,7 +294,10 @@ class PalletCompositionWidget(QWidget):
         self.allocation_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.allocation_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.allocation_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        editor.addWidget(self.allocation_table, 1)
+        layout_asignaciones.addWidget(self.allocation_table, 1)
+        self.editor_tabs.addTab(tab_asignaciones, "Asignaciones")
+
+        editor.addWidget(self.editor_tabs, 1)
         editor_scroll.setWidget(editor_content)
         editor_panel_layout.addWidget(editor_scroll)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
