@@ -1,5 +1,7 @@
 import os
 
+from conftest import _master_data, _valid_order_payload
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -122,6 +124,57 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
     assert read_only.findChild(QPushButton, "saveLoadOrderPalletsButton") is None
     assert read_only.findChild(QPushButton, "closeLoadOrderPalletsButton").text() == "Cerrar"
     assert read_only.pallet_widget.isEnabled() is False
+
+
+def test_bulk_pallet_draft_saves_reopens_and_clears_without_deleting_cards(db):
+    from decimal import Decimal
+
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.load_orders import LoadOrderPallet, LoadOrderPalletAllocation
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderPalletDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    data["product"].peso_unitario_kg = Decimal("25.000")
+    data["product"].save()
+    service = LoadOrderService(current_user="bulk_ui")
+    order = service.create_order(**_valid_order_payload(data))
+
+    cancelled = LoadOrderPalletDialog(service, order)
+    cancelled.pallet_widget.add_pallets(2)
+    cancelled.reject()
+    assert LoadOrderPallet.select().count() == 0
+
+    dialog = LoadOrderPalletDialog(service, order)
+    dialog.pallet_widget.add_pallets(4)
+    dialog.pallet_widget.add_allocations_bulk(
+        [1, 2, 3, 4],
+        data["address"].id,
+        data["product"].id,
+        25,
+    )
+    dialog._save()
+
+    assert LoadOrderPallet.select().count() == 4
+    assert LoadOrderPalletAllocation.select().count() == 4
+    assert service.composition(order).total_kg == Decimal("2500.000")
+
+    reopened = LoadOrderPalletDialog(service, order)
+    assert [pallet["sequence"] for pallet in reopened.pallet_widget.pallet_drafts()] == [1, 2, 3, 4]
+    assert all(
+        len(pallet["allocations"]) == 1
+        for pallet in reopened.pallet_widget.pallet_drafts()
+    )
+    reopened.pallet_widget.clear_all_allocations()
+    reopened._save()
+
+    assert LoadOrderPallet.select().count() == 4
+    assert LoadOrderPalletAllocation.select().count() == 0
+    cleared = LoadOrderPalletDialog(service, order)
+    assert [pallet["sequence"] for pallet in cleared.pallet_widget.pallet_drafts()] == [1, 2, 3, 4]
+    assert all(pallet["allocations"] == [] for pallet in cleared.pallet_widget.pallet_drafts())
 
 
 def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
