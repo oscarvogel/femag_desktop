@@ -53,7 +53,15 @@ class PalletCard(QFrame):
         self.sequence = sequence
         self.setObjectName(f"palletCard{sequence}")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(180, 180)
+        # Permitir que la card escale segun el ancho disponible para que la
+        # composicion entre en pantallas chicas (notebooks 1280x720). Sigue
+        # siendo cuadrada porque Qt respeta mismo ancho/alto cuando ambos
+        # limites inferior y superior son iguales.
+        self.setMinimumSize(150, 150)
+        self.setMaximumSize(200, 200)
+        size_policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        size_policy.setHeightForWidth(True)
+        self.setSizePolicy(size_policy)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         self.title_label = QLabel(f"PALLET {sequence}")
@@ -183,8 +191,18 @@ class PalletCompositionWidget(QWidget):
 
         self.editor_panel = QFrame()
         self.editor_panel.setObjectName("palletEditorPanel")
-        self.editor_panel.setMinimumWidth(300)
-        editor = QVBoxLayout(self.editor_panel)
+        self.editor_panel.setMinimumWidth(240)
+        editor_panel_layout = QVBoxLayout(self.editor_panel)
+        editor_panel_layout.setContentsMargins(0, 0, 0, 0)
+        editor_scroll = QScrollArea()
+        editor_scroll.setObjectName("palletEditorScroll")
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setFrameShape(QFrame.NoFrame)
+        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        editor_content = QWidget()
+        editor_content.setObjectName("palletEditorContent")
+        editor = QVBoxLayout(editor_content)
+        editor.setContentsMargins(0, 0, 0, 0)
         self.editor_title = QLabel("Seleccione un pallet")
         self.editor_title.setStyleSheet("font-size: 17px; font-weight: 800;")
         editor.addWidget(self.editor_title)
@@ -251,6 +269,8 @@ class PalletCompositionWidget(QWidget):
         self.allocation_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.allocation_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         editor.addWidget(self.allocation_table, 1)
+        editor_scroll.setWidget(editor_content)
+        editor_panel_layout.addWidget(editor_scroll)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
         self.product_combo.currentIndexChanged.connect(self._suggest_remaining_quantity)
         self.quantity_input.valueChanged.connect(self._update_editor_actions)

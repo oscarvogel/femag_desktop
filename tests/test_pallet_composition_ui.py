@@ -448,3 +448,63 @@ def test_clear_all_allocations_keeps_cards_and_requires_confirmation(db, monkeyp
     assert "3 pendientes" in widget.summary_label.text()
     assert widget.clear_assignments_button.isEnabled() is False
     assert len(spy) == 1
+
+
+def test_composition_widget_fits_in_notebook_viewport(db):
+    """La pantalla de composicion de pallets debe entrar en notebooks 1280x720.
+
+    Reportado en issue #208: la pantalla quedaba fuera de pantalla en pantallas
+    chicas porque las cards eran de tamano fijo (180x180) y el editor panel
+    pedia 300px minimos. El fix permite que las cards escalen entre 150 y 200
+    y envuelve el editor en un QScrollArea vertical.
+    """
+    from PyQt5.QtWidgets import QApplication, QScrollArea
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+
+    # Forzar el viewport tipico de una notebook moderna
+    widget.resize(1280, 720)
+    app.processEvents()
+
+    # El minimumSizeHint del widget debe caber en el viewport.
+    # Si Qt necesita mas espacio del que la pantalla ofrece, el widget
+    # se recorta o aparecen scrolls no deseados.
+    min_size = widget.minimumSizeHint()
+    assert min_size.width() <= 1280, (
+        f"El widget pide {min_size.width()}px de ancho pero la pantalla solo tiene 1280"
+    )
+    assert min_size.height() <= 720, (
+        f"El widget pide {min_size.height()}px de alto pero la pantalla solo tiene 720"
+    )
+
+    # El editor panel debe respetar un minimo razonable (no menos de 240)
+    assert widget.editor_panel.minimumWidth() == 240
+
+    # El editor debe estar envuelto en un QScrollArea vertical para
+    # que cuando la pantalla sea muy chica el contenido scrollee en vez
+    # de cortarse.
+    editor_scroll = widget.findChild(QScrollArea, "palletEditorScroll")
+    assert editor_scroll is not None, "El editor no esta envuelto en un QScrollArea"
+    assert editor_scroll.widgetResizable() is True
+    # Sin scroll horizontal (solo vertical) para no romper el layout lado a lado
+    assert editor_scroll.horizontalScrollBarPolicy() == 1  # Qt.ScrollBarAlwaysOff
+
+    # Caso realista: 10 pallets como los que genera la operacion bulk.
+    # Las cards deben escalar al rango 150-200 y seguir siendo cuadradas.
+    widget.add_pallets(10)
+    app.processEvents()
+    widget.resize(1280, 720)
+    app.processEvents()
+
+    for sequence in range(1, 11):
+        card = widget.card_for_sequence(sequence)
+        assert 150 <= card.width() <= 200, (
+            f"Card {sequence} tiene width={card.width()}, fuera del rango [150, 200]"
+        )
+        assert card.width() == card.height(), (
+            f"Card {sequence} no es cuadrada ({card.width()}x{card.height()})"
+        )
