@@ -15,6 +15,36 @@
 5. Ejecutar `python scripts/init_db.py`.
 6. Crear el primer usuario con `python scripts/create_admin_user.py admin <clave>`.
 
+## Preparacion administrativa y arranque de puestos
+
+La preparacion del esquema y el arranque diario usan credenciales distintas:
+
+- El usuario administrativo de MySQL se usa solamente con `scripts/init_db.py` y puede crear o modificar el esquema.
+- El usuario operativo de cada puesto necesita `SELECT`, `INSERT`, `UPDATE` y `DELETE`, pero no `CREATE`, `ALTER` ni `DROP`.
+- Las contrasenas se guardan en archivos locales ignorados por Git. Nunca se incluyen en el instalador, el repositorio, comandos compartidos ni capturas.
+
+Antes del primer despliegue, apuntar `FEMAG_ENV_FILE` a la configuracion administrativa y preparar la base una sola vez:
+
+```powershell
+$env:FEMAG_ENV_FILE = "C:\ruta-segura\femag-admin.env"
+python scripts\init_db.py
+```
+
+El resultado esperado es `Base FEMAG preparada correctamente`. Si el comando falla, no se debe abrir ningun puesto hasta resolver la causa.
+
+Para el uso diario, apuntar la aplicacion a la configuracion operativa del puesto:
+
+```powershell
+$env:FEMAG_ENV_FILE = "C:\ProgramData\FEMAG Desktop\config.env"
+python -m app.main --ui
+```
+
+El arranque productivo solo conecta y valida tablas y columnas requeridas. No crea tablas, no agrega columnas, no crea indices y no ejecuta normalizaciones de datos. Si la base esta vacia o su esquema es incompatible, la aplicacion bloquea el inicio y muestra que un administrador debe ejecutar `scripts/init_db.py`.
+
+El modo DEMO conserva su inicializacion automatica de SQLite y permanece aislado del flujo productivo.
+
+Las primeras pruebas MySQL deben realizarse sobre una base descartable y vacia. Nunca usar la base productiva para validar cambios de esquema.
+
 ## Validacion
 
 Ejecutar:

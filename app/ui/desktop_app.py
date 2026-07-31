@@ -36,7 +36,11 @@ from PyQt5.QtWidgets import (
 )
 
 from app.config.database import initialize_demo_database, initialize_runtime_database
-from app.config.schema import ensure_runtime_schema
+from app.config.schema import (
+    SchemaValidationError,
+    ensure_runtime_schema,
+    validate_runtime_schema,
+)
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
@@ -112,14 +116,18 @@ def _start_mail_worker(worker: QRunnable) -> None:
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
-    database = _prepare_database(demo_mode=demo_mode)
-    if database is not None:
-        PermissionService().seed_defaults()
-        _ensure_demo_user(demo_mode=demo_mode)
-        if demo_mode:
-            _seed_demo_masters()
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
+    try:
+        database = _prepare_database(demo_mode=demo_mode)
+    except RuntimeError as exc:
+        QMessageBox.critical(None, "FEMAG Desktop - Base de datos", str(exc))
+        return 1
+
+    PermissionService().seed_defaults()
+    _ensure_demo_user(demo_mode=demo_mode)
+    if demo_mode:
+        _seed_demo_masters()
     login = LoginWindow(demo_mode=demo_mode)
     if login.show() != QDialog.Accepted:
         return 0
@@ -141,10 +149,29 @@ def _prepare_database(*, demo_mode: bool):
     try:
         database = initialize_runtime_database()
         database.connect(reuse_if_open=True)
-        ensure_runtime_schema(database)
-        return database
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(
+            "No se pudo conectar a la base de datos de FEMAG. "
+            "Revise la configuracion, la red y que el servidor MySQL este disponible."
+        ) from exc
+
+    try:
+        validate_runtime_schema(database)
+    except SchemaValidationError as exc:
+        if not database.is_closed():
+            database.close()
+        raise RuntimeError(
+            f"El esquema de la base de datos no es compatible: {exc}. "
+            "Un administrador debe ejecutar scripts/init_db.py antes de abrir los puestos."
+        ) from exc
+    except Exception as exc:
+        if not database.is_closed():
+            database.close()
+        raise RuntimeError(
+            "No se pudo validar el esquema de la base de datos de FEMAG. "
+            "Revise los permisos del usuario operativo y la disponibilidad de MySQL."
+        ) from exc
+    return database
 
 
 class FemagDesktopWindow(QMainWindow):

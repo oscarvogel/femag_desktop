@@ -14,6 +14,56 @@ from playhouse.migrate import SqliteMigrator, migrate
 from app.models import ALL_MODELS
 
 
+class SchemaValidationError(RuntimeError):
+    """Raised when a workstation finds an incomplete runtime schema."""
+
+
+def validate_runtime_schema(database) -> None:
+    """Validate required tables and columns without changing the database."""
+    existing_tables = set(database.get_tables())
+    required_tables = {model._meta.table_name for model in ALL_MODELS}
+    missing_tables = sorted(required_tables - existing_tables)
+    if missing_tables:
+        raise SchemaValidationError(
+            "Faltan tablas requeridas: " + ", ".join(missing_tables)
+        )
+
+    missing_columns = []
+    for model in ALL_MODELS:
+        table_name = model._meta.table_name
+        existing_columns = {column.name for column in database.get_columns(table_name)}
+        required_columns = {field.column_name for field in model._meta.sorted_fields}
+        missing = sorted(required_columns - existing_columns)
+        if missing:
+            missing_columns.append(f"{table_name}: {', '.join(missing)}")
+
+    if missing_columns:
+        raise SchemaValidationError(
+            "Faltan columnas requeridas (" + "; ".join(missing_columns) + ")"
+        )
+
+    missing_indexes = []
+    for model in ALL_MODELS:
+        table_name = model._meta.table_name
+        existing_indexes = database.get_indexes(table_name)
+        for field_names, unique in model._meta.indexes:
+            expected_columns = {
+                model._meta.fields[field_name].column_name for field_name in field_names
+            }
+            if not any(
+                set(index.columns) == expected_columns and (not unique or index.unique)
+                for index in existing_indexes
+            ):
+                missing_indexes.append(
+                    f"{table_name}: {', '.join(sorted(expected_columns))}"
+                )
+
+    if missing_indexes:
+        raise SchemaValidationError(
+            "Faltan indices requeridos (" + "; ".join(missing_indexes) + ")"
+        )
+
+
 def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:

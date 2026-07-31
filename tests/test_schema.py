@@ -1,6 +1,80 @@
 from peewee import SqliteDatabase
 
 
+def test_validate_runtime_schema_accepts_complete_schema_without_writes(db):
+    from app.config.schema import validate_runtime_schema
+
+    statements = []
+    db.connection().set_trace_callback(statements.append)
+    try:
+        validate_runtime_schema(db)
+    finally:
+        db.connection().set_trace_callback(None)
+
+    mutating_prefixes = (
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "REPLACE",
+    )
+    assert not [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith(mutating_prefixes)
+    ]
+
+
+def test_validate_runtime_schema_reports_missing_tables():
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    database = SqliteDatabase(":memory:")
+    database.connect()
+    try:
+        with pytest.raises(SchemaValidationError, match="Faltan tablas requeridas"):
+            validate_runtime_schema(database)
+    finally:
+        database.close()
+
+
+def test_validate_runtime_schema_reports_missing_columns(db):
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    db.execute_sql("ALTER TABLE client RENAME TO client_complete")
+    db.execute_sql("CREATE TABLE client (id INTEGER PRIMARY KEY)")
+    try:
+        with pytest.raises(SchemaValidationError, match="client") as exc_info:
+            validate_runtime_schema(db)
+        assert "name" in str(exc_info.value)
+    finally:
+        db.execute_sql("DROP TABLE client")
+        db.execute_sql("ALTER TABLE client_complete RENAME TO client")
+
+
+def test_validate_runtime_schema_reports_missing_indexes(db):
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    index = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{index.name}"')
+
+    with pytest.raises(SchemaValidationError, match="Faltan indices requeridos") as exc_info:
+        validate_runtime_schema(db)
+
+    assert "loadorderpallet" in str(exc_info.value)
+
+
 def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     from app.config.database import bind_database
     from app.config.schema import ensure_runtime_schema
