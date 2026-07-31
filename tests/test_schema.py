@@ -1,6 +1,41 @@
 from peewee import SqliteDatabase
 
 
+def test_mysql_runtime_schema_snapshot_uses_three_batched_queries():
+    from app.config.schema import _runtime_schema_snapshot
+
+    queries = []
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class MySQLDatabase:
+        def execute_sql(self, sql):
+            queries.append(sql)
+            if "INFORMATION_SCHEMA.TABLES" in sql:
+                return Cursor([("client",)])
+            if "INFORMATION_SCHEMA.COLUMNS" in sql:
+                return Cursor([("client", "id"), ("client", "name")])
+            if "INFORMATION_SCHEMA.STATISTICS" in sql:
+                return Cursor(
+                    [
+                        ("client", "client_name", 0, "name"),
+                    ]
+                )
+            raise AssertionError(f"Consulta inesperada: {sql}")
+
+    tables, columns, indexes = _runtime_schema_snapshot(MySQLDatabase())
+
+    assert len(queries) == 3
+    assert tables == {"client"}
+    assert columns == {"client": {"id", "name"}}
+    assert indexes == {"client": [({"name"}, True)]}
+
+
 def test_validate_runtime_schema_accepts_complete_schema_without_writes(db):
     from app.config.schema import validate_runtime_schema
 
