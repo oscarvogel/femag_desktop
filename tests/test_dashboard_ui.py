@@ -129,7 +129,7 @@ def test_dashboard_new_client_navigates_and_opens_dialog(db):
     assert len(dialog_opened) == 1
 
 
-def test_disabled_dashboard_buttons_have_no_action(db):
+def test_remittance_dashboard_action_is_enabled_and_f150_remains_disabled(db):
     from PyQt5.QtWidgets import QApplication, QPushButton
 
     from app.models.security import User, UserProfile
@@ -147,7 +147,7 @@ def test_disabled_dashboard_buttons_have_no_action(db):
     f150_btn = window.findChild(QPushButton, "dashboardF150")
     assert remittance_btn is not None
     assert f150_btn is not None
-    assert not remittance_btn.isEnabled()
+    assert remittance_btn.isEnabled()
     assert not f150_btn.isEnabled()
 
     # Registrar pago y Cuenta corriente ahora navegan a pantallas reales (issue #144).

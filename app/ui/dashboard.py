@@ -73,7 +73,7 @@ class DashboardService:
             QuickActionSpec("Nueva orden de carga", "load_orders.new", True),
             QuickActionSpec("Buscar orden", "load_orders.search", True),
             QuickActionSpec("Nuevo cliente", "clients.new", True),
-            QuickActionSpec("Registrar remito", None, False, future_module_message()),
+            QuickActionSpec("Registrar remito", "remittances.new", True),
             QuickActionSpec("F150", None, False, future_module_message()),
             QuickActionSpec("Registrar pago", "customer_ledger.register_payment", True),
             QuickActionSpec("Cuenta corriente", "customer_ledger.view", True),
@@ -89,7 +89,7 @@ class DashboardService:
             f"Choferes bloqueados: {summary['choferes_bloqueados'] or 0}",
             f"Órdenes abiertas: {summary['ordenes_pendientes'] or 0}",
             f"Último backup: {summary['ultimo_backup'] or 'Sin registros'}",
-            "Próximos módulos: remitos, F150.",
+            "Próximo módulo: F150.",
         ]
         if demo_mode:
             alerts.append("Modo demo visual con datos de prueba.")

@@ -31,7 +31,10 @@ productiva por si misma.
 - Remito queda fuera del flujo de Orden de carga / Despacho.
 - Remito se genera e imprime en forma individual.
 - No debe generarse automaticamente desde una Orden de carga.
-- No implementar "crear remito desde orden".
+- Puede iniciarse manualmente o precargarse, a pedido del usuario, desde un
+  destino de una Orden de carga.
+- La precarga solo copia cliente, domicilio, productos y datos de transporte;
+  no vincula estados ni modifica la Orden de carga.
 - No acoplar remito al cierre de orden.
 
 ### Rendicion de transportistas
@@ -163,13 +166,15 @@ productiva por si misma.
 
 - Issue: #102.
 - Objetivo: definir carga, listado, impresion, numeracion y validaciones.
-- Regla: individual, sin Orden de carga y sin rendicion.
+- Regla: individual e independiente, con Orden de carga solo como origen
+  opcional de precarga y sin rendicion.
 
 ### 9. Implementar carga e impresion individual de remitos
 
 - Issue existente: #10.
 - Depende de #102.
-- Regla: no generar desde orden, no cerrar orden, no aparecer en rendicion.
+- Regla: permitir carga manual o precarga opcional desde un destino; no cerrar
+  ni alterar la orden y no aparecer en rendicion.
 
 ### 10. Disenar cuenta corriente cliente minima
 

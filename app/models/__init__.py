@@ -22,6 +22,7 @@ from app.models.load_orders import (
     LoadOrderProduct,
     LoadOrderStatusHistory,
 )
+from app.models.remittances import Remittance, RemittanceItem
 from app.models.security import MenuItem, Permission, User, UserProfile
 
 
@@ -50,6 +51,8 @@ ALL_MODELS = [
     LoadOrderPalletAllocation,
     LoadOrderStatusHistory,
     LoadOrderBudgetStatus,
+    Remittance,
+    RemittanceItem,
     AppParameter,
     NumberSequence,
     BackupLog,

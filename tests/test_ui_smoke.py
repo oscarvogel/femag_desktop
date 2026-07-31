@@ -81,7 +81,8 @@ def test_menu_marks_load_orders_as_real_module(db):
     )
 
     assert load_order_item.placeholder is False
-    assert remittance_item.placeholder is True
+    assert remittance_item.placeholder is False
+    assert remittance_item.route_key == "remittances"
     assert summary_item.placeholder is True
 
 

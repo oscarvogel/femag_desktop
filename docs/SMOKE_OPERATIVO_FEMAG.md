@@ -31,7 +31,7 @@ py -3 scripts/femag_operational_smoke.py --database-path .tmp/issue_105.sqlite3 
 
 | Modulo | Estado | Motivo |
 |---|---|---|
-| Remitos | Modulo no disponible | Queda fuera de #105 y no debe usarse remito real. |
+| Remitos | Disponible fuera del smoke #105 | Modulo independiente, manual o precargado desde orden, con PDF no fiscal. |
 | F150 | Modulo no disponible | Queda fuera de #105 y no debe usarse fiscal real. |
 | Rendicion de transportistas | Modulo no disponible | Pendiente de diseno/implementacion en issues separados. |
 | Importacion DBF/MySQL | Modulo no disponible | Area protegida; este smoke usa solo SQLite sintetico. |
@@ -46,4 +46,4 @@ py -3 scripts/femag_operational_smoke.py --database-path .tmp/issue_105.sqlite3 
 
 ## Alcance
 
-Este smoke no implementa funcionalidades faltantes. No usa remitos reales, F150 real, importacion DBF/MySQL, bases productivas ni logica fiscal.
+Este smoke no implementa funcionalidades faltantes. No ejercita remitos, F150 real, importacion DBF/MySQL, bases productivas ni logica fiscal.

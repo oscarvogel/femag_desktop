@@ -87,7 +87,7 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 |---|---|---|
 | Dashboard | `dashboard` | Real |
 | Órdenes de carga | `load_orders` | Real |
-| Remitos | `placeholder` | **Placeholder** — sin UI |
+| Remitos | `remittances` | Real — alta manual o precarga opcional desde orden |
 | F150 | `placeholder` | **Placeholder** — sin UI |
 | Clientes | `clients` | Real |
 | Transporte > Transportistas | `carriers` | Real |
@@ -105,7 +105,7 @@ Requiere Python 3.12 y PyQt5. Ver `guia_instalacion.md` para instalación comple
 | Nueva orden de carga | `load_orders.new` | Real |
 | Buscar orden | `load_orders.search` | Real |
 | Nuevo cliente | `clients.new` | Real |
-| Registrar remito | `(ninguna)` | **Placeholder** — botón deshabilitado |
+| Registrar remito | `remittances.new` | Real — abre alta manual |
 | F150 | `(ninguna)` | **Placeholder** — botón deshabilitado |
 | Registrar pago | `customer_ledger.register_payment` | Real |
 | Cuenta corriente | `customer_ledger.view` | Real |

@@ -40,6 +40,7 @@ from app.config.schema import ensure_runtime_schema
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
+from app.models.remittances import Remittance
 from app.models.payments import ClientPayment
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
@@ -59,6 +60,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
+from app.services.remittance_service import RemittanceService
 from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
@@ -73,6 +75,7 @@ from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
 from app.ui.pallet_composition import PalletCompositionWidget
+from app.ui.remittances import RemittancesPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -185,6 +188,14 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("dashboard", self._dashboard_page())
         self._add_master_pages()
         self._add_page("load_orders", self._load_order_page())
+        self._add_page(
+            "remittances",
+            RemittancesPage(
+                current_user=self.shell.username,
+                annul_callback=self._annul_remittance,
+                parent=self,
+            ),
+        )
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("placeholder", self._placeholder_page())
@@ -416,6 +427,28 @@ class FemagDesktopWindow(QMainWindow):
     def _handle_dashboard_register_payment(self) -> None:
         self._open_payment_dialog(preset_client=None)
 
+    def _handle_dashboard_new_remittance(self) -> None:
+        self._navigate_to_route("remittances")
+        page = self.stack.currentWidget()
+        if isinstance(page, RemittancesPage):
+            page.open_manual_dialog()
+
+    def _annul_remittance(self, remittance: Remittance) -> bool:
+        dialog = AdminAuthorizationDialog(parent=self)
+        if dialog.exec_() != QDialog.Accepted or dialog.authorized_user() is None:
+            return False
+        try:
+            RemittanceService(current_user=self.shell.username).annul(
+                remittance,
+                can_annul=True,
+                reason=dialog.reason(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Anular remito", str(exc))
+            return False
+        QMessageBox.information(self, "Anular remito", f"{remittance.remittance_number} fue anulado.")
+        return True
+
     def _on_global_search(self, search_input: QLineEdit) -> None:
         query = search_input.text().strip()
         if not query:
@@ -608,6 +641,8 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_open_customer_ledger)
                 elif action.route_key == "customer_ledger.register_payment":
                     button.clicked.connect(self._handle_dashboard_register_payment)
+                elif action.route_key == "remittances.new":
+                    button.clicked.connect(self._handle_dashboard_new_remittance)
             actions.addWidget(button)
         layout.addLayout(actions)
         cards = QGridLayout()

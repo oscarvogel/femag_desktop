@@ -212,6 +212,16 @@ def test_runtime_schema_expands_legacy_aggregated_pallet_rows(db):
     assert rows == [(1, 1), (2, 1), (3, 1)]
 
 
+def test_runtime_schema_includes_independent_remittance_tables(db):
+    from app.config.schema import ensure_runtime_schema
+
+    ensure_runtime_schema(db)
+
+    tables = set(db.get_tables())
+    assert "remittance" in tables
+    assert "remittanceitem" in tables
+
+
 def test_runtime_schema_resequences_multiple_legacy_pallet_rows(db):
     from app.config.schema import _ensure_pallet_sequence_index, _normalize_legacy_pallet_rows
     from app.models.load_orders import LoadOrder, LoadOrderPallet
