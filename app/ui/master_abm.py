@@ -33,6 +33,7 @@ from app.models.masters import (
     ClientAddress,
     Driver,
     Product,
+    TipoIVA,
     Truck,
     client_address_has_delivery_function,
     client_address_type_label,
@@ -171,6 +172,14 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             ProductEntryDialog,
             "newProductButton",
             "editProductButton",
+        ),
+        "vat_types": MasterAbmConfig(
+            "Tipos de IVA",
+            ["Nombre", "Porcentaje", "Estado"],
+            _vat_type_rows,
+            VatTypeEntryDialog,
+            "newVatTypeButton",
+            "editVatTypeButton",
         ),
         "drivers": MasterAbmConfig(
             "Choferes",
@@ -633,6 +642,14 @@ class ProductEntryDialog(QDialog):
         self.kind_input.setObjectName("productKindInput")
         for value, label in PRODUCT_KIND_LABELS.items():
             self.kind_input.addItem(label, value)
+        self.iva_input = QComboBox()
+        self.iva_input.setObjectName("productIvaTypeInput")
+        iva_default = TipoIVA.iva_default()
+        for tipo_iva in TipoIVA.select().where(TipoIVA.activo == True).order_by(TipoIVA.nombre):  # noqa: E712
+            self.iva_input.addItem(f"{tipo_iva.nombre} ({tipo_iva.porcentaje:g}%)", tipo_iva.id)
+        default_index = self.iva_input.findData(iva_default.id)
+        if default_index >= 0:
+            self.iva_input.setCurrentIndex(default_index)
         self.price_list_1_input = QLineEdit()
         self.price_list_1_input.setObjectName("productPriceList1Input")
         self.price_list_2_input = QLineEdit()
@@ -649,14 +666,16 @@ class ProductEntryDialog(QDialog):
         form.addWidget(self.unit_input, 2, 1)
         form.addWidget(QLabel("Peso unitario"), 3, 0)
         form.addWidget(self.weight_input, 3, 1)
-        form.addWidget(QLabel("Lista 1"), 4, 0)
-        form.addWidget(self.price_list_1_input, 4, 1)
-        form.addWidget(QLabel("Lista 2"), 5, 0)
-        form.addWidget(self.price_list_2_input, 5, 1)
-        form.addWidget(QLabel("Lista 3"), 6, 0)
-        form.addWidget(self.price_list_3_input, 6, 1)
-        form.addWidget(QLabel("Lista 4"), 7, 0)
-        form.addWidget(self.price_list_4_input, 7, 1)
+        form.addWidget(QLabel("Tipo de IVA"), 4, 0)
+        form.addWidget(self.iva_input, 4, 1)
+        form.addWidget(QLabel("Lista 1"), 5, 0)
+        form.addWidget(self.price_list_1_input, 5, 1)
+        form.addWidget(QLabel("Lista 2"), 6, 0)
+        form.addWidget(self.price_list_2_input, 6, 1)
+        form.addWidget(QLabel("Lista 3"), 7, 0)
+        form.addWidget(self.price_list_3_input, 7, 1)
+        form.addWidget(QLabel("Lista 4"), 8, 0)
+        form.addWidget(self.price_list_4_input, 8, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveProductButton", self._save)
@@ -666,10 +685,18 @@ class ProductEntryDialog(QDialog):
             self.unit_input.setText("kg")
             return
         product = Product.get_by_id(self.record_id)
+        if product.tipo_iva_id is not None and self.iva_input.findData(product.tipo_iva_id) < 0:
+            tipo_iva = product.tipo_iva
+            self.iva_input.addItem(
+                f"{tipo_iva.nombre} ({tipo_iva.porcentaje:g}%) — Inactivo",
+                tipo_iva.id,
+            )
         self.name_input.setText(product.name)
         self.unit_input.setText(product.unit)
         self.weight_input.setValue(float(product.peso_unitario_kg))
         self.kind_input.setCurrentIndex(max(self.kind_input.findData(product.product_kind or "revisar"), 0))
+        if product.tipo_iva_id is not None:
+            self.iva_input.setCurrentIndex(self.iva_input.findData(product.tipo_iva_id))
         self.price_list_1_input.setText(_money_text(product.precio_lista_1 or product.precio_neto_base))
         self.price_list_2_input.setText(_money_text(product.precio_lista_2))
         self.price_list_3_input.setText(_money_text(product.precio_lista_3))
@@ -688,19 +715,88 @@ class ProductEntryDialog(QDialog):
                 "precio_lista_3": _parse_float(self.price_list_3_input.text()),
                 "precio_lista_4": _parse_float(self.price_list_4_input.text()),
             }
+            tipo_iva_id = self.iva_input.currentData()
+            tipo_iva = TipoIVA.get_by_id(tipo_iva_id) if tipo_iva_id is not None else None
             if self.record_id is None:
                 self.saved_record = MasterService(self.current_user).create_product(
                     name,
                     unit,
                     peso_unitario_kg=Decimal(str(self.weight_input.value())),
                     product_kind=self.kind_input.currentData(),
+                    tipo_iva=tipo_iva,
                     **prices,
                 )
             else:
                 self.saved_record = MasterService(self.current_user).update_product(
                     Product.get_by_id(self.record_id), name, unit,
                     peso_unitario_kg=Decimal(str(self.weight_input.value())),
-                    product_kind=self.kind_input.currentData(), **prices,
+                    product_kind=self.kind_input.currentData(),
+                    tipo_iva=tipo_iva,
+                    **prices,
+                )
+            self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
+class VatTypeEntryDialog(QDialog):
+    def __init__(self, *, current_user: str, record_id: int | None = None, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.record_id = record_id
+        self.saved_record: TipoIVA | None = None
+        self.setObjectName("vatTypeEntryDialog")
+        self.setWindowTitle("Tipo de IVA")
+        self._build()
+        self._load_record()
+
+    def _build(self) -> None:
+        layout = _entry_layout(self, "Tipo de IVA")
+        form = QGridLayout()
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("vatTypeNameInput")
+        self.percentage_input = QDoubleSpinBox()
+        self.percentage_input.setObjectName("vatTypePercentageInput")
+        self.percentage_input.setRange(0, 100)
+        self.percentage_input.setDecimals(2)
+        self.percentage_input.setSuffix(" %")
+        self.active_input = QComboBox()
+        self.active_input.setObjectName("vatTypeActiveInput")
+        self.active_input.addItem("Activo", True)
+        self.active_input.addItem("Inactivo", False)
+        form.addWidget(QLabel("Nombre"), 0, 0)
+        form.addWidget(self.name_input, 0, 1)
+        form.addWidget(QLabel("Porcentaje"), 1, 0)
+        form.addWidget(self.percentage_input, 1, 1)
+        form.addWidget(QLabel("Estado"), 2, 0)
+        form.addWidget(self.active_input, 2, 1)
+        layout.addLayout(form)
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveVatTypeButton", self._save)
+
+    def _load_record(self) -> None:
+        if self.record_id is None:
+            return
+        tipo_iva = TipoIVA.get_by_id(self.record_id)
+        self.name_input.setText(tipo_iva.nombre)
+        self.percentage_input.setValue(tipo_iva.porcentaje)
+        self.active_input.setCurrentIndex(max(self.active_input.findData(tipo_iva.activo), 0))
+
+    def _save(self) -> None:
+        try:
+            service = MasterService(self.current_user)
+            if self.record_id is None:
+                self.saved_record = service.create_tipo_iva(
+                    self.name_input.text(),
+                    self.percentage_input.value(),
+                    activo=bool(self.active_input.currentData()),
+                )
+            else:
+                self.saved_record = service.update_tipo_iva(
+                    TipoIVA.get_by_id(self.record_id),
+                    self.name_input.text(),
+                    self.percentage_input.value(),
+                    activo=bool(self.active_input.currentData()),
                 )
             self.accept()
         except Exception as exc:
@@ -914,6 +1010,21 @@ def _product_rows() -> list[list[object]]:
                 "Activo" if product.active else "Inactivo",
             ]
             for product in Product.select().order_by(Product.name).limit(50)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def _vat_type_rows() -> list[list[object]]:
+    try:
+        return [
+            [
+                tipo_iva.id,
+                tipo_iva.nombre,
+                f"{tipo_iva.porcentaje:g}%",
+                "Activo" if tipo_iva.activo else "Inactivo",
+            ]
+            for tipo_iva in TipoIVA.select().order_by(TipoIVA.nombre).limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []

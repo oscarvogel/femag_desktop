@@ -21,7 +21,16 @@ MENU = {
     "Inicio": ["Dashboard", "Pendientes", "Accesos rápidos"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
-    "Maestros": ["Clientes", "Domicilios", "Productos", "Pallets / tipos de pallet", "Choferes", "Transportistas", "Camiones"],
+    "Maestros": [
+        "Clientes",
+        "Domicilios",
+        "Productos",
+        "Tipos de IVA",
+        "Pallets / tipos de pallet",
+        "Choferes",
+        "Transportistas",
+        "Camiones",
+    ],
     "Importación": ["Importación"],
     "Sistema": ["Usuarios", "Perfiles", "Permisos por menú", "Parámetros", "Backups", "Auditoría"],
 }

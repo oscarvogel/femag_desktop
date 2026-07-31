@@ -100,3 +100,16 @@ def test_payment_uses_explicit_date(db):
     assert payment.payment_date == date(2026, 7, 1)
     assert payment.method == "transferencia"
     assert payment.reference == "TRF-001"
+
+
+def test_payment_accepts_other_method(db):
+    client = _make_client()
+
+    payment = ClientPaymentService(current_user="admin").register_payment(
+        client=client,
+        amount=75,
+        method=ClientPayment.METHOD_OTHER,
+        reference="Compensación manual",
+    )
+
+    assert payment.method == ClientPayment.METHOD_OTHER

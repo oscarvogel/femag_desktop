@@ -1,6 +1,17 @@
 from decimal import Decimal
 
-from app.models.masters import PRODUCT_KIND_LABELS, Carrier, Driver, OperationalService, PalletType, Product, Truck
+from peewee import fn
+
+from app.models.masters import (
+    PRODUCT_KIND_LABELS,
+    Carrier,
+    Driver,
+    OperationalService,
+    PalletType,
+    Product,
+    TipoIVA,
+    Truck,
+)
 from app.services.audit_service import AuditService
 
 
@@ -29,12 +40,15 @@ class MasterService:
         precio_lista_3: float = 0.0,
         precio_lista_4: float = 0.0,
         product_kind: str = "producto",
+        tipo_iva: TipoIVA | None = None,
     ) -> Product:
         peso_unitario_kg = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if peso_unitario_kg < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        tipo_iva = tipo_iva or TipoIVA.iva_default()
+        self._validate_tipo_iva(tipo_iva)
         row = Product.create(
             name=name,
             unit=unit,
@@ -48,6 +62,7 @@ class MasterService:
             precio_lista_2=precio_lista_2,
             precio_lista_3=precio_lista_3,
             precio_lista_4=precio_lista_4,
+            tipo_iva=tipo_iva,
         )
         self._record(
             "Product",
@@ -56,14 +71,27 @@ class MasterService:
         )
         return row
 
-    def update_product(self, product: Product, name: str, unit: str, *, peso_unitario_kg=Decimal("0"), product_kind="producto", **prices) -> Product:
+    def update_product(
+        self,
+        product: Product,
+        name: str,
+        unit: str,
+        *,
+        peso_unitario_kg=Decimal("0"),
+        product_kind="producto",
+        tipo_iva: TipoIVA | None = None,
+        **prices,
+    ) -> Product:
         weight = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if weight < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        tipo_iva = tipo_iva or product.tipo_iva or TipoIVA.iva_default()
+        self._validate_tipo_iva(tipo_iva)
         product.name, product.unit = name, unit
         product.peso_unitario_kg, product.product_kind = weight, product_kind
+        product.tipo_iva = tipo_iva
         product.classification_source = product.weight_source = "manual"
         product.review_required = False
         for field in ("precio_lista_1", "precio_lista_2", "precio_lista_3", "precio_lista_4"):
@@ -71,6 +99,69 @@ class MasterService:
         product.precio_neto_base = product.precio_lista_1
         product.save()
         return product
+
+    @staticmethod
+    def _validate_tipo_iva(tipo_iva: TipoIVA | None) -> None:
+        if tipo_iva is None or not tipo_iva.activo:
+            raise ValueError("Seleccione un tipo de IVA activo.")
+
+    def create_tipo_iva(self, nombre: str, porcentaje: float, *, activo: bool = True) -> TipoIVA:
+        nombre, porcentaje = self._validate_tipo_iva_values(nombre, porcentaje)
+        self._validate_unique_tipo_iva_name(nombre)
+        row = TipoIVA.create(nombre=nombre, porcentaje=porcentaje, activo=activo)
+        self._record(
+            "TipoIVA",
+            row,
+            {"nombre": nombre, "porcentaje": porcentaje, "activo": activo},
+        )
+        return row
+
+    def update_tipo_iva(
+        self,
+        tipo_iva: TipoIVA,
+        nombre: str,
+        porcentaje: float,
+        *,
+        activo: bool,
+    ) -> TipoIVA:
+        nombre, porcentaje = self._validate_tipo_iva_values(nombre, porcentaje)
+        self._validate_unique_tipo_iva_name(nombre, exclude_id=tipo_iva.id)
+        old_value = {
+            "nombre": tipo_iva.nombre,
+            "porcentaje": tipo_iva.porcentaje,
+            "activo": tipo_iva.activo,
+        }
+        tipo_iva.nombre = nombre
+        tipo_iva.porcentaje = porcentaje
+        tipo_iva.activo = activo
+        tipo_iva.save()
+        self.audit_service.record(
+            user=self.current_user,
+            module="Maestros",
+            action="modificar",
+            record_ref=f"TipoIVA:{tipo_iva.id}",
+            old_value=old_value,
+            new_value={"nombre": nombre, "porcentaje": porcentaje, "activo": activo},
+        )
+        return tipo_iva
+
+    @staticmethod
+    def _validate_tipo_iva_values(nombre: str, porcentaje: float) -> tuple[str, float]:
+        nombre = nombre.strip()
+        if not nombre:
+            raise ValueError("Complete el nombre del tipo de IVA.")
+        porcentaje = float(porcentaje)
+        if porcentaje < 0 or porcentaje > 100:
+            raise ValueError("El porcentaje de IVA debe estar entre 0 y 100.")
+        return nombre, porcentaje
+
+    @staticmethod
+    def _validate_unique_tipo_iva_name(nombre: str, *, exclude_id: int | None = None) -> None:
+        query = TipoIVA.select().where(fn.LOWER(TipoIVA.nombre) == nombre.lower())
+        if exclude_id is not None:
+            query = query.where(TipoIVA.id != exclude_id)
+        if query.exists():
+            raise ValueError("Ya existe un tipo de IVA con ese nombre.")
 
     def create_driver(
         self,

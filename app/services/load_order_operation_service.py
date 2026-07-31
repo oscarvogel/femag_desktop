@@ -1,5 +1,7 @@
+from datetime import datetime
 from pathlib import Path
 
+from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
@@ -42,8 +44,38 @@ class LoadOrderOperationService:
         order = self._require_printable(order)
         return self.prints.export_pdf(order, self.prints_dir)
 
-    def reprint_order(self, order: LoadOrder) -> Path:
-        return self.print_order(order)
+    def reprint_order(self, order: LoadOrder, *, can_reprint: bool) -> Path:
+        if not can_reprint:
+            raise PermissionError("No tiene permiso para reimprimir órdenes de carga.")
+        order = LoadOrder.get_by_id(order.id)
+        record_ref = f"LoadOrder:{order.id}"
+        original_exists = (
+            AuditLog.select()
+            .where(
+                AuditLog.module == "Ordenes de carga",
+                AuditLog.action == "imprimir",
+                AuditLog.record_ref == record_ref,
+            )
+            .exists()
+        )
+        if not original_exists:
+            raise ValueError("Primero debe imprimir la orden original.")
+        copy_number = (
+            AuditLog.select()
+            .where(
+                AuditLog.module == "Ordenes de carga",
+                AuditLog.action == "reimprimir",
+                AuditLog.record_ref == record_ref,
+            )
+            .count()
+            + 1
+        )
+        return self.prints.export_reprint(
+            order,
+            self.prints_dir,
+            copy_number=copy_number,
+            reprinted_at=datetime.now(),
+        )
 
     def annul(self, order: LoadOrder, *, can_annul: bool) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)

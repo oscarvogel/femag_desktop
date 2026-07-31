@@ -94,6 +94,77 @@ def test_create_product_accepts_unit_weight(db):
     assert product.peso_unitario_kg == Decimal("25.000")
 
 
+def test_create_and_update_product_persist_tipo_iva(db):
+    from app.models.masters import TipoIVA
+    from app.services.master_service import MasterService
+
+    service = MasterService(current_user="admin")
+    iva_reducido = TipoIVA.create(nombre="IVA reducido", porcentaje=10.5)
+    iva_general = TipoIVA.iva_default()
+
+    product = service.create_product("Producto gravado", "unidad", tipo_iva=iva_reducido)
+    assert product.tipo_iva == iva_reducido
+
+    service.update_product(product, product.name, product.unit, tipo_iva=iva_general)
+    assert product.tipo_iva == iva_general
+
+
+def test_create_product_rejects_inactive_tipo_iva(db):
+    from app.models.masters import TipoIVA
+    from app.services.master_service import MasterService
+
+    iva_inactivo = TipoIVA.create(nombre="IVA inactivo", porcentaje=5.0, activo=False)
+
+    with pytest.raises(ValueError, match="tipo de IVA activo"):
+        MasterService(current_user="admin").create_product(
+            "Producto invalido",
+            "unidad",
+            tipo_iva=iva_inactivo,
+        )
+
+
+def test_tipo_iva_service_creates_updates_and_audits(db):
+    from app.models.audit import AuditLog
+    from app.services.master_service import MasterService
+
+    service = MasterService(current_user="admin")
+    tipo_iva = service.create_tipo_iva("IVA reducido", 10.5)
+
+    assert tipo_iva.nombre == "IVA reducido"
+    assert tipo_iva.porcentaje == 10.5
+    assert tipo_iva.activo is True
+
+    service.update_tipo_iva(tipo_iva, "IVA especial", 5.0, activo=False)
+
+    assert tipo_iva.nombre == "IVA especial"
+    assert tipo_iva.porcentaje == 5.0
+    assert tipo_iva.activo is False
+    assert [
+        row.action
+        for row in AuditLog.select().where(AuditLog.record_ref == f"TipoIVA:{tipo_iva.id}").order_by(AuditLog.id)
+    ] == ["crear", "modificar"]
+
+
+@pytest.mark.parametrize("porcentaje", [-0.01, 100.01])
+def test_tipo_iva_service_rejects_out_of_range_percentage(db, porcentaje):
+    from app.services.master_service import MasterService
+
+    with pytest.raises(ValueError, match="entre 0 y 100"):
+        MasterService(current_user="admin").create_tipo_iva("IVA inválido", porcentaje)
+
+
+def test_tipo_iva_service_rejects_empty_or_duplicate_name(db):
+    from app.services.master_service import MasterService
+
+    service = MasterService(current_user="admin")
+    service.create_tipo_iva("IVA reducido", 10.5)
+
+    with pytest.raises(ValueError, match="nombre"):
+        service.create_tipo_iva("   ", 21)
+    with pytest.raises(ValueError, match="Ya existe"):
+        service.create_tipo_iva("iva REDUCIDO", 5)
+
+
 def test_create_product_rejects_negative_weight(db):
     from app.services.master_service import MasterService
 

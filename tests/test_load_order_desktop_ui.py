@@ -1,5 +1,7 @@
 import os
 
+from conftest import _master_data, _valid_order_payload
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -122,6 +124,57 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
     assert read_only.findChild(QPushButton, "saveLoadOrderPalletsButton") is None
     assert read_only.findChild(QPushButton, "closeLoadOrderPalletsButton").text() == "Cerrar"
     assert read_only.pallet_widget.isEnabled() is False
+
+
+def test_bulk_pallet_draft_saves_reopens_and_clears_without_deleting_cards(db):
+    from decimal import Decimal
+
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.load_orders import LoadOrderPallet, LoadOrderPalletAllocation
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderPalletDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    data["product"].peso_unitario_kg = Decimal("25.000")
+    data["product"].save()
+    service = LoadOrderService(current_user="bulk_ui")
+    order = service.create_order(**_valid_order_payload(data))
+
+    cancelled = LoadOrderPalletDialog(service, order)
+    cancelled.pallet_widget.add_pallets(2)
+    cancelled.reject()
+    assert LoadOrderPallet.select().count() == 0
+
+    dialog = LoadOrderPalletDialog(service, order)
+    dialog.pallet_widget.add_pallets(4)
+    dialog.pallet_widget.add_allocations_bulk(
+        [1, 2, 3, 4],
+        data["address"].id,
+        data["product"].id,
+        25,
+    )
+    dialog._save()
+
+    assert LoadOrderPallet.select().count() == 4
+    assert LoadOrderPalletAllocation.select().count() == 4
+    assert service.composition(order).total_kg == Decimal("2500.000")
+
+    reopened = LoadOrderPalletDialog(service, order)
+    assert [pallet["sequence"] for pallet in reopened.pallet_widget.pallet_drafts()] == [1, 2, 3, 4]
+    assert all(
+        len(pallet["allocations"]) == 1
+        for pallet in reopened.pallet_widget.pallet_drafts()
+    )
+    reopened.pallet_widget.clear_all_allocations()
+    reopened._save()
+
+    assert LoadOrderPallet.select().count() == 4
+    assert LoadOrderPalletAllocation.select().count() == 0
+    cleared = LoadOrderPalletDialog(service, order)
+    assert [pallet["sequence"] for pallet in cleared.pallet_widget.pallet_drafts()] == [1, 2, 3, 4]
+    assert all(pallet["allocations"] == [] for pallet in cleared.pallet_widget.pallet_drafts())
 
 
 def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
@@ -560,7 +613,8 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
     assert truck_combo.findData(wrong_truck.id) == -1
 
 
-def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_path, monkeypatch):
+def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
+    from pypdf import PdfReader
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
     from app.models.accounting import ClientAccountMovement
@@ -624,15 +678,22 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
     window.findChild(QPushButton, "printLoadOrderButton").click()
     app.processEvents()
     assert "pdf generado correctamente" in feedback.text().lower()
-    pdf_path = next(tmp_path.glob("orden_carga_*.pdf"))
+    pdf_path = tmp_path / "orden_carga_1.pdf"
     assert opened_outputs == [pdf_path]
     assert str(pdf_path) in feedback.text()
     assert pdf_path.read_bytes().startswith(b"%PDF")
 
-    window.findChild(QPushButton, "printLoadOrderButton").click()
+    reprint_button = window.findChild(QPushButton, "reprintLoadOrderButton")
+    assert reprint_button is not None
+    assert reprint_button.isHidden() is False
+    assert reprint_button.isEnabled() is True
+    reprint_button.click()
     app.processEvents()
-    assert "pdf generado correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, pdf_path]
+    reprint_path = tmp_path / "orden_carga_1_reimpresion_1.pdf"
+    assert "reimpresión generada correctamente" in feedback.text().lower()
+    assert opened_outputs == [pdf_path, reprint_path]
+    reprint_text = "\n".join(page.extract_text() or "" for page in PdfReader(str(reprint_path)).pages)
+    assert "REIMPRESIÓN - copia 1 -" in reprint_text
 
     window.findChild(QPushButton, "annulLoadOrderButton").click()
     app.processEvents()
@@ -645,10 +706,16 @@ def test_load_order_page_operates_emit_print_again_and_annul_feedback(db, tmp_pa
         == 1
     )
 
-    window.findChild(QPushButton, "printLoadOrderButton").click()
+    reprint_button.click()
     app.processEvents()
-    assert "pdf generado correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, pdf_path, pdf_path]
+    annulled_reprint_path = tmp_path / "orden_carga_1_reimpresion_2.pdf"
+    assert "reimpresión generada correctamente" in feedback.text().lower()
+    assert opened_outputs == [pdf_path, reprint_path, annulled_reprint_path]
+    annulled_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(str(annulled_reprint_path)).pages
+    )
+    assert "REIMPRESIÓN - copia 2 -" in annulled_text
+    assert "ANULADA" in annulled_text
 
 
 def test_load_order_detail_panel_keeps_long_summary_readable(db):
@@ -1267,7 +1334,9 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
     feedback = window.findChild(QLabel, "loadOrderFeedback")
 
     assert search_input is not None
-    assert reprint_button is None or not reprint_button.isVisible()
+    assert reprint_button is not None
+    assert reprint_button.isHidden() is False
+    assert reprint_button.isEnabled() is False
     assert window.findChild(QPushButton, "printLoadOrderButton").text() == "Imprimir"
     assert table.rowCount() == 3
 
@@ -1278,6 +1347,24 @@ def test_load_order_page_has_single_print_action_and_real_search_filter(db, tmp_
     assert table.rowCount() == 2
     assert table.item(0, 0).data(Qt.UserRole) == order_a.id
     assert "1 resultado" in feedback.text().lower()
+
+
+def test_load_order_page_hides_reprint_without_permission(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.models.security import User, UserProfile
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    profile = UserProfile.create(name="Sin reimpresion")
+    user = User.create(username="sin_reimpresion_ui", password_hash="x", profile=profile)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    reprint_button = window.findChild(QPushButton, "reprintLoadOrderButton")
+    assert reprint_button is not None
+    assert reprint_button.isHidden() is True
 
 
 def test_load_order_page_blocks_annul_without_permission(db):

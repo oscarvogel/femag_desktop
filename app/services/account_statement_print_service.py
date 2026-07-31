@@ -10,6 +10,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
+from app.models.payments import ClientPayment
 from app.services.ledger_query_service import movements_for_client, running_balance
 
 
@@ -17,6 +18,7 @@ MOVEMENT_TYPE_LABELS = {
     "load_order_documental": "Orden de carga",
     "load_order_documental_reversal": "Reverso OC",
     "payment": "Pago",
+    "payment_reversal": "Anulación de pago",
 }
 
 
@@ -97,6 +99,12 @@ def _movements_table(movements: list[ClientAccountMovement], balances: list[floa
     rows = [header]
     for movement, balance in zip(movements, balances):
         type_label = MOVEMENT_TYPE_LABELS.get(movement.movement_type, movement.movement_type)
+        if (
+            movement.movement_type == ClientAccountMovement.TYPE_PAYMENT
+            and movement.payment is not None
+            and movement.payment.status == ClientPayment.STATUS_ANNULLED
+        ):
+            type_label = "Pago anulado"
         rows.append([
             Paragraph(movement.created_at.strftime("%d/%m/%Y %H:%M"), styles["cell"]),
             Paragraph(type_label, styles["cell"]),

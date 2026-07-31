@@ -126,3 +126,132 @@ def test_customer_ledger_share_buttons_require_callbacks(db):
 
     assert not page.whatsapp_statement_button.isEnabled()
     assert not page.email_statement_button.isEnabled()
+
+
+def test_customer_ledger_prints_and_annuls_selected_payment(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.models.payments import ClientPayment
+    from app.services.auth_service import AuthService
+    from app.services.client_payment_service import ClientPaymentService
+    from app.services.ledger_query_service import client_balance
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Acciones Pago",
+        cuit="30777777772",
+        iva_condition="RI",
+    )
+    payment_service = ClientPaymentService(current_user="caja")
+    payment = payment_service.register_payment(client=client, amount=850)
+    admin = AuthService().create_user(
+        "admin_acciones_pago",
+        "secreto",
+        "Administrador",
+    )
+    printed = []
+
+    def annul(selected):
+        payment_service.annul_payment(
+            selected,
+            authorized_by=admin,
+            reason="Duplicado",
+        )
+
+    page = CustomerLedgerPage(
+        current_user="caja",
+        print_receipt_callback=printed.append,
+        annul_payment_callback=annul,
+        can_annul_payments=True,
+    )
+    app.processEvents()
+
+    payment_row = next(
+        row
+        for row in range(page.movements_table.rowCount())
+        if page.movements_table.item(row, 0).data(Qt.UserRole) == payment.id
+    )
+    page.movements_table.setCurrentCell(payment_row, 0)
+    app.processEvents()
+
+    assert page.print_receipt_button.isEnabled()
+    assert page.annul_payment_button.isHidden() is False
+    assert page.annul_payment_button.isEnabled()
+    page.print_receipt_button.click()
+    assert printed == [payment]
+
+    page.annul_payment_button.click()
+    app.processEvents()
+
+    payment = ClientPayment.get_by_id(payment.id)
+    assert payment.status == ClientPayment.STATUS_ANNULLED
+    assert client_balance(client) == 0
+    type_labels = [
+        page.movements_table.item(row, 1).text()
+        for row in range(page.movements_table.rowCount())
+    ]
+    assert "Pago anulado" in type_labels
+    assert "Anulación de pago" in type_labels
+
+
+def test_customer_ledger_hides_annul_action_without_permission(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.services.client_payment_service import ClientPaymentService
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Sin Anulación",
+        cuit="30777777773",
+        iva_condition="RI",
+    )
+    payment = ClientPaymentService(current_user="caja").register_payment(
+        client=client,
+        amount=100,
+    )
+    page = CustomerLedgerPage(
+        current_user="caja",
+        print_receipt_callback=lambda _payment: None,
+        annul_payment_callback=lambda _payment: None,
+        can_annul_payments=False,
+    )
+    payment_row = next(
+        row
+        for row in range(page.movements_table.rowCount())
+        if page.movements_table.item(row, 0).data(Qt.UserRole) == payment.id
+    )
+    page.movements_table.setCurrentCell(payment_row, 0)
+    app.processEvents()
+
+    assert page.print_receipt_button.isEnabled()
+    assert page.annul_payment_button.isHidden()
+
+
+def test_admin_authorization_dialog_accepts_valid_admin(db):
+    from PyQt5.QtWidgets import QApplication, QDialog
+
+    from app.services.auth_service import AuthService
+    from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
+
+    app = QApplication.instance() or QApplication([])
+    admin = AuthService().create_user(
+        "admin_dialog_pago",
+        "secreto",
+        "Administrador",
+    )
+    dialog = AdminAuthorizationDialog()
+    dialog.username_input.setText(admin.username)
+    dialog.password_input.setText("secreto")
+    dialog.reason_input.setText("Corrección de caja")
+    dialog._on_accept()
+    app.processEvents()
+
+    assert dialog.result() == QDialog.Accepted
+    assert dialog.authorized_user() == admin
+    assert dialog.reason() == "Corrección de caja"

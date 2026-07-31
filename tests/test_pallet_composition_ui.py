@@ -1,6 +1,8 @@
 import os
 from decimal import Decimal
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -310,3 +312,240 @@ def test_zero_weight_marks_only_the_pallet_with_that_snapshot(db):
 
     assert widget.card_for_sequence(1).property("compositionState") == "incomplete"
     assert widget.card_for_sequence(2).property("compositionState") == "complete"
+
+
+def test_add_pallets_in_bulk_creates_consecutive_cards_with_one_change_signal(db):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    spy = QSignalSpy(widget.composition_changed)
+
+    widget.bulk_pallet_count_input.setValue(19)
+    widget.add_pallet_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == list(range(1, 20))
+    assert widget.card_for_sequence(19).title_label.text() == "PALLET 19"
+    assert widget.summary_label.text().startswith("19 pallets")
+    assert len(spy) == 1
+
+    widget.bulk_pallet_count_input.setValue(3)
+    widget.add_pallet_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()][-3:] == [20, 21, 22]
+    assert len(spy) == 2
+
+
+def test_bulk_assignment_applies_one_client_product_to_existing_pallets(db):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(19)
+    widget.destination_combo.setCurrentIndex(
+        widget.destination_combo.findData(destination["address_id"])
+    )
+    widget.product_combo.setCurrentIndex(widget.product_combo.findData(product["product_id"]))
+    widget.bulk_start_input.setValue(1)
+    widget.bulk_target_count_input.setValue(10)
+    app.processEvents()
+
+    assert widget.bulk_quantity_input.value() == 4
+    assert "10 pallets x 4 = 40 unidades" in widget.bulk_preview_label.text()
+    spy = QSignalSpy(widget.composition_changed)
+    widget.bulk_assign_button.click()
+    app.processEvents()
+
+    drafts = widget.pallet_drafts()
+    assert all(len(pallet["allocations"]) == 1 for pallet in drafts[:10])
+    assert all(pallet["allocations"] == [] for pallet in drafts[10:])
+    assert {
+        allocation["client_id"]
+        for pallet in drafts[:10]
+        for allocation in pallet["allocations"]
+    } == {destination["client_id"]}
+    assert widget.total_kg_label.text() == "1.000 kg"
+    assert len(spy) == 1
+
+
+def test_bulk_assignment_rejects_excess_and_unknown_pallets(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destination = destinations[0]
+    product = destination["products"][0]
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+
+    with pytest.raises(ValueError, match="supera la cantidad pendiente"):
+        widget.add_allocations_bulk(
+            [1, 2],
+            destination["address_id"],
+            product["product_id"],
+            21,
+        )
+    with pytest.raises(ValueError, match="pallets inexistentes"):
+        widget.add_allocations_bulk(
+            [1, 3],
+            destination["address_id"],
+            product["product_id"],
+            1,
+        )
+
+
+def test_clear_all_allocations_keeps_cards_and_requires_confirmation(db, monkeypatch):
+    from PyQt5.QtTest import QSignalSpy
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(3)
+    widget.add_allocation(
+        1,
+        destinations[0]["address_id"],
+        destinations[0]["products"][0]["product_id"],
+        20,
+    )
+    widget.add_allocation(
+        2,
+        destinations[1]["address_id"],
+        destinations[1]["products"][0]["product_id"],
+        5,
+    )
+    original_sequences = [pallet["sequence"] for pallet in widget.pallet_drafts()]
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+    widget.clear_assignments_button.click()
+    assert sum(len(pallet["allocations"]) for pallet in widget.pallet_drafts()) == 2
+
+    spy = QSignalSpy(widget.composition_changed)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    widget.clear_assignments_button.click()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == original_sequences
+    assert all(pallet["allocations"] == [] for pallet in widget.pallet_drafts())
+    assert widget.total_kg_label.text() == "0 kg"
+    assert "3 pallets" in widget.summary_label.text()
+    assert "0 completos" in widget.summary_label.text()
+    assert "3 pendientes" in widget.summary_label.text()
+    assert widget.clear_assignments_button.isEnabled() is False
+    assert len(spy) == 1
+
+
+def test_composition_widget_fits_in_notebook_viewport(db):
+    """La pantalla de composicion de pallets debe entrar en notebooks 1280x720.
+
+    Reportado en issue #208: la pantalla quedaba fuera de pantalla en pantallas
+    chicas porque las cards eran de tamano fijo (180x180), el editor pedia
+    300px minimos, y el editor tenia todo el contenido apilado verticalmente.
+    El fix combina tres cambios:
+    - cards escalan entre 150 y 200 (siguen cuadradas)
+    - editor envuelto en un QScrollArea vertical
+    - contenido del editor distribuido en 3 tabs (Individual / Masiva / Asignaciones)
+    """
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QComboBox,
+        QDoubleSpinBox,
+        QFrame,
+        QScrollArea,
+        QTabWidget,
+        QTableWidget,
+        QWidget,
+    )
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+
+    # Forzar el viewport tipico de una notebook moderna
+    widget.resize(1280, 720)
+    app.processEvents()
+
+    # El minimumSizeHint del widget debe caber en el viewport.
+    # Si Qt necesita mas espacio del que la pantalla ofrece, el widget
+    # se recorta o aparecen scrolls no deseados.
+    min_size = widget.minimumSizeHint()
+    assert min_size.width() <= 1280, (
+        f"El widget pide {min_size.width()}px de ancho pero la pantalla solo tiene 1280"
+    )
+    assert min_size.height() <= 720, (
+        f"El widget pide {min_size.height()}px de alto pero la pantalla solo tiene 720"
+    )
+
+    # El editor panel debe respetar un minimo razonable (no menos de 240)
+    assert widget.editor_panel.minimumWidth() == 240
+
+    # El editor debe estar envuelto en un QScrollArea vertical para
+    # que cuando la pantalla sea muy chica el contenido scrollee en vez
+    # de cortarse.
+    editor_scroll = widget.findChild(QScrollArea, "palletEditorScroll")
+    assert editor_scroll is not None, "El editor no esta envuelto en un QScrollArea"
+    assert editor_scroll.widgetResizable() is True
+    # Sin scroll horizontal (solo vertical) para no romper el layout lado a lado
+    assert editor_scroll.horizontalScrollBarPolicy() == 1  # Qt.ScrollBarAlwaysOff
+
+    # El editor debe distribuir su contenido en 3 tabs (Individual / Masiva / Asignaciones)
+    # para que el alto total entre en notebooks chicas.
+    editor_tabs = widget.findChild(QTabWidget, "palletEditorTabs")
+    assert editor_tabs is not None, "El editor no tiene un QTabWidget"
+    assert editor_tabs.count() == 3, (
+        f"Se esperaban 3 tabs (Individual / Masiva / Asignaciones) pero hay {editor_tabs.count()}"
+    )
+    tab_labels = [editor_tabs.tabText(i) for i in range(editor_tabs.count())]
+    assert tab_labels == ["Individual", "Masiva", "Asignaciones"], (
+        f"Labels de tabs inesperados: {tab_labels}"
+    )
+
+    # Verificar que la tab Individual contiene los widgets de asignacion individual
+    tab_individual = widget.findChild(QWidget, "palletEditorTabIndividual")
+    assert tab_individual is not None
+    assert tab_individual.findChild(QComboBox, "palletDestinationInput") is not None
+    assert tab_individual.findChild(QComboBox, "palletProductInput") is not None
+    assert tab_individual.findChild(QDoubleSpinBox, "palletAllocationQuantityInput") is not None
+
+    # Verificar que la tab Masiva contiene el panel de bulk assignment
+    tab_masiva = widget.findChild(QWidget, "palletEditorTabBulk")
+    assert tab_masiva is not None
+    assert tab_masiva.findChild(QFrame, "bulkPalletAssignmentPanel") is not None
+
+    # Verificar que la tab Asignaciones contiene la tabla
+    tab_asignaciones = widget.findChild(QWidget, "palletEditorTabAllocations")
+    assert tab_asignaciones is not None
+    assert tab_asignaciones.findChild(QTableWidget, "palletAllocationTable") is not None
+
+    # Caso realista: 10 pallets como los que genera la operacion bulk.
+    # Las cards deben escalar al rango 150-200 y seguir siendo cuadradas.
+    widget.add_pallets(10)
+    app.processEvents()
+    widget.resize(1280, 720)
+    app.processEvents()
+
+    for sequence in range(1, 11):
+        card = widget.card_for_sequence(sequence)
+        assert 150 <= card.width() <= 200, (
+            f"Card {sequence} tiene width={card.width()}, fuera del rango [150, 200]"
+        )
+        assert card.width() == card.height(), (
+            f"Card {sequence} no es cuadrada ({card.width()}x{card.height()})"
+        )

@@ -103,6 +103,21 @@ def test_sidebar_spec_groups_transport_abms(db):
     assert "Camiones" not in [item.title for item in principal.items]
 
 
+def test_sidebar_spec_exposes_vat_types_crud(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_vat_types_menu", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    vat_types = next(item for item in principal.items if item.title == "Tipos de IVA")
+
+    assert vat_types.placeholder is False
+    assert vat_types.route_key == "vat_types"
+
+
 def test_sidebar_spec_exposes_legacy_dbf_import_page(db):
     from app.services.auth_service import AuthService
     from app.services.permission_service import PermissionService

@@ -28,6 +28,7 @@ METHOD_LABELS = {
     ClientPayment.METHOD_CASH: "Efectivo",
     ClientPayment.METHOD_TRANSFER: "Transferencia",
     ClientPayment.METHOD_CHECK: "Cheque",
+    ClientPayment.METHOD_OTHER: "Otros",
 }
 
 
