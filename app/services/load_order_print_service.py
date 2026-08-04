@@ -549,8 +549,8 @@ class LoadOrderPrintService:
                 self._p(f"$ {prod.neto_subtotal:,.2f}"),
                 self._p(f"$ {prod.descuento_importe:,.2f}"),
                 self._p(f"$ {prod.neto_gravado:,.2f}"),
-                self._p(f"{prod.iva_porcentaje:g}%"),
-                self._p(f"$ {prod.iva_importe:,.2f}"),
+                self._p("-" if prod.iva_porcentaje == 0 else f"{prod.iva_porcentaje:g}%"),
+                self._p("-" if prod.iva_porcentaje == 0 else f"$ {prod.iva_importe:,.2f}"),
                 self._p(f"$ {prod.total:,.2f}"),
             ])
         col_widths = [14 * mm, 34 * mm, 18 * mm, 12 * mm, 18 * mm, 16 * mm, 18 * mm, 12 * mm, 16 * mm, 18 * mm]
@@ -592,9 +592,10 @@ class LoadOrderPrintService:
             [self._p("Neto subtotal:", bold=True), self._p(f"$ {total_neto_subtotal:,.2f}")],
             [self._p("Descuento total:", bold=True), self._p(f"$ {total_descuento:,.2f}")],
             [self._p("Neto gravado:", bold=True), self._p(f"$ {total_neto_gravado:,.2f}")],
-            [self._p("IVA total:", bold=True), self._p(f"$ {total_iva:,.2f}")],
-            [self._p("TOTAL PRESUPUESTO:", bold=True), self._p(f"$ {total_general:,.2f}")],
         ]
+        if total_iva > 0:
+            data.append([self._p("IVA total:", bold=True), self._p(f"$ {total_iva:,.2f}")])
+        data.append([self._p("TOTAL PRESUPUESTO:", bold=True), self._p(f"$ {total_general:,.2f}")])
         table = Table(data, colWidths=[55 * mm, 55 * mm])
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
