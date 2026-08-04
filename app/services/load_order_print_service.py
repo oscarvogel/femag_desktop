@@ -408,6 +408,7 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client),
             Spacer(1, 8 * mm),
+            *self._budget_observations(order),
             self._budget_totals(order, client),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
@@ -480,10 +481,16 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client, destination),
             Spacer(1, 8 * mm),
+            *self._budget_observations(order),
             self._budget_totals(order, client, destination),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
         ]
+
+    def _budget_observations(self, order: LoadOrder) -> list:
+        if not (order.observations or "").strip():
+            return []
+        return [self._observations(order), Spacer(1, 4 * mm)]
 
     def _budget_header(
         self,
