@@ -487,11 +487,13 @@ def test_budget_omits_zero_vat_total_and_uses_dashes_in_detail(db, tmp_path):
     for pdf_path in (individual, combined):
         text = _pdf_text(pdf_path)
         assert "IVA total:" not in text
+        assert "IVA %" not in text
+        assert "IVA $" not in text
         assert "1,000.00" in text
 
     detail = service._budget_detail_table(order, client)
-    assert detail._cellvalues[1][7].getPlainText() == "-"
-    assert detail._cellvalues[1][8].getPlainText() == "-"
+    assert len(detail._cellvalues[0]) == 8
+    assert [cell.getPlainText() for cell in detail._cellvalues[0][-2:]] == ["Neto Grav.", "Total"]
 
 
 def test_budget_keeps_vat_total_for_mixed_products(db, tmp_path):
@@ -512,6 +514,9 @@ def test_budget_keeps_vat_total_for_mixed_products(db, tmp_path):
         assert "2,210.00" in text
 
     detail = service._budget_detail_table(order, client)
+    assert len(detail._cellvalues[0]) == 10
+    assert detail._cellvalues[0][7].getPlainText() == "IVA %"
+    assert detail._cellvalues[0][8].getPlainText() == "IVA $"
     assert detail._cellvalues[1][7].getPlainText() == "-"
     assert detail._cellvalues[1][8].getPlainText() == "-"
     assert detail._cellvalues[2][7].getPlainText() == "21%"
