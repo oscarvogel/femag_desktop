@@ -43,6 +43,7 @@ def test_customer_ledger_page_renders_with_movement(db):
 
 
 def test_payment_dialog_opens_and_registers(db):
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
 
     from app.models.masters import Client
@@ -52,6 +53,9 @@ def test_payment_dialog_opens_and_registers(db):
     client = Client.create(name="Cliente Dialog", cuit="30987654320", iva_condition="RI")
 
     dialog = ClientPaymentDialog(current_user="admin", preset_client=client)
+    assert dialog.client_combo.isEditable()
+    assert dialog.client_combo.completer().filterMode() == Qt.MatchContains
+    assert dialog.method_combo.isEditable()
     dialog.amount_input.setValue(250.0)
     dialog._on_accept()
     payment = dialog.registered_payment()

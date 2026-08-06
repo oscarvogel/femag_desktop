@@ -1412,6 +1412,7 @@ def test_load_order_page_blocks_annul_without_permission(db):
 
 
 def test_load_order_dialog_excludes_inactive_delivery_addresses(db):
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication, QComboBox
 
     from app.models.masters import Client, ClientAddress
@@ -1441,6 +1442,10 @@ def test_load_order_dialog_excludes_inactive_delivery_addresses(db):
 
     client_combo = dialog.findChild(QComboBox, "loadOrderClientInput")
     address_combo = dialog.findChild(QComboBox, "loadOrderAddressInput")
+    assert client_combo.isEditable()
+    assert client_combo.completer().filterMode() == Qt.MatchContains
+    client_combo.completer().setCompletionPrefix("inactivo ui")
+    assert client_combo.completer().completionModel().rowCount() == 1
     _set_combo(client_combo, client.id)
     app.processEvents()
 

@@ -71,6 +71,7 @@ from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
+from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.login_window import LoginWindow
@@ -1710,10 +1711,13 @@ class LoadOrderEntryDialog(QDialog):
         self.order_date.setDate(QDate.currentDate())
         self.carrier_combo = QComboBox()
         self.carrier_combo.setObjectName("loadOrderCarrierInput")
+        enable_combo_autocomplete(self.carrier_combo, placeholder="Buscar transportista...")
         self.truck_combo = QComboBox()
         self.truck_combo.setObjectName("loadOrderTruckInput")
+        enable_combo_autocomplete(self.truck_combo, placeholder="Buscar camion...")
         self.driver_combo = QComboBox()
         self.driver_combo.setObjectName("loadOrderDriverInput")
+        enable_combo_autocomplete(self.driver_combo, placeholder="Buscar chofer...")
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
@@ -1740,8 +1744,10 @@ class LoadOrderEntryDialog(QDialog):
         destination_inputs = QGridLayout()
         self.client_combo = QComboBox()
         self.client_combo.setObjectName("loadOrderClientInput")
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         self.address_combo = QComboBox()
         self.address_combo.setObjectName("loadOrderAddressInput")
+        enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
         add_destination_button = _action_button("addLoadOrderClientButton", "Agregar cliente/destino")
         remove_destination_button = _action_button("removeLoadOrderClientButton", "Quitar seleccionado", secondary=True)
         destination_inputs.addWidget(QLabel("Cliente"), 0, 0)
@@ -2198,6 +2204,7 @@ class LoadOrderProductDialog(QDialog):
 
         self.product_combo = QComboBox()
         self.product_combo.setObjectName("productDialogProductInput")
+        enable_combo_autocomplete(self.product_combo, placeholder="Buscar producto...")
         self.quantity_input = QDoubleSpinBox()
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
@@ -2602,6 +2609,7 @@ def _order_products_text(order: LoadOrder) -> str:
 def _combo(object_name: str, options: list[tuple[object, str]], *, include_empty: bool = False) -> QComboBox:
     combo = QComboBox()
     combo.setObjectName(object_name)
+    enable_combo_autocomplete(combo)
     _fill_combo(combo, options, include_empty=include_empty)
     return combo
 
