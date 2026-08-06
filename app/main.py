@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from app.config.logging_config import configure_logging
@@ -22,7 +23,17 @@ def smoke_check() -> str:
     return "FEMAG smoke OK"
 
 
-def run_ui(*, demo_mode: bool = False) -> int:
+def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
+    if configure:
+        os.environ["FEMAG_SECURE_CONFIG"] = "1"
+    if not demo_mode and (configure or os.getenv("FEMAG_SECURE_CONFIG") == "1"):
+        from PyQt5.QtWidgets import QApplication
+
+        from app.ui.connection_dialog import ensure_runtime_configuration
+
+        qt_app = QApplication.instance() or QApplication([])
+        if not ensure_runtime_configuration(force=configure):
+            return 0
     load_settings()
     configure_logging()
     try:
@@ -38,13 +49,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--smoke", action="store_true", help="Validate imports/config without opening UI")
     parser.add_argument("--ui", action="store_true", help="Open FEMAG Desktop UI for workstation validation")
     parser.add_argument("--demo-ui", action="store_true", help="Open FEMAG Desktop UI with local demo data")
+    parser.add_argument(
+        "--configure",
+        action="store_true",
+        help="Configure and securely save the MySQL connection for this Windows user",
+    )
     args = parser.parse_args(argv)
     if args.smoke:
         print(smoke_check())
         return 0
-    if args.ui or args.demo_ui:
+    if args.ui or args.demo_ui or args.configure:
         try:
-            return run_ui(demo_mode=args.demo_ui)
+            options = {"configure": True} if args.configure else {}
+            return run_ui(demo_mode=args.demo_ui, **options)
         except RuntimeError as exc:
             print(f"No se pudo abrir FEMAG Desktop UI: {exc}", file=sys.stderr)
             return 1
