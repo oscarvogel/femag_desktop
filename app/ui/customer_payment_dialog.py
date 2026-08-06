@@ -22,6 +22,7 @@ from app.services.client_payment_service import (
     ClientPaymentError,
     ClientPaymentService,
 )
+from app.ui.combo_autocomplete import enable_combo_autocomplete
 
 
 METHOD_LABELS = {
@@ -55,6 +56,7 @@ class ClientPaymentDialog(QDialog):
         form = QFormLayout()
         self.client_combo = QComboBox()
         self.client_combo.setObjectName("clientPaymentClientCombo")
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         for client in Client.select().order_by(Client.name):
             self.client_combo.addItem(client.name, client.id)
         if preset_client is not None:
@@ -78,6 +80,7 @@ class ClientPaymentDialog(QDialog):
 
         self.method_combo = QComboBox()
         self.method_combo.setObjectName("clientPaymentMethodCombo")
+        enable_combo_autocomplete(self.method_combo, placeholder="Buscar medio...")
         for method in ClientPayment.METHODS:
             self.method_combo.addItem(METHOD_LABELS.get(method, method), method)
         form.addRow("Medio", self.method_combo)

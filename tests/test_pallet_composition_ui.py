@@ -461,6 +461,7 @@ def test_composition_widget_fits_in_notebook_viewport(db):
     - editor envuelto en un QScrollArea vertical
     - contenido del editor distribuido en 3 tabs (Individual / Masiva / Asignaciones)
     """
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import (
         QApplication,
         QComboBox,
@@ -520,8 +521,13 @@ def test_composition_widget_fits_in_notebook_viewport(db):
     # Verificar que la tab Individual contiene los widgets de asignacion individual
     tab_individual = widget.findChild(QWidget, "palletEditorTabIndividual")
     assert tab_individual is not None
-    assert tab_individual.findChild(QComboBox, "palletDestinationInput") is not None
-    assert tab_individual.findChild(QComboBox, "palletProductInput") is not None
+    destination_combo = tab_individual.findChild(QComboBox, "palletDestinationInput")
+    product_combo = tab_individual.findChild(QComboBox, "palletProductInput")
+    assert destination_combo is not None
+    assert product_combo is not None
+    assert destination_combo.isEditable()
+    assert destination_combo.completer().filterMode() == Qt.MatchContains
+    assert product_combo.isEditable()
     assert tab_individual.findChild(QDoubleSpinBox, "palletAllocationQuantityInput") is not None
 
     # Verificar que la tab Masiva contiene el panel de bulk assignment

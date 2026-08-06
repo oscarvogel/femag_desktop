@@ -31,6 +31,7 @@ from app.services.pallet_composition_service import (
     PalletDraft,
     RequestedLine,
 )
+from app.ui.combo_autocomplete import enable_combo_autocomplete
 
 
 def _kg_text(value) -> str:
@@ -221,10 +222,12 @@ class PalletCompositionWidget(QWidget):
         layout_individual.addWidget(QLabel("Cliente / destino"))
         self.destination_combo = QComboBox()
         self.destination_combo.setObjectName("palletDestinationInput")
+        enable_combo_autocomplete(self.destination_combo, placeholder="Buscar destino...")
         layout_individual.addWidget(self.destination_combo)
         layout_individual.addWidget(QLabel("Articulo"))
         self.product_combo = QComboBox()
         self.product_combo.setObjectName("palletProductInput")
+        enable_combo_autocomplete(self.product_combo, placeholder="Buscar producto...")
         layout_individual.addWidget(self.product_combo)
         layout_individual.addWidget(QLabel("Cantidad"))
         self.quantity_input = QDoubleSpinBox()
