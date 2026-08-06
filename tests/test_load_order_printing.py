@@ -50,6 +50,41 @@ def _pdf_text(path: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def _budget_order(vat_specs):
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_service import LoadOrderService
+
+    client = Client.create(name="Cliente IVA Presupuesto", cuit="30111111216", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta IVA",
+    )
+    products = []
+    for index, (name, vat_percentage, unit_price, quantity) in enumerate(vat_specs, start=1):
+        vat = TipoIVA.create(nombre=f"IVA test {vat_percentage:g}% #{index}", porcentaje=vat_percentage)
+        product = Product.create(
+            name=name,
+            unit="kg",
+            precio_neto_base=unit_price,
+            tipo_iva=vat,
+        )
+        products.append({"product": product, "quantity": quantity})
+    carrier = Carrier.create(name="Carrier IVA")
+    driver = Driver.create(name="Driver IVA", carrier=carrier)
+    truck = Truck.create(domain="IVA216", carrier=carrier)
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[{"client": client, "delivery_address": address, "products": products}],
+        pallets=[],
+    )
+    return order, client
+
+
 def test_print_service_formats_kilos_without_insignificant_zeroes():
     from decimal import Decimal
 
@@ -411,8 +446,18 @@ def test_print_service_exports_budget_pdf_for_client(db, tmp_path):
 
     order = LoadOrderService(current_user="admin").create_order(
         carrier=carrier, driver=driver, truck=truck,
-        destinations=[{"client": client, "delivery_address": address, "products": [{"product": product, "quantity": 50}]}],
+        destinations=[{
+            "client": client,
+            "delivery_address": address,
+            "observations": "Observacion exclusiva del destino",
+            "products": [{
+                "product": product,
+                "quantity": 50,
+                "observations": "Observacion exclusiva del producto",
+            }],
+        }],
         pallets=[],
+        observations="Entregar solamente contra orden de compra aprobada.",
     )
 
     service = LoadOrderPrintService(current_user="admin")
@@ -423,8 +468,59 @@ def test_print_service_exports_budget_pdf_for_client(db, tmp_path):
     assert pdf_path.read_bytes().startswith(b"%PDF")
     assert "PRESUPUESTO" in text
     assert "Cliente Presupuesto" in text
+    assert "Observaciones: Entregar solamente contra orden de compra aprobada." in text
+    assert "Observacion exclusiva del destino" not in text
+    assert "Observacion exclusiva del producto" not in text
+    assert text.index("Observaciones:") < text.index("TOTAL PRESUPUESTO:")
     assert "$ 1,000,000" in text or "1,000,000" in text
     assert "$ 50,000" in text or "50,000" in text
+
+
+def test_budget_omits_zero_vat_total_and_uses_dashes_in_detail(db, tmp_path):
+    from app.services.load_order_print_service import LoadOrderPrintService
+
+    order, client = _budget_order([("Producto sin IVA", 0.0, 100.0, 10)])
+    service = LoadOrderPrintService(current_user="admin")
+    individual = service.export_budget(order, client, tmp_path)
+    combined = service.export_combined_budget(order, tmp_path)
+
+    for pdf_path in (individual, combined):
+        text = _pdf_text(pdf_path)
+        assert "IVA total:" not in text
+        assert "IVA %" not in text
+        assert "IVA $" not in text
+        assert "1,000.00" in text
+
+    detail = service._budget_detail_table(order, client)
+    assert len(detail._cellvalues[0]) == 8
+    assert [cell.getPlainText() for cell in detail._cellvalues[0][-2:]] == ["Neto Grav.", "Total"]
+
+
+def test_budget_keeps_vat_total_for_mixed_products(db, tmp_path):
+    from app.services.load_order_print_service import LoadOrderPrintService
+
+    order, client = _budget_order([
+        ("Producto mixto sin IVA", 0.0, 100.0, 10),
+        ("Producto mixto IVA 21", 21.0, 200.0, 5),
+    ])
+    service = LoadOrderPrintService(current_user="admin")
+    individual = service.export_budget(order, client, tmp_path)
+    combined = service.export_combined_budget(order, tmp_path)
+
+    for pdf_path in (individual, combined):
+        text = _pdf_text(pdf_path)
+        assert "IVA total:" in text
+        assert "210.00" in text
+        assert "2,210.00" in text
+
+    detail = service._budget_detail_table(order, client)
+    assert len(detail._cellvalues[0]) == 10
+    assert detail._cellvalues[0][7].getPlainText() == "IVA %"
+    assert detail._cellvalues[0][8].getPlainText() == "IVA $"
+    assert detail._cellvalues[1][7].getPlainText() == "-"
+    assert detail._cellvalues[1][8].getPlainText() == "-"
+    assert detail._cellvalues[2][7].getPlainText() == "21%"
+    assert detail._cellvalues[2][8].getPlainText() == "$ 210.00"
 
 
 def test_print_service_exports_budgets_for_all_clients_in_order(db, tmp_path):
@@ -460,6 +556,7 @@ def test_print_service_exports_budgets_for_all_clients_in_order(db, tmp_path):
     assert len(paths) == 2
     for p in paths:
         assert p.read_bytes().startswith(b"%PDF")
+        assert "Observaciones:" not in _pdf_text(p)
     names = [p.name for p in paths]
     assert any("Cliente_A_Budget" in n for n in names)
     assert any("Cliente_B_Budget" in n for n in names)
@@ -491,6 +588,7 @@ def test_print_service_exports_combined_budget_pdf_for_all_clients(db, tmp_path)
             {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
         ],
         pallets=[],
+        observations="Validez del presupuesto: siete dias.",
     )
 
     service = LoadOrderPrintService(current_user="admin")
@@ -504,6 +602,7 @@ def test_print_service_exports_combined_budget_pdf_for_all_clients(db, tmp_path)
     assert "Producto combinado A" in text
     assert "Cliente B Combined" in text
     assert "Producto combinado B" in text
+    assert text.count("Observaciones: Validez del presupuesto: siete dias.") == 2
 
 
 def test_print_service_exports_combined_budget_page_for_each_destination(db, tmp_path):

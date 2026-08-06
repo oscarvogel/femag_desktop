@@ -408,6 +408,7 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client),
             Spacer(1, 8 * mm),
+            *self._budget_observations(order),
             self._budget_totals(order, client),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
@@ -480,10 +481,16 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client, destination),
             Spacer(1, 8 * mm),
+            *self._budget_observations(order),
             self._budget_totals(order, client, destination),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
         ]
+
+    def _budget_observations(self, order: LoadOrder) -> list:
+        if not (order.observations or "").strip():
+            return []
+        return [self._observations(order), Spacer(1, 4 * mm)]
 
     def _budget_header(
         self,
@@ -520,6 +527,8 @@ class LoadOrderPrintService:
         )
         if destination is not None:
             products = products.where(LoadOrderProduct.destination == destination)
+        products = list(products)
+        show_vat_columns = any(product.iva_porcentaje != 0 for product in products)
         header = [
             self._p("Cant.", bold=True),
             self._p("Producto", bold=True),
@@ -528,13 +537,13 @@ class LoadOrderPrintService:
             self._p("Neto Subt.", bold=True),
             self._p("Dto $", bold=True),
             self._p("Neto Grav.", bold=True),
-            self._p("IVA %", bold=True),
-            self._p("IVA $", bold=True),
-            self._p("Total", bold=True),
         ]
+        if show_vat_columns:
+            header.extend([self._p("IVA %", bold=True), self._p("IVA $", bold=True)])
+        header.append(self._p("Total", bold=True))
         rows = [header]
         for prod in products:
-            rows.append([
+            row = [
                 _quantity(prod.quantity),
                 self._p(prod.product.name),
                 self._p(f"$ {prod.precio_neto_unitario:,.2f}"),
@@ -542,11 +551,21 @@ class LoadOrderPrintService:
                 self._p(f"$ {prod.neto_subtotal:,.2f}"),
                 self._p(f"$ {prod.descuento_importe:,.2f}"),
                 self._p(f"$ {prod.neto_gravado:,.2f}"),
-                self._p(f"{prod.iva_porcentaje:g}%"),
-                self._p(f"$ {prod.iva_importe:,.2f}"),
-                self._p(f"$ {prod.total:,.2f}"),
-            ])
-        col_widths = [14 * mm, 34 * mm, 18 * mm, 12 * mm, 18 * mm, 16 * mm, 18 * mm, 12 * mm, 16 * mm, 18 * mm]
+            ]
+            if show_vat_columns:
+                row.extend([
+                    self._p("-" if prod.iva_porcentaje == 0 else f"{prod.iva_porcentaje:g}%"),
+                    self._p("-" if prod.iva_porcentaje == 0 else f"$ {prod.iva_importe:,.2f}"),
+                ])
+            row.append(self._p(f"$ {prod.total:,.2f}"))
+            rows.append(row)
+        if show_vat_columns:
+            col_widths = [
+                14 * mm, 34 * mm, 18 * mm, 12 * mm, 18 * mm,
+                16 * mm, 18 * mm, 12 * mm, 16 * mm, 18 * mm,
+            ]
+        else:
+            col_widths = [14 * mm, 46 * mm, 18 * mm, 12 * mm, 20 * mm, 18 * mm, 20 * mm, 28 * mm]
         table = Table(rows, colWidths=col_widths, repeatRows=1)
         table.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
@@ -585,9 +604,10 @@ class LoadOrderPrintService:
             [self._p("Neto subtotal:", bold=True), self._p(f"$ {total_neto_subtotal:,.2f}")],
             [self._p("Descuento total:", bold=True), self._p(f"$ {total_descuento:,.2f}")],
             [self._p("Neto gravado:", bold=True), self._p(f"$ {total_neto_gravado:,.2f}")],
-            [self._p("IVA total:", bold=True), self._p(f"$ {total_iva:,.2f}")],
-            [self._p("TOTAL PRESUPUESTO:", bold=True), self._p(f"$ {total_general:,.2f}")],
         ]
+        if total_iva > 0:
+            data.append([self._p("IVA total:", bold=True), self._p(f"$ {total_iva:,.2f}")])
+        data.append([self._p("TOTAL PRESUPUESTO:", bold=True), self._p(f"$ {total_general:,.2f}")])
         table = Table(data, colWidths=[55 * mm, 55 * mm])
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
