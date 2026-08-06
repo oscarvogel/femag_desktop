@@ -59,6 +59,7 @@ from app.models.masters import (
     Truck,
 )
 from app.services.auth_service import AuthService
+from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
@@ -668,6 +669,7 @@ class FemagDesktopWindow(QMainWindow):
         page.setObjectName("loadOrdersPage")
         layout = page.layout()
         service = LoadOrderService(current_user=self.shell.username)
+        closure_service = LoadOrderClosureService(current_user=self.shell.username)
         operation_service = LoadOrderOperationService(
             current_user=self.shell.username,
             prints_dir=LOAD_ORDER_PRINTS_DIR,
@@ -948,7 +950,8 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.setText("Solo se pueden cerrar ordenes emitidas.")
                 return
             try:
-                closed = service.change_status(order, LoadOrder.STATUS_CLOSED, reason="Cierre operativo")
+                closure = closure_service.close_order(order)
+                closed = LoadOrder.get_by_id(closure.order.id)
                 feedback.setText(f"Orden {_format_order_number(closed.order_number)} cerrada.")
                 selected_order_id["value"] = closed.id
                 refresh()

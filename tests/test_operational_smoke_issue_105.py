@@ -15,6 +15,7 @@ def test_issue_105_operational_smoke_generates_reproducible_report(tmp_path):
     assert database_path.exists()
     assert report_path.exists()
     assert result["order_status"] == "Cerrada"
+    assert result["closure_id"] > 0
     assert result["driver_released"] is True
     assert result["payment_receipt"].startswith("REC-")
     assert result["balance_after_payment"] == 0.0
@@ -27,6 +28,7 @@ def test_issue_105_operational_smoke_generates_reproducible_report(tmp_path):
     assert "# Smoke operativo FEMAG" in report
     assert "No usa datos productivos" in report
     assert "Ordenes de carga" in report
+    assert "Cierre de entrega persistido" in report
     assert "Pallets preparados: `1`" in report
     assert "Peso total asignado: `250.000 kg`" in report
     assert "Cuenta corriente y pagos" in report

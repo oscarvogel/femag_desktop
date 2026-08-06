@@ -157,6 +157,18 @@ class LoadOrderService:
         return order
 
     def change_status(self, order: LoadOrder, status: str, reason: str | None = None) -> LoadOrder:
+        if status == LoadOrder.STATUS_CLOSED:
+            raise ValueError(
+                "El cierre debe registrarse con LoadOrderClosureService para conservar su trazabilidad."
+            )
+        persisted_order = LoadOrder.get_by_id(order.id)
+        if persisted_order.status == LoadOrder.STATUS_CLOSED and status in LoadOrder.ACTIVE_STATUSES:
+            raise ValueError(
+                "La reapertura debe registrarse con LoadOrderClosureService para conservar su trazabilidad."
+            )
+        return self._change_status(persisted_order, status, reason=reason)
+
+    def _change_status(self, order: LoadOrder, status: str, reason: str | None = None) -> LoadOrder:
         if status not in (*LoadOrder.ACTIVE_STATUSES, *LoadOrder.FINAL_STATUSES):
             raise ValueError(f"Estado de orden invalido: {status}")
         order = LoadOrder.get_by_id(order.id)
