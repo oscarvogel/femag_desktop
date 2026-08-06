@@ -23,17 +23,22 @@ from app.config.secure_credentials import (
 from app.config.settings import Settings
 
 
+DEFAULT_MYSQL_HOST = "almanet-server"
+DEFAULT_MYSQL_PORT = 3306
+DEFAULT_MYSQL_DATABASE = "femag_desktop"
+
+
 class ConnectionDialog(QDialog):
     def __init__(self, *, current: RuntimeConnection | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("FEMAG Desktop - Conexion MySQL")
         self.setMinimumWidth(470)
 
-        self.host = QLineEdit(current.host if current else "")
+        self.host = QLineEdit(current.host if current else DEFAULT_MYSQL_HOST)
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
-        self.port.setValue(current.port if current else 3306)
-        self.database = QLineEdit(current.database if current else "")
+        self.port.setValue(current.port if current else DEFAULT_MYSQL_PORT)
+        self.database = QLineEdit(current.database if current else DEFAULT_MYSQL_DATABASE)
         self.user = QLineEdit(current.user if current else "")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)

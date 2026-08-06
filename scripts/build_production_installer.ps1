@@ -39,7 +39,7 @@ try {
     & $Iscc installer\FEMAG_Desktop.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
 
-    Write-Host "Instalador generado: installer\output\FEMAG_Desktop_Produccion_Setup_v3.exe" -ForegroundColor Green
+    Write-Host "Instalador generado: installer\output\FEMAG_Desktop_Produccion_Setup_v4.exe" -ForegroundColor Green
 } finally {
     Pop-Location
 }

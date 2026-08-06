@@ -1,5 +1,5 @@
 #define MyAppName "FEMAG Desktop"
-#define MyAppVersion "2026.08.06.2"
+#define MyAppVersion "2026.08.06.3"
 #define MyAppPublisher "Vogel Consultoria"
 
 [Setup]
@@ -13,7 +13,7 @@ DefaultGroupName=FEMAG Desktop
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=output
-OutputBaseFilename=FEMAG_Desktop_Produccion_Setup_v3
+OutputBaseFilename=FEMAG_Desktop_Produccion_Setup_v4
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

@@ -101,6 +101,19 @@ def test_connection_dialog_masks_tests_and_saves_password(monkeypatch):
     assert calls[1][1].password == "secreta"
 
 
+def test_first_connection_prefills_femag_network_defaults():
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.connection_dialog import ConnectionDialog
+
+    qt_app = QApplication.instance() or QApplication([])
+    dialog = ConnectionDialog()
+
+    assert dialog.host.text() == "almanet-server"
+    assert dialog.port.value() == 3306
+    assert dialog.database.text() == "femag_desktop"
+
+
 def test_connection_test_reports_mysql_error_code(monkeypatch):
     from peewee import OperationalError
 
