@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from peewee import InterfaceError, OperationalError
 from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -109,13 +110,25 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
             f"La base existe pero su estructura no es compatible: {exc}. "
             "Un administrador debe prepararla antes de usar este puesto."
         ) from exc
+    except (OperationalError, InterfaceError) as exc:
+        code, message = _mysql_error_detail(exc)
+        raise RuntimeError(
+            f"MySQL rechazo la conexion ({code}): {message}"
+        ) from exc
     except Exception as exc:
         raise RuntimeError(
-            "No se pudo conectar. Revise servidor, puerto, base, usuario, contrasena y red."
+            f"No se pudo iniciar el cliente MySQL ({type(exc).__name__})."
         ) from exc
     finally:
         if not database.is_closed():
             database.close()
+
+
+def _mysql_error_detail(exc: Exception) -> tuple[str, str]:
+    args = getattr(exc, "args", ())
+    code = str(args[0]) if args else "sin codigo"
+    message = str(args[1]) if len(args) > 1 else str(exc)
+    return code, message or "sin detalle"
 
 
 def ensure_runtime_configuration(*, force: bool = False, parent=None) -> bool:

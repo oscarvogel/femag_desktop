@@ -99,3 +99,24 @@ def test_connection_dialog_masks_tests_and_saves_password(monkeypatch):
     assert dialog.result() == QDialog.Accepted
     assert [action for action, _connection in calls] == ["test", "save"]
     assert calls[1][1].password == "secreta"
+
+
+def test_connection_test_reports_mysql_error_code(monkeypatch):
+    from peewee import OperationalError
+
+    from app.config.secure_credentials import RuntimeConnection
+    from app.ui import connection_dialog
+
+    class RejectedDatabase:
+        def connect(self):
+            raise OperationalError(1045, "Access denied for user")
+
+        def is_closed(self):
+            return True
+
+    monkeypatch.setattr(connection_dialog, "build_mysql_database", lambda _settings: RejectedDatabase())
+
+    with pytest.raises(RuntimeError, match=r"MySQL rechazo la conexion \(1045\)"):
+        connection_dialog.test_runtime_connection(
+            RuntimeConnection("mysql.lan", 3306, "femag", "puesto", "secreta")
+        )
