@@ -4,8 +4,12 @@ from peewee import IntegrityError
 
 from app.config.database import database_proxy
 from app.models.base import utc_now
+from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder, LoadOrderClosure
+from app.models.masters import Client
+from app.models.payments import ClientPayment
 from app.services.audit_service import AuditService
+from app.services.client_payment_service import ClientPaymentService
 from app.services.load_order_service import LoadOrderService
 
 
@@ -16,10 +20,18 @@ class LoadOrderClosureError(ValueError):
 class LoadOrderClosureService:
     """Own the persisted close/reopen lifecycle of an issued load order."""
 
+    PAYMENT_STATUS_UNPAID = "sin_pago"
+    PAYMENT_STATUS_PARTIAL = "parcial"
+    PAYMENT_STATUS_PAID = "cobrada"
+
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
         self.load_orders = LoadOrderService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
+        self.payments = ClientPaymentService(
             current_user=current_user,
             audit_service=self.audit_service,
         )
@@ -29,12 +41,22 @@ class LoadOrderClosureService:
         order: LoadOrder,
         *,
         observations: str | None = None,
+        payments: list[dict] | None = None,
+        no_payment_reason: str | None = None,
     ) -> LoadOrderClosure:
         order = self._require_order(order)
         if order.status != LoadOrder.STATUS_ISSUED:
             raise LoadOrderClosureError("Solo se pueden cerrar ordenes emitidas.")
 
         normalized_observations = (observations or "").strip() or None
+        normalized_no_payment_reason = (no_payment_reason or "").strip() or None
+        payment_specs = self._normalize_payment_specs(order, payments or [])
+        if not payment_specs and normalized_no_payment_reason is None:
+            raise LoadOrderClosureError(
+                "Debe registrar al menos un pago o indicar el motivo del cierre sin pago."
+            )
+        if payment_specs:
+            normalized_no_payment_reason = None
         with database_proxy.atomic():
             order = LoadOrder.get_by_id(order.id)
             if order.status != LoadOrder.STATUS_ISSUED:
@@ -48,9 +70,12 @@ class LoadOrderClosureService:
                     active_marker=True,
                     closed_by=self.current_user,
                     observations=normalized_observations,
+                    no_payment_reason=normalized_no_payment_reason,
                 )
             except IntegrityError as exc:
                 raise LoadOrderClosureError("La orden ya tiene un cierre de entrega activo.") from exc
+            for payment_spec in payment_specs:
+                self.payments.register_payment(closure=closure, **payment_spec)
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_CLOSED,
@@ -65,6 +90,9 @@ class LoadOrderClosureService:
                     "order_id": order.id,
                     "status": closure.status,
                     "observations": closure.observations,
+                    "no_payment_reason": closure.no_payment_reason,
+                    "payment_ids": [payment.id for payment in closure.payments],
+                    "payment_status": self.payment_status(closure),
                 },
             )
         return LoadOrderClosure.get_by_id(closure.id)
@@ -82,6 +110,10 @@ class LoadOrderClosureService:
             closure = self.active_closure(order)
             if closure is None:
                 raise LoadOrderClosureError("La orden cerrada no tiene un cierre de entrega activo.")
+            if closure.payments.where(ClientPayment.status == ClientPayment.STATUS_ACTIVE).exists():
+                raise LoadOrderClosureError(
+                    "Debe anular los pagos activos del cierre antes de reabrir la entrega."
+                )
 
             self.load_orders._change_status(
                 order,
@@ -111,6 +143,49 @@ class LoadOrderClosureService:
             )
         return LoadOrder.get_by_id(order.id)
 
+    def payment_summary(self, closure: LoadOrderClosure) -> list[dict]:
+        closure = LoadOrderClosure.get_by_id(closure.id)
+        totals = self._order_totals_by_client(closure.order)
+        paid_by_client = {client_id: 0.0 for client_id in totals}
+        active_payments = ClientPayment.select().where(
+            (ClientPayment.closure == closure)
+            & (ClientPayment.status == ClientPayment.STATUS_ACTIVE)
+        )
+        for payment in active_payments:
+            paid_by_client[payment.client_id] = round(
+                paid_by_client.get(payment.client_id, 0.0) + float(payment.amount),
+                2,
+            )
+
+        summary = []
+        for client_id, total in totals.items():
+            paid = paid_by_client.get(client_id, 0.0)
+            balance = max(round(total - paid, 2), 0.0)
+            if paid <= 0:
+                status = self.PAYMENT_STATUS_UNPAID
+            elif balance <= 0:
+                status = self.PAYMENT_STATUS_PAID
+            else:
+                status = self.PAYMENT_STATUS_PARTIAL
+            summary.append(
+                {
+                    "client": Client.get_by_id(client_id),
+                    "total": total,
+                    "paid": paid,
+                    "balance": balance,
+                    "status": status,
+                }
+            )
+        return summary
+
+    def payment_status(self, closure: LoadOrderClosure) -> str:
+        statuses = {row["status"] for row in self.payment_summary(closure)}
+        if statuses == {self.PAYMENT_STATUS_PAID}:
+            return self.PAYMENT_STATUS_PAID
+        if statuses == {self.PAYMENT_STATUS_UNPAID}:
+            return self.PAYMENT_STATUS_UNPAID
+        return self.PAYMENT_STATUS_PARTIAL
+
     def active_closure(self, order: LoadOrder) -> LoadOrderClosure | None:
         order = self._require_order(order)
         return (
@@ -131,3 +206,59 @@ class LoadOrderClosureService:
             return LoadOrder.get_by_id(order.id)
         except LoadOrder.DoesNotExist as exc:
             raise LoadOrderClosureError("La orden seleccionada no existe.") from exc
+
+    def _normalize_payment_specs(self, order: LoadOrder, payments: list[dict]) -> list[dict]:
+        totals = self._order_totals_by_client(order)
+        paid_by_client = {client_id: 0.0 for client_id in totals}
+        normalized = []
+        for spec in payments:
+            client = spec.get("client")
+            if not isinstance(client, Client) or client.id not in totals:
+                raise LoadOrderClosureError("Cada pago debe corresponder a un cliente de la orden.")
+            amount = round(float(spec.get("amount") or 0), 2)
+            if amount <= 0:
+                raise LoadOrderClosureError("El monto de cada pago debe ser mayor a cero.")
+            paid_by_client[client.id] = round(paid_by_client[client.id] + amount, 2)
+            if paid_by_client[client.id] > totals[client.id] + 0.009:
+                raise LoadOrderClosureError(
+                    f"Los pagos de {client.name} superan el total de la orden."
+                )
+            normalized.append(
+                {
+                    "client": client,
+                    "amount": amount,
+                    "payment_date": spec.get("payment_date"),
+                    "method": spec.get("method", ClientPayment.METHOD_CASH),
+                    "reference": (spec.get("reference") or "").strip() or None,
+                    "observations": (spec.get("observations") or "").strip() or None,
+                }
+            )
+        return normalized
+
+    def _order_totals_by_client(self, order: LoadOrder) -> dict[int, float]:
+        movements = ClientAccountMovement.select().where(
+            (ClientAccountMovement.load_order == order)
+            & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER)
+            & (ClientAccountMovement.is_reversal == False)  # noqa: E712
+        )
+        totals = {
+            movement.client_id: round(float(movement.total_amount), 2)
+            for movement in movements
+        }
+        if not totals:
+            for line in order.products:
+                client_id = (
+                    line.destination.client_id
+                    if line.destination_id is not None
+                    else order.client_id
+                )
+                if client_id is not None:
+                    totals[client_id] = round(
+                        totals.get(client_id, 0.0) + float(line.total),
+                        2,
+                    )
+        if not totals and order.client_id is not None:
+            totals[order.client_id] = 0.0
+        if not totals:
+            raise LoadOrderClosureError("La orden no tiene clientes para registrar el cierre.")
+        return totals

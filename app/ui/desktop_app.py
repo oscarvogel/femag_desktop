@@ -76,6 +76,7 @@ from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
+from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
@@ -949,14 +950,21 @@ class FemagDesktopWindow(QMainWindow):
             if order.status != LoadOrder.STATUS_ISSUED:
                 feedback.setText("Solo se pueden cerrar ordenes emitidas.")
                 return
-            try:
-                closure = closure_service.close_order(order)
+            dialog = LoadOrderClosureDialog(
+                order=order,
+                current_user=self.shell.username,
+                service=closure_service,
+                parent=self,
+            )
+            if dialog.exec_() == QDialog.Accepted and dialog.closure() is not None:
+                closure = dialog.closure()
                 closed = LoadOrder.get_by_id(closure.order.id)
-                feedback.setText(f"Orden {_format_order_number(closed.order_number)} cerrada.")
+                payment_status = closure_service.payment_status(closure).replace("_", " ")
+                feedback.setText(
+                    f"Orden {_format_order_number(closed.order_number)} cerrada: {payment_status}."
+                )
                 selected_order_id["value"] = closed.id
                 refresh()
-            except Exception as exc:
-                feedback.setText(str(exc))
 
         def print_order() -> None:
             order = selected_order()

@@ -24,6 +24,7 @@ def test_close_order_persists_active_closure_and_releases_driver(db):
     closure = LoadOrderClosureService(current_user="admin_cierre").close_order(
         order,
         observations="Entrega conforme",
+        no_payment_reason="Queda en cuenta corriente",
     )
 
     reloaded_order = LoadOrder.get_by_id(order.id)
@@ -71,7 +72,7 @@ def test_reopen_order_preserves_history_and_allows_new_closure_cycle(db):
 
     data, order = _issued_order()
     service = LoadOrderClosureService(current_user="admin_cierre")
-    first_closure = service.close_order(order)
+    first_closure = service.close_order(order, no_payment_reason="Queda en cuenta corriente")
 
     with pytest.raises(ValueError, match="reapertura.*LoadOrderClosureService"):
         service.load_orders.change_status(order, LoadOrder.STATUS_ISSUED)
@@ -88,7 +89,11 @@ def test_reopen_order_preserves_history_and_allows_new_closure_cycle(db):
     assert first_closure.is_active is False
     assert type(data["driver"]).get_by_id(data["driver"].id).available is False
 
-    second_closure = service.close_order(reopened, observations="Segundo cierre")
+    second_closure = service.close_order(
+        reopened,
+        observations="Segundo cierre",
+        no_payment_reason="Queda en cuenta corriente",
+    )
 
     assert second_closure.id != first_closure.id
     assert second_closure.is_active is True
@@ -106,7 +111,7 @@ def test_reopen_order_requires_reason_and_rolls_back_if_driver_is_busy(db):
 
     data, order = _issued_order()
     closures = LoadOrderClosureService(current_user="admin_cierre")
-    closure = closures.close_order(order)
+    closure = closures.close_order(order, no_payment_reason="Queda en cuenta corriente")
 
     with pytest.raises(LoadOrderClosureError, match="motivo"):
         closures.reopen_order(order, reason="  ")

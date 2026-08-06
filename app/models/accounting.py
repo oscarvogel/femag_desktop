@@ -29,4 +29,4 @@ class ClientAccountMovement(BaseModel):
     created_by = CharField(null=True)
 
     class Meta:
-        indexes = ((("load_order", "client", "movement_type", "is_reversal"), True),)
+        indexes = ((("source_ref", "client", "movement_type", "is_reversal"), True),)

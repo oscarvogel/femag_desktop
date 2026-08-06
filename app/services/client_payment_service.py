@@ -3,6 +3,7 @@ from datetime import date
 from peewee import IntegrityError
 
 from app.models.accounting import ClientAccountMovement
+from app.models.load_orders import LoadOrderClosure
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.models.security import User
@@ -32,6 +33,7 @@ class ClientPaymentService:
         method: str = ClientPayment.METHOD_CASH,
         reference: str | None = None,
         observations: str | None = None,
+        closure: LoadOrderClosure | None = None,
     ) -> ClientPayment:
         if client is None or not isinstance(client, Client):
             raise ClientPaymentError("Debe seleccionar un cliente.")
@@ -39,12 +41,25 @@ class ClientPaymentService:
             raise ClientPaymentError("El monto del pago debe ser mayor a cero.")
         if method not in ClientPayment.METHODS:
             raise ClientPaymentError(f"Medio de pago invalido: {method!r}.")
+        if closure is not None:
+            try:
+                closure = LoadOrderClosure.get_by_id(closure.id)
+            except (AttributeError, LoadOrderClosure.DoesNotExist) as exc:
+                raise ClientPaymentError("El cierre de entrega no es valido.") from exc
+            if not closure.is_active:
+                raise ClientPaymentError("Solo se pueden imputar pagos a un cierre activo.")
+            client_ids = {destination.client_id for destination in closure.order.destinations}
+            if closure.order.client_id is not None:
+                client_ids.add(closure.order.client_id)
+            if client.id not in client_ids:
+                raise ClientPaymentError("El cliente no pertenece a la orden de entrega.")
 
         receipt_number = self._next_receipt_number()
         try:
             payment = ClientPayment.create(
                 receipt_number=receipt_number,
                 client=client,
+                closure=closure,
                 payment_date=payment_date or date.today(),
                 amount=round(float(amount), 2),
                 method=method,
@@ -68,6 +83,8 @@ class ClientPaymentService:
                 "method": payment.method,
                 "payment_date": payment.payment_date.isoformat(),
                 "reference": payment.reference,
+                "closure_id": payment.closure_id,
+                "load_order_id": payment.closure.order_id if payment.closure_id else None,
             },
         )
         return payment
@@ -124,7 +141,7 @@ class ClientPaymentService:
             annulled_at = utc_now()
             reversal = ClientAccountMovement.create(
                 client=payment.client,
-                load_order=None,
+                load_order=original_movement.load_order,
                 payment=payment,
                 movement_type=ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
                 amount=payment.amount,
@@ -164,9 +181,15 @@ class ClientPaymentService:
         return payment
 
     def _register_ledger_movement(self, payment: ClientPayment) -> ClientAccountMovement:
+        load_order = payment.closure.order if payment.closure_id else None
+        source_ref = (
+            f"LoadOrderClosure:{payment.closure_id}:ClientPayment:{payment.id}"
+            if payment.closure_id
+            else f"ClientPayment:{payment.id}"
+        )
         return ClientAccountMovement.create(
             client=payment.client,
-            load_order=None,
+            load_order=load_order,
             payment=payment,
             movement_type=ClientAccountMovement.TYPE_PAYMENT,
             amount=-payment.amount,
@@ -179,7 +202,7 @@ class ClientPaymentService:
                 f"Recibo {payment.receipt_number} - pago {payment.method} "
                 f"${payment.amount:,.2f}"
             ),
-            source_ref=f"ClientPayment:{payment.id}",
+            source_ref=source_ref,
             is_reversal=False,
             reverses=None,
             created_by=self.current_user,

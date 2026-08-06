@@ -212,6 +212,7 @@ def test_payment_schema_includes_annulment_tracking_columns(db):
     columns = {column.name for column in db.get_columns("clientpayment")}
 
     assert {
+        "closure_id",
         "status",
         "annulled_at",
         "annulled_by",
@@ -236,6 +237,7 @@ def test_runtime_schema_creates_load_order_closure_table_and_active_index(db):
         "closed_at",
         "closed_by",
         "observations",
+        "no_payment_reason",
         "reopened_at",
         "reopened_by",
         "reopen_reason",
@@ -244,6 +246,27 @@ def test_runtime_schema_creates_load_order_closure_table_and_active_index(db):
         index.unique and set(index.columns) == {"order_id", "active_marker"}
         for index in db.get_indexes("loadorderclosure")
     )
+
+
+def test_runtime_schema_migrates_account_movement_index_for_multiple_closure_payments(db):
+    from app.config.schema import ensure_runtime_schema, validate_runtime_schema
+
+    legacy_columns = {"load_order_id", "client_id", "movement_type", "is_reversal"}
+    expected_columns = {"source_ref", "client_id", "movement_type", "is_reversal"}
+    for index in db.get_indexes("clientaccountmovement"):
+        if index.unique and set(index.columns) == expected_columns:
+            db.execute_sql(f"DROP INDEX `{index.name}`")
+    db.execute_sql(
+        "CREATE UNIQUE INDEX legacy_account_movement_order_client_type "
+        "ON clientaccountmovement (load_order_id, client_id, movement_type, is_reversal)"
+    )
+
+    ensure_runtime_schema(db)
+    validate_runtime_schema(db)
+
+    indexes = db.get_indexes("clientaccountmovement")
+    assert not any(index.unique and set(index.columns) == legacy_columns for index in indexes)
+    assert any(index.unique and set(index.columns) == expected_columns for index in indexes)
 
 
 def test_runtime_schema_backfills_active_status_for_legacy_payments(db):
