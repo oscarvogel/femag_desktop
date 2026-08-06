@@ -3,9 +3,6 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0000.00.00.00.00.00"
 #endif
-#ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "FEMAG_Desktop_Produccion_Setup"
-#endif
 
 [Setup]
 AppId={{10F03F3B-BA11-4F61-88DA-14DD2AA30EF4}
@@ -18,7 +15,7 @@ DefaultGroupName=FEMAG Desktop
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=output
-OutputBaseFilename={#MyOutputBaseFilename}
+OutputBaseFilename=FEMAG_Desktop_Produccion_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

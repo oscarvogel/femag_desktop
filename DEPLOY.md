@@ -33,11 +33,15 @@ AAAA.MM.DD.HH.MM.SS
 
 Ejemplo: `2026.08.06.14.32.09`.
 
-El script actualiza `app/build_version.py` antes de ejecutar PyInstaller. La misma version se usa en la ventana de FEMAG, en `AppVersion` de Inno Setup y en el nombre del instalador:
+El script actualiza `app/build_version.py` antes de ejecutar PyInstaller. La misma version se usa en la ventana de FEMAG y en `AppVersion` de Inno Setup.
+
+El instalador mantiene siempre un unico nombre estable. Antes de compilar, el script elimina los instaladores productivos anteriores del directorio de salida y genera uno nuevo:
 
 ```text
-FEMAG_Desktop_Produccion_Setup_AAAA.MM.DD.HH.MM.SS.exe
+FEMAG_Desktop_Produccion_Setup.exe
 ```
+
+La identificacion de la compilacion se obtiene desde la version interna del sistema, no desde el nombre del instalador.
 
 ## Compilacion
 
@@ -74,6 +78,8 @@ Ademas se debe validar en una base descartable:
 
 ## Riesgos conocidos
 
-- El instalador actual no tiene firma digital. SmartScreen o una politica corporativa pueden bloquearlo.
-- Antes del despliegue general deben firmarse el ejecutable y el instalador.
+- El instalador actual no tiene firma digital. Smart App Control puede bloquear tanto el instalador como el ejecutable temporal que Inno Setup extrae en `%TEMP%` con error 4551.
+- El nombre y la version del build no causan ni resuelven ese bloqueo: cada binario nuevo sigue siendo codigo sin firma.
+- Antes del despliegue deben firmarse el ejecutable interno, los binarios que genera Inno Setup y el instalador final con un certificado RSA de firma de codigo emitido por una entidad confiable para Windows.
+- La PC de compilacion no tiene actualmente un certificado de firma de codigo con clave privada disponible.
 - Las credenciales administrativas se usan solamente para preparar el esquema. Para operacion diaria se recomienda un usuario limitado a `SELECT`, `INSERT`, `UPDATE` y `DELETE`.

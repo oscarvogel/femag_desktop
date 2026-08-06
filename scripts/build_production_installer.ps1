@@ -10,8 +10,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = if ($PythonPath) { $PythonPath } else { Join-Path $RepoRoot ".venv\Scripts\python.exe" }
 $BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
-$OutputBaseFilename = "FEMAG_Desktop_Produccion_Setup_$BuildVersion"
 $BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
+$InstallerOutputDir = Join-Path $RepoRoot "installer\output"
 $IsccCandidates = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
@@ -37,15 +37,19 @@ try {
 
     Remove-Item -Recurse -Force "build\FEMAG Desktop" -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force "dist\FEMAG Desktop" -ErrorAction SilentlyContinue
+    if (Test-Path $InstallerOutputDir) {
+        Get-ChildItem -LiteralPath $InstallerOutputDir -Filter "FEMAG_Desktop_Produccion_Setup*.exe" -File |
+            Remove-Item -Force
+    }
 
     & $Python -m PyInstaller --noconfirm --clean installer\FEMAG_Desktop.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo." }
 
-    & $Iscc "/DMyAppVersion=$BuildVersion" "/DMyOutputBaseFilename=$OutputBaseFilename" installer\FEMAG_Desktop.iss
+    & $Iscc "/DMyAppVersion=$BuildVersion" installer\FEMAG_Desktop.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
 
     Write-Host "Version: $BuildVersion" -ForegroundColor Green
-    Write-Host "Instalador generado: installer\output\$OutputBaseFilename.exe" -ForegroundColor Green
+    Write-Host "Instalador generado: installer\output\FEMAG_Desktop_Produccion_Setup.exe" -ForegroundColor Green
 } finally {
     Pop-Location
 }

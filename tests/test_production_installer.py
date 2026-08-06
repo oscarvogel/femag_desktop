@@ -60,6 +60,7 @@ def test_each_production_build_uses_timestamp_version() -> None:
     assert 'Get-Date -Format "yyyy.MM.dd.HH.mm.ss"' in build
     assert 'app\\build_version.py' in build
     assert '"/DMyAppVersion=$BuildVersion"' in build
-    assert '"/DMyOutputBaseFilename=$OutputBaseFilename"' in build
-    assert "{#MyOutputBaseFilename}" in iss
+    assert "DMyOutputBaseFilename" not in build
+    assert "OutputBaseFilename=FEMAG_Desktop_Produccion_Setup" in iss
     assert "AAAA.MM.DD.HH.MM.SS" in deploy
+    assert "FEMAG_Desktop_Produccion_Setup.exe" in deploy

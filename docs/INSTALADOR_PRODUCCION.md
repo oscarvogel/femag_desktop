@@ -23,6 +23,6 @@ En una PC Windows con Inno Setup 6:
 .\scripts\build_production_installer.ps1 -SkipInstallDependencies
 ```
 
-El resultado se genera en `installer\output\FEMAG_Desktop_Produccion_Setup_AAAA.MM.DD.HH.MM.SS.exe`.
+El resultado reemplaza siempre `installer\output\FEMAG_Desktop_Produccion_Setup.exe`. La version interna identifica cada compilacion con formato `AAAA.MM.DD.HH.MM.SS`.
 
 La compilacion actual no tiene firma digital. Windows SmartScreen puede mostrar una advertencia y una politica corporativa de control de aplicaciones puede bloquearla por completo. Antes del despliegue general se debe firmar tanto el ejecutable como el instalador con un certificado de firma de codigo confiable. Para un piloto interno sin firma, el responsable de infraestructura debe autorizar explicitamente ambos binarios.
