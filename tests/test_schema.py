@@ -219,6 +219,33 @@ def test_payment_schema_includes_annulment_tracking_columns(db):
     }.issubset(columns)
 
 
+def test_runtime_schema_creates_load_order_closure_table_and_active_index(db):
+    from app.config.schema import ensure_runtime_schema, validate_runtime_schema
+    from app.models.load_orders import LoadOrderClosure
+
+    db.drop_tables([LoadOrderClosure])
+
+    ensure_runtime_schema(db)
+    validate_runtime_schema(db)
+
+    columns = {column.name for column in db.get_columns("loadorderclosure")}
+    assert {
+        "order_id",
+        "status",
+        "active_marker",
+        "closed_at",
+        "closed_by",
+        "observations",
+        "reopened_at",
+        "reopened_by",
+        "reopen_reason",
+    }.issubset(columns)
+    assert any(
+        index.unique and set(index.columns) == {"order_id", "active_marker"}
+        for index in db.get_indexes("loadorderclosure")
+    )
+
+
 def test_runtime_schema_backfills_active_status_for_legacy_payments(db):
     from app.config.schema import ensure_runtime_schema
     from app.models.masters import Client

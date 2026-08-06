@@ -16,6 +16,7 @@ from app.models.masters import (
 from app.models.load_orders import (
     LoadOrder,
     LoadOrderBudgetStatus,
+    LoadOrderClosure,
     LoadOrderDestination,
     LoadOrderPallet,
     LoadOrderPalletAllocation,
@@ -49,6 +50,7 @@ ALL_MODELS = [
     LoadOrderPallet,
     LoadOrderPalletAllocation,
     LoadOrderStatusHistory,
+    LoadOrderClosure,
     LoadOrderBudgetStatus,
     AppParameter,
     NumberSequence,

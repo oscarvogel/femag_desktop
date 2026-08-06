@@ -1,9 +1,19 @@
 from datetime import date
 from decimal import Decimal
 
-from peewee import CharField, DateField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
+from peewee import (
+    BooleanField,
+    CharField,
+    DateField,
+    DateTimeField,
+    DecimalField,
+    FloatField,
+    ForeignKeyField,
+    IntegerField,
+    TextField,
+)
 
-from app.models.base import BaseModel
+from app.models.base import BaseModel, utc_now
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 
 
@@ -107,6 +117,33 @@ class LoadOrderStatusHistory(BaseModel):
     new_status = CharField()
     user = CharField(null=True)
     observation = TextField(null=True)
+
+
+class LoadOrderClosure(BaseModel):
+    """Auditable delivery-closure cycle for an issued load order."""
+
+    STATUS_ACTIVE = "active"
+    STATUS_REOPENED = "reopened"
+    STATUSES = (STATUS_ACTIVE, STATUS_REOPENED)
+
+    order = ForeignKeyField(LoadOrder, backref="closures", on_delete="CASCADE")
+    status = CharField(default=STATUS_ACTIVE)
+    active_marker = BooleanField(default=True, null=True)
+    closed_at = DateTimeField(default=utc_now)
+    closed_by = CharField()
+    observations = TextField(null=True)
+    reopened_at = DateTimeField(null=True)
+    reopened_by = CharField(null=True)
+    reopen_reason = TextField(null=True)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE and self.active_marker is True
+
+    class Meta:
+        # SQL unique indexes allow multiple NULL values, so historical reopened
+        # closures coexist while at most one row can keep active_marker=True.
+        indexes = ((("order", "active_marker"), True),)
 
 
 class LoadOrderBudgetStatus(BaseModel):

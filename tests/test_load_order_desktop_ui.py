@@ -1222,7 +1222,7 @@ def test_load_order_page_treats_legacy_unissued_status_as_actionable(db):
 def test_load_order_page_closes_issued_order_and_releases_driver(db):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
-    from app.models.load_orders import LoadOrder
+    from app.models.load_orders import LoadOrder, LoadOrderClosure
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_operation_service import LoadOrderOperationService
@@ -1268,6 +1268,9 @@ def test_load_order_page_closes_issued_order_and_releases_driver(db):
     app.processEvents()
 
     assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_CLOSED
+    closure = LoadOrderClosure.get(LoadOrderClosure.order == order)
+    assert closure.status == LoadOrderClosure.STATUS_ACTIVE
+    assert closure.closed_by == user.username
     assert Driver.get_by_id(driver.id).available is True
     assert "cerrada" in window.findChild(QLabel, "loadOrderFeedback").text().lower()
 

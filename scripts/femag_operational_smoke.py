@@ -12,6 +12,7 @@ from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 from app.services.client_payment_service import ClientPaymentService
 from app.services.ledger_query_service import client_balance
+from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
@@ -49,6 +50,7 @@ def run_operational_smoke(
 
         masters = _create_demo_masters()
         order_service = LoadOrderService(current_user=username)
+        closure_service = LoadOrderClosureService(current_user=username)
         operation_service = LoadOrderOperationService(current_user=username, prints_dir=evidence_dir)
 
         order = order_service.create_order(
@@ -95,7 +97,8 @@ def run_operational_smoke(
             observations="Pago sintetico del smoke operativo #105.",
         )
         balance_after_payment = client_balance(masters["client"])
-        closed = order_service.change_status(issued, LoadOrder.STATUS_CLOSED, reason="Smoke operativo #105")
+        closure = closure_service.close_order(issued, observations="Smoke operativo #105")
+        closed = LoadOrder.get_by_id(closure.order_id)
         driver = Driver.get_by_id(masters["driver"].id)
 
         result = {
@@ -104,6 +107,7 @@ def run_operational_smoke(
             "report_path": report_path,
             "order_number": closed.order_number,
             "order_status": closed.status,
+            "closure_id": closure.id,
             "order_pdf": order_pdf,
             "balance_after_issue": round(float(balance_after_issue), 2),
             "balance_after_payment": round(float(balance_after_payment), 2),
@@ -201,6 +205,7 @@ def _write_report(result: dict) -> Path:
                 f"- Evidencia: `{Path(result['evidence_dir'])}`",
                 f"- Orden: `OC-{result['order_number']:06d}`",
                 f"- Estado final de orden: `{result['order_status']}`",
+                f"- Cierre de entrega persistido: `{result['closure_id']}`",
                 f"- Orden PDF: `{Path(result['order_pdf']).name}`",
                 f"- Cliente: `{result['client']}`",
                 f"- Transportista: `{result['carrier']}`",
@@ -220,7 +225,7 @@ def _write_report(result: dict) -> Path:
                 "| App / schema | Cubierto | Abre SQLite local, crea schema runtime y permisos base. |",
                 "| ABMs de transporte | Cubierto | Crea transportista, chofer y camion sinteticos. |",
                 "| Cliente, lugar y producto demo | Cubierto | Crea cliente, direccion de entrega y producto sinteticos. |",
-                "| Ordenes de carga | Cubierto | Crea orden, prepara pallets, emite, imprime PDF y cierra. |",
+                "| Ordenes de carga | Cubierto | Crea orden, prepara pallets, emite, imprime PDF y persiste el cierre de entrega. |",
                 "| Liberacion de chofer | Cubierto | Verifica chofer disponible luego del cierre. |",
                 "| Cuenta corriente y pagos | Cubierto | Emision genera saldo, pago sintetico lo deja en cero. |",
                 "",

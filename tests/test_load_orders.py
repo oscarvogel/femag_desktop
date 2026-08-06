@@ -370,12 +370,14 @@ def test_create_load_order_rejects_invalid_pallet_quantity(db, quantity):
 def test_list_orders_returns_created_orders_newest_first(db):
     from datetime import date
 
+    from app.services.load_order_closure_service import LoadOrderClosureService
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
     service = LoadOrderService(current_user="admin")
     first = service.create_order(**_valid_order_payload(data), order_date=date(2026, 6, 20))
-    service.change_status(first, first.STATUS_CLOSED)
+    service.change_status(first, first.STATUS_ISSUED)
+    LoadOrderClosureService(current_user="admin").close_order(first)
     second = service.create_order(**_valid_order_payload(data), order_date=date(2026, 6, 21))
 
     assert service.list_orders() == [second, first]
@@ -466,6 +468,7 @@ def test_update_legacy_unissued_order_as_pending(db):
 
 def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
     from app.models.load_orders import LoadOrder
+    from app.services.load_order_closure_service import LoadOrderClosureService
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
@@ -491,7 +494,8 @@ def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
             pallets=[],
         )
 
-    service.change_status(first, LoadOrder.STATUS_CLOSED)
+    service.change_status(first, LoadOrder.STATUS_ISSUED)
+    LoadOrderClosureService(current_user="admin").close_order(first)
     assert type(data["driver"]).get_by_id(data["driver"].id).available is True
 
     second = service.create_order(
@@ -551,6 +555,7 @@ def test_available_drivers_excludes_blocked_active_drivers(db):
 
 def test_reopening_closed_order_requires_driver_availability(db):
     from app.models.load_orders import LoadOrder
+    from app.services.load_order_closure_service import LoadOrderClosureService
     from app.services.load_order_service import LoadOrderService
 
     data = _master_data()
@@ -564,7 +569,9 @@ def test_reopening_closed_order_requires_driver_availability(db):
         products=[{"product": data["product"], "quantity": 100}],
         pallets=[],
     )
-    service.change_status(first, LoadOrder.STATUS_CLOSED)
+    service.change_status(first, LoadOrder.STATUS_ISSUED)
+    closures = LoadOrderClosureService(current_user="admin")
+    closures.close_order(first)
     service.create_order(
         client=data["client"],
         delivery_address=data["address"],
@@ -576,7 +583,7 @@ def test_reopening_closed_order_requires_driver_availability(db):
     )
 
     with pytest.raises(ValueError, match="chofer.*bloqueado"):
-        service.change_status(first, LoadOrder.STATUS_PENDING)
+        closures.reopen_order(first, reason="Corregir cierre")
 
 def test_calculate_product_prices_uses_defaults(db):
     from app.models.masters import Client, Product, TipoIVA
