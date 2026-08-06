@@ -211,58 +211,107 @@ def test_app_ui_flag_reports_launch_error(monkeypatch, capsys):
     assert "PyQt5 no esta instalado" in captured.err
 
 
-def test_runtime_ui_prepares_schema_for_existing_local_database(tmp_path, monkeypatch):
-    from peewee import SqliteDatabase
-
-    from app.config.database import bind_database
+def test_runtime_ui_validates_schema_without_evolving_it(monkeypatch):
     from app.ui import desktop_app
 
-    database_path = tmp_path / "runtime.sqlite3"
-    database = SqliteDatabase(str(database_path), pragmas={"foreign_keys": 1})
-    bind_database(database)
-    database.connect(reuse_if_open=True)
-    database.execute_sql(
-        """
-        CREATE TABLE client (
-            id INTEGER PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            cuit VARCHAR(255) NOT NULL,
-            iva_condition VARCHAR(255) NOT NULL,
-            active BOOL DEFAULT 1,
-            created_at DATETIME,
-            updated_at DATETIME
-        )
-        """
-    )
-    database.execute_sql(
-        """
-        CREATE TABLE clientaddress (
-            id INTEGER PRIMARY KEY,
-            client_id INTEGER NOT NULL,
-            address_type VARCHAR(255) NOT NULL,
-            province VARCHAR(255) NOT NULL,
-            city VARCHAR(255) NOT NULL,
-            address VARCHAR(255) NOT NULL,
-            is_primary BOOL DEFAULT 0,
-            created_at DATETIME,
-            updated_at DATETIME
-        )
-        """
-    )
-    database.close()
+    calls = []
 
-    def fake_initialize_runtime_database():
-        runtime_database = SqliteDatabase(str(database_path), pragmas={"foreign_keys": 1})
-        bind_database(runtime_database)
-        return runtime_database
+    class RuntimeDatabase:
+        def connect(self, *, reuse_if_open):
+            calls.append(("connect", reuse_if_open))
 
-    monkeypatch.setattr(desktop_app, "initialize_runtime_database", fake_initialize_runtime_database)
+    database = RuntimeDatabase()
+    monkeypatch.setattr(desktop_app, "initialize_runtime_database", lambda: database)
+    monkeypatch.setattr(
+        desktop_app,
+        "validate_runtime_schema",
+        lambda target: calls.append(("validate", target)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        desktop_app,
+        "ensure_runtime_schema",
+        lambda _target: (_ for _ in ()).throw(AssertionError("production startup executed DDL")),
+    )
 
     prepared = desktop_app._prepare_database(demo_mode=False)
 
-    try:
-        column_names = {column.name for column in prepared.get_columns("clientaddress")}
-        assert "active" in column_names
-    finally:
-        if prepared is not None and not prepared.is_closed():
-            prepared.close()
+    assert prepared is database
+    assert calls == [("connect", True), ("validate", database)]
+
+
+def test_demo_ui_keeps_automatic_schema_preparation(monkeypatch):
+    from app.ui import desktop_app
+
+    calls = []
+
+    class DemoDatabase:
+        def connect(self, *, reuse_if_open):
+            calls.append(("connect", reuse_if_open))
+
+    database = DemoDatabase()
+    monkeypatch.setattr(desktop_app, "initialize_demo_database", lambda: database)
+    monkeypatch.setattr(
+        desktop_app,
+        "ensure_runtime_schema",
+        lambda target: calls.append(("ensure", target)),
+    )
+
+    prepared = desktop_app._prepare_database(demo_mode=True)
+
+    assert prepared is database
+    assert calls == [("connect", True), ("ensure", database)]
+
+
+def test_runtime_ui_reports_connection_failure_instead_of_falling_back(monkeypatch):
+    import pytest
+
+    from app.ui import desktop_app
+
+    def fail_initialization():
+        raise OSError("secret internal connection detail")
+
+    monkeypatch.setattr(desktop_app, "initialize_runtime_database", fail_initialization)
+
+    with pytest.raises(RuntimeError, match="No se pudo conectar a la base de datos") as exc_info:
+        desktop_app._prepare_database(demo_mode=False)
+
+    assert "secret internal connection detail" not in str(exc_info.value)
+
+
+def test_runtime_ui_shows_startup_error_before_login(monkeypatch):
+    from app.ui import desktop_app
+
+    messages = []
+
+    class FakeApplication:
+        @staticmethod
+        def instance():
+            return None
+
+        def __init__(self, _arguments):
+            pass
+
+        def setWindowIcon(self, _icon):
+            pass
+
+    monkeypatch.setattr(desktop_app, "QApplication", FakeApplication)
+    monkeypatch.setattr(desktop_app, "femag_icon", lambda: object())
+    monkeypatch.setattr(
+        desktop_app,
+        "_prepare_database",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("Esquema incompatible")),
+    )
+    monkeypatch.setattr(
+        desktop_app.QMessageBox,
+        "critical",
+        lambda parent, title, message: messages.append((parent, title, message)),
+    )
+    monkeypatch.setattr(
+        desktop_app,
+        "LoginWindow",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("login should not open")),
+    )
+
+    assert desktop_app.run_desktop_app(demo_mode=False) == 1
+    assert messages == [(None, "FEMAG Desktop - Base de datos", "Esquema incompatible")]

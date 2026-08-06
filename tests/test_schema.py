@@ -1,6 +1,115 @@
 from peewee import SqliteDatabase
 
 
+def test_mysql_runtime_schema_snapshot_uses_three_batched_queries():
+    from app.config.schema import _runtime_schema_snapshot
+
+    queries = []
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class MySQLDatabase:
+        def execute_sql(self, sql):
+            queries.append(sql)
+            if "INFORMATION_SCHEMA.TABLES" in sql:
+                return Cursor([("client",)])
+            if "INFORMATION_SCHEMA.COLUMNS" in sql:
+                return Cursor([("client", "id"), ("client", "name")])
+            if "INFORMATION_SCHEMA.STATISTICS" in sql:
+                return Cursor(
+                    [
+                        ("client", "client_name", 0, "name"),
+                    ]
+                )
+            raise AssertionError(f"Consulta inesperada: {sql}")
+
+    tables, columns, indexes = _runtime_schema_snapshot(MySQLDatabase())
+
+    assert len(queries) == 3
+    assert tables == {"client"}
+    assert columns == {"client": {"id", "name"}}
+    assert indexes == {"client": [({"name"}, True)]}
+
+
+def test_validate_runtime_schema_accepts_complete_schema_without_writes(db):
+    from app.config.schema import validate_runtime_schema
+
+    statements = []
+    db.connection().set_trace_callback(statements.append)
+    try:
+        validate_runtime_schema(db)
+    finally:
+        db.connection().set_trace_callback(None)
+
+    mutating_prefixes = (
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "REPLACE",
+    )
+    assert not [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith(mutating_prefixes)
+    ]
+
+
+def test_validate_runtime_schema_reports_missing_tables():
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    database = SqliteDatabase(":memory:")
+    database.connect()
+    try:
+        with pytest.raises(SchemaValidationError, match="Faltan tablas requeridas"):
+            validate_runtime_schema(database)
+    finally:
+        database.close()
+
+
+def test_validate_runtime_schema_reports_missing_columns(db):
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    db.execute_sql("ALTER TABLE client RENAME TO client_complete")
+    db.execute_sql("CREATE TABLE client (id INTEGER PRIMARY KEY)")
+    try:
+        with pytest.raises(SchemaValidationError, match="client") as exc_info:
+            validate_runtime_schema(db)
+        assert "name" in str(exc_info.value)
+    finally:
+        db.execute_sql("DROP TABLE client")
+        db.execute_sql("ALTER TABLE client_complete RENAME TO client")
+
+
+def test_validate_runtime_schema_reports_missing_indexes(db):
+    import pytest
+
+    from app.config.schema import SchemaValidationError, validate_runtime_schema
+
+    index = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{index.name}"')
+
+    with pytest.raises(SchemaValidationError, match="Faltan indices requeridos") as exc_info:
+        validate_runtime_schema(db)
+
+    assert "loadorderpallet" in str(exc_info.value)
+
+
 def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     from app.config.database import bind_database
     from app.config.schema import ensure_runtime_schema
