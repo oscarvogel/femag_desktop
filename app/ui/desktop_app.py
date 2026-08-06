@@ -36,6 +36,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.config.database import initialize_demo_database, initialize_runtime_database
+from app.build_version import BUILD_VERSION
 from app.config.schema import (
     SchemaValidationError,
     ensure_runtime_schema,
@@ -179,7 +180,7 @@ class FemagDesktopWindow(QMainWindow):
         super().__init__()
         self.user = user
         self.shell = ShellBuilder(user=user, demo_mode=demo_mode).shell_spec
-        self.setWindowTitle("FEMAG Desktop")
+        self.setWindowTitle(f"FEMAG Desktop {BUILD_VERSION}")
         self.setWindowIcon(femag_icon())
         app = QApplication.instance()
         if app is not None:

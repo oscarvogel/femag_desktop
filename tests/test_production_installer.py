@@ -7,6 +7,7 @@ SPEC = ROOT / "installer" / "FEMAG_Desktop.spec"
 BUILD = ROOT / "scripts" / "build_production_installer.ps1"
 ENTRYPOINT = ROOT / "app" / "production_entrypoint.py"
 DOC = ROOT / "docs" / "INSTALADOR_PRODUCCION.md"
+DEPLOY = ROOT / "DEPLOY.md"
 
 
 def test_production_installer_has_no_database_credentials() -> None:
@@ -46,6 +47,19 @@ def test_secure_first_run_is_documented() -> None:
     assert "Windows DPAPI" in content
     assert "CurrentUser" in content
     assert "connection.credential" in content
-    assert "no crea ni modifica tablas" in content
+    assert "Los arranques normales no crean ni modifican tablas" in content
     assert "no tiene firma digital" in content
     assert "politica corporativa" in content
+
+
+def test_each_production_build_uses_timestamp_version() -> None:
+    build = BUILD.read_text(encoding="utf-8")
+    iss = ISS.read_text(encoding="utf-8")
+    deploy = DEPLOY.read_text(encoding="utf-8")
+
+    assert 'Get-Date -Format "yyyy.MM.dd.HH.mm.ss"' in build
+    assert 'app\\build_version.py' in build
+    assert '"/DMyAppVersion=$BuildVersion"' in build
+    assert '"/DMyOutputBaseFilename=$OutputBaseFilename"' in build
+    assert "{#MyOutputBaseFilename}" in iss
+    assert "AAAA.MM.DD.HH.MM.SS" in deploy

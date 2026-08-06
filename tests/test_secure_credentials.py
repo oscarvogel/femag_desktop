@@ -133,3 +133,42 @@ def test_connection_test_reports_mysql_error_code(monkeypatch):
         connection_dialog.test_runtime_connection(
             RuntimeConnection("mysql.lan", 3306, "femag", "puesto", "secreta")
         )
+
+
+def test_schema_preparation_requires_confirmation_before_saving(monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
+
+    from app.ui import connection_dialog
+
+    qt_app = QApplication.instance() or QApplication([])
+    calls = []
+    monkeypatch.setattr(
+        connection_dialog,
+        "test_runtime_connection",
+        lambda _connection: (_ for _ in ()).throw(
+            connection_dialog.RuntimeSchemaPreparationRequired("Faltan tablas")
+        ),
+    )
+    monkeypatch.setattr(
+        connection_dialog.QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        connection_dialog,
+        "prepare_runtime_schema",
+        lambda connection: calls.append(("prepare", connection)),
+    )
+    monkeypatch.setattr(
+        connection_dialog,
+        "save_runtime_connection",
+        lambda connection: calls.append(("save", connection)),
+    )
+    dialog = connection_dialog.ConnectionDialog()
+    dialog.user.setText("femag_admin")
+    dialog.password.setText("secreta")
+
+    dialog._test_and_save()
+
+    assert dialog.result() == QDialog.Accepted
+    assert [action for action, _connection in calls] == ["prepare", "save"]

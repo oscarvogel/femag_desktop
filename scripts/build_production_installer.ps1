@@ -9,6 +9,9 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = if ($PythonPath) { $PythonPath } else { Join-Path $RepoRoot ".venv\Scripts\python.exe" }
+$BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
+$OutputBaseFilename = "FEMAG_Desktop_Produccion_Setup_$BuildVersion"
+$BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
 $IsccCandidates = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
@@ -25,6 +28,8 @@ if (-not $Iscc) {
 
 Push-Location $RepoRoot
 try {
+    Set-Content -LiteralPath $BuildVersionFile -Value "BUILD_VERSION = `"$BuildVersion`"" -Encoding UTF8
+
     if (-not $SkipInstallDependencies) {
         & $Python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
         if ($LASTEXITCODE -ne 0) { throw "No se pudieron instalar las dependencias de compilacion." }
@@ -36,10 +41,11 @@ try {
     & $Python -m PyInstaller --noconfirm --clean installer\FEMAG_Desktop.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo." }
 
-    & $Iscc installer\FEMAG_Desktop.iss
+    & $Iscc "/DMyAppVersion=$BuildVersion" "/DMyOutputBaseFilename=$OutputBaseFilename" installer\FEMAG_Desktop.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
 
-    Write-Host "Instalador generado: installer\output\FEMAG_Desktop_Produccion_Setup_v4.exe" -ForegroundColor Green
+    Write-Host "Version: $BuildVersion" -ForegroundColor Green
+    Write-Host "Instalador generado: installer\output\$OutputBaseFilename.exe" -ForegroundColor Green
 } finally {
     Pop-Location
 }
