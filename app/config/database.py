@@ -1,3 +1,5 @@
+import socket
+
 from peewee import DatabaseProxy, MySQLDatabase, SqliteDatabase
 
 from app.config.settings import Settings, load_settings
@@ -6,11 +8,19 @@ from app.config.settings import Settings, load_settings
 database_proxy = DatabaseProxy()
 
 
+def resolve_mysql_host_ipv4(host: str) -> str:
+    """Resolve a DNS/NetBIOS server name to IPv4 without changing saved configuration."""
+    try:
+        return socket.gethostbyname(host)
+    except OSError:
+        return host
+
+
 def build_mysql_database(settings: Settings | None = None) -> MySQLDatabase:
     settings = settings or load_settings()
     return MySQLDatabase(
         settings.db_name,
-        host=settings.db_host,
+        host=resolve_mysql_host_ipv4(settings.db_host),
         port=settings.db_port,
         user=settings.db_user,
         password=settings.db_password,
