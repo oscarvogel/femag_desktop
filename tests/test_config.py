@@ -57,6 +57,32 @@ def test_initialize_runtime_database_keeps_mysql_as_default(monkeypatch):
     assert isinstance(database, MySQLDatabase)
 
 
+def test_mysql_hostname_is_resolved_to_ipv4_without_changing_settings(monkeypatch):
+    from app.config import database as database_config
+    from app.config.settings import Settings
+
+    settings = Settings(
+        app_env="testing",
+        db_engine="mysql",
+        db_host="almanet-server",
+        db_port=3306,
+        db_name="femag_desktop",
+        db_user="puesto",
+        db_password="secreta",
+        sqlite_path=Path("unused.sqlite3"),
+        demo=False,
+        backup_dir=Path("backups"),
+        backup_extra_dir=None,
+        log_level="INFO",
+    )
+    monkeypatch.setattr(database_config.socket, "gethostbyname", lambda host: "192.168.0.116")
+
+    database = database_config.build_mysql_database(settings)
+
+    assert settings.db_host == "almanet-server"
+    assert database.connect_params["host"] == "192.168.0.116"
+
+
 def test_database_can_bind_sqlite_for_tests(db):
     from app.models.security import UserProfile
 
