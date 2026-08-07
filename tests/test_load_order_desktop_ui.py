@@ -42,7 +42,7 @@ def _complete_order_for_issue(order, current_user):
 def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(db):
     from decimal import Decimal
 
-    from PyQt5.QtWidgets import QApplication, QComboBox, QPushButton
+    from PyQt5.QtWidgets import QApplication, QComboBox, QPushButton, QTextEdit
 
     from app.models.load_orders import LoadOrderPalletAllocation
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -99,10 +99,25 @@ def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(d
         }
     ]
     dialog._render_destinations()
+    description_input = dialog.findChild(QTextEdit, "loadOrderDestinationBudgetDescriptionInput")
+    description_input.setPlainText("Condiciones comerciales exclusivas para Cliente UI kilos.")
     dialog._save()
 
     assert dialog.created_order is not None
+    assert dialog.created_order.destinations.get().observations == (
+        "Condiciones comerciales exclusivas para Cliente UI kilos."
+    )
     assert LoadOrderPalletAllocation.select().count() == 0
+
+    edit_dialog = LoadOrderEntryDialog(
+        dialog.service,
+        "ui_kilos",
+        order=dialog.created_order,
+    )
+    app.processEvents()
+    assert edit_dialog.findChild(QTextEdit, "loadOrderDestinationBudgetDescriptionInput").toPlainText() == (
+        "Condiciones comerciales exclusivas para Cliente UI kilos."
+    )
 
     pallets = LoadOrderPalletDialog(dialog.service, dialog.created_order)
     app.processEvents()
@@ -808,6 +823,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
 
 
 def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path, monkeypatch):
+    from pypdf import PdfReader
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
     from app.models.security import User, UserProfile
@@ -846,15 +862,24 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
         driver=driver,
         truck=truck,
         destinations=[
-            {"client": client_a, "delivery_address": address_a, "products": [{"product": product_a, "quantity": 10}]},
-            {"client": client_b, "delivery_address": address_b, "products": [{"product": product_b, "quantity": 20}]},
+            {
+                "client": client_a,
+                "delivery_address": address_a,
+                "observations": "Condición comercial Cliente Budget A.",
+                "products": [{"product": product_a, "quantity": 10}],
+            },
+            {
+                "client": client_b,
+                "delivery_address": address_b,
+                "observations": "Condición comercial Cliente Budget B.",
+                "products": [{"product": product_b, "quantity": 20}],
+            },
         ],
         pallets=[],
     )
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
-
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
@@ -867,6 +892,10 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     assert len(budget_paths) == 1
     assert opened_outputs == budget_paths
     assert "presupuestos_orden_1_" in feedback
+    reader = PdfReader(str(budget_paths[0]))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert text.count("Observaciones: Condición comercial Cliente Budget A.") == 1
+    assert text.count("Observaciones: Condición comercial Cliente Budget B.") == 1
 
 
 def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
@@ -926,8 +955,18 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
         driver=driver_b,
         truck=truck_b,
         destinations=[
-            {"client": client_b, "delivery_address": address_b, "products": [{"product": product, "quantity": 2}]},
-            {"client": client_c, "delivery_address": address_c, "products": [{"product": product, "quantity": 3}]},
+            {
+                "client": client_b,
+                "delivery_address": address_b,
+                "observations": "Presupuesto exclusivo Selection B.",
+                "products": [{"product": product, "quantity": 2}],
+            },
+            {
+                "client": client_c,
+                "delivery_address": address_c,
+                "observations": "Presupuesto exclusivo Selection C.",
+                "products": [{"product": product, "quantity": 3}],
+            },
         ],
         pallets=[],
     )
@@ -961,6 +1000,8 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
     assert "Cliente Selection B" in text
     assert "Cliente Selection C" in text
+    assert text.count("Observaciones: Presupuesto exclusivo Selection B.") == 1
+    assert text.count("Observaciones: Presupuesto exclusivo Selection C.") == 1
 
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):

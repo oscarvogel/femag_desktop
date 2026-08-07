@@ -257,6 +257,9 @@ class LoadOrderPrintService:
 
     def _observations(self, order: LoadOrder) -> Paragraph:
         value = order.observations or "-"
+        return self._observations_paragraph(value)
+
+    def _observations_paragraph(self, value: str) -> Paragraph:
         return Paragraph(f"<b>Observaciones:</b> {escape(value)}", self.styles["normal"])
 
     def _detail_rows(self, order: LoadOrder) -> list[dict[str, object]]:
@@ -408,7 +411,7 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client),
             Spacer(1, 8 * mm),
-            *self._budget_observations(order),
+            *self._budget_observations(order, client=client),
             self._budget_totals(order, client),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
@@ -481,16 +484,34 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client, destination),
             Spacer(1, 8 * mm),
-            *self._budget_observations(order),
+            *self._budget_observations(order, destination=destination),
             self._budget_totals(order, client, destination),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
         ]
 
-    def _budget_observations(self, order: LoadOrder) -> list:
-        if not (order.observations or "").strip():
+    def _budget_observations(
+        self,
+        order: LoadOrder,
+        *,
+        client: Client | None = None,
+        destination: LoadOrderDestination | None = None,
+    ) -> list:
+        if destination is not None:
+            descriptions = [(destination.observations or "").strip()]
+        elif client is not None:
+            descriptions = [
+                (item.observations or "").strip()
+                for item in order.destinations.order_by(LoadOrderDestination.sequence)
+                if item.client_id == client.id
+            ]
+        else:
+            descriptions = []
+        descriptions = list(dict.fromkeys(value for value in descriptions if value))
+        if not descriptions:
             return []
-        return [self._observations(order), Spacer(1, 4 * mm)]
+        value = " / ".join(descriptions)
+        return [self._observations_paragraph(value), Spacer(1, 4 * mm)]
 
     def _budget_header(
         self,

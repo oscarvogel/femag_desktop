@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QStyle,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
     QMessageBox,
@@ -1804,14 +1805,27 @@ class LoadOrderEntryDialog(QDialog):
         destination_inputs.addWidget(add_destination_button, 2, 0)
         destination_inputs.addWidget(remove_destination_button, 2, 1)
         destination_layout.addLayout(destination_inputs)
-        self.destination_table = QTableWidget(0, 4)
+        self.destination_table = QTableWidget(0, 5)
         self.destination_table.setObjectName("loadOrderDestinationDraftTable")
-        self.destination_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Productos", "Total $"))
+        self.destination_table.setHorizontalHeaderLabels(
+            ("Cliente", "Destino", "Descripción", "Productos", "Total $")
+        )
         self.destination_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.destination_table.verticalHeader().setVisible(False)
         self.destination_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.destination_table.setMinimumHeight(180)
         destination_layout.addWidget(self.destination_table)
+        destination_description_label = QLabel("Descripción del presupuesto del cliente/destino seleccionado")
+        destination_description_label.setObjectName("loadOrderDestinationBudgetDescriptionLabel")
+        destination_layout.addWidget(destination_description_label)
+        self.destination_budget_description_input = QTextEdit()
+        self.destination_budget_description_input.setObjectName("loadOrderDestinationBudgetDescriptionInput")
+        self.destination_budget_description_input.setPlaceholderText(
+            "Condiciones comerciales o aclaraciones exclusivas para este cliente."
+        )
+        self.destination_budget_description_input.setMaximumHeight(90)
+        self.destination_budget_description_input.setEnabled(False)
+        destination_layout.addWidget(self.destination_budget_description_input)
         self.step_stack.addWidget(destination)
 
         product = QFrame()
@@ -1853,9 +1867,11 @@ class LoadOrderEntryDialog(QDialog):
         preparation_hint.setObjectName("loadOrderPalletPreparationHint")
         preparation_hint.setWordWrap(True)
         review_layout.addWidget(preparation_hint)
-        self.review_table = QTableWidget(0, 6)
+        self.review_table = QTableWidget(0, 7)
         self.review_table.setObjectName("loadOrderReviewTable")
-        self.review_table.setHorizontalHeaderLabels(("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total"))
+        self.review_table.setHorizontalHeaderLabels(
+            ("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total", "Descripción")
+        )
         self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.review_table.verticalHeader().setVisible(False)
         self.review_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1891,8 +1907,9 @@ class LoadOrderEntryDialog(QDialog):
         self.save_button.clicked.connect(self._save)
         cancel_button.clicked.connect(self.reject)
         self.destination_table.currentCellChanged.connect(
-            lambda row, _column, _previous_row, _previous_column: self._render_products(row)
+            lambda row, _column, _previous_row, _previous_column: self._select_destination(row)
         )
+        self.destination_budget_description_input.textChanged.connect(self._update_destination_observations)
         self.driver_combo.currentIndexChanged.connect(lambda _index: self._refresh_from_driver())
         self.carrier_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
         self.truck_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
@@ -1938,6 +1955,7 @@ class LoadOrderEntryDialog(QDialog):
                 "address_id": destination.delivery_address.id,
                 "client_label": destination.client.name,
                 "address_label": f"{destination.delivery_address.client.name} - {destination.delivery_address.address}, {destination.delivery_address.city}",
+                "observations": destination.observations,
                 "products": [
                     {
                         "product_id": product.product.id,
@@ -2021,6 +2039,7 @@ class LoadOrderEntryDialog(QDialog):
                 "address_id": address_id,
                 "client_label": self.client_combo.currentText(),
                 "address_label": self.address_combo.currentText(),
+                "observations": None,
                 "products": [],
             }
         )
@@ -2087,6 +2106,7 @@ class LoadOrderEntryDialog(QDialog):
             values = (
                 destination["client_label"],
                 destination["address_label"],
+                destination.get("observations") or "-",
                 str(len(destination["products"])),
                 f"$ {total:,.2f}",
             )
@@ -2094,9 +2114,26 @@ class LoadOrderEntryDialog(QDialog):
                 self.destination_table.setItem(row_index, column, QTableWidgetItem(value))
         if self.destinations and self.destination_table.currentRow() < 0:
             self.destination_table.setCurrentCell(0, 0)
-        self._render_products(self.destination_table.currentRow())
+        self._select_destination(self.destination_table.currentRow())
         self._render_review()
         self._update_save_button_state()
+
+    def _select_destination(self, destination_index: int) -> None:
+        self._render_products(destination_index)
+        valid = 0 <= destination_index < len(self.destinations)
+        with QSignalBlocker(self.destination_budget_description_input):
+            value = self.destinations[destination_index].get("observations") if valid else ""
+            self.destination_budget_description_input.setPlainText(value or "")
+        self.destination_budget_description_input.setEnabled(valid)
+
+    def _update_destination_observations(self) -> None:
+        row = self.destination_table.currentRow()
+        if row < 0 or row >= len(self.destinations):
+            return
+        value = self.destination_budget_description_input.toPlainText().strip() or None
+        self.destinations[row]["observations"] = value
+        self.destination_table.setItem(row, 2, QTableWidgetItem(value or "-"))
+        self._render_review()
 
     def _render_products(self, destination_index: int) -> None:
         products = []
@@ -2132,6 +2169,7 @@ class LoadOrderEntryDialog(QDialog):
                         f"{product.get('quantity', 0):g}" if product.get("quantity") else "-",
                         product.get("unit", "-"),
                         f"$ {product.get('total', 0.0):,.2f}" if product.get("total") else "-",
+                        destination.get("observations") or "-",
                     )
                 )
         self.review_table.setRowCount(len(rows))
@@ -2193,6 +2231,7 @@ class LoadOrderEntryDialog(QDialog):
                     {
                         "client": Client.get_by_id(destination["client_id"]),
                         "delivery_address": ClientAddress.get_by_id(destination["address_id"]),
+                        "observations": destination.get("observations"),
                         "products": [
                             {
                                 "product": Product.get_by_id(product["product_id"]),
