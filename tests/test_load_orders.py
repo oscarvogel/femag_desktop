@@ -208,6 +208,92 @@ def test_create_load_order_requires_products(db):
     with pytest.raises(ValueError, match="producto"):
         LoadOrderService(current_user="admin").create_order(**payload)
 
+
+def test_create_load_order_rejects_duplicate_client_delivery_destination(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    payload = _valid_order_payload(data)
+    payload["destinations"] = [
+        {
+            "client": data["client"],
+            "delivery_address": data["address"],
+            "products": [{"product": data["product"], "quantity": 150}],
+        },
+        {
+            "client": data["client"],
+            "delivery_address": data["address"],
+            "products": [{"product": data["other_product"], "quantity": 250}],
+        },
+    ]
+
+    with pytest.raises(ValueError, match="cliente y lugar de entrega.*ya estan cargados"):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
+
+def test_create_load_order_rejects_duplicate_product_for_same_destination(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    payload = _valid_order_payload(data)
+    payload["destinations"] = [
+        {
+            "client": data["client"],
+            "delivery_address": data["address"],
+            "products": [
+                {"product": data["product"], "quantity": 150},
+                {"product": data["product"], "quantity": 250},
+            ],
+        }
+    ]
+
+    with pytest.raises(ValueError, match="articulo Fecula de mandioca.*ya esta cargado"):
+        LoadOrderService(current_user="admin").create_order(**payload)
+
+
+def test_create_load_order_allows_same_product_for_different_destinations(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _multi_client_data()
+    payload = _valid_order_payload(data)
+    payload["destinations"] = [
+        {
+            "client": data["client"],
+            "delivery_address": data["address"],
+            "products": [{"product": data["product"], "quantity": 150}],
+        },
+        {
+            "client": data["client"],
+            "delivery_address": data["other_destination"],
+            "products": [{"product": data["product"], "quantity": 250}],
+        },
+    ]
+
+    order = LoadOrderService(current_user="admin").create_order(**payload)
+
+    assert order.destinations.count() == 2
+    assert order.products.count() == 2
+
+
+def test_persisted_duplicate_product_is_detected_before_pallet_composition(db):
+    from app.models.load_orders import LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+    destination = order.destinations.get()
+    LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=250,
+        unit=data["product"].unit,
+    )
+
+    with pytest.raises(ValueError, match="articulo Fecula de mandioca.*ya esta cargado"):
+        service.validate_merchandise_uniqueness(order)
+
 def test_create_load_order_rejects_address_from_another_client(db):
     from app.models.masters import Client, ClientAddress
     from app.services.load_order_service import LoadOrderService
