@@ -132,6 +132,7 @@ class LoadOrderClosure(BaseModel):
     closed_at = DateTimeField(default=utc_now)
     closed_by = CharField()
     observations = TextField(null=True)
+    no_payment_reason = TextField(null=True)
     reopened_at = DateTimeField(null=True)
     reopened_by = CharField(null=True)
     reopen_reason = TextField(null=True)

@@ -32,6 +32,7 @@ debito documental de cuenta corriente.
 - `active_marker`: `True` para el cierre vigente y `NULL` para ciclos
   historicos reabiertos.
 - `closed_at`, `closed_by`, `observations`: evidencia del cierre.
+- `no_payment_reason`: motivo obligatorio cuando el cierre no registra pagos.
 - `reopened_at`, `reopened_by`, `reopen_reason`: evidencia de la reapertura.
 
 El indice unico `(order, active_marker)` permite varios cierres historicos con
@@ -51,9 +52,9 @@ El indice unico `(order, active_marker)` permite varios cierres historicos con
 
 ## Extension prevista por sub-issue
 
-### #220 - Pagos del cierre
+### #220 - Pagos del cierre (implementado)
 
-`ClientPayment` incorporara una relacion opcional con `LoadOrderClosure`. El
+`ClientPayment` incorpora una relacion opcional con `LoadOrderClosure`. El
 cliente ya pertenece al pago, lo que permite soportar ordenes multicliente sin
 duplicar datos. El estado `sin pago`, `parcial` o `cobrado` se deriva por cliente
 y para el cierre completo a partir de:
@@ -63,6 +64,18 @@ y para el cierre completo a partir de:
 - creditos por devolucion cuando existan.
 
 No se guardara un saldo agregado que pueda quedar desactualizado.
+
+El dialogo de cierre muestra los renglones emitidos y permite preparar varios
+pagos con cliente, fecha, monto, medio y referencia. La confirmacion crea el
+cierre, los recibos, sus movimientos y el cambio de estado en una sola
+transaccion. Los movimientos de pago guardan la OC y una referencia al cierre.
+
+El indice contable usa `source_ref`, cliente, tipo y marca de reverso. Asi se
+mantiene la proteccion contra movimientos documentales duplicados y se admiten
+varios recibos para la misma OC/cliente.
+
+Mientras #222 no genere reversos automaticos, una entrega con pagos activos no
+puede reabrirse. Primero deben anularse esos pagos con el flujo administrativo.
 
 ### #221 - Devoluciones por renglon
 
@@ -96,8 +109,6 @@ devoluciones historicas.
 
 ## Fuera de alcance de este corte
 
-- UI del dialogo de cierre.
-- Registro de pagos.
 - Registro de devoluciones.
 - Generacion o reverso de notas de credito.
 - Cambios de stock.

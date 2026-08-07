@@ -128,6 +128,7 @@ def ensure_runtime_schema(database) -> None:
         _consolidate_shared_client_addresses(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
+        _ensure_account_movement_source_index(database)
     _ensure_sqlite_index_integrity(database)
 
 
@@ -188,6 +189,28 @@ def _ensure_pallet_sequence_index(database) -> None:
     database.execute_sql(
         "CREATE UNIQUE INDEX `loadorderpallet_order_id_sequence` "
         "ON `loadorderpallet` (`order_id`, `sequence`)"
+    )
+
+
+def _ensure_account_movement_source_index(database) -> None:
+    table_name = "clientaccountmovement"
+    expected_columns = {"source_ref", "client_id", "movement_type", "is_reversal"}
+    legacy_columns = {"load_order_id", "client_id", "movement_type", "is_reversal"}
+    indexes = database.get_indexes(table_name)
+    for index in indexes:
+        if index.unique and set(index.columns) == legacy_columns:
+            escaped_name = _escape_identifier(index.name)
+            if database.__class__.__name__ == "MySQLDatabase":
+                database.execute_sql(
+                    f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
+                )
+            else:
+                database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
+    if any(index.unique and set(index.columns) == expected_columns for index in indexes):
+        return
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `clientaccountmovement_source_client_type_reversal` "
+        "ON `clientaccountmovement` (`source_ref`, `client_id`, `movement_type`, `is_reversal`)"
     )
 
 

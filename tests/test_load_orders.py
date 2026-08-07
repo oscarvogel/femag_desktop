@@ -463,7 +463,9 @@ def test_list_orders_returns_created_orders_newest_first(db):
     service = LoadOrderService(current_user="admin")
     first = service.create_order(**_valid_order_payload(data), order_date=date(2026, 6, 20))
     service.change_status(first, first.STATUS_ISSUED)
-    LoadOrderClosureService(current_user="admin").close_order(first)
+    LoadOrderClosureService(current_user="admin").close_order(
+        first, no_payment_reason="Queda en cuenta corriente"
+    )
     second = service.create_order(**_valid_order_payload(data), order_date=date(2026, 6, 21))
 
     assert service.list_orders() == [second, first]
@@ -581,7 +583,9 @@ def test_blocked_driver_cannot_be_reused_until_order_is_closed_or_annulled(db):
         )
 
     service.change_status(first, LoadOrder.STATUS_ISSUED)
-    LoadOrderClosureService(current_user="admin").close_order(first)
+    LoadOrderClosureService(current_user="admin").close_order(
+        first, no_payment_reason="Queda en cuenta corriente"
+    )
     assert type(data["driver"]).get_by_id(data["driver"].id).available is True
 
     second = service.create_order(
@@ -657,7 +661,7 @@ def test_reopening_closed_order_requires_driver_availability(db):
     )
     service.change_status(first, LoadOrder.STATUS_ISSUED)
     closures = LoadOrderClosureService(current_user="admin")
-    closures.close_order(first)
+    closures.close_order(first, no_payment_reason="Queda en cuenta corriente")
     service.create_order(
         client=data["client"],
         delivery_address=data["address"],

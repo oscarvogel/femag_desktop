@@ -3,6 +3,7 @@ from datetime import date
 from peewee import CharField, DateField, DateTimeField, FloatField, ForeignKeyField, TextField
 
 from app.models.base import BaseModel
+from app.models.load_orders import LoadOrderClosure
 from app.models.masters import Client
 
 
@@ -19,6 +20,7 @@ class ClientPayment(BaseModel):
 
     receipt_number = CharField(unique=True)
     client = ForeignKeyField(Client, backref="payments")
+    closure = ForeignKeyField(LoadOrderClosure, backref="payments", null=True)
     payment_date = DateField(default=date.today)
     amount = FloatField()
     method = CharField()

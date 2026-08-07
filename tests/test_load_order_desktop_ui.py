@@ -1392,8 +1392,8 @@ def test_load_order_page_treats_legacy_unissued_status_as_actionable(db):
     assert window.findChild(QPushButton, "editLoadOrderButton").isEnabled() is True
 
 
-def test_load_order_page_closes_issued_order_and_releases_driver(db):
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+def test_load_order_page_closes_issued_order_and_releases_driver(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QTableWidget
 
     from app.models.load_orders import LoadOrder, LoadOrderClosure
     from app.models.security import User, UserProfile
@@ -1402,6 +1402,7 @@ def test_load_order_page_closes_issued_order_and_releases_driver(db):
     from app.services.load_order_service import LoadOrderService
     from app.services.permission_service import PermissionService
     from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 
     app = QApplication.instance() or QApplication([])
     PermissionService().seed_defaults()
@@ -1428,6 +1429,15 @@ def test_load_order_page_closes_issued_order_and_releases_driver(db):
     )
     _complete_order_for_issue(order, user.username)
     LoadOrderOperationService(current_user=user.username).issue(order)
+
+    def accept_without_payment(dialog):
+        dialog._closure = dialog.service.close_order(
+            dialog.order,
+            no_payment_reason="Queda en cuenta corriente",
+        )
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderClosureDialog, "exec_", accept_without_payment)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()

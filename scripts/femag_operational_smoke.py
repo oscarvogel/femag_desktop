@@ -10,7 +10,6 @@ from app.config.database import bind_database
 from app.config.schema import ensure_runtime_schema
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
-from app.services.client_payment_service import ClientPaymentService
 from app.services.ledger_query_service import client_balance
 from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
@@ -90,14 +89,20 @@ def run_operational_smoke(
         issued = operation_service.issue(order)
         balance_after_issue = client_balance(masters["client"])
         order_pdf = operation_service.print_order(issued)
-        payment = ClientPaymentService(current_user=username).register_payment(
-            client=masters["client"],
-            amount=balance_after_issue,
-            reference="SMOKE-105",
-            observations="Pago sintetico del smoke operativo #105.",
+        closure = closure_service.close_order(
+            issued,
+            observations="Smoke operativo #105",
+            payments=[
+                {
+                    "client": masters["client"],
+                    "amount": balance_after_issue,
+                    "reference": "SMOKE-105",
+                    "observations": "Pago sintetico del smoke operativo #105.",
+                }
+            ],
         )
+        payment = closure.payments.get()
         balance_after_payment = client_balance(masters["client"])
-        closure = closure_service.close_order(issued, observations="Smoke operativo #105")
         closed = LoadOrder.get_by_id(closure.order_id)
         driver = Driver.get_by_id(masters["driver"].id)
 
