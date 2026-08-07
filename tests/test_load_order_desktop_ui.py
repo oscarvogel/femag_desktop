@@ -240,6 +240,138 @@ def test_load_order_desktop_ui_creates_order_from_modal_flow(db, monkeypatch):
     assert LoadOrderProduct.select().count() == 1
 
 
+def test_load_order_dialog_rejects_duplicate_destination_and_product_immediately(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
+
+    from app.models.masters import Client, ClientAddress, Product
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(name="Cliente Unico UI", cuit="30700023001", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Garuhape",
+        address="Entrega Unica UI",
+    )
+    product = Product.create(name="Fecula unica UI", unit="kg")
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="issue230_ui"), "issue230_ui")
+    app.processEvents()
+    _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
+    _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
+    add_destination = dialog.findChild(QPushButton, "addLoadOrderClientButton")
+
+    add_destination.click()
+    add_destination.click()
+
+    assert len(dialog.destinations) == 1
+    assert "ya estan cargados" in dialog.feedback.text()
+
+    def accept_product(product_dialog):
+        product_dialog.product = {
+            "product_id": product.id,
+            "product_label": product.name,
+            "quantity": 150,
+            "unit": product.unit,
+        }
+        return QDialog.Accepted
+
+    monkeypatch.setattr(LoadOrderProductDialog, "exec_", accept_product)
+    add_product = dialog.findChild(QPushButton, "addLoadOrderProductButton")
+    add_product.click()
+    add_product.click()
+
+    assert len(dialog.destinations[0]["products"]) == 1
+    assert "ya esta cargado" in dialog.feedback.text()
+    assert dialog.findChild(QTableWidget, "loadOrderProductDraftTable").currentRow() == 0
+
+
+def test_existing_duplicate_order_can_be_opened_and_repaired_without_silent_merge(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    service = LoadOrderService(current_user="issue230_repair")
+    order = service.create_order(**_valid_order_payload(data))
+    destination = order.destinations.get()
+    LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=250,
+        unit=data["product"].unit,
+    )
+
+    dialog = LoadOrderEntryDialog(service, "issue230_repair", order=order)
+    app.processEvents()
+    save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
+
+    assert len(dialog.destinations[0]["products"]) == 2
+    assert save_button.isEnabled() is False
+    assert "mercaderia duplicada" in dialog.feedback.text()
+
+    product_table = dialog.findChild(QTableWidget, "loadOrderProductDraftTable")
+    product_table.setCurrentCell(1, 0)
+    dialog.findChild(QPushButton, "removeLoadOrderProductButton").click()
+    app.processEvents()
+
+    assert len(dialog.destinations[0]["products"]) == 1
+    assert save_button.isEnabled() is True
+    save_button.click()
+
+    assert dialog.created_order is not None
+    assert LoadOrderProduct.select().where(LoadOrderProduct.order == order).count() == 1
+
+
+def test_load_order_page_blocks_pallet_editor_for_persisted_duplicate_lines(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLabel, QDialog, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrderProduct
+    from app.models.security import User, UserProfile
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, LoadOrderPalletDialog
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="issue230_pallet_ui", password_hash="x", profile=profile)
+    data = _master_data()
+    service = LoadOrderService(current_user=user.username)
+    order = service.create_order(**_valid_order_payload(data))
+    destination = order.destinations.get()
+    LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=250,
+        unit=data["product"].unit,
+    )
+    opened = []
+    monkeypatch.setattr(
+        LoadOrderPalletDialog,
+        "exec_",
+        lambda _dialog: opened.append(True) or QDialog.Rejected,
+    )
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+    window.findChild(QPushButton, f"prepareLoadOrderPalletsButton{order.id}").click()
+    app.processEvents()
+
+    feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+    assert opened == []
+    assert "no se pueden armar los pallets" in feedback.lower()
+    assert "edite la orden" in feedback.lower()
+
+
 def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
 

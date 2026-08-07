@@ -942,6 +942,14 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.setText("Seleccione una orden para preparar sus pallets.")
                 return
+            if order.is_unissued:
+                try:
+                    service.validate_merchandise_uniqueness(order)
+                except ValueError as exc:
+                    feedback.setText(
+                        f"No se pueden armar los pallets: {exc} Edite la orden para corregirla."
+                    )
+                    return
             if not order.is_unissued and not order.pallets.exists():
                 feedback.setText("La orden seleccionada no tiene pallets para consultar.")
                 return
@@ -1956,6 +1964,12 @@ class LoadOrderEntryDialog(QDialog):
         self._render_destinations()
         self._render_review()
         self._update_save_button_state()
+        duplicate_message = self._duplicate_merchandise_message()
+        if duplicate_message:
+            self.feedback.setText(
+                f"La orden contiene mercaderia duplicada: {duplicate_message} "
+                "Quite el duplicado antes de guardar o armar pallets."
+            )
 
     def _refresh_from_driver(self) -> None:
         driver_id = self.driver_combo.currentData()
@@ -2015,6 +2029,16 @@ class LoadOrderEntryDialog(QDialog):
         if address.client.id != client_id:
             self.feedback.setText("El destino seleccionado no pertenece al cliente.")
             return
+        for row, destination in enumerate(self.destinations):
+            if destination.get("client_id") == client_id and destination.get("address_id") == address_id:
+                self.destination_table.setCurrentCell(row, 0)
+                self._go_to_step(2)
+                self.feedback.setText(
+                    f"El cliente y lugar de entrega {destination['client_label']} / "
+                    f"{destination['address_label']} ya estan cargados. "
+                    "Agregue los articulos en el destino existente."
+                )
+                return
         self.destinations.append(
             {
                 "client_id": client_id,
@@ -2056,6 +2080,16 @@ class LoadOrderEntryDialog(QDialog):
         dialog = LoadOrderProductDialog(self, client=client)
         if dialog.exec_() != QDialog.Accepted or dialog.product is None:
             return
+        product_id = dialog.product.get("product_id")
+        for product_row, product in enumerate(dest["products"]):
+            if product.get("product_id") == product_id:
+                self.product_table.setCurrentCell(product_row, 0)
+                self.feedback.setText(
+                    f"El articulo {product['product_label']} ya esta cargado para "
+                    f"{dest['client_label']} / {dest['address_label']}. "
+                    "Quite el duplicado o edite la linea existente."
+                )
+                return
         self.destinations[row]["products"].append(dialog.product)
         self._render_products(row)
         self._render_destinations()
@@ -2160,7 +2194,33 @@ class LoadOrderEntryDialog(QDialog):
                     return False
                 if product.get("quantity") is None or product.get("quantity") <= 0:
                     return False
-        return True
+        return self._duplicate_merchandise_message() is None
+
+    def _duplicate_merchandise_message(self) -> str | None:
+        seen_destinations: set[tuple[int, int]] = set()
+        seen_lines: set[tuple[int, int, int]] = set()
+        for destination in self.destinations:
+            client_id = destination.get("client_id")
+            address_id = destination.get("address_id")
+            if client_id is None or address_id is None:
+                continue
+            destination_key = (client_id, address_id)
+            destination_label = f"{destination['client_label']} / {destination['address_label']}"
+            if destination_key in seen_destinations:
+                return f"el cliente y lugar de entrega {destination_label} estan repetidos."
+            seen_destinations.add(destination_key)
+            for product in destination.get("products") or []:
+                product_id = product.get("product_id")
+                if product_id is None:
+                    continue
+                line_key = (*destination_key, product_id)
+                if line_key in seen_lines:
+                    return (
+                        f"el articulo {product['product_label']} esta repetido para "
+                        f"{destination_label}."
+                    )
+                seen_lines.add(line_key)
+        return None
 
     def _update_save_button_state(self) -> None:
         if not hasattr(self, "save_button"):
@@ -2169,12 +2229,20 @@ class LoadOrderEntryDialog(QDialog):
         self.save_button.setEnabled(ready)
         if ready:
             self.save_button.setToolTip("Guardar orden.")
+        elif self._duplicate_merchandise_message():
+            self.save_button.setToolTip("Quite la mercaderia duplicada antes de guardar.")
         else:
             self.save_button.setToolTip("Complete chofer, camion, destino y productos para guardar.")
 
     def _save(self) -> None:
         if not self._is_ready_to_save():
-            self.feedback.setText("Complete chofer, camion, destino y productos antes de guardar.")
+            duplicate_message = self._duplicate_merchandise_message()
+            if duplicate_message:
+                self.feedback.setText(
+                    f"No se puede guardar: {duplicate_message} Quite el duplicado."
+                )
+            else:
+                self.feedback.setText("Complete chofer, camion, destino y productos antes de guardar.")
             self._update_save_button_state()
             return
         if self.driver_combo.currentData() is None:

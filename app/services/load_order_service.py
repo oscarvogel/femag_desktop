@@ -245,6 +245,11 @@ class LoadOrderService:
             query = query.where(LoadOrder.date == day)
         return list(query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc()))
 
+    def validate_merchandise_uniqueness(self, order: LoadOrder) -> None:
+        """Reject persisted orders that cannot be represented as unique pallet lines."""
+        order = LoadOrder.get_by_id(order.id)
+        self._require_unique_merchandise(self._persisted_destination_payload(order))
+
     def _validate_logistic_header(
         self,
         carrier: Carrier,
@@ -306,7 +311,32 @@ class LoadOrderService:
                     "products": self._validate_products(products),
                 }
             )
+        self._require_unique_merchandise(normalized)
         return normalized
+
+    def _require_unique_merchandise(self, destinations: list[dict]) -> None:
+        seen_destinations: set[tuple[int, int]] = set()
+        seen_lines: set[tuple[int, int, int]] = set()
+        for destination in destinations:
+            client = destination["client"]
+            delivery_address = destination["delivery_address"]
+            destination_key = (client.id, delivery_address.id)
+            destination_label = f"{client.name} / {delivery_address.address}, {delivery_address.city}"
+            if destination_key in seen_destinations:
+                raise ValueError(
+                    f"El cliente y lugar de entrega {destination_label} ya estan cargados en la orden. "
+                    "Use el destino existente para agregar sus articulos."
+                )
+            seen_destinations.add(destination_key)
+            for item in destination["products"]:
+                product = item["product"]
+                line_key = (*destination_key, product.id)
+                if line_key in seen_lines:
+                    raise ValueError(
+                        f"El articulo {product.name} ya esta cargado para {destination_label}. "
+                        "Quite el duplicado o edite la linea existente."
+                    )
+                seen_lines.add(line_key)
 
     def _validate_products(self, products: list[dict]) -> list[dict]:
         if not products:
