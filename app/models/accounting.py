@@ -1,4 +1,4 @@
-from peewee import BooleanField, CharField, FloatField, ForeignKeyField, TextField
+from peewee import BooleanField, CharField, DateField, FloatField, ForeignKeyField, TextField
 
 from app.models.base import BaseModel
 from app.models.load_orders import LoadOrder
@@ -11,6 +11,8 @@ class ClientAccountMovement(BaseModel):
     TYPE_LOAD_ORDER_REVERSAL = "load_order_documental_reversal"
     TYPE_PAYMENT = "payment"
     TYPE_PAYMENT_REVERSAL = "payment_reversal"
+    TYPE_MANUAL_DEBIT = "manual_debit"
+    TYPE_MANUAL_DEBIT_REVERSAL = "manual_debit_reversal"
 
     client = ForeignKeyField(Client, backref="account_movements")
     load_order = ForeignKeyField(LoadOrder, backref="account_movements", null=True)
@@ -22,8 +24,10 @@ class ClientAccountMovement(BaseModel):
     vat_amount = FloatField(default=0)
     total_amount = FloatField(default=0)
     currency = CharField(default="ARS")
+    movement_date = DateField(null=True)
     description = TextField()
     source_ref = CharField()
+    reference = CharField(null=True)
     is_reversal = BooleanField(default=False)
     reverses = ForeignKeyField("self", backref="reversal_movements", null=True)
     created_by = CharField(null=True)

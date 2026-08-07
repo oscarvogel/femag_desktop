@@ -114,3 +114,36 @@ def test_export_account_statement_pdf_is_valid_pdf(db, tmp_path):
     assert pdf_path.read_bytes().startswith(b"%PDF")
     reader = PdfReader(str(pdf_path))
     assert len(reader.pages) >= 1
+
+
+def test_export_account_statement_includes_manual_debit_and_reversal(db, tmp_path):
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.services import account_statement_print_service
+    from app.services.client_manual_debit_service import ClientManualDebitService
+
+    client = Client.create(
+        name="Cliente Débito PDF",
+        cuit="30700001217",
+        iva_condition="RI",
+    )
+    service = ClientManualDebitService(current_user="caja")
+    debit = service.register_manual_debit(
+        client=client,
+        amount=5000,
+        debit_date=date(2026, 8, 7),
+        description="Interés por mora",
+        reference="ND-PDF-217",
+    )
+    service.reverse_manual_debit(debit, reversal_date=date(2026, 8, 8))
+
+    pdf_path = account_statement_print_service.export_account_statement(client, tmp_path)
+    text = _pdf_text(pdf_path)
+
+    assert "Débito manual" in text
+    assert "Reverso débito" in text
+    assert "ND-PDF-217" in text
+    assert "Interés por mora" in text
+    assert "5,000.00" in text
+    assert "0.00" in text
