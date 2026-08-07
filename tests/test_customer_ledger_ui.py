@@ -64,6 +64,35 @@ def test_payment_dialog_opens_and_registers(db):
     assert payment.client == client
 
 
+def test_manual_debit_dialog_opens_and_registers_required_fields(db):
+    from PyQt5.QtCore import QDate
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Débito Dialog",
+        cuit="30987654217",
+        iva_condition="RI",
+    )
+    dialog = ClientManualDebitDialog(current_user="caja", preset_client=client)
+    dialog.date_input.setDate(QDate(2026, 8, 7))
+    dialog.amount_input.setValue(5000)
+    dialog.description_input.setText("Interés por mora")
+    dialog.reference_input.setText("ND-217")
+    dialog._on_accept()
+
+    movement = dialog.registered_debit()
+    assert movement is not None
+    assert movement.client == client
+    assert movement.total_amount == 5000
+    assert movement.movement_date.isoformat() == "2026-08-07"
+    assert movement.description == "Interés por mora"
+    assert movement.reference == "ND-217"
+
+
 def test_customer_ledger_share_buttons_dispatch_selected_client(db):
     from PyQt5.QtWidgets import QApplication
 
@@ -235,6 +264,131 @@ def test_customer_ledger_hides_annul_action_without_permission(db):
 
     assert page.print_receipt_button.isEnabled()
     assert page.annul_payment_button.isHidden()
+
+
+def test_customer_ledger_registers_and_reverses_manual_debit(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.services.client_manual_debit_service import ClientManualDebitService
+    from app.services.ledger_query_service import client_balance
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Acciones Débito",
+        cuit="30777777217",
+        iva_condition="RI",
+    )
+    service = ClientManualDebitService(current_user="caja")
+
+    def register(selected):
+        service.register_manual_debit(
+            client=selected,
+            amount=5000,
+            description="Ajuste operativo",
+            reference="AJ-5000",
+        )
+
+    page = CustomerLedgerPage(
+        current_user="caja",
+        register_manual_debit_callback=register,
+        reverse_manual_debit_callback=service.reverse_manual_debit,
+    )
+    # La página sólo lista clientes con movimientos; crear el primero y refrescar.
+    register(client)
+    page.refresh()
+    app.processEvents()
+
+    assert page.register_manual_debit_button.isEnabled()
+    assert page.detail_balance.text() == "$5,000.00"
+    debit_row = next(
+        row
+        for row in range(page.movements_table.rowCount())
+        if page.movements_table.item(row, 1).text() == "Débito manual"
+    )
+    assert page.movements_table.item(debit_row, 2).text() == "AJ-5000"
+    page.movements_table.setCurrentCell(debit_row, 0)
+    app.processEvents()
+    assert page.reverse_manual_debit_button.isEnabled()
+
+    page.reverse_manual_debit_button.click()
+    app.processEvents()
+
+    assert client_balance(client) == 0
+    assert ClientAccountMovement.select().count() == 2
+    labels = [
+        page.movements_table.item(row, 1).text()
+        for row in range(page.movements_table.rowCount())
+    ]
+    assert labels == ["Débito manual", "Reverso débito manual"]
+    original_row = next(
+        row
+        for row in range(page.movements_table.rowCount())
+        if page.movements_table.item(row, 1).text() == "Débito manual"
+    )
+    page.movements_table.setCurrentCell(original_row, 0)
+    app.processEvents()
+    assert not page.reverse_manual_debit_button.isEnabled()
+
+
+def test_customer_ledger_can_start_first_manual_debit_without_existing_movements(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    Client.create(
+        name="Cliente Sin Movimientos",
+        cuit="30777779217",
+        iva_condition="RI",
+    )
+    presets = []
+    page = CustomerLedgerPage(
+        current_user="caja",
+        register_manual_debit_callback=presets.append,
+    )
+    app.processEvents()
+
+    assert page.clients_table.rowCount() == 0
+    assert page.register_manual_debit_button.isEnabled()
+    page.register_manual_debit_button.click()
+    assert presets == [None]
+
+
+def test_desktop_wires_manual_debit_actions_into_customer_ledger(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.services.auth_service import AuthService
+    from app.services.client_manual_debit_service import ClientManualDebitService
+    from app.ui.customer_ledger import CustomerLedgerPage
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    user = AuthService().create_user("admin_debito_ui", "secreto", "Administrador")
+    client = Client.create(
+        name="Cliente Débito Desktop",
+        cuit="30777778217",
+        iva_condition="RI",
+    )
+    ClientManualDebitService(current_user=user.username).register_manual_debit(
+        client=client,
+        amount=100,
+        description="Ajuste de integración",
+    )
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    window._navigate_to_route("customer_ledger")
+    page = window.stack.currentWidget()
+
+    assert isinstance(page, CustomerLedgerPage)
+    assert page.register_manual_debit_callback == window._open_manual_debit_dialog
+    assert page.reverse_manual_debit_callback == window._reverse_manual_debit
+    assert page.register_manual_debit_button.isEnabled()
+    window.close()
 
 
 def test_admin_authorization_dialog_accepts_valid_admin(db):

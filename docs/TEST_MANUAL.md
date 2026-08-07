@@ -215,10 +215,12 @@ La UI tiene `LoadOrderEntryDialog` con flujo:
 | Protección duplicados | Sí (idempotencia) |
 | UI | Real — listado de clientes, saldos, movimientos y acciones |
 | Pagos | Registro manual con efectivo, transferencia, cheque u otros |
+| Débitos manuales | Alta de ajustes/intereses con fecha, descripción y referencia opcional |
 | Recibos | Numeración correlativa y PDF individual |
 | Anulación | Credenciales de administrador, reversión contable y auditoría |
+| Reverso de débito | Acción separada que conserva el original y genera un movimiento inverso |
 | Consulta | El pago original queda visible como anulado junto con su reversión |
-| Servicios | `AccountLedgerService`, `ClientPaymentService`, `PaymentReceiptPrintService` |
+| Servicios | `AccountLedgerService`, `ClientPaymentService`, `ClientManualDebitService`, `PaymentReceiptPrintService` |
 
 ---
 
@@ -514,6 +516,22 @@ py -3.12 -m app.main --ui
    `Anulación de pago` por el importe opuesto y el saldo vuelve al valor anterior.
 10. Imprimir otra vez el recibo y verificar la marca roja `ANULADO`, el administrador,
     la fecha y el motivo.
+
+### 10.8 Circuito manual — débito y reverso
+
+1. Abrir **Cuenta corriente** y seleccionar un cliente con movimientos.
+2. Pulsar **Registrar débito**.
+3. Completar fecha, monto `$5.000`, descripción obligatoria y referencia opcional.
+4. Guardar y verificar que aparece `Débito manual`, el saldo aumenta `$5.000` y la
+   referencia queda visible.
+5. Generar el extracto PDF y comprobar que incluye el débito con fecha, descripción,
+   referencia e importe.
+6. Seleccionar el movimiento y pulsar **Reversar débito**.
+7. Confirmar la acción y verificar que aparece `Reverso débito manual` por `-$5.000`.
+8. Confirmar que el movimiento original sigue visible, el botón de reverso queda
+   deshabilitado para ese débito y el saldo vuelve a cero.
+9. Revisar auditoría: deben existir `registrar_debito_manual` y
+   `reversar_debito_manual` con usuario, cliente, importes y movimientos relacionados.
 
 ---
 

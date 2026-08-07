@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.ledger_query_service import (
@@ -32,6 +33,8 @@ MOVEMENT_TYPE_LABELS = {
     "load_order_documental_reversal": "Reverso OC",
     "payment": "Pago",
     "payment_reversal": "Anulación de pago",
+    "manual_debit": "Débito manual",
+    "manual_debit_reversal": "Reverso débito manual",
 }
 
 
@@ -60,11 +63,13 @@ class CustomerLedgerPage(QWidget):
         *,
         current_user: str,
         register_payment_callback=None,
+        register_manual_debit_callback=None,
         print_statement_callback=None,
         whatsapp_statement_callback=None,
         email_statement_callback=None,
         print_receipt_callback=None,
         annul_payment_callback=None,
+        reverse_manual_debit_callback=None,
         can_annul_payments: bool = False,
         parent=None,
     ):
@@ -72,11 +77,13 @@ class CustomerLedgerPage(QWidget):
         self.setObjectName("customerLedgerPage")
         self.current_user = current_user
         self.register_payment_callback = register_payment_callback
+        self.register_manual_debit_callback = register_manual_debit_callback
         self.print_statement_callback = print_statement_callback
         self.whatsapp_statement_callback = whatsapp_statement_callback
         self.email_statement_callback = email_statement_callback
         self.print_receipt_callback = print_receipt_callback
         self.annul_payment_callback = annul_payment_callback
+        self.reverse_manual_debit_callback = reverse_manual_debit_callback
         self.can_annul_payments = can_annul_payments
 
         layout = QVBoxLayout(self)
@@ -169,6 +176,14 @@ class CustomerLedgerPage(QWidget):
         self.register_payment_button.clicked.connect(self._on_register_payment)
         header_row.addWidget(self.register_payment_button)
 
+        self.register_manual_debit_button = QPushButton("Registrar débito")
+        self.register_manual_debit_button.setObjectName("customerLedgerRegisterManualDebitButton")
+        self.register_manual_debit_button.setEnabled(
+            self.register_manual_debit_callback is not None
+        )
+        self.register_manual_debit_button.clicked.connect(self._on_register_manual_debit)
+        header_row.addWidget(self.register_manual_debit_button)
+
         self.print_statement_button = QPushButton("Imprimir extracto")
         self.print_statement_button.setObjectName("customerLedgerPrintStatementButton")
         self.print_statement_button.setEnabled(False)
@@ -202,6 +217,14 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_button.setEnabled(False)
         self.annul_payment_button.clicked.connect(self._on_annul_payment)
         payment_actions.addWidget(self.annul_payment_button)
+
+        self.reverse_manual_debit_button = QPushButton("Reversar débito")
+        self.reverse_manual_debit_button.setObjectName(
+            "customerLedgerReverseManualDebitButton"
+        )
+        self.reverse_manual_debit_button.setEnabled(False)
+        self.reverse_manual_debit_button.clicked.connect(self._on_reverse_manual_debit)
+        payment_actions.addWidget(self.reverse_manual_debit_button)
         layout.addLayout(payment_actions)
 
         # Highlighted balance card
@@ -374,11 +397,13 @@ class CustomerLedgerPage(QWidget):
                 reference = f"OC-{movement.load_order.order_number:06d}"
             elif movement.payment is not None:
                 reference = movement.payment.receipt_number
+            elif movement.reference:
+                reference = movement.reference
             importe = movement.total_amount
             importe_text = f"${importe:,.2f}"
             saldo_text = f"${balances[row_index]:,.2f}"
             values = (
-                _display_datetime(movement.created_at),
+                _display_movement_date(movement),
                 type_label,
                 reference,
                 movement.description,
@@ -401,12 +426,18 @@ class CustomerLedgerPage(QWidget):
                     and movement.payment is not None
                 ):
                     cell.setData(Qt.UserRole, movement.payment.id)
+                if column == 0:
+                    cell.setData(Qt.UserRole + 1, movement.id)
                 self.movements_table.setItem(row_index, column, cell)
         self.register_payment_button.setEnabled(self.register_payment_callback is not None)
+        self.register_manual_debit_button.setEnabled(
+            self.register_manual_debit_callback is not None
+        )
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
         self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
         self.email_statement_button.setEnabled(self.email_statement_callback is not None)
         self._update_payment_actions()
+        self._update_manual_debit_action()
 
     def _selected_client(self) -> Client | None:
         current = self.clients_table.currentRow()
@@ -447,11 +478,15 @@ class CustomerLedgerPage(QWidget):
         self.movements_table.setRowCount(0)
         self.empty_label.hide()
         self.register_payment_button.setEnabled(False)
+        self.register_manual_debit_button.setEnabled(
+            self.register_manual_debit_callback is not None
+        )
         self.print_statement_button.setEnabled(False)
         self.whatsapp_statement_button.setEnabled(False)
         self.email_statement_button.setEnabled(False)
         self.print_receipt_button.setEnabled(False)
         self.annul_payment_button.setEnabled(False)
+        self.reverse_manual_debit_button.setEnabled(False)
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
@@ -460,6 +495,13 @@ class CustomerLedgerPage(QWidget):
         if client is None:
             return
         self.register_payment_callback(client)
+        self.refresh()
+
+    def _on_register_manual_debit(self) -> None:
+        if self.register_manual_debit_callback is None:
+            return
+        client = self._selected_client()
+        self.register_manual_debit_callback(client)
         self.refresh()
 
     def _selected_payment(self) -> ClientPayment | None:
@@ -474,6 +516,38 @@ class CustomerLedgerPage(QWidget):
 
     def _on_movement_selected(self, *_args) -> None:
         self._update_payment_actions()
+        self._update_manual_debit_action()
+
+    def _selected_movement(self) -> ClientAccountMovement | None:
+        current = self.movements_table.currentRow()
+        if current < 0:
+            return None
+        item = self.movements_table.item(current, 0)
+        movement_id = item.data(Qt.UserRole + 1) if item is not None else None
+        if movement_id is None:
+            return None
+        return ClientAccountMovement.get_or_none(ClientAccountMovement.id == movement_id)
+
+    def _update_manual_debit_action(self) -> None:
+        movement = self._selected_movement()
+        has_reversal = False
+        if movement is not None:
+            has_reversal = (
+                ClientAccountMovement.select()
+                .where(
+                    ClientAccountMovement.reverses == movement,
+                    ClientAccountMovement.movement_type
+                    == ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL,
+                )
+                .exists()
+            )
+        self.reverse_manual_debit_button.setEnabled(
+            movement is not None
+            and movement.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT
+            and not movement.is_reversal
+            and not has_reversal
+            and self.reverse_manual_debit_callback is not None
+        )
 
     def _update_payment_actions(self) -> None:
         payment = self._selected_payment()
@@ -499,8 +573,21 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_callback(payment)
         self.refresh()
 
+    def _on_reverse_manual_debit(self) -> None:
+        movement = self._selected_movement()
+        if movement is None or self.reverse_manual_debit_callback is None:
+            return
+        self.reverse_manual_debit_callback(movement)
+        self.refresh()
+
 
 def _display_datetime(value) -> str:
     if value.tzinfo is not None:
         value = value.astimezone()
     return value.strftime("%d/%m/%Y %H:%M")
+
+
+def _display_movement_date(movement: ClientAccountMovement) -> str:
+    if movement.movement_date is not None:
+        return movement.movement_date.strftime("%d/%m/%Y")
+    return _display_datetime(movement.created_at)

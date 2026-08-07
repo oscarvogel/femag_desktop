@@ -19,6 +19,8 @@ MOVEMENT_TYPE_LABELS = {
     "load_order_documental_reversal": "Reverso OC",
     "payment": "Pago",
     "payment_reversal": "Anulación de pago",
+    "manual_debit": "Débito manual",
+    "manual_debit_reversal": "Reverso débito manual",
 }
 
 
@@ -27,7 +29,15 @@ def _reference(movement: ClientAccountMovement) -> str:
         return f"OC-{movement.load_order.order_number:06d}"
     if movement.payment is not None:
         return movement.payment.receipt_number
+    if movement.reference:
+        return movement.reference
     return movement.source_ref or "-"
+
+
+def _movement_date(movement: ClientAccountMovement) -> str:
+    if movement.movement_date is not None:
+        return movement.movement_date.strftime("%d/%m/%Y")
+    return movement.created_at.strftime("%d/%m/%Y %H:%M")
 
 
 def export_account_statement(client: Client, output_dir: str | Path) -> Path:
@@ -106,7 +116,7 @@ def _movements_table(movements: list[ClientAccountMovement], balances: list[floa
         ):
             type_label = "Pago anulado"
         rows.append([
-            Paragraph(movement.created_at.strftime("%d/%m/%Y %H:%M"), styles["cell"]),
+            Paragraph(_movement_date(movement), styles["cell"]),
             Paragraph(type_label, styles["cell"]),
             Paragraph(_reference(movement), styles["cell"]),
             Paragraph(movement.description, styles["cell"]),

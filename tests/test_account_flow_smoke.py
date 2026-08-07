@@ -8,6 +8,7 @@ from conftest import _complete_order_for_issue
 from app.models.accounting import ClientAccountMovement
 from app.models.payments import ClientPayment
 from app.services.client_payment_service import ClientPaymentService
+from app.services.client_manual_debit_service import ClientManualDebitService
 from app.services.ledger_query_service import client_balance
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
@@ -108,3 +109,35 @@ def test_full_account_flow_smoke(db):
     assert reversal.reverses == debit
     assert reversal.total_amount == approx(-expected_total)
     assert reversal.payment is None
+
+
+def test_manual_debit_and_reversal_account_flow_smoke(db):
+    """Débito manual de $5.000 y reverso dejan el saldo nuevamente en cero."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+
+    client = Client.create(
+        name="Cliente Smoke Débito",
+        cuit="30700002217",
+        iva_condition="RI",
+    )
+    service = ClientManualDebitService(current_user="caja")
+
+    assert client_balance(client) == 0
+    debit = service.register_manual_debit(
+        client=client,
+        amount=5000,
+        description="Ajuste smoke",
+        reference="SMOKE-217",
+    )
+    assert client_balance(client) == approx(5000)
+    assert debit.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT
+
+    reversal = service.reverse_manual_debit(debit)
+    assert client_balance(client) == 0
+    assert reversal.reverses == debit
+    assert reversal.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL
+    assert [audit.action for audit in AuditLog.select().order_by(AuditLog.id)] == [
+        "registrar_debito_manual",
+        "reversar_debito_manual",
+    ]
