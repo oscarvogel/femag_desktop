@@ -3154,6 +3154,7 @@ QComboBox::down-arrow, QDateEdit::down-arrow {
     width: 12px;
     height: 8px;
 }
+QComboBox::drop-down:hover, QDateEdit::drop-down:hover { background: #eef2f7; }
 QComboBox QAbstractItemView {
     background: #ffffff;
     color: #172033;
