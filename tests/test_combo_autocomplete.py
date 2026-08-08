@@ -61,18 +61,26 @@ def _show(combo: QComboBox) -> QComboBox:
     return combo
 
 
-def test_combo_click_on_field_opens_popup() -> None:
+def test_combo_click_on_field_opens_filterable_popup() -> None:
     combo = _show(_combo())
     QTest.mouseClick(combo.lineEdit(), Qt.LeftButton)
     _application().processEvents()
-    assert combo.view().isVisible()
+    assert not combo.view().isVisible()
+    assert combo.completer().popup().isVisible()
 
 
 def test_combo_click_again_closes_popup() -> None:
     combo = _show(_combo())
     QTest.mouseClick(combo.lineEdit(), Qt.LeftButton)
     _application().processEvents()
-    assert combo.view().isVisible()
+    assert combo.completer().popup().isVisible()
+    QTest.mouseClick(combo.lineEdit(), Qt.LeftButton)
+    _application().processEvents()
+    assert not combo.completer().popup().isVisible()
+
+
+def test_combo_click_does_not_open_non_filtering_view() -> None:
+    combo = _show(_combo())
     QTest.mouseClick(combo.lineEdit(), Qt.LeftButton)
     _application().processEvents()
     assert not combo.view().isVisible()

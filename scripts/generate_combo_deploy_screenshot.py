@@ -31,7 +31,8 @@ def _capture_deployed_list(combo: QComboBox, title: str, output: Path) -> None:
     layout.addWidget(preview_combo)
     preview.resize(560, 200)
     preview.show()
-    preview_combo.showPopup()
+    preview_combo.completer().setCompletionPrefix("")
+    preview_combo.completer().complete()
     QApplication.processEvents()
     image = preview.grab().toImage().convertToFormat(QImage.Format_RGB32)
     if not image.save(str(output), "PNG"):

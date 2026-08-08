@@ -24,25 +24,20 @@ class _PopupToggleFilter(QObject):
         return False
 
     def _popup_is_visible(self) -> bool:
-        if self._combo.view().isVisible():
-            return True
         completer = self._combo.completer()
         return completer is not None and completer.popup().isVisible()
 
     def _close_popup(self) -> None:
         completer = self._combo.completer()
-        if completer is not None and completer.popup().isVisible():
+        if completer is not None:
             completer.popup().hide()
-        self._combo.hidePopup()
 
     def _open_filtered_popup(self) -> None:
         text = self._combo.lineEdit().text()
         completer = self._combo.completer()
-        if text and completer is not None:
+        if completer is not None:
             completer.setCompletionPrefix(text)
             completer.complete()
-        else:
-            self._combo.showPopup()
 
 
 def enable_combo_autocomplete(
