@@ -150,6 +150,7 @@ def test_global_styles_include_polished_combo_controls():
 
     assert "QComboBox" in STYLES
     assert "QComboBox::drop-down" in STYLES
+    assert "QComboBox::drop-down:hover" in STYLES
     assert "chevron-down.svg" in STYLES
     assert "QComboBox QAbstractItemView" in STYLES
     assert "QDateEdit" in STYLES
