@@ -77,6 +77,17 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         ]
     )
 
+    system_children = [
+        item
+        for item in (
+            approved_item("Usuarios", route_key="user_management"),
+            approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
+        )
+        if item.action_key is not None
+    ]
+    if system_children:
+        principal_items.append(MenuItemView(title="Sistema", children=system_children))
+
     return SidebarTreeSpec(
         sections=[
             MenuSectionView(

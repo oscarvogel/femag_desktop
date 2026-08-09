@@ -531,7 +531,23 @@ py -3.12 -m app.main --ui
 8. Confirmar que el movimiento original sigue visible, el botón de reverso queda
    deshabilitado para ese débito y el saldo vuelve a cero.
 9. Revisar auditoría: deben existir `registrar_debito_manual` y
-   `reversar_debito_manual` con usuario, cliente, importes y movimientos relacionados.
+    `reversar_debito_manual` con usuario, cliente, importes y movimientos relacionados.
+
+### 10.9 Circuito manual — usuarios, permisos y sesión
+
+1. En una base nueva, abrir el login y pulsar **Crear administrador inicial**.
+2. Ingresar con ese administrador y abrir **Sistema → Usuarios**.
+3. Crear un usuario con perfil **Secretaría** y otro con perfil **Solo consulta**.
+4. Cerrar sesión e ingresar con el usuario de Secretaría. Verificar que no aparece el menú
+   de Sistema y que puede utilizar únicamente las acciones de su perfil.
+5. Intentar ingresar con un usuario previamente deshabilitado y verificar el mensaje genérico
+   de credenciales incorrectas.
+6. Volver al administrador, editar los permisos de un perfil y guardar. Verificar el registro
+   de auditoría del cambio.
+7. Probar **Cambiar clave** con el usuario actual y **Restablecer contraseña** desde el perfil
+   administrador.
+8. Intentar deshabilitar al último administrador habilitado. La operación debe ser rechazada.
+9. Pulsar **Cerrar sesión** y comprobar que se muestra nuevamente el login.
 
 ---
 
