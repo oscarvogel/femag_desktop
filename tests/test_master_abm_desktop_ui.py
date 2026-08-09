@@ -1090,3 +1090,110 @@ def test_client_abm_shows_inactive_and_active_addresses(db):
     statuses = [places_table.item(r, 4).text() for r in range(places_table.rowCount())]
     assert "Activo" in statuses
     assert "Inactivo" in statuses
+
+
+def test_master_search_normalizes_accents_and_keeps_stable_sort_order():
+    from app.ui.master_abm import filter_and_sort_master_rows, normalize_master_text
+
+    rows = [
+        [3, "Zeta"],
+        [1, "Árbol"],
+        [2, "arbol"],
+        [4, "Logística Sur"],
+    ]
+
+    assert normalize_master_text("Razón Social") == "razonsocial"
+    assert [row[1] for row in filter_and_sort_master_rows(rows, query="ARBOL")] == [
+        "Árbol",
+        "arbol",
+    ]
+    assert [row[0] for row in filter_and_sort_master_rows(rows, descending=True)] == [
+        3,
+        4,
+        1,
+        2,
+    ]
+    assert filter_and_sort_master_rows(rows, query="inexistente") == []
+
+
+def test_master_abms_search_and_sort_products_carriers_and_drivers(db):
+    from PyQt5.QtWidgets import QLineEdit, QTableWidget
+
+    from app.models.masters import Carrier, Driver, Product
+
+    carrier_nandu = Carrier.create(name="Transporte Ñandú", cuit="30700000001")
+    carrier_sur = Carrier.create(name="Logística Sur", cuit="30700000002")
+    Driver.create(name="Bruno Chofer", carrier=carrier_nandu, document="DNI1")
+    Driver.create(name="Ana Chofer", carrier=carrier_sur, document="DNI2")
+    Product.create(name="Zeta Producto", unit="kg")
+    Product.create(name="Árbol Producto", unit="kg")
+
+    app, window = _admin_window("admin_master_search_sort")
+
+    _navigate_to_route(window, "products")
+    product_table = window.findChild(QTableWidget, "newProductButtonTable")
+    product_search = window.findChild(QLineEdit, "newProductButtonSearchInput")
+    assert [product_table.item(row, 0).text() for row in range(product_table.rowCount())] == [
+        "Árbol Producto",
+        "Zeta Producto",
+    ]
+    product_search.setText("arbol")
+    app.processEvents()
+    assert product_table.rowCount() == 1
+    assert product_table.item(0, 0).text() == "Árbol Producto"
+    product_search.clear()
+    product_table.horizontalHeader().sectionClicked.emit(0)
+    assert [product_table.item(row, 0).text() for row in range(product_table.rowCount())] == [
+        "Zeta Producto",
+        "Árbol Producto",
+    ]
+
+    _navigate_to_route(window, "carriers")
+    carrier_table = window.findChild(QTableWidget, "newCarrierButtonTable")
+    carrier_search = window.findChild(QLineEdit, "newCarrierButtonSearchInput")
+    carrier_search.setText("nandu")
+    app.processEvents()
+    assert carrier_table.rowCount() == 1
+    assert carrier_table.item(0, 0).text() == "Transporte Ñandú"
+
+    _navigate_to_route(window, "drivers")
+    driver_table = window.findChild(QTableWidget, "newDriverButtonTable")
+    driver_search = window.findChild(QLineEdit, "newDriverButtonSearchInput")
+    driver_search.setText("logistica")
+    app.processEvents()
+    assert driver_table.rowCount() == 1
+    assert driver_table.item(0, 0).text() == "Ana Chofer"
+
+
+def test_clients_abm_searches_clients_and_delivery_places(db):
+    from PyQt5.QtWidgets import QLabel, QLineEdit, QTableWidget
+
+    from app.models.masters import Client, ClientAddress
+
+    client = Client.create(name="Águila Sur", cuit="30700000003", iva_condition="RI")
+    ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Puerto Rico",
+        address="Ruta Ñandú 123",
+    )
+    app, window = _admin_window("admin_client_search_sort")
+
+    client_table = window.findChild(QTableWidget, "clientTable")
+    client_search = window.findChild(QLineEdit, "clientSearchInput")
+    client_search.setText("aguila")
+    app.processEvents()
+    assert client_table.rowCount() == 1
+    assert client_table.item(0, 0).text() == "Águila Sur"
+
+    places_table = window.findChild(QTableWidget, "clientPlacesTable")
+    places_search = window.findChild(QLineEdit, "clientPlacesSearchInput")
+    places_search.setText("nandu")
+    app.processEvents()
+    assert places_table.rowCount() == 1
+    assert places_table.item(0, 1).text() == "Ruta Ñandú 123"
+    places_search.setText("sin coincidencia")
+    app.processEvents()
+    assert places_table.rowCount() == 0
+    assert "No se encontraron" in window.findChild(QLabel, "clientPlacesSearchFeedback").text()

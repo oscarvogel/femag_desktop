@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -62,6 +63,111 @@ class MasterAbmConfig:
     dialog_class: type[QDialog]
     new_button_name: str
     edit_button_name: str
+    sort_column: int = 0
+    search_placeholder: str = ""
+
+
+def normalize_master_text(value: object) -> str:
+    """Return a comparison key shared by master-table search and sorting."""
+    text = unicodedata.normalize("NFKD", "" if value is None else str(value))
+    return "".join(character for character in text.casefold() if character.isalnum())
+
+
+def filter_and_sort_master_rows(
+    rows: list[list[object]],
+    *,
+    query: str = "",
+    sort_column: int = 0,
+    descending: bool = False,
+) -> list[list[object]]:
+    """Filter visible row values and sort them deterministically for an ABM table."""
+    normalized_query = normalize_master_text(query)
+    visible_rows = [
+        row
+        for row in rows
+        if not normalized_query
+        or normalized_query in normalize_master_text(" ".join(str(value) for value in row[1:]))
+    ]
+    # Use the record id as the stable tie-breaker in both directions.
+    visible_rows.sort(key=lambda row: row[0])
+    visible_rows.sort(
+        key=lambda row: normalize_master_text(
+            row[sort_column + 1] if sort_column + 1 < len(row) else ""
+        ),
+        reverse=descending,
+    )
+    return visible_rows
+
+
+class MasterTableController:
+    """Reusable search/sort behavior for the master ABM tables."""
+
+    def __init__(
+        self,
+        *,
+        table: QTableWidget,
+        search_input: QLineEdit,
+        search_feedback: QLabel,
+        rows_fn,
+        sort_column: int = 0,
+    ):
+        self.table = table
+        self.search_input = search_input
+        self.search_feedback = search_feedback
+        self.rows_fn = rows_fn
+        self.sort_column = sort_column
+        self.sort_order = Qt.AscendingOrder
+        header = self.table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(self.sort_column, self.sort_order)
+        header.sectionClicked.connect(self._toggle_sort)
+        self.search_input.textChanged.connect(self.refresh)
+
+    def _toggle_sort(self, column: int) -> None:
+        if column == self.sort_column:
+            self.sort_order = (
+                Qt.DescendingOrder
+                if self.sort_order == Qt.AscendingOrder
+                else Qt.AscendingOrder
+            )
+        else:
+            self.sort_column = column
+            self.sort_order = Qt.AscendingOrder
+        self.table.horizontalHeader().setSortIndicator(self.sort_column, self.sort_order)
+        self.refresh()
+
+    def selected_id(self) -> int | None:
+        item = self.table.item(self.table.currentRow(), 0)
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def refresh(self) -> None:
+        selected_id = self.selected_id()
+        rows = filter_and_sort_master_rows(
+            list(self.rows_fn()),
+            query=self.search_input.text(),
+            sort_column=self.sort_column,
+            descending=self.sort_order == Qt.DescendingOrder,
+        )
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            row_id, values = row[0], row[1:]
+            for column, value in enumerate(values):
+                self.table.setItem(row_index, column, QTableWidgetItem(str(value)))
+            if self.table.item(row_index, 0):
+                self.table.item(row_index, 0).setData(Qt.UserRole, row_id)
+
+        if rows:
+            selected_row = next(
+                (index for index, row in enumerate(rows) if row[0] == selected_id),
+                0,
+            )
+            self.table.setCurrentCell(selected_row, 0)
+
+        query = self.search_input.text().strip()
+        if query and not rows:
+            self.search_feedback.setText(f"No se encontraron coincidencias para «{query}».")
+        else:
+            self.search_feedback.setText("")
 
 
 def build_master_abm_page(
@@ -76,6 +182,19 @@ def build_master_abm_page(
     feedback = QLabel("")
     feedback.setObjectName(f"{config.new_button_name}Feedback")
     feedback.setToolTip(AUTO_ABM_TECHNICAL_DEBT)
+    search_input = QLineEdit()
+    search_input.setObjectName(f"{config.new_button_name}SearchInput")
+    search_input.setClearButtonEnabled(True)
+    search_input.setPlaceholderText(
+        config.search_placeholder or f"Buscar {config.title.lower()}..."
+    )
+    search_row = QHBoxLayout()
+    search_row.addWidget(QLabel("Buscar"))
+    search_row.addWidget(search_input, 1)
+    layout.addLayout(search_row)
+    search_feedback = QLabel("")
+    search_feedback.setObjectName(f"{config.new_button_name}SearchFeedback")
+    layout.addWidget(search_feedback)
     actions = QHBoxLayout()
     new_button = _action_button(config.new_button_name, "Nuevo")
     edit_button = _action_button(config.edit_button_name, "Editar", secondary=True)
@@ -100,23 +219,13 @@ def build_master_abm_page(
     layout.addWidget(table, 1)
     layout.addWidget(feedback)
 
-    def refresh() -> None:
-        rows = config.rows_fn()
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            row_id, values = row[0], row[1:]
-            for column, value in enumerate(values):
-                table.setItem(row_index, column, QTableWidgetItem(str(value)))
-            if table.item(row_index, 0):
-                table.item(row_index, 0).setData(Qt.UserRole, row_id)
-        if rows:
-            table.setCurrentCell(0, 0)
-
-    def selected_id() -> int | None:
-        item = table.item(table.currentRow(), 0)
-        if item is None:
-            return None
-        return item.data(Qt.UserRole)
+    table_controller = MasterTableController(
+        table=table,
+        search_input=search_input,
+        search_feedback=search_feedback,
+        rows_fn=config.rows_fn,
+        sort_column=config.sort_column,
+    )
 
     def open_new() -> None:
         if not can_create:
@@ -124,26 +233,27 @@ def build_master_abm_page(
             return
         dialog = config.dialog_class(current_user=current_user, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
-            refresh()
+            table_controller.refresh()
             feedback.setText("Registro guardado.")
 
     def open_edit() -> None:
         if not can_modify:
             feedback.setText("El perfil actual no permite modificar este maestro.")
             return
-        row_id = selected_id()
+        row_id = table_controller.selected_id()
         if row_id is None:
             feedback.setText("Seleccione un registro para editar.")
             return
         dialog = config.dialog_class(current_user=current_user, record_id=row_id, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
-            refresh()
+            table_controller.refresh()
             feedback.setText("Registro actualizado.")
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
-    page.refresh = refresh
-    refresh()
+    page.master_table_controller = table_controller
+    page.refresh = table_controller.refresh
+    table_controller.refresh()
     return page
 
 
@@ -156,6 +266,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             ClientEntryDialog,
             "newClientButton",
             "editClientButton",
+            search_placeholder="Buscar clientes por nombre o CUIT...",
         ),
         "addresses": MasterAbmConfig(
             "Domicilios",
@@ -164,6 +275,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             ClientAddressEntryDialog,
             "newAddressButton",
             "editAddressButton",
+            search_placeholder="Buscar domicilios por cliente, ciudad o dirección...",
         ),
         "products": MasterAbmConfig(
             "Productos",
@@ -172,6 +284,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             ProductEntryDialog,
             "newProductButton",
             "editProductButton",
+            search_placeholder="Buscar productos por nombre...",
         ),
         "vat_types": MasterAbmConfig(
             "Tipos de IVA",
@@ -180,6 +293,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             VatTypeEntryDialog,
             "newVatTypeButton",
             "editVatTypeButton",
+            search_placeholder="Buscar tipos de IVA...",
         ),
         "drivers": MasterAbmConfig(
             "Choferes",
@@ -188,6 +302,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             DriverEntryDialog,
             "newDriverButton",
             "editDriverButton",
+            search_placeholder="Buscar choferes por nombre o transportista...",
         ),
         "carriers": MasterAbmConfig(
             "Transportistas",
@@ -196,6 +311,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             CarrierEntryDialog,
             "newCarrierButton",
             "editCarrierButton",
+            search_placeholder="Buscar transportistas por nombre o razón social...",
         ),
         "trucks": MasterAbmConfig(
             "Camiones",
@@ -204,6 +320,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             TruckEntryDialog,
             "newTruckButton",
             "editTruckButton",
+            search_placeholder="Buscar camiones por patente o transportista...",
         ),
     }
 
@@ -940,7 +1057,7 @@ def _client_rows() -> list[list[object]]:
     try:
         return [
             [client.id, client.name, client.cuit, f"Lista {client.lista_precios}", "Activo" if client.active else "Inactivo"]
-            for client in Client.select().order_by(Client.name).limit(50)
+            for client in Client.select().order_by(Client.name)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -960,7 +1077,6 @@ def _address_rows() -> list[list[object]]:
             for address in ClientAddress.select()
             .join(Client)
             .order_by(Client.name, ClientAddress.city)
-            .limit(50)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -987,7 +1103,7 @@ def _product_rows() -> list[list[object]]:
                 _money_text(product.precio_lista_4),
                 "Activo" if product.active else "Inactivo",
             ]
-            for product in Product.select().order_by(Product.name).limit(50)
+            for product in Product.select().order_by(Product.name)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -1002,7 +1118,7 @@ def _vat_type_rows() -> list[list[object]]:
                 f"{tipo_iva.porcentaje:g}%",
                 "Activo" if tipo_iva.activo else "Inactivo",
             ]
-            for tipo_iva in TipoIVA.select().order_by(TipoIVA.nombre).limit(50)
+            for tipo_iva in TipoIVA.select().order_by(TipoIVA.nombre)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -1011,7 +1127,7 @@ def _vat_type_rows() -> list[list[object]]:
 def _driver_rows() -> list[list[object]]:
     try:
         rows = []
-        for driver in Driver.select().order_by(Driver.name).limit(50):
+        for driver in Driver.select().order_by(Driver.name):
             truck = driver.usual_truck if driver.usual_truck_id is not None else None
             if driver.carrier_id is None:
                 relationship_state = "Sin transportista"
@@ -1038,7 +1154,7 @@ def _carrier_rows() -> list[list[object]]:
     try:
         return [
             [carrier.id, carrier.name, carrier.cuit or "", carrier.phone or "", "Activo" if carrier.active else "Inactivo"]
-            for carrier in Carrier.select().order_by(Carrier.name).limit(50)
+            for carrier in Carrier.select().order_by(Carrier.name)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -1054,7 +1170,7 @@ def _truck_rows() -> list[list[object]]:
                 truck.carrier.name if truck.carrier_id is not None else "Sin asignar",
                 "Activo" if truck.active else "Inactivo",
             ]
-            for truck in Truck.select().order_by(Truck.domain).limit(50)
+            for truck in Truck.select().order_by(Truck.domain)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -1088,6 +1204,18 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_feedback = QLabel("")
     client_feedback.setObjectName("clientAbmFeedback")
 
+    client_search_input = QLineEdit()
+    client_search_input.setObjectName("clientSearchInput")
+    client_search_input.setClearButtonEnabled(True)
+    client_search_input.setPlaceholderText("Buscar clientes por nombre o CUIT...")
+    client_search_row = QHBoxLayout()
+    client_search_row.addWidget(QLabel("Buscar"))
+    client_search_row.addWidget(client_search_input, 1)
+    layout.addLayout(client_search_row)
+    client_search_feedback = QLabel("")
+    client_search_feedback.setObjectName("clientSearchFeedback")
+    layout.addWidget(client_search_feedback)
+
     client_actions = QHBoxLayout()
     new_client_btn = _action_button("newClientButton", "Nuevo")
     edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
@@ -1109,6 +1237,18 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     separator = QLabel("Domicilios")
     separator.setObjectName("sectionTitle")
     layout.addWidget(separator)
+
+    places_search_input = QLineEdit()
+    places_search_input.setObjectName("clientPlacesSearchInput")
+    places_search_input.setClearButtonEnabled(True)
+    places_search_input.setPlaceholderText("Buscar domicilios por ciudad, dirección o estado...")
+    places_search_row = QHBoxLayout()
+    places_search_row.addWidget(QLabel("Buscar domicilios"))
+    places_search_row.addWidget(places_search_input, 1)
+    layout.addLayout(places_search_row)
+    places_search_feedback = QLabel("")
+    places_search_feedback.setObjectName("clientPlacesSearchFeedback")
+    layout.addWidget(places_search_feedback)
 
     places_feedback = QLabel("")
     places_feedback.setObjectName("clientPlacesFeedback")
@@ -1136,20 +1276,8 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     layout.addWidget(places_feedback)
 
     def refresh_clients() -> None:
-        rows = _client_rows()
-        client_table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            row_id, values = row[0], row[1:]
-            for column, value in enumerate(values):
-                client_table.setItem(row_index, column, QTableWidgetItem(str(value)))
-            if client_table.item(row_index, 0):
-                client_table.item(row_index, 0).setData(Qt.UserRole, row_id)
-        if rows:
-            client_table.setCurrentCell(0, 0)
-            refresh_places()
-        else:
-            places_table.setRowCount(0)
-            places_feedback.setText("")
+        client_table_controller.refresh()
+        refresh_places()
 
     def selected_client_id() -> int | None:
         item = client_table.item(client_table.currentRow(), 0)
@@ -1161,20 +1289,31 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
         cid = selected_client_id()
         if cid is None:
             places_table.setRowCount(0)
+            places_search_feedback.setText("")
             places_feedback.setText("Seleccione un cliente para ver sus domicilios.")
             return
+        places_table_controller.refresh()
         rows = _client_address_rows(cid)
-        places_table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            row_id, values = row[0], row[1:]
-            for column, value in enumerate(values):
-                places_table.setItem(row_index, column, QTableWidgetItem(str(value)))
-            if places_table.item(row_index, 0):
-                places_table.item(row_index, 0).setData(Qt.UserRole, row_id)
         if not rows:
             places_feedback.setText("Este cliente no tiene domicilios cargados.")
         else:
             places_feedback.setText("")
+
+    client_table_controller = MasterTableController(
+        table=client_table,
+        search_input=client_search_input,
+        search_feedback=client_search_feedback,
+        rows_fn=_client_rows,
+    )
+    places_table_controller = MasterTableController(
+        table=places_table,
+        search_input=places_search_input,
+        search_feedback=places_search_feedback,
+        rows_fn=lambda: _client_address_rows(selected_client_id())
+        if selected_client_id() is not None
+        else [],
+        sort_column=1,
+    )
 
     def open_new_client() -> None:
         if not can_create:
@@ -1239,6 +1378,8 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     toggle_place_btn.clicked.connect(toggle_place_active)
     client_table.currentCellChanged.connect(lambda *_: refresh_places())
 
+    page.client_table_controller = client_table_controller
+    page.client_places_table_controller = places_table_controller
     page.refresh = refresh_clients
     refresh_clients()
     return page
