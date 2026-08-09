@@ -32,6 +32,11 @@ La pestaña **Perfiles y permisos** muestra la matriz por módulo, pantalla y ac
 administrador habilitado puede guardar cambios. Las modificaciones quedan auditadas con
 usuario, fecha/hora, perfil, pantalla, acción y valor anterior/nuevo.
 
+Los perfiles integrados son exactamente **Administrador**, **Secretaría**,
+**Administración** y **Solo consulta**. Al iniciar el sistema, los nombres históricos sin
+tilde (`Secretaria` y `Administracion`) se normalizan y sus usuarios y permisos se
+consolidan en el perfil oficial correspondiente.
+
 La ausencia de un permiso explícito se interpreta como denegación. Ocultar un botón no es la
 única protección: las operaciones sensibles también deben rechazar la acción desde el servicio
 que las ejecuta.
