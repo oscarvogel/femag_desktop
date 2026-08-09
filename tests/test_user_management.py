@@ -23,6 +23,7 @@ def test_user_lifecycle_passwords_and_last_admin_protection(db):
     )
 
     assert secretary.display_name == "Ana Secretaría"
+    assert secretary.profile.name == "Secretaría"
     assert auth.authenticate("secretaria", "clave") == secretary
 
     auth.set_active(secretary, False, actor=admin)
@@ -45,6 +46,53 @@ def test_user_lifecycle_passwords_and_last_admin_protection(db):
     assert "restablecer contraseña" in actions
     assert "habilitar usuario" in actions
     assert "deshabilitar usuario" in actions
+
+
+def test_seed_defaults_consolidates_legacy_profile_names_and_is_idempotent(db):
+    from app.models.security import MenuItem, Permission, User, UserProfile
+    from app.services.permission_service import PermissionService
+
+    service = PermissionService()
+    service.seed_defaults()
+    legacy_profile = UserProfile.create(name="Administracion")
+    UserProfile.create(name="Secretaria")
+    legacy_user = User.create(
+        username="legacy",
+        password_hash="legacy-hash",
+        profile=legacy_profile,
+        active=True,
+    )
+    menu_item = MenuItem.get(MenuItem.title == "Clientes")
+    Permission.create(
+        profile=legacy_profile,
+        menu_item=menu_item,
+        action="ver",
+        allowed=False,
+    )
+
+    service.seed_defaults()
+    service.seed_defaults()
+
+    assert {profile.name for profile in UserProfile.select().order_by(UserProfile.name)} == {
+        "Administrador",
+        "Administración",
+        "Secretaría",
+        "Solo consulta",
+    }
+    legacy_user = User.get_by_id(legacy_user.id)
+    assert legacy_user.profile.name == "Administración"
+    assert Permission.select().where(Permission.profile == legacy_profile).count() == 0
+    assert (
+        Permission.select()
+        .where(
+            (Permission.profile == legacy_user.profile)
+            & (Permission.menu_item == menu_item)
+            & (Permission.action == "ver")
+        )
+        .get()
+        .allowed
+        is True
+    )
 
 
 def test_admin_can_edit_permissions_and_non_admin_cannot(db):

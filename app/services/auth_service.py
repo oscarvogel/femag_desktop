@@ -47,6 +47,9 @@ class AuthService:
         profile_name = (profile_name or "").strip()
         if not profile_name:
             raise ValueError("Seleccione un perfil válido.")
+        from app.services.permission_service import canonical_profile_name
+
+        profile_name = canonical_profile_name(profile_name)
         profile, _ = UserProfile.get_or_create(name=profile_name)
         return profile
 
