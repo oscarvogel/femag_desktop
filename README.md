@@ -126,6 +126,11 @@ python scripts/init_db.py
 python scripts/create_admin_user.py admin <clave>
 ```
 
+En una instalación nueva, el primer inicio también muestra **Crear administrador inicial**
+en la pantalla de login. Una vez creado el primer administrador, las altas, bajas lógicas,
+habilitación, perfiles, permisos y restablecimientos se gestionan desde **Sistema → Usuarios**.
+No se permite deshabilitar ni degradar al último administrador habilitado.
+
 ## Validaciones
 
 Antes de cerrar cambios ejecutar:

@@ -1,8 +1,10 @@
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout
 
+from app.models.security import User
 from app.services.auth_service import AuthService
 from app.ui.branding import femag_icon, load_brand_pixmap
+from app.ui.user_management import InitialAdminDialog
 
 
 class LoginWindow(QDialog):
@@ -90,6 +92,14 @@ class LoginWindow(QDialog):
 
         outer_layout.addSpacing(10)
 
+        self.bootstrap_button = None
+        if not User.select().exists():
+            self.bootstrap_button = QPushButton("Crear administrador inicial")
+            self.bootstrap_button.setObjectName("loginBootstrapButton")
+            self.bootstrap_button.clicked.connect(self._create_initial_admin)
+            outer_layout.addWidget(self.bootstrap_button)
+            outer_layout.addSpacing(8)
+
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
 
@@ -136,6 +146,25 @@ class LoginWindow(QDialog):
             self.feedback.setText("Usuario o contrasena incorrectos. Verifique sus credenciales.")
             return
         self.authenticated_user = user
+        self.accept()
+
+    def _create_initial_admin(self):
+        dialog = InitialAdminDialog(parent=self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        values = dialog.values()
+        try:
+            AuthService().create_initial_admin(
+                values["username"],
+                values["password"],
+                display_name=values["display_name"],
+            )
+            self.authenticated_user = AuthService().authenticate(
+                values["username"], values["password"]
+            )
+        except (ValueError, TypeError) as exc:
+            self.feedback.setText(str(exc))
+            return
         self.accept()
 
     def show(self):
