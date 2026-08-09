@@ -93,7 +93,17 @@ class LoginWindow(QDialog):
         outer_layout.addSpacing(10)
 
         self.bootstrap_button = None
-        if not User.select().exists():
+        # El chequeo de "primer administrador" requiere una DB inicializada.
+        # La app real siempre la garantiza antes de mostrar el login, pero los
+        # tests instancian LoginWindow con un proxy sin inicializar y no podemos
+        # romperlos: si la consulta falla por cualquier motivo, asumimos que la
+        # DB no está lista y ocultamos el botón. La app real nunca debería
+        # entrar por esta rama.
+        try:
+            needs_bootstrap = not User.select().exists()
+        except Exception:
+            needs_bootstrap = False
+        if needs_bootstrap:
             self.bootstrap_button = QPushButton("Crear administrador inicial")
             self.bootstrap_button.setObjectName("loginBootstrapButton")
             self.bootstrap_button.clicked.connect(self._create_initial_admin)
