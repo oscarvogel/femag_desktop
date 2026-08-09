@@ -73,11 +73,11 @@ def test_seed_defaults_consolidates_legacy_profile_names_and_is_idempotent(db):
     service.seed_defaults()
     service.seed_defaults()
 
-    assert set(UserProfile.select().order_by(UserProfile.name).tuples()) == {
-        ("Administrador",),
-        ("Administración",),
-        ("Secretaría",),
-        ("Solo consulta",),
+    assert {profile.name for profile in UserProfile.select().order_by(UserProfile.name)} == {
+        "Administrador",
+        "Administración",
+        "Secretaría",
+        "Solo consulta",
     }
     legacy_user = User.get_by_id(legacy_user.id)
     assert legacy_user.profile.name == "Administración"
