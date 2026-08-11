@@ -305,19 +305,19 @@ class LoadOrderPrintService:
         return {
             "destination": destination_label,
             "articles": articles,
-            "pallet": self._pallet_sequences_for_products(order, products),
+            "pallet": self._pallet_count_for_products(order, products),
             "detail": " / ".join(detail_items) if detail_items else "-",
         }
 
-    def _pallet_sequences_for_products(self, order: LoadOrder, products: list) -> str:
+    def _pallet_count_for_products(self, order: LoadOrder, products: list) -> int | str:
         row_lines = {(product.destination_id, product.product_id) for product in products}
-        sequences = {
-            pallet.sequence
+        pallet_ids = {
+            pallet.id
             for pallet in order.pallets
             for allocation in pallet.allocations
             if (allocation.destination_id, allocation.product_id) in row_lines
         }
-        return ", ".join(str(sequence) for sequence in sorted(sequences)) or "-"
+        return len(pallet_ids) or "-"
 
     def _used_pallet_total(self, order: LoadOrder) -> int:
         return sum(1 for pallet in order.pallets if pallet.allocations.exists())
