@@ -97,7 +97,7 @@ def test_print_service_formats_kilos_without_insignificant_zeroes():
     assert service._kg_text(Decimal("1250.750")) == "1.250,75 kg"
 
 
-def test_print_service_lists_real_pallet_sequences_per_destination(db, tmp_path):
+def test_print_service_prints_pallet_count_per_destination(db, tmp_path):
     from decimal import Decimal
 
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -176,7 +176,7 @@ def test_print_service_lists_real_pallet_sequences_per_destination(db, tmp_path)
     normalized_text = " ".join(text.split())
 
     assert "300 kg" in normalized_text
-    assert "1, 3" in normalized_text
+    assert "1, 3" not in normalized_text
     assert "2 pallets" in normalized_text
 
 
