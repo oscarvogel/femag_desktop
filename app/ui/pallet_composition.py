@@ -172,7 +172,10 @@ class PalletCompositionWidget(QWidget):
         self.bulk_pallet_count_input = QSpinBox()
         self.bulk_pallet_count_input.setObjectName("bulkPalletCountInput")
         self.bulk_pallet_count_input.setRange(0, 999)
-        self.bulk_pallet_count_input.setSpecialValueText("")
+        # Qt 5.15 trata setSpecialValueText("") como "sin special text" y
+        # renderiza "0". Usamos un espacio para que el input se vea vacío
+        # cuando el valor es 0, manteniendo la lógica de "no crear pallet".
+        self.bulk_pallet_count_input.setSpecialValueText(" ")
         self.bulk_pallet_count_input.setValue(0)
         pallet_actions_layout.addWidget(self.bulk_pallet_count_input, 1, 0)
         self.add_pallet_button = QPushButton("Agregar primer pallet")
