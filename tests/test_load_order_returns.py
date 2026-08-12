@@ -22,6 +22,28 @@ def _issued_order_with_valued_line():
     return order, line
 
 
+def _foreign_line_for(order):
+    from app.models.load_orders import LoadOrder, LoadOrderProduct
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    data["client"].cuit = "30712345999"
+    data["client"].name = "Cliente FEMAG alternativo"
+    data["client"].save()
+    data["carrier"].name = "Transportista alternativo"
+    data["carrier"].save()
+    data["driver"].name = "Chofer alternativo"
+    data["driver"].save()
+    data["truck"].domain = "RET221"
+    data["truck"].save()
+    service = LoadOrderService(current_user="issue221")
+    other_order = service.create_order(**_valid_order_payload(data))
+    other_line = LoadOrderProduct.select().where(LoadOrderProduct.order == other_order).first()
+    service.change_status(other_order, LoadOrder.STATUS_ISSUED, reason="Emitida para validación ajena")
+    assert other_order.id != order.id
+    return other_line
+
+
 def test_close_order_persists_return_line_and_credit_snapshot(db):
     from app.models.audit import AuditLog
     from app.models.load_orders import LoadOrderReturnLine
@@ -90,8 +112,7 @@ def test_return_rejects_zero_excess_missing_reason_and_foreign_line(db):
             no_payment_reason="Cuenta corriente",
         )
 
-    other_order, other_line = _issued_order_with_valued_line()
-    assert other_order.id != order.id
+    other_line = _foreign_line_for(order)
     with pytest.raises(LoadOrderClosureError, match="otra orden"):
         service.close_order(
             order,
