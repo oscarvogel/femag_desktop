@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config.database import initialize_runtime_database
 from app.config.schema import ensure_runtime_schema
+from app.models.security import User
 from app.services.auth_service import AuthService
 from app.services.permission_service import PermissionService
 
@@ -20,7 +21,11 @@ def main() -> int:
     db.connect(reuse_if_open=True)
     ensure_runtime_schema(db)
     PermissionService().seed_defaults()
-    AuthService().create_user(args.username, args.password, "Administrador")
+    auth = AuthService()
+    if User.select().exists():
+        auth.create_user(args.username, args.password, "Administrador")
+    else:
+        auth.create_initial_admin(args.username, args.password)
     print(f"Usuario administrador creado: {args.username}")
     return 0
 

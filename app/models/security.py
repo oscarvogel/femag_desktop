@@ -10,6 +10,7 @@ class UserProfile(BaseModel):
 
 class User(BaseModel):
     username = CharField(unique=True)
+    display_name = CharField(null=True)
     password_hash = CharField()
     profile = ForeignKeyField(UserProfile, backref="users")
     active = BooleanField(default=True)

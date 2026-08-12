@@ -171,8 +171,12 @@ class PalletCompositionWidget(QWidget):
         pallet_actions_layout.addWidget(QLabel("Cantidad de pallets a agregar"), 0, 0, 1, 2)
         self.bulk_pallet_count_input = QSpinBox()
         self.bulk_pallet_count_input.setObjectName("bulkPalletCountInput")
-        self.bulk_pallet_count_input.setRange(1, 999)
-        self.bulk_pallet_count_input.setValue(1)
+        self.bulk_pallet_count_input.setRange(0, 999)
+        # Qt 5.15 trata setSpecialValueText("") como "sin special text" y
+        # renderiza "0". Usamos un espacio para que el input se vea vacío
+        # cuando el valor es 0, manteniendo la lógica de "no crear pallet".
+        self.bulk_pallet_count_input.setSpecialValueText(" ")
+        self.bulk_pallet_count_input.setValue(0)
         pallet_actions_layout.addWidget(self.bulk_pallet_count_input, 1, 0)
         self.add_pallet_button = QPushButton("Agregar primer pallet")
         self.add_pallet_button.setObjectName("addPalletCardButton")
@@ -346,7 +350,14 @@ class PalletCompositionWidget(QWidget):
         return sequences
 
     def _add_pallets_from_editor(self) -> None:
-        self.add_pallets(self.bulk_pallet_count_input.value())
+        count = self.bulk_pallet_count_input.value()
+        if count <= 0:
+            self.bulk_pallet_count_input.setFocus()
+            return
+        self.add_pallets(count)
+        self.bulk_pallet_count_input.setValue(0)
+        self.bulk_pallet_count_input.setFocus()
+        self.bulk_pallet_count_input.selectAll()
 
     def add_allocation(self, sequence: int, address_id: int, product_id: int, quantity) -> None:
         destination = self._destination(address_id)

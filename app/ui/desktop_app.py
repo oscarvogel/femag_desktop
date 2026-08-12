@@ -84,6 +84,7 @@ from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
 from app.ui.pallet_composition import PalletCompositionWidget
+from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -135,13 +136,16 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     _ensure_demo_user(demo_mode=demo_mode)
     if demo_mode:
         _seed_demo_masters()
-    login = LoginWindow(demo_mode=demo_mode)
-    if login.show() != QDialog.Accepted:
-        return 0
-    user = login.authenticated_user
-    window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
-    window.show()
-    result = app.exec_()
+    while True:
+        login = LoginWindow(demo_mode=demo_mode)
+        if login.show() != QDialog.Accepted:
+            return 0
+        user = login.authenticated_user
+        window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
+        window.show()
+        result = app.exec_()
+        if not window.session_closed:
+            break
     if database is not None and not database.is_closed():
         database.close()
     return result
@@ -185,6 +189,7 @@ class FemagDesktopWindow(QMainWindow):
     def __init__(self, *, user, demo_mode: bool):
         super().__init__()
         self.user = user
+        self.session_closed = False
         self.shell = ShellBuilder(user=user, demo_mode=demo_mode).shell_spec
         self.setWindowTitle(f"FEMAG Desktop {BUILD_VERSION}")
         self.setWindowIcon(femag_icon())
@@ -221,6 +226,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("load_orders", self._load_order_page())
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
+        self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
@@ -266,8 +272,12 @@ class FemagDesktopWindow(QMainWindow):
         notifications = QPushButton("Avisos")
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
-        for button in (notifications, help_button, settings):
+        change_password = QPushButton("Cambiar clave")
+        logout = QPushButton("Cerrar sesión")
+        for button in (notifications, help_button, settings, change_password, logout):
             button.setObjectName("topbarIconButton")
+        change_password.clicked.connect(self._open_change_password)
+        logout.clicked.connect(self._logout)
         user = QLabel(f"{self.shell.username}\n{self.shell.profile}")
         user.setObjectName("userBlock")
         user.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -278,8 +288,40 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(notifications)
         layout.addWidget(help_button)
         layout.addWidget(settings)
+        layout.addWidget(change_password)
+        layout.addWidget(logout)
         layout.addWidget(user)
         return bar
+
+    def _open_change_password(self) -> None:
+        dialog = ChangePasswordDialog(title="Cambiar mi contraseña", parent=self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        password, confirmation = dialog.values()
+        try:
+            AuthService().change_password(
+                self.user,
+                password,
+                confirmation,
+                actor=self.user,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Cambiar contraseña", str(exc))
+            return
+        QMessageBox.information(self, "Cambiar contraseña", "La contraseña se actualizó correctamente.")
+
+    def _logout(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Cerrar sesión",
+            "¿Desea cerrar la sesión actual?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.session_closed = True
+        self.close()
 
     def _sidebar(self) -> QWidget:
         container = QFrame()

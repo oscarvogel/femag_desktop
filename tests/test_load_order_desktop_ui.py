@@ -1565,7 +1565,7 @@ def test_load_order_page_blocks_annul_without_permission(db):
 
     app = QApplication.instance() or QApplication([])
     PermissionService().seed_defaults()
-    profile = UserProfile.get(UserProfile.name == "Secretaria")
+    profile = UserProfile.get(UserProfile.name == "Secretaría")
     user = User.create(username="secretaria_ui", password_hash="x", profile=profile)
     carrier = Carrier.create(name="Transporte UI")
     driver = Driver.create(name="Chofer UI", carrier=carrier)
