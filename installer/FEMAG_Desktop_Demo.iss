@@ -1,6 +1,8 @@
 #define MyAppName "FEMAG Desktop DEMO"
-#define MyAppVersion "2026.07.30-demo"
 #define MyAppPublisher "Vogel Consultoria"
+#ifndef MyAppVersion
+  #define MyAppVersion "0000.00.00.00"
+#endif
 [Setup]
 AppId={{F4E7A5EE-3E2E-4A5D-8A28-DA9E741EDE01}
 AppName={#MyAppName}

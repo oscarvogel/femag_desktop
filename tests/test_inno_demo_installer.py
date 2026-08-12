@@ -13,7 +13,7 @@ def test_inno_installer_is_standalone_and_demo_only() -> None:
     content = ISS.read_text(encoding="utf-8")
 
     assert '#define MyAppName "FEMAG Desktop DEMO"' in content
-    assert '#define MyAppVersion "2026.07.30-demo"' in content
+    assert "#ifndef MyAppVersion" in content
     assert "DefaultDirName={localappdata}\\Programs\\FEMAG Desktop DEMO" in content
     assert "OutputBaseFilename=FEMAG_Desktop_DEMO_Standalone_Setup" in content
     assert "PrivilegesRequired=lowest" in content
@@ -21,6 +21,24 @@ def test_inno_installer_is_standalone_and_demo_only() -> None:
     assert "dist\\FEMAG Desktop DEMO\\*" in content
     for forbidden in ("git", "python.exe", "winget", "powershell", "github", "RepoUrl"):
         assert forbidden.lower() not in content.lower()
+
+
+def test_demo_build_script_injects_version_in_aaaa_mm_dd_vv_format() -> None:
+    build = BUILD_SCRIPT.read_text(encoding="utf-8")
+
+    assert "Get-DemoBuildVersion" in build
+    assert "yyyy.MM.dd" in build
+    assert "/DMyAppVersion=" in build
+    assert "FEMAG_Desktop_Demo.iss" in build
+    assert "app\\\\build_demo_version.py" in build or "app\\build_demo_version.py" in build
+    assert ".demo_build_state" in build
+
+
+def test_demo_pyspec_includes_build_demo_version_file() -> None:
+    spec = SPEC.read_text(encoding="utf-8")
+
+    assert "build_demo_version.py" in spec
+    assert "FEMAG Desktop DEMO" in spec
 
 
 def test_frozen_entrypoint_forces_local_sqlite_demo() -> None:
