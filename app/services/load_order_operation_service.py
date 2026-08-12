@@ -5,6 +5,7 @@ from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
+from app.services.client_credit_service import ClientCreditService
 from app.services.load_order_print_service import LoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
@@ -36,6 +37,7 @@ class LoadOrderOperationService:
         if not composition.can_issue:
             details = " ".join(issue.message for issue in composition.issues)
             raise ValueError(f"No se puede emitir la orden: {details}")
+        ClientCreditService.assert_can_issue(order)
         issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
         self.account_ledger.generate_for_load_order(issued)
         return issued
