@@ -34,5 +34,6 @@ def test_customer_ledger_shows_load_order_due_date(db):
     app.processEvents()
 
     assert page.movements_table.columnCount() == 7
-    assert page.movements_table.horizontalHeaderItem(1).text() == "Vencimiento"
-    assert page.movements_table.item(0, 1).text() == "27/08/2026"
+    assert page.movements_table.horizontalHeaderItem(1).text() == "Tipo"
+    assert page.movements_table.horizontalHeaderItem(6).text() == "Vencimiento"
+    assert page.movements_table.item(0, 6).text() == "27/08/2026"
