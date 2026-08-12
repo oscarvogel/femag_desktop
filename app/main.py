@@ -37,6 +37,9 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
     load_settings()
     configure_logging()
     try:
+        from app.ui.window_policy import install_workspace_window_policy
+
+        install_workspace_window_policy()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.
         raise RuntimeError(

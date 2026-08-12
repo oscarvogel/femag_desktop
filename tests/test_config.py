@@ -45,8 +45,12 @@ def test_initialize_runtime_database_uses_sqlite_when_demo_env_requests_it(tmp_p
     assert Path(database.database) == sqlite_path
 
 
-def test_initialize_runtime_database_keeps_mysql_as_default(monkeypatch):
-    monkeypatch.delenv("FEMAG_ENV_FILE", raising=False)
+def test_initialize_runtime_database_keeps_mysql_as_default(monkeypatch, tmp_path):
+    # Apuntamos FEMAG_ENV_FILE a un archivo inexistente para que load_dotenv
+    # sea un no-op y el resultado dependa sólo de las defaults, no del
+    # `.env` que el dev tenga en el CWD.
+    missing_env = tmp_path / "missing.env"
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(missing_env))
     monkeypatch.delenv("FEMAG_DB_ENGINE", raising=False)
     monkeypatch.delenv("FEMAG_DEMO", raising=False)
 

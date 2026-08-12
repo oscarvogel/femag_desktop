@@ -5,6 +5,35 @@ from peewee import SqliteDatabase
 TEST_DB = SqliteDatabase(":memory:")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_femag_env(monkeypatch, tmp_path):
+    """Aisla ``FEMAG_*`` del entorno real para que los tests sean deterministas.
+
+    ``app.config.settings.load_settings`` hace ``load_dotenv(env_file, override=True)``
+    con el archivo apuntado por ``FEMAG_ENV_FILE`` (o ``.env`` del CWD si no está).
+    Los tests que cargan sus valores vía archivo .env (p. ej. ``test_config.py``)
+    terminan escribiendo ``FEMAG_SQLITE_PATH`` / ``FEMAG_DEMO`` en ``os.environ``,
+    pero ``monkeypatch`` solo rastrea lo que se setea explícitamente con
+    ``monkeypatch.setenv`` — no lo que ``load_dotenv`` deja como side-effect.
+    Eso filtra vars entre tests y rompe determinismo.
+
+    Esta fixture autouse, por defecto, apunta ``FEMAG_ENV_FILE`` a un archivo
+    inexistente (en el ``tmp_path`` del test) y limpia las ``FEMAG_*`` típicas.
+    Los tests que necesitan un archivo real o vars específicas las setean con
+    ``monkeypatch.setenv`` dentro de su cuerpo; ``monkeypatch`` restaura todo
+    al terminar.
+    """
+    non_existent_env = tmp_path / "missing.env"
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(non_existent_env))
+    for var in (
+        "FEMAG_DB_ENGINE",
+        "FEMAG_SQLITE_PATH",
+        "FEMAG_SECURE_CONFIG",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    yield
+
+
 @pytest.fixture()
 def db():
     from app.config.database import bind_database
