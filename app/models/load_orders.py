@@ -142,9 +142,23 @@ class LoadOrderClosure(BaseModel):
         return self.status == self.STATUS_ACTIVE and self.active_marker is True
 
     class Meta:
-        # SQL unique indexes allow multiple NULL values, so historical reopened
-        # closures coexist while at most one row can keep active_marker=True.
         indexes = ((("order", "active_marker"), True),)
+
+
+class LoadOrderReturnLine(BaseModel):
+    """Returned quantity captured at delivery closure without mutating the issued order."""
+
+    closure = ForeignKeyField(LoadOrderClosure, backref="return_lines", on_delete="CASCADE")
+    order_product = ForeignKeyField(LoadOrderProduct, backref="return_lines")
+    client = ForeignKeyField(Client, backref="load_order_return_lines")
+    quantity = FloatField()
+    reason = TextField()
+    unit_price = FloatField(default=0.0)
+    credit_amount = FloatField(default=0.0)
+    created_by = CharField(null=True)
+
+    class Meta:
+        indexes = ((("closure", "order_product"), True),)
 
 
 class LoadOrderBudgetStatus(BaseModel):
