@@ -25,6 +25,7 @@ class ClientAccountMovement(BaseModel):
     total_amount = FloatField(default=0)
     currency = CharField(default="ARS")
     movement_date = DateField(null=True)
+    due_date = DateField(null=True)
     description = TextField()
     source_ref = CharField()
     reference = CharField(null=True)
