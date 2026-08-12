@@ -69,6 +69,7 @@ class Client(BaseModel):
     descuento_porcentaje = FloatField(default=0.0)
     lista_precios = IntegerField(default=1)
     dias_plazo_pago = IntegerField(default=0)
+    max_despachos_pendientes = IntegerField(null=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
     imported_at = DateTimeField(null=True)
