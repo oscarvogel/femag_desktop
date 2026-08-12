@@ -22,26 +22,29 @@ def _issued_order_with_valued_line():
     return order, line
 
 
-def _foreign_line_for(order):
+def _foreign_line_for(order, source_line):
     from app.models.load_orders import LoadOrder, LoadOrderProduct
-    from app.services.load_order_service import LoadOrderService
 
-    data = _master_data()
-    data["client"].cuit = "30712345999"
-    data["client"].name = "Cliente FEMAG alternativo"
-    data["client"].save()
-    data["carrier"].name = "Transportista alternativo"
-    data["carrier"].save()
-    data["driver"].name = "Chofer alternativo"
-    data["driver"].save()
-    data["truck"].domain = "RET221"
-    data["truck"].save()
-    service = LoadOrderService(current_user="issue221")
-    other_order = service.create_order(**_valid_order_payload(data))
-    other_line = LoadOrderProduct.select().where(LoadOrderProduct.order == other_order).first()
-    service.change_status(other_order, LoadOrder.STATUS_ISSUED, reason="Emitida para validación ajena")
-    assert other_order.id != order.id
-    return other_line
+    other_order = LoadOrder.create(
+        order_number=999999,
+        date=order.date,
+        client=order.client,
+        delivery_address=order.delivery_address,
+        carrier=order.carrier,
+        driver=order.driver,
+        truck=order.truck,
+        status=LoadOrder.STATUS_PENDING,
+        created_by="issue221",
+    )
+    return LoadOrderProduct.create(
+        order=other_order,
+        destination=None,
+        product=source_line.product,
+        quantity=source_line.quantity,
+        unit=source_line.unit,
+        precio_neto_unitario=source_line.precio_neto_unitario,
+        total=source_line.total,
+    )
 
 
 def test_close_order_persists_return_line_and_credit_snapshot(db):
@@ -112,7 +115,7 @@ def test_return_rejects_zero_excess_missing_reason_and_foreign_line(db):
             no_payment_reason="Cuenta corriente",
         )
 
-    other_line = _foreign_line_for(order)
+    other_line = _foreign_line_for(order, line)
     with pytest.raises(LoadOrderClosureError, match="otra orden"):
         service.close_order(
             order,
