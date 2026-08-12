@@ -1,6 +1,8 @@
 """UI package for FEMAG Desktop."""
 
 from app.ui.client_payment_term_extension import install_client_payment_term_extension
+from app.ui.customer_ledger_due_date_extension import install_customer_ledger_due_date_extension
 
 
 install_client_payment_term_extension()
+install_customer_ledger_due_date_extension()
