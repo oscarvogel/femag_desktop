@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Client
@@ -17,6 +19,8 @@ class AccountLedgerService:
         movements = []
         for client in self._clients_for_order(order):
             totals = self._load_order_totals_for_client(order, client)
+            movement_date = order.date
+            due_date = movement_date + timedelta(days=max(int(client.dias_plazo_pago or 0), 0))
             movement, created = ClientAccountMovement.get_or_create(
                 load_order=order,
                 client=client,
@@ -29,6 +33,8 @@ class AccountLedgerService:
                     "vat_amount": totals["iva_importe"],
                     "total_amount": totals["total"],
                     "currency": self.CURRENCY,
+                    "movement_date": movement_date,
+                    "due_date": due_date,
                     "description": self._description(order, totals),
                     "source_ref": self._source_ref(order),
                     "created_by": self.current_user,
@@ -62,6 +68,8 @@ class AccountLedgerService:
                     "vat_amount": -original.vat_amount,
                     "total_amount": -original.total_amount,
                     "currency": original.currency,
+                    "movement_date": original.movement_date,
+                    "due_date": original.due_date,
                     "description": f"Reverso {original.description}",
                     "source_ref": self._source_ref(order),
                     "created_by": self.current_user,
@@ -160,6 +168,8 @@ class AccountLedgerService:
                 "discount_amount": movement.discount_amount,
                 "vat_amount": movement.vat_amount,
                 "total_amount": movement.total_amount,
+                "movement_date": movement.movement_date.isoformat() if movement.movement_date else None,
+                "due_date": movement.due_date.isoformat() if movement.due_date else None,
                 "source_ref": movement.source_ref,
             },
         )
