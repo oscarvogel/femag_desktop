@@ -34,7 +34,7 @@ METHOD_LABELS = {
 
 
 class LoadOrderClosureDialog(QDialog):
-    """Capture the delivery payments before closing an issued load order."""
+    """Capture delivery payments and returned quantities before closing an order."""
 
     def __init__(
         self,
@@ -49,20 +49,29 @@ class LoadOrderClosureDialog(QDialog):
         self.service = service or LoadOrderClosureService(current_user=current_user)
         self._closure: LoadOrderClosure | None = None
         self._payments: list[dict] = []
+        self._return_inputs: list[tuple[object, QDoubleSpinBox, QLineEdit, QTableWidgetItem]] = []
 
         self.setWindowTitle(f"Cerrar entrega OC-{self.order.order_number:06d}")
         self.setModal(True)
-        self.resize(900, 720)
+        self.resize(1050, 760)
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel("Renglones emitidos"))
-        self.lines_table = QTableWidget(0, 5)
+        layout.addWidget(QLabel("Renglones emitidos y devoluciones"))
+        self.lines_table = QTableWidget(0, 8)
         self.lines_table.setObjectName("loadOrderClosureLinesTable")
         self.lines_table.setHorizontalHeaderLabels(
-            ["Cliente", "Producto", "Cantidad", "Precio unitario", "Total"]
+            [
+                "Cliente",
+                "Producto",
+                "Cantidad",
+                "Precio unitario",
+                "Total",
+                "Cant. devuelta",
+                "Motivo devolución",
+                "A acreditar",
+            ]
         )
-        self.lines_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.lines_table.setMinimumHeight(110)
+        self.lines_table.setMinimumHeight(170)
         self.lines_table.horizontalHeader().setStretchLastSection(True)
         self._load_lines()
         layout.addWidget(self.lines_table)
@@ -124,6 +133,10 @@ class LoadOrderClosureDialog(QDialog):
         self.summary_label.setObjectName("loadOrderClosurePaymentSummary")
         layout.addWidget(self.summary_label)
 
+        self.return_summary_label = QLabel()
+        self.return_summary_label.setObjectName("loadOrderClosureReturnSummary")
+        layout.addWidget(self.return_summary_label)
+
         self.no_payment_reason_input = QLineEdit()
         self.no_payment_reason_input.setObjectName("loadOrderClosureNoPaymentReasonInput")
         self.no_payment_reason_input.setPlaceholderText(
@@ -150,6 +163,7 @@ class LoadOrderClosureDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         self._refresh_summary()
+        self._refresh_return_summary()
 
     def closure(self) -> LoadOrderClosure | None:
         return self._closure
@@ -157,9 +171,25 @@ class LoadOrderClosureDialog(QDialog):
     def pending_payments(self) -> list[dict]:
         return list(self._payments)
 
+    def pending_returns(self) -> list[dict]:
+        returns = []
+        for line, quantity_input, reason_input, _credit_item in self._return_inputs:
+            quantity = round(quantity_input.value(), 3)
+            if quantity <= 0:
+                continue
+            returns.append(
+                {
+                    "order_product": line,
+                    "quantity": quantity,
+                    "reason": reason_input.text().strip(),
+                }
+            )
+        return returns
+
     def _load_lines(self) -> None:
         lines = list(self.order.products.order_by())
         self.lines_table.setRowCount(len(lines))
+        self._return_inputs.clear()
         for row, line in enumerate(lines):
             client = line.destination.client if line.destination_id else self.order.client
             values = (
@@ -170,7 +200,28 @@ class LoadOrderClosureDialog(QDialog):
                 f"$ {float(line.total):,.2f}",
             )
             for column, value in enumerate(values):
-                self.lines_table.setItem(row, column, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                self.lines_table.setItem(row, column, item)
+
+            quantity_input = QDoubleSpinBox()
+            quantity_input.setObjectName(f"loadOrderClosureReturnQuantityInput_{line.id}")
+            quantity_input.setDecimals(3)
+            quantity_input.setRange(0.0, max(float(line.quantity), 0.0))
+            quantity_input.setSingleStep(1.0)
+            self.lines_table.setCellWidget(row, 5, quantity_input)
+
+            reason_input = QLineEdit()
+            reason_input.setObjectName(f"loadOrderClosureReturnReasonInput_{line.id}")
+            reason_input.setPlaceholderText("Motivo")
+            self.lines_table.setCellWidget(row, 6, reason_input)
+
+            credit_item = QTableWidgetItem("$ 0.00")
+            credit_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            credit_item.setFlags(credit_item.flags() & ~Qt.ItemIsEditable)
+            self.lines_table.setItem(row, 7, credit_item)
+            self._return_inputs.append((line, quantity_input, reason_input, credit_item))
+            quantity_input.valueChanged.connect(self._refresh_return_summary)
 
     def _order_clients(self) -> list[Client]:
         clients = []
@@ -233,11 +284,35 @@ class LoadOrderClosureDialog(QDialog):
             f"Saldo estimado: $ {max(total - paid, 0):,.2f}"
         )
 
+    def _refresh_return_summary(self, *_args) -> None:
+        total_credit = 0.0
+        returned_lines = 0
+        for line, quantity_input, _reason_input, credit_item in self._return_inputs:
+            quantity = round(quantity_input.value(), 3)
+            unit_total = float(line.total) / float(line.quantity) if line.quantity else 0.0
+            credit = round(unit_total * quantity, 2)
+            credit_item.setText(f"$ {credit:,.2f}")
+            total_credit += credit
+            if quantity > 0:
+                returned_lines += 1
+        self.return_summary_label.setText(
+            f"Devoluciones: {returned_lines} renglón(es) | Monto estimado a acreditar: $ {total_credit:,.2f}"
+        )
+
     def _on_accept(self) -> None:
+        returns = self.pending_returns()
+        if any(not item["reason"] for item in returns):
+            QMessageBox.warning(
+                self,
+                "Cierre de entrega",
+                "Debe indicar el motivo de cada devolución registrada.",
+            )
+            return
         try:
             self._closure = self.service.close_order(
                 self.order,
                 payments=self._payments,
+                returns=returns,
                 no_payment_reason=self.no_payment_reason_input.text(),
                 observations=self.observations_input.text(),
             )
