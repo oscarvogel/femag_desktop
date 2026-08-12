@@ -4,6 +4,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 hiddenimports = collect_submodules("pyqt5libs")
 datas = collect_data_files("pyqt5libs")
 datas += [("../app/ui/assets/branding", "app/ui/assets/branding")]
+datas += [("../app/build_demo_version.py", "app/build_demo_version.py")]
 
 
 a = Analysis(
