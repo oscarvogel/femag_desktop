@@ -25,9 +25,11 @@ class ClientService:
         email: str | None = None,
         contact: str | None = None,
         lista_precios: int = 1,
+        dias_plazo_pago: int = 0,
     ) -> Client:
         if lista_precios not in (1, 2, 3, 4):
             raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
+        dias_plazo_pago = self.validate_payment_term_days(dias_plazo_pago)
         client = Client.create(
             name=name,
             cuit=cuit,
@@ -36,15 +38,30 @@ class ClientService:
             email=email,
             contact=contact,
             lista_precios=lista_precios,
+            dias_plazo_pago=dias_plazo_pago,
         )
         self.audit_service.record(
             user=self.current_user,
             module="Clientes",
             action="crear",
             record_ref=f"Client:{client.id}",
-            new_value={"name": name, "cuit": cuit},
+            new_value={
+                "name": name,
+                "cuit": cuit,
+                "dias_plazo_pago": dias_plazo_pago,
+            },
         )
         return client
+
+    @staticmethod
+    def validate_payment_term_days(value: int) -> int:
+        try:
+            days = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Los días de plazo de pago deben ser un número entero.") from exc
+        if days < 0:
+            raise ValueError("Los días de plazo de pago no pueden ser negativos.")
+        return days
 
     def add_address(
         self,
