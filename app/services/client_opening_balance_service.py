@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from datetime import date
+
+from peewee import IntegrityError
+
+from app.models.accounting import ClientAccountMovement
+from app.models.masters import Client
+from app.services.audit_service import AuditService
+
+
+class ClientOpeningBalanceError(ValueError):
+    pass
+
+
+class ClientOpeningBalanceService:
+    def __init__(self, current_user: str, audit_service: AuditService | None = None):
+        self.current_user = current_user
+        self.audit_service = audit_service or AuditService()
+
+    @staticmethod
+    def normalize_currency(currency: str) -> str:
+        normalized = (currency or "").strip().upper()
+        if len(normalized) != 3 or not normalized.isalpha():
+            raise ClientOpeningBalanceError("La moneda debe tener un codigo de tres letras.")
+        return normalized
+
+    @classmethod
+    def has_opening_balance(cls, client: Client, currency: str | None = None) -> bool:
+        query = ClientAccountMovement.select().where(
+            (ClientAccountMovement.client == client)
+            & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_OPENING_BALANCE)
+            & (ClientAccountMovement.is_reversal == False)  # noqa: E712
+        )
+        if currency is not None:
+            query = query.where(
+                ClientAccountMovement.currency == cls.normalize_currency(currency)
+            )
+        return query.exists()
+
+    def register(
+        self,
+        *,
+        client: Client,
+        amount: float,
+        currency: str = "ARS",
+        movement_date: date | None = None,
+    ) -> ClientAccountMovement:
+        if client is None or not isinstance(client, Client):
+            raise ClientOpeningBalanceError("Debe seleccionar un cliente.")
+        normalized_amount = round(float(amount or 0), 2)
+        if normalized_amount == 0:
+            raise ClientOpeningBalanceError("El saldo inicial no puede ser cero.")
+        normalized_currency = self.normalize_currency(currency)
+        source_ref = f"OpeningBalance:{normalized_currency}"
+        database = ClientAccountMovement._meta.database
+
+        try:
+            with database.atomic():
+                if self.has_opening_balance(client, normalized_currency):
+                    raise ClientOpeningBalanceError(
+                        f"El cliente ya tiene saldo inicial en {normalized_currency}."
+                    )
+                movement = ClientAccountMovement.create(
+                    client=client,
+                    load_order=None,
+                    payment=None,
+                    movement_type=ClientAccountMovement.TYPE_OPENING_BALANCE,
+                    amount=normalized_amount,
+                    net_amount=normalized_amount,
+                    discount_amount=0.0,
+                    vat_amount=0.0,
+                    total_amount=normalized_amount,
+                    currency=normalized_currency,
+                    movement_date=movement_date or date.today(),
+                    description=f"Saldo inicial de apertura ({normalized_currency})",
+                    source_ref=source_ref,
+                    reference=f"APERTURA-{normalized_currency}",
+                    is_reversal=False,
+                    reverses=None,
+                    created_by=self.current_user,
+                )
+                self.audit_service.record(
+                    user=self.current_user,
+                    module="Cuenta corriente",
+                    action="registrar_saldo_inicial",
+                    record_ref=f"ClientAccountMovement:{movement.id}",
+                    new_value={
+                        "client_id": client.id,
+                        "amount": normalized_amount,
+                        "currency": normalized_currency,
+                        "movement_date": movement.movement_date.isoformat(),
+                        "source_ref": source_ref,
+                    },
+                )
+                return movement
+        except IntegrityError as exc:
+            raise ClientOpeningBalanceError(
+                f"El cliente ya tiene saldo inicial en {normalized_currency}."
+            ) from exc
