@@ -352,7 +352,7 @@ def test_pdf_marks_annulled_order_without_changing_status(db, tmp_path):
     assert "Estado: Anulada" in text
 
 
-def test_pdf_uses_up_to_four_product_columns_and_sends_extra_products_to_detail(db, tmp_path):
+def test_pdf_detail_lists_every_requested_product_in_its_own_row(db, tmp_path):
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_print_service import LoadOrderPrintService
     from app.services.load_order_service import LoadOrderService
@@ -403,7 +403,8 @@ def test_pdf_uses_up_to_four_product_columns_and_sends_extra_products_to_detail(
     assert "10kg" in text
     assert "Pack 1kg" in text
     assert "Almidon" in text
-    assert "Producto extra - 50 cajas" in text
+    assert "Producto extra" in text
+    assert "50" in text
     assert "Bolsas 25 kg" not in text
     assert "Bolsas 10 kg" not in text
     assert "Lote" in text
