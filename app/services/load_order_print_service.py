@@ -236,6 +236,7 @@ class LoadOrderPrintService:
             [self._p("Empresa de transporte:", bold=True), self._p(order.carrier.name)],
             [self._p("Dominio del vehiculo:", bold=True), self._p(order.truck.domain)],
             [self._p("Nombre del chofer:", bold=True), self._p(order.driver.name)],
+            [self._p("Dominio semi/acoplado:", bold=True), self._p(self._snapshot_trailer_domain(order))],
             [self._p("TOTAL MERCADERIA:", bold=True), self._p(self._kg_text(self._merchandise_kg_total(order)), bold=True)],
             [self._p("Vehiculo limpio y apto:", bold=True), self._p("Si / No")],
         ]
@@ -348,6 +349,11 @@ class LoadOrderPrintService:
         localized_whole = f"{int(whole):,}".replace(",", ".")
         localized_fraction = f",{fraction}" if fraction else ""
         return f"{localized_whole}{localized_fraction} kg"
+
+    @staticmethod
+    def _snapshot_trailer_domain(order: LoadOrder) -> str:
+        value = (order.trailer_domain or "").strip()
+        return value or "-"
 
     def _row_destination(self, order: LoadOrder, destination) -> str:
         if destination is None:
