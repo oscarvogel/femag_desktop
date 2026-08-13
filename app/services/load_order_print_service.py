@@ -99,8 +99,6 @@ class LoadOrderPrintService:
             title=f"Orden de carga {order.order_number}",
         )
         story = [
-            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
-            Spacer(1, 5 * mm),
             Paragraph("ORDEN DE DESPACHO DE FECULA DE MANDIOCA", self.styles["title"]),
             self._header_table(order),
             Spacer(1, 5 * mm),
@@ -402,8 +400,6 @@ class LoadOrderPrintService:
             title=f"Presupuesto {client.name} - OC {order.order_number}",
         )
         story = [
-            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
-            Spacer(1, 5 * mm),
             Paragraph(f"PRESUPUESTO - Orden de carga Nro. {order.order_number:04d}", self.styles["title"]),
             self._budget_header(order, client),
             Spacer(1, 5 * mm),
@@ -474,8 +470,6 @@ class LoadOrderPrintService:
         client = destination.client
         address = destination.delivery_address
         return [
-            Paragraph("GRAEF HERMANOS S.R.L.", self.styles["company"]),
-            Spacer(1, 5 * mm),
             Paragraph(f"PRESUPUESTO - Orden de carga Nro. {order.order_number:04d}", self.styles["title"]),
             self._budget_header(order, client, destination),
             Spacer(1, 5 * mm),
