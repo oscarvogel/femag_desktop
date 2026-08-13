@@ -36,6 +36,8 @@ MOVEMENT_TYPE_LABELS = {
     "payment_reversal": "Anulación de pago",
     "manual_debit": "Débito manual",
     "manual_debit_reversal": "Reverso débito manual",
+    "manual_credit": "Crédito manual",
+    "manual_credit_reversal": "Reverso crédito manual",
 }
 
 
@@ -65,12 +67,14 @@ class CustomerLedgerPage(QWidget):
         current_user: str,
         register_payment_callback=None,
         register_manual_debit_callback=None,
+        register_manual_credit_callback=None,
         print_statement_callback=None,
         whatsapp_statement_callback=None,
         email_statement_callback=None,
         print_receipt_callback=None,
         annul_payment_callback=None,
         reverse_manual_debit_callback=None,
+        reverse_manual_credit_callback=None,
         can_annul_payments: bool = False,
         parent=None,
     ):
@@ -79,12 +83,14 @@ class CustomerLedgerPage(QWidget):
         self.current_user = current_user
         self.register_payment_callback = register_payment_callback
         self.register_manual_debit_callback = register_manual_debit_callback
+        self.register_manual_credit_callback = register_manual_credit_callback
         self.print_statement_callback = print_statement_callback
         self.whatsapp_statement_callback = whatsapp_statement_callback
         self.email_statement_callback = email_statement_callback
         self.print_receipt_callback = print_receipt_callback
         self.annul_payment_callback = annul_payment_callback
         self.reverse_manual_debit_callback = reverse_manual_debit_callback
+        self.reverse_manual_credit_callback = reverse_manual_credit_callback
         self.can_annul_payments = can_annul_payments
         self._direct_client_id: int | None = None
 
@@ -186,6 +192,18 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_debit_button.clicked.connect(self._on_register_manual_debit)
         header_row.addWidget(self.register_manual_debit_button)
 
+        self.register_manual_credit_button = QPushButton("Registrar crédito")
+        self.register_manual_credit_button.setObjectName(
+            "customerLedgerRegisterManualCreditButton"
+        )
+        self.register_manual_credit_button.setEnabled(
+            self.register_manual_credit_callback is not None
+        )
+        self.register_manual_credit_button.clicked.connect(
+            self._on_register_manual_credit
+        )
+        header_row.addWidget(self.register_manual_credit_button)
+
         self.print_statement_button = QPushButton("Imprimir extracto")
         self.print_statement_button.setObjectName("customerLedgerPrintStatementButton")
         self.print_statement_button.setEnabled(False)
@@ -227,6 +245,16 @@ class CustomerLedgerPage(QWidget):
         self.reverse_manual_debit_button.setEnabled(False)
         self.reverse_manual_debit_button.clicked.connect(self._on_reverse_manual_debit)
         payment_actions.addWidget(self.reverse_manual_debit_button)
+
+        self.reverse_manual_credit_button = QPushButton("Reversar crédito")
+        self.reverse_manual_credit_button.setObjectName(
+            "customerLedgerReverseManualCreditButton"
+        )
+        self.reverse_manual_credit_button.setEnabled(False)
+        self.reverse_manual_credit_button.clicked.connect(
+            self._on_reverse_manual_credit
+        )
+        payment_actions.addWidget(self.reverse_manual_credit_button)
         layout.addLayout(payment_actions)
 
         # Highlighted balance card
@@ -433,7 +461,7 @@ class CustomerLedgerPage(QWidget):
                 _display_movement_date(movement),
                 type_label,
                 reference,
-                movement.description,
+                _display_description(movement),
                 importe_text,
                 saldo_text,
             )
@@ -460,11 +488,15 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
+        self.register_manual_credit_button.setEnabled(
+            self.register_manual_credit_callback is not None
+        )
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
         self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
         self.email_statement_button.setEnabled(self.email_statement_callback is not None)
         self._update_payment_actions()
         self._update_manual_debit_action()
+        self._update_manual_credit_action()
 
     def _selected_client(self) -> Client | None:
         current = self.clients_table.currentRow()
@@ -508,12 +540,16 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
+        self.register_manual_credit_button.setEnabled(
+            self.register_manual_credit_callback is not None
+        )
         self.print_statement_button.setEnabled(False)
         self.whatsapp_statement_button.setEnabled(False)
         self.email_statement_button.setEnabled(False)
         self.print_receipt_button.setEnabled(False)
         self.annul_payment_button.setEnabled(False)
         self.reverse_manual_debit_button.setEnabled(False)
+        self.reverse_manual_credit_button.setEnabled(False)
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
@@ -531,6 +567,13 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_debit_callback(client)
         self.refresh()
 
+    def _on_register_manual_credit(self) -> None:
+        if self.register_manual_credit_callback is None:
+            return
+        client = self._selected_client()
+        self.register_manual_credit_callback(client)
+        self.refresh()
+
     def _selected_payment(self) -> ClientPayment | None:
         current = self.movements_table.currentRow()
         if current < 0:
@@ -544,6 +587,7 @@ class CustomerLedgerPage(QWidget):
     def _on_movement_selected(self, *_args) -> None:
         self._update_payment_actions()
         self._update_manual_debit_action()
+        self._update_manual_credit_action()
 
     def _selected_movement(self) -> ClientAccountMovement | None:
         current = self.movements_table.currentRow()
@@ -574,6 +618,27 @@ class CustomerLedgerPage(QWidget):
             and not movement.is_reversal
             and not has_reversal
             and self.reverse_manual_debit_callback is not None
+        )
+
+    def _update_manual_credit_action(self) -> None:
+        movement = self._selected_movement()
+        has_reversal = False
+        if movement is not None:
+            has_reversal = (
+                ClientAccountMovement.select()
+                .where(
+                    ClientAccountMovement.reverses == movement,
+                    ClientAccountMovement.movement_type
+                    == ClientAccountMovement.TYPE_MANUAL_CREDIT_REVERSAL,
+                )
+                .exists()
+            )
+        self.reverse_manual_credit_button.setEnabled(
+            movement is not None
+            and movement.movement_type == ClientAccountMovement.TYPE_MANUAL_CREDIT
+            and not movement.is_reversal
+            and not has_reversal
+            and self.reverse_manual_credit_callback is not None
         )
 
     def _update_payment_actions(self) -> None:
@@ -607,6 +672,13 @@ class CustomerLedgerPage(QWidget):
         self.reverse_manual_debit_callback(movement)
         self.refresh()
 
+    def _on_reverse_manual_credit(self) -> None:
+        movement = self._selected_movement()
+        if movement is None or self.reverse_manual_credit_callback is None:
+            return
+        self.reverse_manual_credit_callback(movement)
+        self.refresh()
+
 
 def _display_datetime(value) -> str:
     if value.tzinfo is not None:
@@ -618,3 +690,9 @@ def _display_movement_date(movement: ClientAccountMovement) -> str:
     if movement.movement_date is not None:
         return movement.movement_date.strftime("%d/%m/%Y")
     return _display_datetime(movement.created_at)
+
+
+def _display_description(movement: ClientAccountMovement) -> str:
+    if movement.observations:
+        return f"{movement.description} — {movement.observations}"
+    return movement.description

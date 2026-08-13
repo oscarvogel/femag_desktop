@@ -21,6 +21,8 @@ MOVEMENT_TYPE_LABELS = {
     "payment_reversal": "Anulación de pago",
     "manual_debit": "Débito manual",
     "manual_debit_reversal": "Reverso débito manual",
+    "manual_credit": "Crédito manual",
+    "manual_credit_reversal": "Reverso crédito manual",
 }
 
 
@@ -119,7 +121,7 @@ def _movements_table(movements: list[ClientAccountMovement], balances: list[floa
             Paragraph(_movement_date(movement), styles["cell"]),
             Paragraph(type_label, styles["cell"]),
             Paragraph(_reference(movement), styles["cell"]),
-            Paragraph(movement.description, styles["cell"]),
+            Paragraph(_description(movement), styles["cell"]),
             Paragraph(f"$ {movement.total_amount:,.2f}", styles["cell_right"]),
             Paragraph(f"$ {balance:,.2f}", styles["cell_right"]),
         ])
@@ -146,6 +148,12 @@ def _movements_table(movements: list[ClientAccountMovement], balances: list[floa
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     return table
+
+
+def _description(movement: ClientAccountMovement) -> str:
+    if movement.observations:
+        return f"{movement.description} — {movement.observations}"
+    return movement.description
 
 
 def _styles() -> dict[str, ParagraphStyle]:

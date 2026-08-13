@@ -14,6 +14,8 @@ class ClientAccountMovement(BaseModel):
     TYPE_PAYMENT_REVERSAL = "payment_reversal"
     TYPE_MANUAL_DEBIT = "manual_debit"
     TYPE_MANUAL_DEBIT_REVERSAL = "manual_debit_reversal"
+    TYPE_MANUAL_CREDIT = "manual_credit"
+    TYPE_MANUAL_CREDIT_REVERSAL = "manual_credit_reversal"
 
     client = ForeignKeyField(Client, backref="account_movements")
     load_order = ForeignKeyField(LoadOrder, backref="account_movements", null=True)
@@ -28,6 +30,7 @@ class ClientAccountMovement(BaseModel):
     movement_date = DateField(null=True)
     due_date = DateField(null=True)
     description = TextField()
+    observations = TextField(null=True)
     source_ref = CharField()
     reference = CharField(null=True)
     is_reversal = BooleanField(default=False)
