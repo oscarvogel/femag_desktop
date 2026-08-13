@@ -34,6 +34,7 @@ class LoadOrder(BaseModel):
     carrier = ForeignKeyField(Carrier, backref="load_orders")
     driver = ForeignKeyField(Driver, backref="load_orders")
     truck = ForeignKeyField(Truck, backref="load_orders")
+    trailer_domain = CharField(null=True)
     status = CharField(default=STATUS_PENDING)
     observations = TextField(null=True)
     created_by = CharField(null=True)
