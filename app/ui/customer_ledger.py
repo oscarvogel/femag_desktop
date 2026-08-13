@@ -85,6 +85,7 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_callback = annul_payment_callback
         self.reverse_manual_debit_callback = reverse_manual_debit_callback
         self.can_annul_payments = can_annul_payments
+        self._direct_client_id: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
@@ -311,6 +312,15 @@ class CustomerLedgerPage(QWidget):
         self.clients_table.blockSignals(True)
         self.clients_table.clearContents()
         all_balances = client_balances()
+        if self._direct_client_id is not None and not any(
+            entry["client"].id == self._direct_client_id for entry in all_balances
+        ):
+            direct_client = Client.get_or_none(Client.id == self._direct_client_id)
+            if direct_client is not None:
+                all_balances.insert(
+                    0,
+                    {"client": direct_client, "balance": 0.0, "movements": 0},
+                )
         balances = self._filter_balances(all_balances)
         self.clients_table.setRowCount(len(balances))
         total_to_collect = 0.0
@@ -364,6 +374,22 @@ class CustomerLedgerPage(QWidget):
             self._on_client_selected(self.clients_table.currentRow(), 0, -1, -1)
         else:
             self._clear_detail()
+
+    def select_client(self, client: Client) -> None:
+        """Show a client immediately when navigation originates in Clientes."""
+        self._direct_client_id = client.id
+        self.search_input.blockSignals(True)
+        self.only_with_balance.blockSignals(True)
+        self.search_input.clear()
+        self.only_with_balance.setChecked(False)
+        self.search_input.blockSignals(False)
+        self.only_with_balance.blockSignals(False)
+        self.refresh()
+        for row in range(self.clients_table.rowCount()):
+            item = self.clients_table.item(row, 0)
+            if item is not None and item.data(Qt.UserRole) == client.id:
+                self.clients_table.setCurrentCell(row, 0)
+                return
 
     def _on_client_selected(self, current_row, _current_col, _previous_row, _previous_col) -> None:
         if current_row < 0:
