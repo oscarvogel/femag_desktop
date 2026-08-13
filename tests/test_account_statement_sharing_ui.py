@@ -65,8 +65,12 @@ def test_email_handler_confirms_and_sends_pdf(monkeypatch, tmp_path):
         lambda selected, output: pdf_path,
     )
     monkeypatch.setattr(
-        "app.ui.desktop_app.QMessageBox.question",
-        lambda *_args: QMessageBox.Yes,
+        "app.ui.desktop_app._AccountStatementRecipientsDialog",
+        lambda **_kwargs: SimpleNamespace(
+            exec_=lambda: QMessageBox.Accepted,
+            selected_recipients=lambda: ("cliente@example.com",),
+            subject=lambda: "Extracto de cuenta corriente - Cliente Uno",
+        ),
     )
     monkeypatch.setattr(
         "app.ui.desktop_app.account_statement_mail_service.send_account_statement",
@@ -89,7 +93,8 @@ def test_email_handler_confirms_and_sends_pdf(monkeypatch, tmp_path):
     assert sent == [
         {
             "client_name": "Cliente Uno",
-            "recipient": "cliente@example.com",
+            "recipients": ("cliente@example.com",),
+            "subject": "Extracto de cuenta corriente - Cliente Uno",
             "pdf_path": pdf_path,
         }
     ]
@@ -105,8 +110,8 @@ def test_email_handler_does_not_send_when_user_cancels(monkeypatch, tmp_path):
     fake_window = SimpleNamespace(_print_output_dir=tmp_path)
     client = SimpleNamespace(name="Cliente Uno", email="cliente@example.com")
     monkeypatch.setattr(
-        "app.ui.desktop_app.QMessageBox.question",
-        lambda *_args: QMessageBox.No,
+        "app.ui.desktop_app._AccountStatementRecipientsDialog",
+        lambda **_kwargs: SimpleNamespace(exec_=lambda: QMessageBox.Rejected),
     )
     monkeypatch.setattr(
         "app.ui.desktop_app.account_statement_mail_service.send_account_statement",
@@ -128,8 +133,12 @@ def test_email_handler_reports_background_send_error(monkeypatch, tmp_path):
     client = SimpleNamespace(name="Cliente Uno", email="cliente@example.com")
     pdf_path = tmp_path / "extracto.pdf"
     monkeypatch.setattr(
-        "app.ui.desktop_app.QMessageBox.question",
-        lambda *_args: QMessageBox.Yes,
+        "app.ui.desktop_app._AccountStatementRecipientsDialog",
+        lambda **_kwargs: SimpleNamespace(
+            exec_=lambda: QMessageBox.Accepted,
+            selected_recipients=lambda: ("cliente@example.com",),
+            subject=lambda: "Extracto de cuenta corriente - Cliente Uno",
+        ),
     )
     monkeypatch.setattr(
         "app.ui.desktop_app.account_statement_print_service.export_account_statement",

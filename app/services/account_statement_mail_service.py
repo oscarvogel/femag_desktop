@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import smtplib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
@@ -60,19 +60,25 @@ class SmtpSettings:
 
 
 def build_account_statement_message(
-    *, client_name: str, recipient: str, sender: str, pdf_path: str | Path
+    *,
+    client_name: str,
+    recipient: str | None = None,
+    recipients: Iterable[str] | None = None,
+    sender: str,
+    pdf_path: str | Path,
+    subject: str | None = None,
 ) -> EmailMessage:
-    recipient = (recipient or "").strip()
-    if not recipient:
+    addresses = _normalize_recipients(recipient=recipient, recipients=recipients)
+    if not addresses:
         raise ValueError("El cliente no tiene un correo electronico configurado.")
     path = Path(pdf_path)
     if not path.is_file():
         raise ValueError("No se encontro el PDF del extracto para adjuntar.")
 
     message = EmailMessage()
-    message["Subject"] = f"Extracto de cuenta corriente - {client_name}"
+    message["Subject"] = (subject or "").strip() or f"Extracto de cuenta corriente - {client_name}"
     message["From"] = sender
-    message["To"] = recipient
+    message["To"] = ", ".join(addresses)
     message.set_content(
         f"Hola {client_name},\n\n"
         "Adjuntamos su extracto de cuenta corriente.\n\n"
@@ -90,8 +96,10 @@ def build_account_statement_message(
 def send_account_statement(
     *,
     client_name: str,
-    recipient: str,
+    recipient: str | None = None,
+    recipients: Iterable[str] | None = None,
     pdf_path: str | Path,
+    subject: str | None = None,
     settings: SmtpSettings | None = None,
     smtp_factory=smtplib.SMTP,
 ) -> None:
@@ -99,8 +107,10 @@ def send_account_statement(
     message = build_account_statement_message(
         client_name=client_name,
         recipient=recipient,
+        recipients=recipients,
         sender=config.sender,
         pdf_path=pdf_path,
+        subject=subject,
     )
     try:
         with smtp_factory(config.host, config.port, timeout=20) as smtp:
@@ -112,3 +122,17 @@ def send_account_statement(
         raise AccountStatementMailError(
             "No se pudo enviar el correo. Revise la configuracion SMTP y la conexion."
         ) from exc
+
+
+def _normalize_recipients(
+    *, recipient: str | None, recipients: Iterable[str] | None
+) -> list[str]:
+    values = list(recipients or [])
+    if recipient:
+        values.append(recipient)
+    normalized: list[str] = []
+    for value in values:
+        address = (value or "").strip().lower()
+        if address and address not in normalized:
+            normalized.append(address)
+    return normalized
