@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from peewee import JOIN, InterfaceError, OperationalError
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
     QComboBox,
+    QDateEdit,
     QDialog,
     QDoubleSpinBox,
     QGridLayout,
@@ -41,6 +42,9 @@ from app.models.masters import (
     product_kind_label,
 )
 from app.services.client_service import ClientService
+from app.services.client_opening_balance_service import (
+    ClientOpeningBalanceService,
+)
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
@@ -398,6 +402,66 @@ class ClientEntryDialog(QDialog):
                 client.lista_precios = int(self.price_list_combo.currentData() or 1)
                 client.save()
                 self.saved_record = client
+            self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
+class ClientOpeningBalanceDialog(QDialog):
+    def __init__(self, *, current_user: str, client_id: int, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.client = Client.get_by_id(client_id)
+        self.saved_movement = None
+        self.setObjectName("clientOpeningBalanceDialog")
+        self.setWindowTitle("Saldo inicial")
+        self._build()
+
+    def _build(self) -> None:
+        layout = _entry_layout(self, f"Saldo inicial - {self.client.name}")
+        form = QGridLayout()
+        self.type_input = _combo(
+            "clientOpeningBalanceTypeInput",
+            [
+                (ClientOpeningBalanceService.TYPE_DEBIT, "Débito (el cliente debe)"),
+                (ClientOpeningBalanceService.TYPE_CREDIT, "Crédito (a favor del cliente)"),
+            ],
+            include_empty=False,
+        )
+        self.amount_input = QDoubleSpinBox()
+        self.amount_input.setObjectName("clientOpeningBalanceAmountInput")
+        self.amount_input.setDecimals(2)
+        self.amount_input.setRange(0.01, 999_999_999.99)
+        self.amount_input.setPrefix("$ ")
+        self.currency_input = QComboBox()
+        self.currency_input.setObjectName("clientOpeningBalanceCurrencyInput")
+        self.currency_input.setEditable(True)
+        self.currency_input.addItems(["ARS", "USD"])
+        self.date_input = QDateEdit(QDate.currentDate())
+        self.date_input.setObjectName("clientOpeningBalanceDateInput")
+        self.date_input.setCalendarPopup(True)
+        self.date_input.setDisplayFormat("dd/MM/yyyy")
+        form.addWidget(QLabel("Tipo"), 0, 0)
+        form.addWidget(self.type_input, 0, 1)
+        form.addWidget(QLabel("Importe"), 1, 0)
+        form.addWidget(self.amount_input, 1, 1)
+        form.addWidget(QLabel("Moneda"), 2, 0)
+        form.addWidget(self.currency_input, 2, 1)
+        form.addWidget(QLabel("Fecha"), 3, 0)
+        form.addWidget(self.date_input, 3, 1)
+        layout.addLayout(form)
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveClientOpeningBalanceButton", self._save)
+
+    def _save(self) -> None:
+        try:
+            self.saved_movement = ClientOpeningBalanceService(self.current_user).register(
+                client=self.client,
+                amount=self.amount_input.value(),
+                balance_type=self.type_input.currentData(),
+                currency=self.currency_input.currentText(),
+                movement_date=self.date_input.date().toPyDate(),
+            )
             self.accept()
         except Exception as exc:
             self.feedback.setText(str(exc))
@@ -1219,10 +1283,15 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_actions = QHBoxLayout()
     new_client_btn = _action_button("newClientButton", "Nuevo")
     edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
+    opening_balance_btn = _action_button(
+        "addClientOpeningBalanceButton", "Agregar saldo inicial", secondary=True
+    )
     new_client_btn.setEnabled(can_create)
     edit_client_btn.setEnabled(can_modify)
+    opening_balance_btn.setEnabled(False)
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
+    client_actions.addWidget(opening_balance_btn)
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
@@ -1287,6 +1356,11 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     def refresh_places() -> None:
         cid = selected_client_id()
+        opening_balance_btn.setEnabled(
+            can_modify
+            and cid is not None
+            and not ClientOpeningBalanceService.has_opening_balance(Client.get_by_id(cid))
+        )
         if cid is None:
             places_table.setRowCount(0)
             places_search_feedback.setText("")
@@ -1337,6 +1411,20 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
             refresh_clients()
             client_feedback.setText("Cliente actualizado.")
 
+    def open_opening_balance() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.setText("Seleccione un cliente para agregar el saldo inicial.")
+            return
+        dialog = ClientOpeningBalanceDialog(
+            current_user=current_user,
+            client_id=cid,
+            parent=parent,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.setText("Saldo inicial registrado.")
+
     def open_new_place() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -1373,6 +1461,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)
+    opening_balance_btn.clicked.connect(open_opening_balance)
     add_place_btn.clicked.connect(open_new_place)
     edit_place_btn.clicked.connect(open_edit_place)
     toggle_place_btn.clicked.connect(toggle_place_active)

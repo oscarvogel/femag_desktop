@@ -29,6 +29,7 @@ from app.services.ledger_query_service import (
 
 
 MOVEMENT_TYPE_LABELS = {
+    "opening_balance": "Saldo inicial",
     "load_order_documental": "Orden de carga",
     "load_order_documental_reversal": "Reverso OC",
     "payment": "Pago",
