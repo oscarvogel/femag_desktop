@@ -1259,7 +1259,9 @@ def _client_address_rows(client_id: int) -> list[list[object]]:
         return []
 
 
-def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
+def build_client_abm_page(
+    *, user, current_user: str, view_ledger_callback=None, parent=None
+) -> QWidget:
     page = _page("Clientes", "ABM de clientes con domicilios")
     layout = page.layout()
     can_create = _can_use_menu_action(user, "Maestros", "crear", "Clientes")
@@ -1283,6 +1285,9 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_actions = QHBoxLayout()
     new_client_btn = _action_button("newClientButton", "Nuevo")
     edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
+    view_ledger_btn = _action_button(
+        "viewClientLedgerButton", "Ver cuenta corriente", secondary=True
+    )
     opening_balance_btn = _action_button(
         "addClientOpeningBalanceButton", "Agregar saldo inicial", secondary=True
     )
@@ -1291,6 +1296,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     opening_balance_btn.setEnabled(False)
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
+    client_actions.addWidget(view_ledger_btn)
     client_actions.addWidget(opening_balance_btn)
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
@@ -1356,6 +1362,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     def refresh_places() -> None:
         cid = selected_client_id()
+        view_ledger_btn.setEnabled(view_ledger_callback is not None and cid is not None)
         opening_balance_btn.setEnabled(
             can_modify
             and cid is not None
@@ -1411,6 +1418,13 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
             refresh_clients()
             client_feedback.setText("Cliente actualizado.")
 
+    def open_client_ledger() -> None:
+        cid = selected_client_id()
+        if cid is None or view_ledger_callback is None:
+            client_feedback.setText("Seleccione un cliente para ver su cuenta corriente.")
+            return
+        view_ledger_callback(Client.get_by_id(cid))
+
     def open_opening_balance() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -1461,6 +1475,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)
+    view_ledger_btn.clicked.connect(open_client_ledger)
     opening_balance_btn.clicked.connect(open_opening_balance)
     add_place_btn.clicked.connect(open_new_place)
     edit_place_btn.clicked.connect(open_edit_place)
