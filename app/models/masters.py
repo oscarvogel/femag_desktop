@@ -77,6 +77,18 @@ class Client(BaseModel):
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_clients", null=True)
 
 
+class ClientEmail(BaseModel):
+    client = ForeignKeyField(Client, backref="contact_emails")
+    email = CharField()
+    label = CharField(null=True)
+    is_primary = BooleanField(default=False)
+    active = BooleanField(default=True)
+    observations = TextField(null=True)
+
+    class Meta:
+        indexes = ((('client', 'email'), True),)
+
+
 class ClientAddress(BaseModel):
     client = ForeignKeyField(Client, backref="addresses")
     address_type = CharField()

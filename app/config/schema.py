@@ -123,6 +123,7 @@ def ensure_runtime_schema(database) -> None:
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
     if hasattr(database, "atomic"):
+        _backfill_client_emails(database)
         _backfill_product_classification(database)
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
@@ -153,6 +154,39 @@ def _backfill_product_classification(database) -> None:
                 or (product.product_kind == "producto" and product.peso_unitario_kg <= 0)
             )
             product.save()
+
+
+def _backfill_client_emails(database) -> None:
+    from app.models.masters import Client, ClientEmail
+    from app.services.client_email_service import ClientEmailService
+
+    with database.atomic():
+        for client in Client.select().where(Client.email.is_null(False)).order_by(Client.id):
+            raw_email = (client.email or "").strip()
+            if not raw_email:
+                continue
+            try:
+                normalized = ClientEmailService.normalize_email(raw_email)
+            except ValueError:
+                continue
+            has_primary = ClientEmail.select().where(
+                (ClientEmail.client == client)
+                & (ClientEmail.active == True)  # noqa: E712
+                & (ClientEmail.is_primary == True)  # noqa: E712
+            ).exists()
+            row, _created = ClientEmail.get_or_create(
+                client=client,
+                email=normalized,
+                defaults={
+                    "label": "Legacy",
+                    "is_primary": not has_primary,
+                    "active": True,
+                },
+            )
+            if not has_primary:
+                row.active = True
+                row.is_primary = True
+                row.save()
 
 
 def _consolidate_shared_client_addresses(database) -> None:
