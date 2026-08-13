@@ -1772,7 +1772,7 @@ class LoadOrderEntryDialog(QDialog):
         title = QLabel("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
-        hint = QLabel("Seleccione el chofer. El transportista se cargara automaticamente. Luego elija camion y complete los destinos.")
+        hint = QLabel("Seleccione el chofer. El transportista se cargara automaticamente. Luego elija camion, semi/acoplado (opcional) y complete los destinos.")
         hint.setObjectName("formHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -1816,6 +1816,10 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.setContentsMargins(12, 12, 12, 12)
         header_layout.setHorizontalSpacing(10)
         header_layout.setVerticalSpacing(8)
+        # Mantener las filas compactas arriba del QFrame; el stacked widget
+        # heredaba el alto y las dejaba repartidas en huecos grandes.
+        for row in range(3):
+            header_layout.setRowStretch(row, 0)
         self.order_date = QDateEdit()
         self.order_date.setObjectName("loadOrderDateInput")
         self.order_date.setCalendarPopup(True)
@@ -1827,22 +1831,29 @@ class LoadOrderEntryDialog(QDialog):
         self.truck_combo = QComboBox()
         self.truck_combo.setObjectName("loadOrderTruckInput")
         enable_combo_autocomplete(self.truck_combo, placeholder="Buscar camion...")
+        self.trailer_combo = QComboBox()
+        self.trailer_combo.setObjectName("loadOrderTrailerInput")
+        enable_combo_autocomplete(self.trailer_combo, placeholder="Sin semi / acoplado")
         self.driver_combo = QComboBox()
         self.driver_combo.setObjectName("loadOrderDriverInput")
         enable_combo_autocomplete(self.driver_combo, placeholder="Buscar chofer...")
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
+        # 6 columnas: tres pares label/field. Trailer queda al lado del
+        # camion, en la misma fila; observaciones baja a su propia fila.
         header_layout.addWidget(QLabel("Fecha"), 0, 0)
         header_layout.addWidget(self.order_date, 0, 1)
         header_layout.addWidget(QLabel("Chofer"), 0, 2)
-        header_layout.addWidget(self.driver_combo, 0, 3)
+        header_layout.addWidget(self.driver_combo, 0, 3, 1, 3)
         header_layout.addWidget(QLabel("Transportista"), 1, 0)
         header_layout.addWidget(self.carrier_combo, 1, 1)
         header_layout.addWidget(QLabel("Camion / patente"), 1, 2)
         header_layout.addWidget(self.truck_combo, 1, 3)
+        header_layout.addWidget(QLabel("Semi / Acoplado"), 1, 4)
+        header_layout.addWidget(self.trailer_combo, 1, 5)
         header_layout.addWidget(QLabel("Observaciones"), 2, 0)
-        header_layout.addWidget(self.observations_input, 2, 1, 1, 3)
+        header_layout.addWidget(self.observations_input, 2, 1, 1, 5)
         self.step_stack.addWidget(header)
 
         destination = QFrame()
@@ -2012,6 +2023,11 @@ class LoadOrderEntryDialog(QDialog):
         _set_combo(self.driver_combo, self.order.driver.id)
         self._refresh_from_driver()
         _set_combo(self.truck_combo, self.order.truck.id)
+        if self.order.trailer_domain:
+            self._populate_trailer_options(
+                carrier_id=self.order.carrier.id,
+                preferred=LoadOrderService._normalize_trailer_domain(self.order.trailer_domain),
+            )
         self.observations_input.setText(self.order.observations or "")
         self.destinations = [
             {
@@ -2050,6 +2066,7 @@ class LoadOrderEntryDialog(QDialog):
         if driver_id is None:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            _fill_combo(self.trailer_combo, [])
             self._update_save_button_state()
             return
         try:
@@ -2057,6 +2074,7 @@ class LoadOrderEntryDialog(QDialog):
         except Driver.DoesNotExist:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            _fill_combo(self.trailer_combo, [])
             self._update_save_button_state()
             return
         try:
@@ -2066,6 +2084,7 @@ class LoadOrderEntryDialog(QDialog):
         if carrier is None or not carrier.active:
             self.carrier_combo.setCurrentIndex(-1)
             _fill_combo(self.truck_combo, [])
+            _fill_combo(self.trailer_combo, [])
             if carrier is None:
                 self.feedback.setText("El chofer seleccionado no tiene transportista asociado.")
             else:
@@ -2082,7 +2101,21 @@ class LoadOrderEntryDialog(QDialog):
             self.truck_combo.setCurrentIndex(1)
         elif not truck_options:
             self.feedback.setText("No hay camiones activos para el transportista seleccionado.")
+        preferred_trailer = None
+        if driver.usual_truck is not None and driver.usual_truck.trailer_domain:
+            preferred_trailer = LoadOrderService._normalize_trailer_domain(
+                driver.usual_truck.trailer_domain
+            )
+        self._populate_trailer_options(carrier_id=carrier_id, preferred=preferred_trailer)
         self._update_save_button_state()
+
+    def _populate_trailer_options(self, *, carrier_id: int | None, preferred: str | None = None) -> None:
+        options = _trailer_options(carrier_id=carrier_id)
+        _fill_combo(self.trailer_combo, options)
+        if preferred and any(value == preferred for _value, value in options):
+            self.trailer_combo.setCurrentIndex(self.trailer_combo.findData(preferred))
+        elif len(options) == 1:
+            self.trailer_combo.setCurrentIndex(1)
 
     def _refresh_address_options(self) -> None:
         client_id = self.client_combo.currentData()
@@ -2328,6 +2361,17 @@ class LoadOrderEntryDialog(QDialog):
         else:
             self.save_button.setToolTip("Complete chofer, camion, destino y productos para guardar.")
 
+    def _selected_trailer_domain(self) -> str | None:
+        if not hasattr(self, "trailer_combo"):
+            return None
+        data = self.trailer_combo.currentData()
+        if not data:
+            return None
+        if not isinstance(data, str):
+            return None
+        cleaned = "".join(ch for ch in data.strip().upper() if ch.isalnum())
+        return cleaned or None
+
     def _save(self) -> None:
         if not self._is_ready_to_save():
             duplicate_message = self._duplicate_merchandise_message()
@@ -2377,6 +2421,7 @@ class LoadOrderEntryDialog(QDialog):
                     pallets=[],
                     observations=self.observations_input.text().strip() or None,
                     order_date=self.order_date.date().toPyDate(),
+                    trailer_domain=self._selected_trailer_domain(),
                 )
             else:
                 self.created_order = self.service.update_order(
@@ -2387,6 +2432,7 @@ class LoadOrderEntryDialog(QDialog):
                     destinations=destinations,
                     observations=self.observations_input.text().strip() or None,
                     date=self.order_date.date().toPyDate(),
+                    trailer_domain=self._selected_trailer_domain(),
                 )
             self.accept()
         except Exception as exc:
@@ -2895,6 +2941,28 @@ def _driver_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
         if carrier_id is not None:
             query = query.where(Driver.carrier == carrier_id)
         return [(driver.id, driver.name) for driver in query.order_by(Driver.name)]
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def _trailer_options(carrier_id: int | None = None) -> list[tuple[str, str]]:
+    try:
+        if carrier_id is None:
+            return []
+        seen: dict[str, None] = {}
+        for truck in (
+            Truck.select(Truck.trailer_domain)
+            .where(
+                (Truck.active == True)  # noqa: E712
+                & (Truck.carrier == carrier_id)
+                & (Truck.trailer_domain.is_null(False))
+            )
+            .order_by(Truck.trailer_domain)
+        ):
+            domain = LoadOrderService._normalize_trailer_domain(truck.trailer_domain or "")
+            if domain and domain not in seen:
+                seen[domain] = None
+        return [(domain, domain) for domain in sorted(seen)]
     except (InterfaceError, OperationalError):
         return []
 

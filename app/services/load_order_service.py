@@ -44,9 +44,11 @@ class LoadOrderService:
         pallets: list[dict] | None = None,
         observations: str | None = None,
         order_date: date | None = None,
+        trailer_domain: str | None = None,
     ) -> LoadOrder:
         order_date = self._validate_order_date(order_date)
         carrier, driver, truck = self._validate_logistic_header(carrier, driver, truck)
+        trailer_domain = self._validate_trailer_domain(trailer_domain, carrier=carrier)
         normalized_destinations = self._validate_destinations(
             destinations,
             legacy_client=client,
@@ -64,6 +66,7 @@ class LoadOrderService:
                 carrier=carrier,
                 driver=driver,
                 truck=truck,
+                trailer_domain=trailer_domain,
                 observations=observations,
                 created_by=self.current_user,
                 updated_by=self.current_user,
@@ -126,6 +129,18 @@ class LoadOrderService:
         candidate_driver = changes.get("driver", order.driver)
         candidate_truck = changes.get("truck", order.truck)
         self._validate_logistic_header(candidate_carrier, candidate_driver, candidate_truck)
+        if "trailer_domain" in changes:
+            changes["trailer_domain"] = self._validate_trailer_domain(
+                changes["trailer_domain"], carrier=candidate_carrier
+            )
+        elif (
+            "carrier" in changes
+            and order.trailer_domain
+            and order.trailer_domain not in self._available_trailer_domains(candidate_carrier)
+        ):
+            raise ValueError(
+                "El semi/acoplado seleccionado no pertenece al nuevo transportista."
+            )
         if "date" in changes:
             changes["date"] = self._validate_order_date(changes["date"], allow_none=False)
         if new_driver is not None and new_driver.id != order.driver.id and order.is_active:
@@ -550,6 +565,47 @@ class LoadOrderService:
             raise ValueError("La fecha de la orden no es valida.")
         return value
 
+    @staticmethod
+    def _normalize_trailer_domain(value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("El semi/acoplado debe ser una patente valida.")
+        cleaned = "".join(ch for ch in value.strip().upper() if ch.isalnum())
+        return cleaned or None
+
+    def _available_trailer_domains(self, carrier: Carrier | None) -> set[str]:
+        if carrier is None:
+            return set()
+        query = Truck.select(Truck.trailer_domain).where(
+            (Truck.active == True)  # noqa: E712
+            & (Truck.carrier == carrier)
+            & (Truck.trailer_domain.is_null(False))
+        )
+        return {
+            normalized
+            for row in query
+            if row.trailer_domain
+            for normalized in (self._normalize_trailer_domain(row.trailer_domain),)
+            if normalized
+        }
+
+    def _validate_trailer_domain(
+        self,
+        value: object,
+        *,
+        carrier: Carrier,
+    ) -> str | None:
+        normalized = self._normalize_trailer_domain(value)
+        if normalized is None:
+            return None
+        available = self._available_trailer_domains(carrier)
+        if normalized not in available:
+            raise ValueError(
+                "El semi/acoplado seleccionado no pertenece al transportista de la orden."
+            )
+        return normalized
+
     def _replace_products(self, order: LoadOrder, products: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()
         for item in products:
@@ -707,4 +763,5 @@ class LoadOrderService:
             "client_ids": [destination.client.id for destination in order.destinations],
             "driver_id": order.driver.id,
             "truck_id": order.truck.id,
+            "trailer_domain": order.trailer_domain,
         }
