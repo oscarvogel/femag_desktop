@@ -1645,7 +1645,7 @@ class LoadOrderPalletDialog(QDialog):
         root.addWidget(subtitle)
 
         self.pallet_widget = PalletCompositionWidget(destinations=self._destination_drafts())
-        self.pallet_widget.load_pallets(self._pallet_drafts())
+        self.pallet_widget.load_pallets(self._pallet_drafts(), loose=self._loose_drafts())
         self.pallet_widget.setEnabled(not read_only)
         root.addWidget(self.pallet_widget, 1)
 
@@ -1714,6 +1714,19 @@ class LoadOrderPalletDialog(QDialog):
             for pallet in self.order.pallets.order_by()
         ]
 
+    def _loose_drafts(self) -> list[dict]:
+        return [
+            {
+                "client_id": allocation.destination.client.id,
+                "address_id": allocation.destination.delivery_address.id,
+                "product_id": allocation.product.id,
+                "product_label": allocation.product.name,
+                "quantity": float(allocation.quantity),
+                "peso_unitario_kg": allocation.peso_unitario_kg,
+            }
+            for allocation in self.order.loose_allocations.order_by()
+        ]
+
     def _save(self) -> None:
         try:
             pallets = []
@@ -1738,7 +1751,21 @@ class LoadOrderPalletDialog(QDialog):
                         "allocations": allocations,
                     }
                 )
-            self.order = self.service.update_order(self.order, pallets=pallets)
+            loose_allocations = []
+            for allocation in self.pallet_widget.loose_drafts():
+                address = ClientAddress.get_by_id(allocation["address_id"])
+                loose_allocations.append(
+                    {
+                        "client": address.client,
+                        "delivery_address": address,
+                        "product": Product.get_by_id(allocation["product_id"]),
+                        "quantity": allocation["quantity"],
+                        "peso_unitario_kg": allocation.get("peso_unitario_kg"),
+                    }
+                )
+            self.order = self.service.update_order(
+                self.order, pallets=pallets, loose_allocations=loose_allocations
+            )
             self.accept()
         except Exception as exc:
             self.feedback.setText(str(exc))

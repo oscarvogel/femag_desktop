@@ -6,6 +6,7 @@ from app.models.load_orders import (
     LoadOrder,
     LoadOrderBudgetStatus,
     LoadOrderDestination,
+    LoadOrderLooseAllocation,
     LoadOrderPallet,
     LoadOrderPalletAllocation,
     LoadOrderProduct,
@@ -16,7 +17,13 @@ from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.driver_availability_service import DriverAvailabilityService
 from app.services.master_service import MasterService
-from app.services.pallet_composition_service import AllocationDraft, PalletCompositionService, PalletDraft, RequestedLine
+from app.services.pallet_composition_service import (
+    AllocationDraft,
+    LooseAllocationDraft,
+    PalletCompositionService,
+    PalletDraft,
+    RequestedLine,
+)
 
 
 class LoadOrderService:
@@ -42,6 +49,7 @@ class LoadOrderService:
         products: list[dict] | None = None,
         destinations: list[dict] | None = None,
         pallets: list[dict] | None = None,
+        loose_allocations: list[dict] | None = None,
         observations: str | None = None,
         order_date: date | None = None,
         trailer_domain: str | None = None,
@@ -55,7 +63,12 @@ class LoadOrderService:
             legacy_delivery_address=delivery_address,
             legacy_products=products,
         )
-        normalized_pallets = self._validate_pallets(pallets, normalized_destinations)
+        normalized_pallets = self._validate_pallets(
+            pallets,
+            normalized_destinations,
+            loose=loose_allocations,
+        )
+        normalized_loose = self._validate_loose(loose_allocations, normalized_destinations)
         self.driver_availability.ensure_available(driver)
         with database_proxy.atomic():
             order = LoadOrder.create(
@@ -73,6 +86,7 @@ class LoadOrderService:
             )
             self._replace_destinations(order, normalized_destinations)
             self._replace_pallets(order, normalized_pallets)
+            self._replace_loose_allocations(order, normalized_loose)
             LoadOrderStatusHistory.create(
                 order=order,
                 old_status=None,
@@ -97,9 +111,12 @@ class LoadOrderService:
         old_snapshot = self._snapshot(order)
         destinations = changes.pop("destinations", None)
         pallets = changes.pop("pallets", None)
+        loose_allocations = changes.pop("loose_allocations", None)
         normalized_destinations = None
         normalized_pallets = None
+        normalized_loose = None
         weight_snapshots = self._pallet_weight_snapshots(order)
+        loose_weight_snapshots = self._loose_weight_snapshots(order)
         if destinations is not None:
             if not order.is_unissued:
                 raise ValueError("Solo se pueden editar clientes y productos de ordenes pendientes.")
@@ -114,6 +131,13 @@ class LoadOrderService:
                     self._persisted_pallet_payload(order),
                     normalized_destinations,
                     weight_snapshots=weight_snapshots,
+                    loose=loose_allocations if loose_allocations is not None else self._persisted_loose_payload(order),
+                )
+            if loose_allocations is None:
+                normalized_loose = self._validate_loose(
+                    self._persisted_loose_payload(order),
+                    normalized_destinations,
+                    weight_snapshots=loose_weight_snapshots,
                 )
         if pallets is not None:
             if not order.is_unissued:
@@ -123,7 +147,19 @@ class LoadOrderService:
                 pallets,
                 pallet_destinations,
                 weight_snapshots=weight_snapshots,
+                loose=loose_allocations if loose_allocations is not None else self._persisted_loose_payload(order),
             )
+        if loose_allocations is not None:
+            if not order.is_unissued:
+                raise ValueError("Solo se pueden editar pallets de ordenes pendientes.")
+            loose_destinations = normalized_destinations or self._persisted_destination_payload(order)
+            normalized_loose = self._validate_loose(
+                loose_allocations,
+                loose_destinations,
+                weight_snapshots=loose_weight_snapshots,
+            )
+            pallets_for_excess = normalized_pallets if normalized_pallets is not None else self._persisted_pallet_payload(order)
+            self._raise_if_excess(loose_destinations, pallets_for_excess, loose_allocations)
         new_driver = changes.get("driver")
         candidate_carrier = changes.get("carrier", order.carrier)
         candidate_driver = changes.get("driver", order.driver)
@@ -158,6 +194,8 @@ class LoadOrderService:
                 self._replace_destinations(order, normalized_destinations)
             if normalized_pallets is not None:
                 self._replace_pallets(order, normalized_pallets)
+            if normalized_loose is not None:
+                self._replace_loose_allocations(order, normalized_loose)
             if previous_driver is not None:
                 self.driver_availability.release_driver(previous_driver, order)
                 self.driver_availability.lock_driver(order.driver, order)
@@ -381,6 +419,7 @@ class LoadOrderService:
         destinations: list[dict],
         *,
         weight_snapshots: dict[tuple[int, int, int], Decimal] | None = None,
+        loose: list[dict] | None = None,
     ) -> list[dict]:
         normalized: list[dict] = []
         valid_lines = {
@@ -452,11 +491,70 @@ class LoadOrderService:
         result = PalletCompositionService().reconcile(
             requested=self._requested_lines(destinations),
             pallets=self._draft_pallets(normalized),
+            loose=self._draft_loose(loose or []),
         )
         excess = [issue.message for issue in result.issues if issue.code == "excess"]
         if excess:
             raise ValueError(" ".join(excess))
         return normalized
+
+    def _validate_loose(
+        self,
+        loose: list[dict] | None,
+        destinations: list[dict],
+        *,
+        weight_snapshots: dict[tuple[int, int], Decimal] | None = None,
+    ) -> list[dict]:
+        normalized: list[dict] = []
+        valid_lines = {
+            (destination["client"].id, destination["delivery_address"].id, product["product"].id): (
+                destination,
+                product,
+            )
+            for destination in destinations
+            for product in destination["products"]
+        }
+        for item in loose or []:
+            if not isinstance(item, dict):
+                raise ValueError("Cada asignacion suelta debe ser un detalle valido.")
+            client = self._require_instance(item.get("client"), Client, "cliente")
+            address = self._require_instance(item.get("delivery_address"), ClientAddress, "lugar de entrega")
+            product = self._require_instance(item.get("product"), Product, "producto")
+            self._require_loadable_product(product)
+            key = (client.id, address.id, product.id)
+            if key not in valid_lines:
+                raise ValueError("La mercaderia suelta no pertenece a la orden.")
+            quantity = item.get("quantity")
+            if quantity is None or quantity <= 0:
+                raise ValueError("La cantidad suelta debe ser mayor a cero.")
+            normalized.append(
+                {
+                    "client": client,
+                    "delivery_address": address,
+                    "product": product,
+                    "quantity": quantity,
+                    "peso_unitario_kg": (weight_snapshots or {}).get(
+                        (address.id, product.id),
+                        product.peso_unitario_kg,
+                    ),
+                }
+            )
+        return normalized
+
+    def _raise_if_excess(
+        self,
+        destinations: list[dict],
+        pallets: list[dict],
+        loose: list[dict],
+    ) -> None:
+        result = PalletCompositionService().reconcile(
+            requested=self._requested_lines(destinations),
+            pallets=self._draft_pallets(pallets),
+            loose=self._draft_loose(loose or []),
+        )
+        excess = [issue.message for issue in result.issues if issue.code == "excess"]
+        if excess:
+            raise ValueError(" ".join(excess))
 
     def _persisted_destination_payload(self, order: LoadOrder) -> list[dict]:
         return [
@@ -493,12 +591,30 @@ class LoadOrderService:
             for pallet in order.pallets.order_by(LoadOrderPallet.sequence)
         ]
 
+    def _persisted_loose_payload(self, order: LoadOrder) -> list[dict]:
+        return [
+            {
+                "client": allocation.destination.client,
+                "delivery_address": allocation.destination.delivery_address,
+                "product": allocation.product,
+                "quantity": allocation.quantity,
+                "peso_unitario_kg": allocation.peso_unitario_kg,
+            }
+            for allocation in order.loose_allocations
+        ]
+
     def _pallet_weight_snapshots(self, order: LoadOrder) -> dict[tuple[int, int, int], Decimal]:
         return {
             (pallet.sequence, allocation.destination.delivery_address.id, allocation.product.id):
                 allocation.peso_unitario_kg
             for pallet in order.pallets
             for allocation in pallet.allocations
+        }
+
+    def _loose_weight_snapshots(self, order: LoadOrder) -> dict[tuple[int, int], Decimal]:
+        return {
+            (allocation.destination.delivery_address.id, allocation.product.id): allocation.peso_unitario_kg
+            for allocation in order.loose_allocations
         }
 
     def _requested_lines(self, destinations: list[dict]) -> list[RequestedLine]:
@@ -536,6 +652,22 @@ class LoadOrderService:
                 ),
             )
             for pallet in pallets
+        ]
+
+    def _draft_loose(self, loose: list[dict]) -> list[LooseAllocationDraft]:
+        return [
+            LooseAllocationDraft(
+                destination_id=allocation["delivery_address"].id,
+                product_id=allocation["product"].id,
+                quantity=allocation["quantity"],
+                peso_unitario_kg=allocation.get("peso_unitario_kg") or allocation["product"].peso_unitario_kg,
+                client_id=allocation["client"].id,
+                label=(
+                    f"{allocation['client'].name} / {allocation['delivery_address'].address} / "
+                    f"{allocation['product'].name}"
+                ),
+            )
+            for allocation in loose
         ]
 
     def _require_instance(self, value, model_class, label: str):
@@ -719,6 +851,22 @@ class LoadOrderService:
                     peso_unitario_kg=allocation["peso_unitario_kg"],
                 )
 
+    def _replace_loose_allocations(self, order: LoadOrder, loose: list[dict]) -> None:
+        LoadOrderLooseAllocation.delete().where(LoadOrderLooseAllocation.order == order).execute()
+        persisted_destinations = {
+            (destination.client.id, destination.delivery_address.id): destination
+            for destination in order.destinations
+        }
+        for item in loose:
+            destination = persisted_destinations[(item["client"].id, item["delivery_address"].id)]
+            LoadOrderLooseAllocation.create(
+                order=order,
+                destination=destination,
+                product=item["product"],
+                quantity=item["quantity"],
+                peso_unitario_kg=item["peso_unitario_kg"],
+            )
+
     def composition(self, order: LoadOrder):
         order = LoadOrder.get_by_id(order.id)
         requested = [
@@ -754,7 +902,21 @@ class LoadOrderService:
             )
             for pallet in order.pallets.order_by(LoadOrderPallet.sequence)
         ]
-        return PalletCompositionService().reconcile(requested=requested, pallets=pallets)
+        loose = [
+            LooseAllocationDraft(
+                destination_id=allocation.destination.id,
+                product_id=allocation.product.id,
+                quantity=allocation.quantity,
+                peso_unitario_kg=allocation.peso_unitario_kg,
+                client_id=allocation.destination.client.id,
+                label=(
+                    f"{allocation.destination.client.name} / "
+                    f"{allocation.destination.delivery_address.address} / {allocation.product.name}"
+                ),
+            )
+            for allocation in order.loose_allocations
+        ]
+        return PalletCompositionService().reconcile(requested=requested, pallets=pallets, loose=loose)
 
     def _snapshot(self, order: LoadOrder) -> dict:
         return {

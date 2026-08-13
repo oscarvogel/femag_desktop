@@ -75,7 +75,7 @@ def test_kg_text_hides_zero_decimals_and_keeps_real_precision():
     assert _kg_text(Decimal("1234.125")) == "1.234,125 kg"
 
 
-def test_empty_state_guides_first_pallet_and_disables_editor_actions(db):
+def test_empty_state_guides_first_pallet_and_keeps_loose_actions_available(db):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
 
     from app.ui.pallet_composition import PalletCompositionWidget
@@ -90,11 +90,14 @@ def test_empty_state_guides_first_pallet_and_disables_editor_actions(db):
     assert widget.summary_label.text() == "45 unidades pendientes"
     assert widget.quantity_input.value() == 1
     assert widget.findChild(QPushButton, "addPalletCardButton").text() == "Agregar primer pallet"
-    assert widget.destination_combo.isEnabled() is False
-    assert widget.product_combo.isEnabled() is False
-    assert widget.quantity_input.isEnabled() is False
+    assert widget.destination_combo.isEnabled() is True
+    assert widget.product_combo.isEnabled() is True
+    assert widget.quantity_input.isEnabled() is True
+    assert widget.allocation_table.isEnabled() is False
     assert widget.findChild(QPushButton, "addPalletAllocationButton").isEnabled() is False
+    assert widget.findChild(QPushButton, "markLooseAllocationButton").isEnabled() is False
     assert widget.findChild(QPushButton, "removePalletProductButton_0") is None
+    assert widget.findChild(QPushButton, "removeLooseAllocationButton_0") is None
 
     widget.add_pallet()
     app.processEvents()
@@ -506,15 +509,16 @@ def test_composition_widget_fits_in_notebook_viewport(db):
     # Sin scroll horizontal (solo vertical) para no romper el layout lado a lado
     assert editor_scroll.horizontalScrollBarPolicy() == 1  # Qt.ScrollBarAlwaysOff
 
-    # El editor debe distribuir su contenido en 3 tabs (Individual / Masiva / Asignaciones)
-    # para que el alto total entre en notebooks chicas.
+    # El editor debe distribuir su contenido en 4 tabs
+    # (Individual / Masiva / Asignaciones / Suelto) para que el alto total
+    # entre en notebooks chicas.
     editor_tabs = widget.findChild(QTabWidget, "palletEditorTabs")
     assert editor_tabs is not None, "El editor no tiene un QTabWidget"
-    assert editor_tabs.count() == 3, (
-        f"Se esperaban 3 tabs (Individual / Masiva / Asignaciones) pero hay {editor_tabs.count()}"
+    assert editor_tabs.count() == 4, (
+        f"Se esperaban 4 tabs (Individual / Masiva / Asignaciones / Suelto) pero hay {editor_tabs.count()}"
     )
     tab_labels = [editor_tabs.tabText(i) for i in range(editor_tabs.count())]
-    assert tab_labels == ["Individual", "Masiva", "Asignaciones"], (
+    assert tab_labels == ["Individual", "Masiva", "Asignaciones", "Suelto"], (
         f"Labels de tabs inesperados: {tab_labels}"
     )
 
