@@ -136,7 +136,7 @@ def build_load_order_form_spec() -> LoadOrderFormSpec:
             ),
             LoadOrderSectionSpec(
                 "Transporte",
-                ("Transportista", "Camión", "Chofer", "Vehículo limpio y apto"),
+                ("Transportista", "Camión", "Semi / Acoplado", "Chofer", "Vehículo limpio y apto"),
             ),
         ),
         detail_columns=(
