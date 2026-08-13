@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (
 from app.models.masters import Product
 from app.services.pallet_composition_service import (
     AllocationDraft,
+    LooseAllocationDraft,
     PalletCompositionService,
     PalletDraft,
     RequestedLine,
@@ -111,6 +112,7 @@ class PalletCompositionWidget(QWidget):
         self.setObjectName("palletCompositionWidget")
         self._destinations: list[dict] = destinations or []
         self._pallets: list[dict] = []
+        self._loose: list[dict] = []
         self._cards: dict[int, PalletCard] = {}
         self._selected_sequence: int | None = None
         self._build()
@@ -244,6 +246,14 @@ class PalletCompositionWidget(QWidget):
         self.add_allocation_button.setObjectName("addPalletAllocationButton")
         self.add_allocation_button.clicked.connect(self._add_from_editor)
         layout_individual.addWidget(self.add_allocation_button)
+        self.add_loose_button = QPushButton("Marcar como suelto")
+        self.add_loose_button.setObjectName("markLooseAllocationButton")
+        self.add_loose_button.setProperty("secondary", True)
+        self.add_loose_button.setToolTip(
+            "Asigna la cantidad como mercaderia suelta, sin asociarla a ningun pallet."
+        )
+        self.add_loose_button.clicked.connect(self._add_loose_from_editor)
+        layout_individual.addWidget(self.add_loose_button)
         layout_individual.addStretch(1)
         self.editor_tabs.addTab(tab_individual, "Individual")
 
@@ -304,6 +314,24 @@ class PalletCompositionWidget(QWidget):
         layout_asignaciones.addWidget(self.allocation_table, 1)
         self.editor_tabs.addTab(tab_asignaciones, "Asignaciones")
 
+        tab_suelto = QWidget()
+        tab_suelto.setObjectName("palletEditorTabLoose")
+        layout_suelto = QVBoxLayout(tab_suelto)
+        layout_suelto.setContentsMargins(0, 8, 0, 0)
+        self.loose_table = QTableWidget(0, 5)
+        self.loose_table.setObjectName("looseAllocationTable")
+        self.loose_table.setHorizontalHeaderLabels(
+            ("Cliente / destino", "Articulo", "Cantidad", "Kg", "Accion")
+        )
+        self.loose_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.loose_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.loose_table.verticalHeader().setVisible(False)
+        self.loose_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.loose_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.loose_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout_suelto.addWidget(self.loose_table, 1)
+        self.editor_tabs.addTab(tab_suelto, "Suelto")
+
         editor.addWidget(self.editor_tabs, 1)
         editor_scroll.setWidget(editor_content)
         editor_panel_layout.addWidget(editor_scroll)
@@ -328,6 +356,11 @@ class PalletCompositionWidget(QWidget):
                 for allocation in pallet["allocations"]
                 if (allocation["address_id"], allocation["product_id"]) in valid_keys
             ]
+        self._loose = [
+            allocation
+            for allocation in self._loose
+            if (allocation["address_id"], allocation["product_id"]) in valid_keys
+        ]
         self._refresh_destination_combo()
         self._refresh()
 
@@ -445,6 +478,58 @@ class PalletCompositionWidget(QWidget):
                 }
             )
 
+    def add_loose_allocation(self, address_id: int, product_id: int, quantity) -> None:
+        destination = self._destination(address_id)
+        product_draft = next(
+            product for product in destination.get("products") or [] if product["product_id"] == product_id
+        )
+        product = Product.get_by_id(product_id)
+        self._add_loose_allocation(
+            destination,
+            product_draft,
+            product,
+            quantity,
+        )
+        self._refresh()
+        self.composition_changed.emit()
+
+    def _add_loose_allocation(
+        self,
+        destination: dict,
+        product_draft: dict,
+        product: Product,
+        quantity,
+    ) -> None:
+        address_id = destination["address_id"]
+        product_id = product.id
+        existing = next(
+            (
+                allocation
+                for allocation in self._loose
+                if allocation["address_id"] == address_id and allocation["product_id"] == product_id
+            ),
+            None,
+        )
+        if existing is not None:
+            existing["quantity"] = float(existing["quantity"]) + float(quantity)
+        else:
+            self._loose.append(
+                {
+                    "client_id": destination["client_id"],
+                    "address_id": address_id,
+                    "product_id": product_id,
+                    "product_label": product_draft["product_label"],
+                    "quantity": float(quantity),
+                    "peso_unitario_kg": Decimal(product.peso_unitario_kg),
+                }
+            )
+
+    def remove_loose_allocation(self, index: int) -> None:
+        if 0 <= index < len(self._loose):
+            self._loose.pop(index)
+            self._refresh()
+            self.composition_changed.emit()
+
     def clear_all_allocations(self) -> int:
         allocation_count = sum(len(pallet["allocations"]) for pallet in self._pallets)
         if not allocation_count:
@@ -473,7 +558,7 @@ class PalletCompositionWidget(QWidget):
         if answer == QMessageBox.Yes:
             self.clear_all_allocations()
 
-    def load_pallets(self, pallets: list[dict]) -> None:
+    def load_pallets(self, pallets: list[dict], *, loose: list[dict] | None = None) -> None:
         self._pallets = []
         for pallet in pallets:
             self._pallets.append(
@@ -483,6 +568,7 @@ class PalletCompositionWidget(QWidget):
                     "allocations": [dict(allocation) for allocation in pallet.get("allocations") or []],
                 }
             )
+        self._loose = [dict(allocation) for allocation in loose or []]
         self._selected_sequence = self._pallets[0]["sequence"] if self._pallets else None
         self._refresh()
 
@@ -495,6 +581,9 @@ class PalletCompositionWidget(QWidget):
             }
             for pallet in self._pallets
         ]
+
+    def loose_drafts(self) -> list[dict]:
+        return [dict(allocation) for allocation in self._loose]
 
     def card_for_sequence(self, sequence: int) -> PalletCard:
         return self._cards[sequence]
@@ -536,10 +625,24 @@ class PalletCompositionWidget(QWidget):
             for pallet in self._pallets
         ]
 
+    def _domain_loose(self) -> list[LooseAllocationDraft]:
+        return [
+            LooseAllocationDraft(
+                destination_id=allocation["address_id"],
+                product_id=allocation["product_id"],
+                quantity=allocation["quantity"],
+                peso_unitario_kg=allocation["peso_unitario_kg"],
+                label=allocation.get("product_label", ""),
+                client_id=allocation.get("client_id"),
+            )
+            for allocation in self._loose
+        ]
+
     def _refresh(self) -> None:
         result = PalletCompositionService().reconcile(
             requested=self._requested_lines(),
             pallets=self._domain_pallets(),
+            loose=self._domain_loose(),
         )
         self.total_kg_label.setText(_kg_text(result.total_kg))
         pending_keys = {
@@ -583,8 +686,6 @@ class PalletCompositionWidget(QWidget):
             )
         self.issue_label.setText(
             "\n".join(issue.message for issue in result.issues if issue.code != "no_pallets")
-            if self._pallets
-            else ""
         )
         while self.card_grid.count():
             item = self.card_grid.takeAt(0)
@@ -715,6 +816,14 @@ class PalletCompositionWidget(QWidget):
             ),
             Decimal("0"),
         )
+        assigned += sum(
+            (
+                Decimal(str(allocation["quantity"]))
+                for allocation in self._loose
+                if allocation["address_id"] == address_id and allocation["product_id"] == product_id
+            ),
+            Decimal("0"),
+        )
         return max(requested - assigned, Decimal("0"))
 
     def _suggest_remaining_quantity(self) -> None:
@@ -765,6 +874,16 @@ class PalletCompositionWidget(QWidget):
             return
         self.add_allocation(self._selected_sequence, address_id, product_id, quantity)
 
+    def _add_loose_from_editor(self) -> None:
+        address_id = self.destination_combo.currentData()
+        product_id = self.product_combo.currentData()
+        if address_id is None or product_id is None:
+            return
+        quantity = Decimal(str(self.quantity_input.value()))
+        if quantity <= 0 or quantity > self._remaining_quantity(address_id, product_id):
+            return
+        self.add_loose_allocation(address_id, product_id, quantity)
+
     def _assign_bulk_from_editor(self) -> None:
         address_id = self.destination_combo.currentData()
         product_id = self.product_combo.currentData()
@@ -792,17 +911,46 @@ class PalletCompositionWidget(QWidget):
             self._refresh()
             self.composition_changed.emit()
 
+    def _remove_loose_row(self, row: int) -> None:
+        self.remove_loose_allocation(row)
+
+    def _render_loose_table(self) -> None:
+        selected_row = self.loose_table.currentRow()
+        self.loose_table.setRowCount(len(self._loose))
+        for row, allocation in enumerate(self._loose):
+            destination = self._destination(allocation["address_id"])
+            kilos = Decimal(str(allocation["quantity"])) * Decimal(str(allocation["peso_unitario_kg"]))
+            values = (
+                f"{destination['client_label']} · {destination['address_label']}",
+                allocation.get("product_label", str(allocation["product_id"])),
+                f"{allocation['quantity']:g}",
+                _kg_text(kilos),
+            )
+            for column, value in enumerate(values):
+                self.loose_table.setItem(row, column, QTableWidgetItem(value))
+            remove_button = QPushButton("Quitar")
+            remove_button.setObjectName(f"removeLooseAllocationButton_{row}")
+            remove_button.setToolTip("Quitar esta asignacion suelta")
+            remove_button.clicked.connect(
+                lambda _checked=False, loose_row=row: self._remove_loose_row(loose_row)
+            )
+            self.loose_table.setCellWidget(row, 4, remove_button)
+        if self._loose:
+            self.loose_table.selectRow(min(max(selected_row, 0), len(self._loose) - 1))
+
     def _render_editor(self) -> None:
+        self._render_loose_table()
         if self._selected_sequence is None:
-            self.editor_title.setText("Agregue un pallet para comenzar")
+            self.editor_title.setText("Marcar mercaderia como suelta o agregar un pallet")
             self.allocation_table.setRowCount(0)
+            self.allocation_table.setEnabled(False)
             for control in (
                 self.destination_combo,
                 self.product_combo,
                 self.quantity_input,
-                self.allocation_table,
             ):
-                control.setEnabled(False)
+                control.setEnabled(True)
+            self._suggest_remaining_quantity()
             self._update_editor_actions()
             return
         pallet = self._pallet(self._selected_sequence)
@@ -840,13 +988,19 @@ class PalletCompositionWidget(QWidget):
 
     def _update_editor_actions(self) -> None:
         has_pallet = self._selected_sequence is not None
+        has_selection = (
+            self.destination_combo.currentData() is not None and self.product_combo.currentData() is not None
+        )
         can_add = (
             has_pallet
-            and self.destination_combo.currentData() is not None
-            and self.product_combo.currentData() is not None
+            and has_selection
             and self.quantity_input.value() > 0
         )
         self.add_allocation_button.setEnabled(can_add)
+        self.add_loose_button.setEnabled(
+            has_selection
+            and self.quantity_input.value() > 0
+        )
         address_id = self.destination_combo.currentData()
         product_id = self.product_combo.currentData()
         target_count = self.bulk_target_count_input.value()

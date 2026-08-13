@@ -53,6 +53,24 @@ class PalletDraft:
 
 
 @dataclass(frozen=True)
+class LooseAllocationDraft:
+    destination_id: int
+    product_id: int
+    quantity: Decimal
+    peso_unitario_kg: Decimal
+    label: str = ""
+    client_id: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "quantity", _decimal(self.quantity))
+        object.__setattr__(self, "peso_unitario_kg", _decimal(self.peso_unitario_kg))
+
+    @property
+    def kilos(self) -> Decimal:
+        return _decimal(self.quantity * self.peso_unitario_kg)
+
+
+@dataclass(frozen=True)
 class CompositionIssue:
     code: str
     message: str
@@ -82,7 +100,7 @@ class CompositionResult:
 
     @property
     def can_issue(self) -> bool:
-        return bool(self.pallets) and not self.issues
+        return not self.issues
 
 
 class PalletCompositionService:
@@ -91,9 +109,11 @@ class PalletCompositionService:
         *,
         requested: Iterable[RequestedLine],
         pallets: Iterable[PalletDraft],
+        loose: Iterable[LooseAllocationDraft] = (),
     ) -> CompositionResult:
         requested = tuple(requested)
         pallets = tuple(sorted(pallets, key=lambda pallet: pallet.sequence))
+        loose = tuple(loose)
         requested_by_key: dict[tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.000"))
         labels: dict[tuple[int, int], str] = {}
         for line in requested:
@@ -124,8 +144,17 @@ class PalletCompositionService:
                 )
             )
 
+        loose_kg = Decimal("0.000")
+        for allocation in loose:
+            key = (allocation.destination_id, allocation.product_id)
+            assigned_by_key[key] = _decimal(assigned_by_key[key] + allocation.quantity)
+            labels.setdefault(key, allocation.label)
+            loose_kg = _decimal(loose_kg + allocation.kilos)
+            if allocation.quantity > 0 and allocation.peso_unitario_kg <= 0:
+                zero_weight_keys.add(key)
+
         issues: list[CompositionIssue] = []
-        if not pallets:
+        if not pallets and not loose:
             issues.append(CompositionIssue("no_pallets", "La orden no tiene pallets."))
 
         pending_quantity = Decimal("0.000")
@@ -169,6 +198,7 @@ class PalletCompositionService:
             )
 
         total_kg = sum((pallet.total_kg for pallet in pallet_results), Decimal("0.000"))
+        total_kg = _decimal(total_kg + loose_kg)
         return CompositionResult(
             pallets=tuple(pallet_results),
             issues=tuple(issues),

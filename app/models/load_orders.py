@@ -112,6 +112,27 @@ class LoadOrderPalletAllocation(BaseModel):
         indexes = ((('pallet', 'destination', 'product'), True),)
 
 
+class LoadOrderLooseAllocation(BaseModel):
+    """Mercadería despachada suelta / sin pallet, modelada explícitamente.
+
+    Mantiene la trazabilidad de cliente/destino/producto/cantidad sin recurrir
+    a pallets ficticios ni a un "pallet 0".
+    """
+
+    order = ForeignKeyField(LoadOrder, backref="loose_allocations", on_delete="CASCADE")
+    destination = ForeignKeyField(LoadOrderDestination, backref="loose_allocations", on_delete="CASCADE")
+    product = ForeignKeyField(Product, backref="loose_allocations")
+    quantity = DecimalField(max_digits=14, decimal_places=3)
+    peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3)
+
+    @property
+    def kilos(self) -> Decimal:
+        return (self.quantity * self.peso_unitario_kg).quantize(Decimal("0.001"))
+
+    class Meta:
+        indexes = ((("order", "destination", "product"), True),)
+
+
 class LoadOrderStatusHistory(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="status_history", on_delete="CASCADE")
     old_status = CharField(null=True)

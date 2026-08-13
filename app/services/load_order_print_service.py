@@ -10,7 +10,14 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 from app.models.masters import Client
 from app.services.audit_service import AuditService
 
@@ -268,9 +275,15 @@ class LoadOrderPrintService:
         if destinations:
             for destination in destinations:
                 products = list(destination.products)
-                rows.append(
-                    self._detail_row(order, self._row_destination(order, destination), products, article_columns)
-                )
+                destination_label = self._row_destination(order, destination)
+                loose_allocations = list(destination.loose_allocations)
+                if loose_allocations:
+                    palletized = self._palletized_row(order, destination_label, destination, products, article_columns)
+                    if palletized is not None:
+                        rows.append(palletized)
+                    rows.append(self._loose_row(destination_label, loose_allocations, article_columns))
+                else:
+                    rows.append(self._detail_row(order, destination_label, products, article_columns))
         else:
             rows.append(self._detail_row(order, self._destination_label(order), list(order.products), article_columns))
         if not rows:
@@ -283,6 +296,72 @@ class LoadOrderPrintService:
                 }
             )
         return rows
+
+    def _palletized_row(
+        self,
+        order: LoadOrder,
+        destination_label: str,
+        destination: LoadOrderDestination,
+        products: list,
+        article_columns: list[str],
+    ) -> dict[str, object] | None:
+        allocations = list(
+            LoadOrderPalletAllocation.select()
+            .join(LoadOrderPallet)
+            .where(LoadOrderPallet.order == order, LoadOrderPalletAllocation.destination == destination)
+        )
+        if not allocations:
+            return None
+        articles, detail_items = self._pairs_detail(
+            article_columns,
+            [(allocation.product, allocation.quantity, allocation.product.unit or "") for allocation in allocations],
+        )
+        return {
+            "destination": destination_label,
+            "articles": articles,
+            "pallet": self._pallet_count_for_products(order, products),
+            "detail": " / ".join(detail_items) if detail_items else "-",
+        }
+
+    def _loose_row(
+        self,
+        destination_label: str,
+        loose_allocations: list,
+        article_columns: list[str],
+    ) -> dict[str, object]:
+        articles, detail_items = self._pairs_detail(
+            article_columns,
+            [
+                (allocation.product, allocation.quantity, allocation.product.unit or "")
+                for allocation in loose_allocations
+            ],
+        )
+        return {
+            "destination": destination_label,
+            "articles": articles,
+            "pallet": "SUELTO",
+            "detail": " / ".join(detail_items) if detail_items else "-",
+        }
+
+    def _pairs_detail(
+        self,
+        article_columns: list[str],
+        pairs: list[tuple],
+    ) -> tuple[dict[str, float], list[str]]:
+        articles = {article: 0.0 for article in article_columns}
+        detail_items = []
+        for product, quantity, unit in pairs:
+            product_name = product.name
+            if product_name in articles:
+                articles[product_name] += float(quantity)
+            else:
+                detail_items.append(self._pairs_item_detail(product, quantity, unit))
+        if not detail_items:
+            detail_items = [self._pairs_item_detail(product, quantity, unit) for product, quantity, unit in pairs]
+        return articles, detail_items
+
+    def _pairs_item_detail(self, product, quantity, unit: str) -> str:
+        return f"{product.name} - {_quantity(float(quantity))} {unit}".strip()
 
     def _detail_row(
         self,
@@ -341,7 +420,9 @@ class LoadOrderPrintService:
         return float(sum(pallet.quantity for pallet in order.pallets))
 
     def _merchandise_kg_total(self, order: LoadOrder):
-        return sum((pallet.kilos for pallet in order.pallets), 0)
+        return sum((pallet.kilos for pallet in order.pallets), 0) + sum(
+            (allocation.kilos for allocation in order.loose_allocations), 0
+        )
 
     def _kg_text(self, value) -> str:
         whole, fraction = f"{value:.3f}".split(".")
