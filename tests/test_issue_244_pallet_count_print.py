@@ -66,25 +66,30 @@ def _build_order_with_mixed_pallet(db):
     )
 
 
-def test_issue_244_detail_row_prints_pallet_count_instead_of_sequences(db):
+def test_issue_244_detail_blocks_group_by_pallet_instead_of_sequences(db):
     from app.services.load_order_print_service import LoadOrderPrintService
 
     order = _build_order_with_mixed_pallet(db)
     service = LoadOrderPrintService(current_user="admin")
 
-    rows = service._detail_rows(order)
+    blocks = service._detail_blocks(order)
 
-    assert len(rows) == 1
-    assert rows[0]["pallet"] == 2
-    assert rows[0]["pallet"] != "1, 3"
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert [pallet["label"] for pallet in block["pallet_blocks"]] == ["1", "3"]
+    assert [len(pallet["rows"]) for pallet in block["pallet_blocks"]] == [1, 2]
     assert service._used_pallet_total(order) == 2
 
 
-def test_issue_244_mixed_pallet_is_counted_once_per_printed_row(db):
+def test_issue_244_mixed_pallet_is_counted_once_as_a_single_printed_block(db):
     from app.services.load_order_print_service import LoadOrderPrintService
 
     order = _build_order_with_mixed_pallet(db)
     service = LoadOrderPrintService(current_user="admin")
-    products = list(order.destinations.get().products)
+    blocks = service._detail_blocks(order)
 
-    assert service._pallet_count_for_products(order, products) == 2
+    mixed = blocks[0]["pallet_blocks"][1]
+    assert mixed["label"] == "3"
+    assert len(mixed["rows"]) == 2
+    assert [row["product"] for row in mixed["rows"]] == ["Nativa issue 244", "Maiz issue 244"]
+    assert service._used_pallet_total(order) == 2
