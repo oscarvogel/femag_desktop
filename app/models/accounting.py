@@ -7,6 +7,7 @@ from app.models.payments import ClientPayment
 
 
 class ClientAccountMovement(BaseModel):
+    TYPE_OPENING_BALANCE = "opening_balance"
     TYPE_LOAD_ORDER = "load_order_documental"
     TYPE_LOAD_ORDER_REVERSAL = "load_order_documental_reversal"
     TYPE_PAYMENT = "payment"

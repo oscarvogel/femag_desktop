@@ -193,10 +193,13 @@ def test_issue_273_print_splits_loose_rows_and_counts_total_kg(db, tmp_path):
     order = _create(service, data, loose=_loose(data, 5))
     prints = LoadOrderPrintService(current_user="admin")
 
-    rows = prints._detail_rows(order)
-    assert len(rows) == 1
-    assert rows[0]["pallet"] == "SUELTO"
-    assert rows[0]["articles"]["Fecula suelta 273"] == 5.0
+    blocks = prints._detail_blocks(order)
+    assert len(blocks) == 1
+    loose = blocks[0]["loose_block"]
+    assert loose is not None
+    assert loose["label"] == "SUELTO"
+    assert [row["product"] for row in loose["rows"]] == ["Fecula suelta 273"]
+    assert loose["rows"][0]["quantity"] == 5.0
     assert prints._used_pallet_total(order) == 0
 
     text = _pdf_text(prints.export_pdf(order, tmp_path))

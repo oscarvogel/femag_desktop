@@ -327,6 +327,7 @@ class FemagDesktopWindow(QMainWindow):
                     build_client_abm_page(
                         user=self.user,
                         current_user=self.shell.username,
+                        view_ledger_callback=self._open_customer_ledger_for_client,
                         parent=self,
                     ),
                 )
@@ -576,6 +577,12 @@ class FemagDesktopWindow(QMainWindow):
 
     def _handle_dashboard_open_customer_ledger(self) -> None:
         self._navigate_to_route("customer_ledger")
+
+    def _open_customer_ledger_for_client(self, client) -> None:
+        self._navigate_to_route("customer_ledger")
+        page = self.stack.currentWidget()
+        if isinstance(page, CustomerLedgerPage):
+            page.select_client(client)
 
     def _handle_dashboard_register_payment(self) -> None:
         self._open_payment_dialog(preset_client=None)
