@@ -7,14 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from peewee import fn
+
 from app.models.base import utc_now
-from app.models.masters import Carrier, Client, Driver, Product, Truck
+from app.models.masters import Carrier, Client, Driver, Product, TipoIVA, Truck
 from app.models.system import ImportBatch
 from app.services.client_service import ClientService
 from app.services.product_classification_service import analyze_legacy_product
 
 
 ENTITY_KEYS = ("clients", "carriers", "drivers", "trucks", "products")
+EXEMPT_VAT_NAME = "EXENTO"
 
 
 @dataclass(frozen=True)
@@ -161,6 +164,7 @@ class LegacyDbfMasterImporter:
     def _import_products(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "products", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "products", "NOMBRE", "PRODUCTO", "DESCRIP")
+        exempt_vat = self._ensure_exempt_vat()
         existing = (
             Product.select().where((Product.source_system == source_system) & (Product.source_id == source_id)).first()
             or Product.select().where(Product.name == name).first()
@@ -175,7 +179,11 @@ class LegacyDbfMasterImporter:
             existing.weight_source = "manual"
             existing.save(only=[Product.weight_source])
         legacy_unit = self._value(row, "UNIDADDGR", "UNIDAD", "UNI", default="unidad")
-        values = {"name": name, "unit": {"K": "kg", "U": "unidad"}.get(legacy_unit.upper(), legacy_unit)}
+        values = {
+            "name": name,
+            "unit": {"K": "kg", "U": "unidad"}.get(legacy_unit.upper(), legacy_unit),
+            "tipo_iva": exempt_vat,
+        }
         if existing is None or existing.classification_source != "manual":
             values.update(product_kind=inference.product_kind, classification_source="inferido")
         if existing is None or existing.weight_source != "manual":
@@ -184,6 +192,19 @@ class LegacyDbfMasterImporter:
         effective_weight = values.get("peso_unitario_kg", existing.peso_unitario_kg if existing else inference.peso_unitario_kg)
         values["review_required"] = effective_kind == "revisar" or (effective_kind == "producto" and effective_weight <= 0)
         return ImportOutcome(self._upsert(Product, {"name": name}, values, source_system, source_id, batch))
+
+    def _ensure_exempt_vat(self) -> TipoIVA:
+        exempt_vat = (
+            TipoIVA.select()
+            .where(fn.Lower(TipoIVA.nombre) == EXEMPT_VAT_NAME.lower())
+            .first()
+        )
+        if exempt_vat is None:
+            return TipoIVA.create(nombre=EXEMPT_VAT_NAME, porcentaje=0.0)
+        if exempt_vat.porcentaje != 0.0:
+            exempt_vat.porcentaje = 0.0
+            exempt_vat.save(only=[TipoIVA.porcentaje])
+        return exempt_vat
 
     def _resolve_driver_carrier(
         self,

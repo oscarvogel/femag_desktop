@@ -70,6 +70,64 @@ def test_legacy_product_reimport_preserves_manually_entered_weight(db):
     assert Product.get_by_id(product.id).peso_unitario_kg == Decimal("25.000")
 
 
+def test_legacy_product_import_creates_exempt_vat_at_zero_percent(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Product, TipoIVA
+
+    LegacyDbfMasterImporter().import_rows(
+        {
+            "products": [
+                {"CODIGO": "P001", "NOMBRE": "Fecula", "UNIDAD": "kg"},
+                {"CODIGO": "P002", "NOMBRE": "Almidon", "UNIDAD": "kg"},
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    exempt_vat = TipoIVA.get(TipoIVA.nombre == "EXENTO")
+    assert exempt_vat.porcentaje == 0.0
+    assert {product.tipo_iva_id for product in Product.select()} == {exempt_vat.id}
+
+
+def test_legacy_product_import_reuses_exempt_vat_without_duplicates(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Product, TipoIVA
+
+    exempt_vat = TipoIVA.create(nombre="Exento", porcentaje=10.5)
+
+    LegacyDbfMasterImporter().import_rows(
+        {"products": [{"CODIGO": "P001", "NOMBRE": "Fecula", "UNIDAD": "kg"}]},
+        source_system="legacy_dbf",
+    )
+
+    assert TipoIVA.select().count() == 1
+    assert TipoIVA.get_by_id(exempt_vat.id).porcentaje == 0.0
+    assert Product.get().tipo_iva_id == exempt_vat.id
+
+
+def test_legacy_product_import_assigns_exempt_vat_to_updated_products(db):
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Product, TipoIVA
+
+    previous_vat = TipoIVA.create(nombre="IVA 21%", porcentaje=21.0)
+    product = Product.create(
+        name="Fecula",
+        unit="bolsa",
+        tipo_iva=previous_vat,
+        source_system="legacy_dbf",
+        source_id="P001",
+    )
+
+    LegacyDbfMasterImporter().import_rows(
+        {"products": [{"CODIGO": "P001", "NOMBRE": "Fecula", "UNIDAD": "kg"}]},
+        source_system="legacy_dbf",
+    )
+
+    exempt_vat = TipoIVA.get(TipoIVA.nombre == "EXENTO")
+    assert Product.get_by_id(product.id).tipo_iva == exempt_vat
+    assert exempt_vat.porcentaje == 0.0
+
+
 def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import Client
