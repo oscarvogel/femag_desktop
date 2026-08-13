@@ -8,7 +8,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.load_orders import (
     LoadOrder,
@@ -128,7 +128,7 @@ class LoadOrderPrintService:
                 self._client_table(order),
                 Spacer(1, 8 * mm),
                 Paragraph("2. DETALLE DEL PRODUCTO A DESPACHAR", self.styles["section"]),
-                self._detail_table(order),
+                *self._detail_flowables(order),
                 Spacer(1, 9 * mm),
                 Paragraph("3. DATOS DEL TRANSPORTE", self.styles["section"]),
                 self._transport_table(order),
@@ -173,66 +173,219 @@ class LoadOrderPrintService:
         )
         return table
 
-    def _detail_table(self, order: LoadOrder) -> Table:
-        article_columns = self._article_columns(order)
+    def _detail_flowables(self, order: LoadOrder) -> list:
+        blocks = self._detail_blocks(order)
+        flowables = [KeepTogether(self._destination_table(block)) for block in blocks]
+        flowables.append(Spacer(1, 4 * mm))
+        flowables.append(self._totals_table(order, blocks))
+        return flowables
+
+    def _detail_blocks(self, order: LoadOrder) -> list[dict[str, object]]:
+        destinations = list(order.destinations.order_by(LoadOrderDestination.sequence))
+        if not destinations:
+            return [self._legacy_destination_block(order)]
+        return [self._destination_detail_block(order, destination) for destination in destinations]
+
+    def _destination_detail_block(self, order: LoadOrder, destination) -> dict[str, object]:
+        requested = self._requested_by_destination_product(order)
+        assigned = defaultdict(float)
+        pallet_blocks = []
+        for pallet, allocations in self._pallet_allocations_by_destination(destination):
+            rows = []
+            for allocation in allocations:
+                lote, elab = self._lote_elab(requested, destination, allocation.product)
+                rows.append(self._allocation_row(allocation, lote, elab))
+                assigned[(destination.id, allocation.product_id)] += float(allocation.quantity)
+            pallet_blocks.append({"label": str(pallet.sequence), "rows": rows})
+        loose_block = None
+        loose_rows = []
+        for allocation in destination.loose_allocations:
+            lote, elab = self._lote_elab(requested, destination, allocation.product)
+            loose_rows.append(self._allocation_row(allocation, lote, elab))
+            assigned[(destination.id, allocation.product_id)] += float(allocation.quantity)
+        if loose_rows:
+            loose_block = {"label": "SUELTO", "rows": loose_rows}
+        unassigned_block = None
+        unassigned_rows = []
+        for product_row in destination.products.order_by(LoadOrderProduct.id):
+            key = (destination.id, product_row.product_id)
+            remaining = float(product_row.quantity) - assigned.get(key, 0.0)
+            if remaining > 0:
+                unassigned_rows.append(
+                    {
+                        "quantity": remaining,
+                        "product": product_row.product.name,
+                        "lote": product_row.lote or "-",
+                        "elab": self._elab_text(product_row.fecha_elaboracion),
+                    }
+                )
+        if unassigned_rows:
+            unassigned_block = {"label": "-", "rows": unassigned_rows}
+        return {
+            "destination": self._row_destination(order, destination),
+            "pallet_blocks": pallet_blocks,
+            "loose_block": loose_block,
+            "unassigned_block": unassigned_block,
+        }
+
+    def _legacy_destination_block(self, order: LoadOrder) -> dict[str, object]:
+        rows = []
+        for product_row in order.products.order_by(LoadOrderProduct.id):
+            rows.append(
+                {
+                    "quantity": float(product_row.quantity),
+                    "product": product_row.product.name,
+                    "lote": product_row.lote or "-",
+                    "elab": self._elab_text(product_row.fecha_elaboracion),
+                }
+            )
+        return {
+            "destination": self._row_destination(order, None),
+            "pallet_blocks": [],
+            "loose_block": None,
+            "unassigned_block": {"label": "-", "rows": rows} if rows else None,
+        }
+
+    @staticmethod
+    def _allocation_row(allocation, lote: str, elab: str) -> dict[str, object]:
+        return {
+            "quantity": float(allocation.quantity),
+            "product": allocation.product.name,
+            "lote": lote,
+            "elab": elab,
+        }
+
+    def _pallet_allocations_by_destination(self, destination) -> list:
+        allocations = (
+            LoadOrderPalletAllocation.select()
+            .join(LoadOrderPallet)
+            .where(LoadOrderPalletAllocation.destination == destination)
+            .order_by(LoadOrderPallet.sequence, LoadOrderPalletAllocation.id)
+        )
+        grouped = defaultdict(list)
+        for allocation in allocations:
+            grouped[allocation.pallet].append(allocation)
+        return list(grouped.items())
+
+    def _requested_by_destination_product(self, order: LoadOrder) -> dict:
+        return {
+            (product.destination_id, product.product_id): product
+            for product in order.products
+            if product.destination_id is not None
+        }
+
+    def _lote_elab(self, requested: dict, destination, product) -> tuple[str, str]:
+        product_row = requested.get((destination.id, product.id))
+        if product_row is None:
+            return "-", "-"
+        return product_row.lote or "-", self._elab_text(product_row.fecha_elaboracion)
+
+    @staticmethod
+    def _elab_text(value) -> str:
+        return "-" if value is None else f"{value:%d/%m/%y}"
+
+    def _destination_table(self, block: dict[str, object]) -> Table:
         header = [
-            self._p("Cliente / destino / detalle de entrega", bold=True),
-            *(self._p(article, bold=True) for article in article_columns),
+            self._p("Cliente / destino", bold=True),
+            self._p("Cant.", bold=True),
             self._p("Pallet", bold=True),
             self._p("Detalle", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
         rows = [header]
-        totals = defaultdict(float)
-        for row in self._detail_rows(order):
-            rows.append(
-                [
-                    self._p(row["destination"]),
-                    *(_quantity(row["articles"].get(article, 0.0)) for article in article_columns),
-                    self._p(row["pallet"]),
-                    self._p(row["detail"]),
-                    "-",
-                    "-",
-                ]
-            )
-            for article in article_columns:
-                totals[article] += row["articles"].get(article, 0.0)
+        rows.append([Paragraph(escape(block["destination"] or "-"), self.styles["dest_banner"]), "", "", "", "", ""])
+        row_index = 2
+        spans = []
+        has_rows = False
+        sub_blocks = [
+            *block["pallet_blocks"],
+            *([block["loose_block"]] if block["loose_block"] else []),
+            *([block["unassigned_block"]] if block["unassigned_block"] else []),
+        ]
+        for sub_block in sub_blocks:
+            if not sub_block["rows"]:
+                continue
+            has_rows = True
+            start = row_index
+            for row in sub_block["rows"]:
+                rows.append(
+                    [
+                        self._p(""),
+                        _quantity(row["quantity"]),
+                        self._p(""),
+                        self._p(row["product"]),
+                        self._p(row["lote"]),
+                        self._p(row["elab"]),
+                    ]
+                )
+                row_index += 1
+            rows[start][2] = self._p(str(sub_block["label"]), bold=True)
+            if row_index - 1 > start:
+                spans.append((2, start, 2, row_index - 1))
+        if not has_rows:
+            rows.append([self._p(block["destination"] or "-"), self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
+        table = Table(rows, colWidths=[44 * mm, 24 * mm, 16 * mm, 62 * mm, 18 * mm, 18 * mm], repeatRows=2)
+        style_commands = [
+            ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.1),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("ALIGN", (1, 0), (1, -1), "CENTER"),
+            ("ALIGN", (2, 0), (2, -1), "CENTER"),
+            ("SPAN", (0, 1), (5, 1)),
+            ("BACKGROUND", (0, 1), (5, 1), colors.whitesmoke),
+        ]
+        for span in spans:
+            style_commands.append(("SPAN", (span[0], span[1]), (span[2], span[3])))
+        table.setStyle(TableStyle(style_commands))
+        return table
+
+    def _totals_table(self, order: LoadOrder, blocks: list[dict[str, object]]) -> Table:
+        totals: dict[str, float] = {}
+        order_of_products: list[str] = []
+        for block in blocks:
+            for sub_block in [
+                *block["pallet_blocks"],
+                *([block["loose_block"]] if block["loose_block"] else []),
+                *([block["unassigned_block"]] if block["unassigned_block"] else []),
+            ]:
+                for row in sub_block["rows"]:
+                    name = row["product"]
+                    if name not in totals:
+                        totals[name] = 0.0
+                        order_of_products.append(name)
+                    totals[name] += row["quantity"]
         used_pallets = self._used_pallet_total(order)
+        rows = []
+        for name in order_of_products:
+            rows.append(["", _quantity(totals[name]), "", self._p(name), "", ""])
         rows.append(
             [
                 self._p("TOTALES", bold=True),
-                *(_quantity(totals[article]) for article in article_columns),
+                "",
                 self._p(f"{used_pallets} pallet" + ("s" if used_pallets != 1 else ""), bold=True),
                 "",
                 "",
                 "",
             ]
         )
-        article_width = 68 / max(len(article_columns), 1)
-        table = Table(
-            rows,
-            colWidths=[
-                42 * mm,
-                *(article_width * mm for _article in article_columns),
-                13 * mm,
-                31 * mm,
-                12 * mm,
-                16 * mm,
-            ],
-        )
+        table = Table(rows, colWidths=[44 * mm, 24 * mm, 16 * mm, 62 * mm, 18 * mm, 18 * mm])
         table.setStyle(
             TableStyle(
                 [
                     ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
                     ("FONTSIZE", (0, 0), (-1, -1), 7.1),
-                    ("ALIGN", (1, 1), (len(article_columns) + 1, -1), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("TOPPADDING", (0, 0), (-1, -1), 3),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                    ("ALIGN", (2, 0), (2, -1), "CENTER"),
                 ]
             )
         )
@@ -268,156 +421,8 @@ class LoadOrderPrintService:
     def _observations_paragraph(self, value: str) -> Paragraph:
         return Paragraph(f"<b>Observaciones:</b> {escape(value)}", self.styles["normal"])
 
-    def _detail_rows(self, order: LoadOrder) -> list[dict[str, object]]:
-        rows = []
-        article_columns = self._article_columns(order)
-        destinations = list(order.destinations.order_by())
-        if destinations:
-            for destination in destinations:
-                products = list(destination.products)
-                destination_label = self._row_destination(order, destination)
-                loose_allocations = list(destination.loose_allocations)
-                if loose_allocations:
-                    palletized = self._palletized_row(order, destination_label, destination, products, article_columns)
-                    if palletized is not None:
-                        rows.append(palletized)
-                    rows.append(self._loose_row(destination_label, loose_allocations, article_columns))
-                else:
-                    rows.append(self._detail_row(order, destination_label, products, article_columns))
-        else:
-            rows.append(self._detail_row(order, self._destination_label(order), list(order.products), article_columns))
-        if not rows:
-            rows.append(
-                {
-                    "destination": self._destination_label(order),
-                    "articles": {article: 0.0 for article in article_columns},
-                    "pallet": self._pallet_total(order),
-                    "detail": "-",
-                }
-            )
-        return rows
-
-    def _palletized_row(
-        self,
-        order: LoadOrder,
-        destination_label: str,
-        destination: LoadOrderDestination,
-        products: list,
-        article_columns: list[str],
-    ) -> dict[str, object] | None:
-        allocations = list(
-            LoadOrderPalletAllocation.select()
-            .join(LoadOrderPallet)
-            .where(LoadOrderPallet.order == order, LoadOrderPalletAllocation.destination == destination)
-        )
-        if not allocations:
-            return None
-        articles, detail_items = self._pairs_detail(
-            article_columns,
-            [(allocation.product, allocation.quantity, allocation.product.unit or "") for allocation in allocations],
-        )
-        return {
-            "destination": destination_label,
-            "articles": articles,
-            "pallet": self._pallet_count_for_products(order, products),
-            "detail": " / ".join(detail_items) if detail_items else "-",
-        }
-
-    def _loose_row(
-        self,
-        destination_label: str,
-        loose_allocations: list,
-        article_columns: list[str],
-    ) -> dict[str, object]:
-        articles, detail_items = self._pairs_detail(
-            article_columns,
-            [
-                (allocation.product, allocation.quantity, allocation.product.unit or "")
-                for allocation in loose_allocations
-            ],
-        )
-        return {
-            "destination": destination_label,
-            "articles": articles,
-            "pallet": "SUELTO",
-            "detail": " / ".join(detail_items) if detail_items else "-",
-        }
-
-    def _pairs_detail(
-        self,
-        article_columns: list[str],
-        pairs: list[tuple],
-    ) -> tuple[dict[str, float], list[str]]:
-        articles = {article: 0.0 for article in article_columns}
-        detail_items = []
-        for product, quantity, unit in pairs:
-            product_name = product.name
-            if product_name in articles:
-                articles[product_name] += float(quantity)
-            else:
-                detail_items.append(self._pairs_item_detail(product, quantity, unit))
-        if not detail_items:
-            detail_items = [self._pairs_item_detail(product, quantity, unit) for product, quantity, unit in pairs]
-        return articles, detail_items
-
-    def _pairs_item_detail(self, product, quantity, unit: str) -> str:
-        return f"{product.name} - {_quantity(float(quantity))} {unit}".strip()
-
-    def _detail_row(
-        self,
-        order: LoadOrder,
-        destination_label: str,
-        products: list,
-        article_columns: list[str],
-    ) -> dict[str, object]:
-        articles = {article: 0.0 for article in article_columns}
-        detail_items = []
-        for item in products:
-            product_name = item.product.name
-            if product_name in articles:
-                articles[product_name] += item.quantity
-            else:
-                detail_items.append(self._product_detail(item))
-        if not detail_items:
-            detail_items = [self._product_detail(item) for item in products]
-        return {
-            "destination": destination_label,
-            "articles": articles,
-            "pallet": self._pallet_count_for_products(order, products),
-            "detail": " / ".join(detail_items) if detail_items else "-",
-        }
-
-    def _pallet_count_for_products(self, order: LoadOrder, products: list) -> int | str:
-        row_lines = {(product.destination_id, product.product_id) for product in products}
-        pallet_ids = {
-            pallet.id
-            for pallet in order.pallets
-            for allocation in pallet.allocations
-            if (allocation.destination_id, allocation.product_id) in row_lines
-        }
-        return len(pallet_ids) or "-"
-
     def _used_pallet_total(self, order: LoadOrder) -> int:
         return sum(1 for pallet in order.pallets if pallet.allocations.exists())
-
-    def _article_columns(self, order: LoadOrder) -> list[str]:
-        articles = []
-        for item in order.products:
-            product_name = item.product.name
-            if product_name not in articles:
-                articles.append(product_name)
-            if len(articles) == 4:
-                break
-        return articles or ["Articulo"]
-
-    def _product_detail(self, item) -> str:
-        detail = f"{item.product.name} - {_quantity(item.quantity)} {item.unit}"
-        if item.observations:
-            detail = f"{detail} - {item.observations}"
-        return detail
-
-    def _pallet_total(self, order: LoadOrder) -> float:
-        return float(sum(pallet.quantity for pallet in order.pallets))
 
     def _merchandise_kg_total(self, order: LoadOrder):
         return sum((pallet.kilos for pallet in order.pallets), 0) + sum(
@@ -780,6 +785,13 @@ def _styles() -> dict[str, ParagraphStyle]:
         "cell": ParagraphStyle("cell", parent=base["Normal"], fontSize=6.8, leading=8),
         "cell_bold": ParagraphStyle(
             "cell_bold", parent=base["Normal"], fontName="Helvetica-Bold", fontSize=6.8, leading=8, alignment=TA_CENTER
+        ),
+        "dest_banner": ParagraphStyle(
+            "dest_banner",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=8.5,
+            leading=10,
         ),
         "right": ParagraphStyle("right", parent=base["Normal"], fontSize=8, alignment=TA_RIGHT),
     }
