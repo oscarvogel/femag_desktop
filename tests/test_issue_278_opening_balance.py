@@ -16,6 +16,7 @@ def test_register_opening_balance_persists_identifiable_audited_movement(db):
     movement = ClientOpeningBalanceService("admin_278").register(
         client=client,
         amount=1250.75,
+        balance_type="debit",
         currency="ars",
         movement_date=date(2026, 8, 13),
     )
@@ -24,12 +25,14 @@ def test_register_opening_balance_persists_identifiable_audited_movement(db):
     assert movement.total_amount == 1250.75
     assert movement.currency == "ARS"
     assert movement.movement_date == date(2026, 8, 13)
-    assert movement.description == "Saldo inicial de apertura (ARS)"
+    assert movement.description == "Saldo inicial de apertura - Débito (ARS)"
+    assert movement.reference == "APERTURA-DEBITO-ARS"
     assert movement.created_by == "admin_278"
     audit = AuditLog.get(AuditLog.record_ref == f"ClientAccountMovement:{movement.id}")
     assert audit.user == "admin_278"
     assert audit.action == "registrar_saldo_inicial"
     assert audit.new_value["currency"] == "ARS"
+    assert audit.new_value["balance_type"] == "debit"
 
 
 def test_register_opening_balance_rejects_duplicate_for_client_and_currency(db):
@@ -46,14 +49,21 @@ def test_register_opening_balance_rejects_duplicate_for_client_and_currency(db):
     with pytest.raises(ClientOpeningBalanceError, match="ya tiene saldo inicial en ARS"):
         service.register(client=client, amount=200, currency="ARS")
 
-    usd = service.register(client=client, amount=-50, currency="USD")
+    usd = service.register(
+        client=client,
+        amount=50,
+        balance_type="credit",
+        currency="USD",
+    )
     assert usd.currency == "USD"
     assert usd.total_amount == -50
+    assert usd.description == "Saldo inicial de apertura - Crédito (USD)"
+    assert usd.reference == "APERTURA-CREDITO-USD"
 
 
 def test_clients_action_registers_once_and_disables_immediately(db):
     from PyQt5.QtCore import QTimer
-    from PyQt5.QtWidgets import QApplication, QDoubleSpinBox, QPushButton
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDoubleSpinBox, QPushButton
 
     from app.models.accounting import ClientAccountMovement
     from app.models.masters import Client
@@ -76,6 +86,8 @@ def test_clients_action_registers_once_and_disables_immediately(db):
     def fill_dialog():
         dialog = app.activeModalWidget()
         assert dialog.objectName() == "clientOpeningBalanceDialog"
+        type_input = dialog.findChild(QComboBox, "clientOpeningBalanceTypeInput")
+        type_input.setCurrentIndex(type_input.findData("credit"))
         dialog.findChild(QDoubleSpinBox, "clientOpeningBalanceAmountInput").setValue(800)
         dialog.findChild(QPushButton, "saveClientOpeningBalanceButton").click()
 
@@ -87,5 +99,18 @@ def test_clients_action_registers_once_and_disables_immediately(db):
         (ClientAccountMovement.client == client)
         & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_OPENING_BALANCE)
     )
-    assert movement.total_amount == 800
+    assert movement.total_amount == -800
+    assert movement.reference == "APERTURA-CREDITO-ARS"
     assert not button.isEnabled()
+
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    ledger = CustomerLedgerPage(current_user="admin_ui_278")
+    app.processEvents()
+    assert ledger.movements_table.rowCount() == 1
+    assert ledger.movements_table.item(0, 1).text() == "Saldo inicial"
+    assert ledger.movements_table.item(0, 2).text() == "APERTURA-CREDITO-ARS"
+    assert ledger.movements_table.item(0, 3).text() == (
+        "Saldo inicial de apertura - Crédito (ARS)"
+    )
+    assert ledger.detail_balance.text() == "$-800.00"

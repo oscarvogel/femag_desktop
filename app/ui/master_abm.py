@@ -420,10 +420,18 @@ class ClientOpeningBalanceDialog(QDialog):
     def _build(self) -> None:
         layout = _entry_layout(self, f"Saldo inicial - {self.client.name}")
         form = QGridLayout()
+        self.type_input = _combo(
+            "clientOpeningBalanceTypeInput",
+            [
+                (ClientOpeningBalanceService.TYPE_DEBIT, "Débito (el cliente debe)"),
+                (ClientOpeningBalanceService.TYPE_CREDIT, "Crédito (a favor del cliente)"),
+            ],
+            include_empty=False,
+        )
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("clientOpeningBalanceAmountInput")
         self.amount_input.setDecimals(2)
-        self.amount_input.setRange(-999_999_999.99, 999_999_999.99)
+        self.amount_input.setRange(0.01, 999_999_999.99)
         self.amount_input.setPrefix("$ ")
         self.currency_input = QComboBox()
         self.currency_input.setObjectName("clientOpeningBalanceCurrencyInput")
@@ -433,12 +441,14 @@ class ClientOpeningBalanceDialog(QDialog):
         self.date_input.setObjectName("clientOpeningBalanceDateInput")
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("dd/MM/yyyy")
-        form.addWidget(QLabel("Importe"), 0, 0)
-        form.addWidget(self.amount_input, 0, 1)
-        form.addWidget(QLabel("Moneda"), 1, 0)
-        form.addWidget(self.currency_input, 1, 1)
-        form.addWidget(QLabel("Fecha"), 2, 0)
-        form.addWidget(self.date_input, 2, 1)
+        form.addWidget(QLabel("Tipo"), 0, 0)
+        form.addWidget(self.type_input, 0, 1)
+        form.addWidget(QLabel("Importe"), 1, 0)
+        form.addWidget(self.amount_input, 1, 1)
+        form.addWidget(QLabel("Moneda"), 2, 0)
+        form.addWidget(self.currency_input, 2, 1)
+        form.addWidget(QLabel("Fecha"), 3, 0)
+        form.addWidget(self.date_input, 3, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveClientOpeningBalanceButton", self._save)
@@ -448,6 +458,7 @@ class ClientOpeningBalanceDialog(QDialog):
             self.saved_movement = ClientOpeningBalanceService(self.current_user).register(
                 client=self.client,
                 amount=self.amount_input.value(),
+                balance_type=self.type_input.currentData(),
                 currency=self.currency_input.currentText(),
                 movement_date=self.date_input.date().toPyDate(),
             )
