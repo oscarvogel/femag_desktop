@@ -1816,6 +1816,10 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.setContentsMargins(12, 12, 12, 12)
         header_layout.setHorizontalSpacing(10)
         header_layout.setVerticalSpacing(8)
+        # Mantener las filas compactas arriba del QFrame; el stacked widget
+        # heredaba el alto y las dejaba repartidas en huecos grandes.
+        for row in range(3):
+            header_layout.setRowStretch(row, 0)
         self.order_date = QDateEdit()
         self.order_date.setObjectName("loadOrderDateInput")
         self.order_date.setCalendarPopup(True)
@@ -1836,18 +1840,20 @@ class LoadOrderEntryDialog(QDialog):
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
+        # 6 columnas: tres pares label/field. Trailer queda al lado del
+        # camion, en la misma fila; observaciones baja a su propia fila.
         header_layout.addWidget(QLabel("Fecha"), 0, 0)
         header_layout.addWidget(self.order_date, 0, 1)
         header_layout.addWidget(QLabel("Chofer"), 0, 2)
-        header_layout.addWidget(self.driver_combo, 0, 3)
+        header_layout.addWidget(self.driver_combo, 0, 3, 1, 3)
         header_layout.addWidget(QLabel("Transportista"), 1, 0)
         header_layout.addWidget(self.carrier_combo, 1, 1)
         header_layout.addWidget(QLabel("Camion / patente"), 1, 2)
         header_layout.addWidget(self.truck_combo, 1, 3)
-        header_layout.addWidget(QLabel("Semi / Acoplado"), 2, 0)
-        header_layout.addWidget(self.trailer_combo, 2, 1)
-        header_layout.addWidget(QLabel("Observaciones"), 2, 2)
-        header_layout.addWidget(self.observations_input, 2, 3)
+        header_layout.addWidget(QLabel("Semi / Acoplado"), 1, 4)
+        header_layout.addWidget(self.trailer_combo, 1, 5)
+        header_layout.addWidget(QLabel("Observaciones"), 2, 0)
+        header_layout.addWidget(self.observations_input, 2, 1, 1, 5)
         self.step_stack.addWidget(header)
 
         destination = QFrame()
