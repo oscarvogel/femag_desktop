@@ -31,6 +31,7 @@ from app.models.masters import (
     Carrier,
     Client,
     ClientAddress,
+    ClientEmail,
     Driver,
     Product,
     TipoIVA,
@@ -41,6 +42,7 @@ from app.models.masters import (
     product_kind_label,
 )
 from app.services.client_service import ClientService
+from app.services.client_email_service import ClientEmailService
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
@@ -399,6 +401,217 @@ class ClientEntryDialog(QDialog):
                 client.save()
                 self.saved_record = client
             self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
+class ClientEmailEntryDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        current_user: str,
+        client_id: int,
+        record_id: int | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.client = Client.get_by_id(client_id)
+        self.record_id = record_id
+        self.saved_record = None
+        self.setObjectName("clientEmailEntryDialog")
+        self.setWindowTitle("Email de contacto")
+        self._build()
+        self._load_record()
+
+    def _build(self) -> None:
+        layout = _entry_layout(self, f"Email - {self.client.name}")
+        form = QGridLayout()
+        self.email_input = QLineEdit()
+        self.email_input.setObjectName("clientContactEmailInput")
+        self.label_input = QLineEdit()
+        self.label_input.setObjectName("clientContactEmailLabelInput")
+        self.primary_combo = _combo(
+            "clientContactEmailPrimaryInput",
+            [(False, "No"), (True, "Si")],
+            include_empty=False,
+        )
+        self.active_combo = _combo(
+            "clientContactEmailActiveInput",
+            [(True, "Activo"), (False, "Inactivo")],
+            include_empty=False,
+        )
+        self.observations_input = QLineEdit()
+        self.observations_input.setObjectName("clientContactEmailObservationsInput")
+        form.addWidget(QLabel("Email"), 0, 0)
+        form.addWidget(self.email_input, 0, 1)
+        form.addWidget(QLabel("Etiqueta"), 1, 0)
+        form.addWidget(self.label_input, 1, 1)
+        form.addWidget(QLabel("Principal"), 2, 0)
+        form.addWidget(self.primary_combo, 2, 1)
+        form.addWidget(QLabel("Estado"), 3, 0)
+        form.addWidget(self.active_combo, 3, 1)
+        form.addWidget(QLabel("Observaciones"), 4, 0)
+        form.addWidget(self.observations_input, 4, 1)
+        layout.addLayout(form)
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveClientContactEmailButton", self._save)
+
+    def _load_record(self) -> None:
+        if self.record_id is None:
+            return
+        row = ClientEmail.get_by_id(self.record_id)
+        self.email_input.setText(row.email)
+        self.label_input.setText(row.label or "")
+        _set_combo(self.primary_combo, row.is_primary)
+        _set_combo(self.active_combo, row.active)
+        self.observations_input.setText(row.observations or "")
+
+    def _save(self) -> None:
+        service = ClientEmailService(self.current_user)
+        values = {
+            "email": self.email_input.text(),
+            "label": self.label_input.text(),
+            "is_primary": bool(self.primary_combo.currentData()),
+            "active": bool(self.active_combo.currentData()),
+            "observations": self.observations_input.text(),
+        }
+        try:
+            if self.record_id is None:
+                self.saved_record = service.create(client=self.client, **values)
+            else:
+                self.saved_record = service.update(
+                    ClientEmail.get_by_id(self.record_id), **values
+                )
+            self.accept()
+        except Exception as exc:
+            self.feedback.setText(str(exc))
+
+
+class ClientEmailsDialog(QDialog):
+    def __init__(self, *, current_user: str, client_id: int, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.client = Client.get_by_id(client_id)
+        self.setObjectName("clientEmailsDialog")
+        self.setWindowTitle(f"Emails - {self.client.name}")
+        self.resize(840, 430)
+        self._build()
+        self.refresh()
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Emails de contacto - {self.client.name}"))
+        actions = QHBoxLayout()
+        self.add_button = _action_button("addClientEmailButton", "Agregar")
+        self.edit_button = _action_button("editClientEmailButton", "Editar", secondary=True)
+        self.toggle_button = _action_button(
+            "toggleClientEmailButton", "Activar/Desactivar", secondary=True
+        )
+        self.primary_button = _action_button(
+            "setPrimaryClientEmailButton", "Marcar principal", secondary=True
+        )
+        for button in (
+            self.add_button,
+            self.edit_button,
+            self.toggle_button,
+            self.primary_button,
+        ):
+            actions.addWidget(button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        self.table = QTableWidget(0, 5)
+        self.table.setObjectName("clientEmailsTable")
+        self.table.setHorizontalHeaderLabels(
+            ["Email", "Etiqueta", "Principal", "Estado", "Observaciones"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.table, 1)
+        self.feedback = QLabel("")
+        self.feedback.setObjectName("clientEmailsFeedback")
+        layout.addWidget(self.feedback)
+        close_button = QPushButton("Cerrar")
+        close_button.clicked.connect(self.accept)
+        layout.addWidget(close_button)
+        self.add_button.clicked.connect(self._add)
+        self.edit_button.clicked.connect(self._edit)
+        self.toggle_button.clicked.connect(self._toggle)
+        self.primary_button.clicked.connect(self._set_primary)
+
+    def _selected(self) -> ClientEmail | None:
+        item = self.table.item(self.table.currentRow(), 0)
+        if item is None:
+            return None
+        return ClientEmail.get_or_none(ClientEmail.id == item.data(Qt.UserRole))
+
+    def refresh(self) -> None:
+        rows = list(
+            ClientEmail.select()
+            .where(ClientEmail.client == self.client)
+            .order_by(ClientEmail.is_primary.desc(), ClientEmail.id)
+        )
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = (
+                row.email,
+                row.label or "",
+                "Si" if row.is_primary else "No",
+                "Activo" if row.active else "Inactivo",
+                row.observations or "",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.UserRole, row.id)
+                self.table.setItem(row_index, column, item)
+        if rows:
+            self.table.setCurrentCell(0, 0)
+
+    def _add(self) -> None:
+        dialog = ClientEmailEntryDialog(
+            current_user=self.current_user,
+            client_id=self.client.id,
+            parent=self,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            self.refresh()
+            self.feedback.setText("Email agregado.")
+
+    def _edit(self) -> None:
+        row = self._selected()
+        if row is None:
+            self.feedback.setText("Seleccione un email para editar.")
+            return
+        dialog = ClientEmailEntryDialog(
+            current_user=self.current_user,
+            client_id=self.client.id,
+            record_id=row.id,
+            parent=self,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            self.refresh()
+            self.feedback.setText("Email actualizado.")
+
+    def _toggle(self) -> None:
+        row = self._selected()
+        if row is None:
+            self.feedback.setText("Seleccione un email.")
+            return
+        ClientEmailService(self.current_user).toggle_active(row)
+        self.refresh()
+        self.feedback.setText("Estado actualizado.")
+
+    def _set_primary(self) -> None:
+        row = self._selected()
+        if row is None:
+            self.feedback.setText("Seleccione un email.")
+            return
+        try:
+            ClientEmailService(self.current_user).set_primary(row)
+            self.refresh()
+            self.feedback.setText("Email principal actualizado.")
         except Exception as exc:
             self.feedback.setText(str(exc))
 
@@ -1219,10 +1432,13 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
     client_actions = QHBoxLayout()
     new_client_btn = _action_button("newClientButton", "Nuevo")
     edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
+    emails_btn = _action_button("clientEmailsButton", "Emails", secondary=True)
     new_client_btn.setEnabled(can_create)
     edit_client_btn.setEnabled(can_modify)
+    emails_btn.setEnabled(False)
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
+    client_actions.addWidget(emails_btn)
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
@@ -1287,6 +1503,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     def refresh_places() -> None:
         cid = selected_client_id()
+        emails_btn.setEnabled(can_modify and cid is not None)
         if cid is None:
             places_table.setRowCount(0)
             places_search_feedback.setText("")
@@ -1337,6 +1554,17 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
             refresh_clients()
             client_feedback.setText("Cliente actualizado.")
 
+    def open_client_emails() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.setText("Seleccione un cliente para administrar emails.")
+            return
+        ClientEmailsDialog(
+            current_user=current_user,
+            client_id=cid,
+            parent=parent,
+        ).exec_()
+
     def open_new_place() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -1373,6 +1601,7 @@ def build_client_abm_page(*, user, current_user: str, parent=None) -> QWidget:
 
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)
+    emails_btn.clicked.connect(open_client_emails)
     add_place_btn.clicked.connect(open_new_place)
     edit_place_btn.clicked.connect(open_edit_place)
     toggle_place_btn.clicked.connect(toggle_place_active)
