@@ -71,6 +71,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
+from app.services.client_email_service import ClientEmailService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
@@ -102,10 +103,18 @@ class _AccountStatementMailSignals(QObject):
 
 
 class _AccountStatementMailWorker(QRunnable):
-    def __init__(self, *, client_name: str, recipient: str, pdf_path: Path):
+    def __init__(
+        self,
+        *,
+        client_name: str,
+        recipients: tuple[str, ...],
+        subject: str,
+        pdf_path: Path,
+    ):
         super().__init__()
         self.client_name = client_name
-        self.recipient = recipient
+        self.recipients = recipients
+        self.subject = subject
         self.pdf_path = pdf_path
         self.signals = _AccountStatementMailSignals()
 
@@ -113,19 +122,92 @@ class _AccountStatementMailWorker(QRunnable):
         try:
             account_statement_mail_service.send_account_statement(
                 client_name=self.client_name,
-                recipient=self.recipient,
+                recipients=self.recipients,
+                subject=self.subject,
                 pdf_path=self.pdf_path,
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
         else:
-            self.signals.succeeded.emit(self.recipient)
+            self.signals.succeeded.emit(", ".join(self.recipients))
         finally:
             self.signals.finished.emit()
 
 
 def _start_mail_worker(worker: QRunnable) -> None:
     QThreadPool.globalInstance().start(worker)
+
+
+class _AccountStatementRecipientsDialog(QDialog):
+    def __init__(self, *, client_name: str, options: list[tuple[str, str, bool]], parent=None):
+        super().__init__(parent)
+        self.setObjectName("accountStatementRecipientsDialog")
+        self.setWindowTitle("Confirmar envio de extracto")
+        self.resize(620, 420)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Destinatarios activos de {client_name}"))
+        self.recipients_list = QListWidget()
+        self.recipients_list.setObjectName("accountStatementRecipientsList")
+        has_primary = any(primary for _email, _label, primary in options)
+        for index, (email, label, primary) in enumerate(options):
+            suffix = f" - {label}" if label else ""
+            if primary:
+                suffix += " (principal)"
+            item = QListWidgetItem(f"{email}{suffix}")
+            item.setData(Qt.UserRole, email)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.Checked if primary or (index == 0 and not has_primary) else Qt.Unchecked
+            )
+            self.recipients_list.addItem(item)
+        layout.addWidget(self.recipients_list, 1)
+        layout.addWidget(QLabel("Asunto"))
+        self.subject_input = QLineEdit(f"Extracto de cuenta corriente - {client_name}")
+        self.subject_input.setObjectName("accountStatementEmailSubjectInput")
+        layout.addWidget(self.subject_input)
+        self.feedback = QLabel("")
+        self.feedback.setObjectName("accountStatementRecipientsFeedback")
+        layout.addWidget(self.feedback)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel = QPushButton("Cancelar")
+        send = QPushButton("Enviar")
+        send.setObjectName("confirmAccountStatementEmailButton")
+        cancel.clicked.connect(self.reject)
+        send.clicked.connect(self._confirm)
+        actions.addWidget(cancel)
+        actions.addWidget(send)
+        layout.addLayout(actions)
+
+    def selected_recipients(self) -> tuple[str, ...]:
+        return tuple(
+            self.recipients_list.item(index).data(Qt.UserRole)
+            for index in range(self.recipients_list.count())
+            if self.recipients_list.item(index).checkState() == Qt.Checked
+        )
+
+    def subject(self) -> str:
+        return self.subject_input.text().strip()
+
+    def _confirm(self) -> None:
+        if not self.selected_recipients():
+            self.feedback.setText("Seleccione al menos un destinatario.")
+            return
+        if not self.subject():
+            self.feedback.setText("El asunto es obligatorio.")
+            return
+        self.accept()
+
+
+def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
+    try:
+        contacts = ClientEmailService.active_for_client(client)
+    except Exception:
+        contacts = []
+    if contacts:
+        return [(row.email, row.label or "", row.is_primary) for row in contacts]
+    legacy = (getattr(client, "email", None) or "").strip()
+    return [(legacy, "", True)] if legacy else []
 
 
 def run_desktop_app(*, demo_mode: bool = False) -> int:
@@ -576,21 +658,21 @@ class FemagDesktopWindow(QMainWindow):
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
-        recipient = (client.email or "").strip()
-        if not recipient:
+        options = _active_client_email_options(client)
+        if not options:
             QMessageBox.warning(
                 self, "Correo", "El cliente no tiene un correo electronico configurado."
             )
             return
-        answer = QMessageBox.question(
-            self,
-            "Enviar extracto",
-            f"¿Enviar el extracto de cuenta corriente a {recipient}?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+        dialog = _AccountStatementRecipientsDialog(
+            client_name=client.name,
+            options=options,
+            parent=self,
         )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
+        recipients = dialog.selected_recipients()
+        subject = dialog.subject()
         try:
             pdf_path = account_statement_print_service.export_account_statement(
                 client, self._print_output_dir
@@ -600,7 +682,8 @@ class FemagDesktopWindow(QMainWindow):
             return
         worker = _AccountStatementMailWorker(
             client_name=client.name,
-            recipient=recipient,
+            recipients=recipients,
+            subject=subject,
             pdf_path=pdf_path,
         )
         workers = getattr(self, "_account_statement_mail_workers", set())
