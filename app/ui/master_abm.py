@@ -50,6 +50,7 @@ from app.services.client_opening_balance_service import (
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
+from app.ui.form_feedback import FormFeedback
 
 
 AUTO_ABM_TECHNICAL_DEBT = (
@@ -384,7 +385,14 @@ class ClientEntryDialog(QDialog):
         cuit = self.cuit_input.text().strip()
         iva = self.iva_input.text().strip()
         if not name or not cuit or not iva:
-            self.feedback.setText("Complete nombre, CUIT e IVA.")
+            focus_widget = (
+                self.name_input
+                if not name
+                else self.cuit_input
+                if not cuit
+                else self.iva_input
+            )
+            self.feedback.show_warning("Complete nombre, CUIT e IVA.", focus_widget=focus_widget)
             return
         try:
             if self.record_id is None:
@@ -406,7 +414,7 @@ class ClientEntryDialog(QDialog):
                 self.saved_record = client
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class ClientEmailEntryDialog(QDialog):
@@ -489,7 +497,7 @@ class ClientEmailEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc), focus_widget=self.email_input)
 
 
 class ClientOpeningBalanceDialog(QDialog):
@@ -549,7 +557,7 @@ class ClientOpeningBalanceDialog(QDialog):
             )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc), focus_widget=self.amount_input)
 
 
 class ClientEmailsDialog(QDialog):
@@ -593,8 +601,7 @@ class ClientEmailsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.table, 1)
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("clientEmailsFeedback")
+        self.feedback = FormFeedback("clientEmailsFeedback")
         layout.addWidget(self.feedback)
         close_button = QPushButton("Cerrar")
         close_button.clicked.connect(self.accept)
@@ -641,12 +648,12 @@ class ClientEmailsDialog(QDialog):
         )
         if dialog.exec_() == QDialog.Accepted:
             self.refresh()
-            self.feedback.setText("Email agregado.")
+            self.feedback.show_success("Email agregado.")
 
     def _edit(self) -> None:
         row = self._selected()
         if row is None:
-            self.feedback.setText("Seleccione un email para editar.")
+            self.feedback.show_warning("Seleccione un email para editar.", focus_widget=self.table)
             return
         dialog = ClientEmailEntryDialog(
             current_user=self.current_user,
@@ -656,28 +663,30 @@ class ClientEmailsDialog(QDialog):
         )
         if dialog.exec_() == QDialog.Accepted:
             self.refresh()
-            self.feedback.setText("Email actualizado.")
+            self.feedback.show_success("Email actualizado.")
 
     def _toggle(self) -> None:
         row = self._selected()
         if row is None:
-            self.feedback.setText("Seleccione un email.")
+            self.feedback.show_warning("Seleccione un email.", focus_widget=self.table)
             return
         ClientEmailService(self.current_user).toggle_active(row)
         self.refresh()
-        self.feedback.setText("Estado actualizado.")
+        self.feedback.show_success("Estado actualizado.")
 
     def _set_primary(self) -> None:
         row = self._selected()
         if row is None:
-            self.feedback.setText("Seleccione un email.")
+            self.feedback.show_warning("Seleccione un email.", focus_widget=self.table)
             return
         try:
             ClientEmailService(self.current_user).set_primary(row)
             self.refresh()
-            self.feedback.setText("Email principal actualizado.")
+            self.feedback.show_success("Email principal actualizado.")
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc), focus_widget=self.table)
+
+
 class ClientAddressEntryDialog(QDialog):
     def __init__(self, *, current_user: str, record_id: int | None = None, client_id: int | None = None, parent=None):
         super().__init__(parent)
@@ -745,7 +754,18 @@ class ClientAddressEntryDialog(QDialog):
         city = self.city_input.text().strip()
         street = self.street_input.text().strip()
         if client_id is None or not province or not city or not street:
-            self.feedback.setText("Complete cliente, provincia, ciudad y direccion.")
+            focus_widget = (
+                self.client_combo
+                if client_id is None
+                else self.province_input
+                if not province
+                else self.city_input
+                if not city
+                else self.street_input
+            )
+            self.feedback.show_warning(
+                "Complete cliente, provincia, ciudad y direccion.", focus_widget=focus_widget
+            )
             return
         try:
             client = Client.get_by_id(client_id)
@@ -772,7 +792,7 @@ class ClientAddressEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class CarrierEntryDialog(QDialog):
@@ -816,7 +836,9 @@ class CarrierEntryDialog(QDialog):
     def _save(self) -> None:
         name = self.name_input.text().strip()
         if not name:
-            self.feedback.setText("Complete el nombre del transportista.")
+            self.feedback.show_warning(
+                "Complete el nombre del transportista.", focus_widget=self.name_input
+            )
             return
         try:
             if self.record_id is None:
@@ -834,7 +856,7 @@ class CarrierEntryDialog(QDialog):
                 self.saved_record = carrier
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class DriverEntryDialog(QDialog):
@@ -902,14 +924,20 @@ class DriverEntryDialog(QDialog):
         carrier_id = combo_current_data(self.carrier_combo)
         name = self.name_input.text().strip()
         if carrier_id is None or not name:
-            self.feedback.setText("Complete transportista y nombre del chofer.")
+            focus_widget = self.carrier_combo if carrier_id is None else self.name_input
+            self.feedback.show_warning(
+                "Complete transportista y nombre del chofer.", focus_widget=focus_widget
+            )
             return
         try:
             carrier = Carrier.get_by_id(carrier_id)
             usual_truck_id = self.usual_truck_combo.currentData()
             usual_truck = Truck.get_by_id(usual_truck_id) if usual_truck_id is not None else None
             if usual_truck is not None and usual_truck.carrier_id not in {None, carrier.id}:
-                self.feedback.setText("El camión habitual pertenece a otro transportista.")
+                self.feedback.show_error(
+                    "El camión habitual pertenece a otro transportista.",
+                    focus_widget=self.usual_truck_combo,
+                )
                 return
             if self.record_id is None:
                 self.saved_record = MasterService(self.current_user).create_driver(
@@ -930,7 +958,7 @@ class DriverEntryDialog(QDialog):
                 self.saved_record = driver
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class TruckEntryDialog(QDialog):
@@ -980,10 +1008,16 @@ class TruckEntryDialog(QDialog):
         domain = _normalize_domain(self.domain_input.text())
         trailer_domain = _normalize_domain(self.trailer_domain_input.text()) or None
         if carrier_id is None and not _carrier_options():
-            self.feedback.setText("Debe cargar un transportista antes de crear un camión.")
+            self.feedback.show_warning(
+                "Debe cargar un transportista antes de crear un camión.",
+                focus_widget=self.carrier_combo,
+            )
             return
         if carrier_id is None or not domain:
-            self.feedback.setText("Complete transportista y patente.")
+            focus_widget = self.carrier_combo if carrier_id is None else self.domain_input
+            self.feedback.show_warning(
+                "Complete transportista y patente.", focus_widget=focus_widget
+            )
             return
         try:
             carrier = Carrier.get_by_id(carrier_id)
@@ -1003,7 +1037,7 @@ class TruckEntryDialog(QDialog):
                 self.saved_record = truck
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class ProductEntryDialog(QDialog):
@@ -1099,7 +1133,8 @@ class ProductEntryDialog(QDialog):
         name = self.name_input.text().strip()
         unit = self.unit_input.text().strip()
         if not name or not unit:
-            self.feedback.setText("Complete producto y unidad.")
+            focus_widget = self.name_input if not name else self.unit_input
+            self.feedback.show_warning("Complete producto y unidad.", focus_widget=focus_widget)
             return
         try:
             prices = {
@@ -1129,7 +1164,7 @@ class ProductEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class VatTypeEntryDialog(QDialog):
@@ -1194,7 +1229,7 @@ class VatTypeEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 def _page(title: str, subtitle: str) -> QWidget:
@@ -1229,10 +1264,8 @@ def _entry_layout(dialog: QDialog, title: str) -> QVBoxLayout:
     return layout
 
 
-def _entry_feedback(layout: QVBoxLayout) -> QLabel:
-    feedback = QLabel("")
-    feedback.setObjectName("masterDialogFeedback")
-    feedback.setWordWrap(True)
+def _entry_feedback(layout: QVBoxLayout) -> FormFeedback:
+    feedback = FormFeedback("masterDialogFeedback")
     layout.addWidget(feedback)
     return feedback
 
