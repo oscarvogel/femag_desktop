@@ -73,6 +73,7 @@ from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
 from app.services.client_email_service import ClientEmailService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
+from app.ui.form_feedback import FormFeedback
 from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
@@ -2073,9 +2074,7 @@ class LoadOrderEntryDialog(QDialog):
 
         root.addWidget(body, 1)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("loadOrderDialogFeedback")
-        self.feedback.setWordWrap(True)
+        self.feedback = FormFeedback("loadOrderDialogFeedback")
         root.addWidget(self.feedback)
 
         footer = QHBoxLayout()
@@ -2173,9 +2172,10 @@ class LoadOrderEntryDialog(QDialog):
         self._update_save_button_state()
         duplicate_message = self._duplicate_merchandise_message()
         if duplicate_message:
-            self.feedback.setText(
+            self.feedback.show_error(
                 f"La orden contiene mercaderia duplicada: {duplicate_message} "
-                "Quite el duplicado antes de guardar o armar pallets."
+                "Quite el duplicado antes de guardar o armar pallets.",
+                focus_widget=self.product_table,
             )
 
     def _refresh_from_driver(self) -> None:
@@ -2203,9 +2203,15 @@ class LoadOrderEntryDialog(QDialog):
             _fill_combo(self.truck_combo, [])
             _fill_combo(self.trailer_combo, [])
             if carrier is None:
-                self.feedback.setText("El chofer seleccionado no tiene transportista asociado.")
+                self.feedback.show_warning(
+                    "El chofer seleccionado no tiene transportista asociado.",
+                    focus_widget=self.driver_combo,
+                )
             else:
-                self.feedback.setText("El transportista asociado al chofer esta inactivo.")
+                self.feedback.show_warning(
+                    "El transportista asociado al chofer esta inactivo.",
+                    focus_widget=self.driver_combo,
+                )
             self._update_save_button_state()
             return
         carrier_id = carrier.id
@@ -2217,7 +2223,10 @@ class LoadOrderEntryDialog(QDialog):
         if len(truck_options) == 1:
             self.truck_combo.setCurrentIndex(1)
         elif not truck_options:
-            self.feedback.setText("No hay camiones activos para el transportista seleccionado.")
+            self.feedback.show_warning(
+                "No hay camiones activos para el transportista seleccionado.",
+                focus_widget=self.truck_combo,
+            )
         preferred_trailer = None
         if driver.usual_truck is not None and driver.usual_truck.trailer_domain:
             preferred_trailer = LoadOrderService._normalize_trailer_domain(
@@ -2241,26 +2250,36 @@ class LoadOrderEntryDialog(QDialog):
         if len(options) == 1:
             self.address_combo.setCurrentIndex(1)
         if client_id is not None and not options:
-            self.feedback.setText("El cliente seleccionado no tiene lugares de entrega activos.")
+            self.feedback.show_warning(
+                "El cliente seleccionado no tiene lugares de entrega activos.",
+                focus_widget=self.client_combo,
+            )
 
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
         address_id = self.address_combo.currentData()
         if client_id is None or address_id is None:
-            self.feedback.setText("Seleccione cliente y destino.")
+            focus_widget = self.client_combo if client_id is None else self.address_combo
+            self.feedback.show_warning(
+                "Seleccione cliente y destino.", focus_widget=focus_widget
+            )
             return
         address = ClientAddress.get_by_id(address_id)
         if address.client.id != client_id:
-            self.feedback.setText("El destino seleccionado no pertenece al cliente.")
+            self.feedback.show_error(
+                "El destino seleccionado no pertenece al cliente.",
+                focus_widget=self.address_combo,
+            )
             return
         for row, destination in enumerate(self.destinations):
             if destination.get("client_id") == client_id and destination.get("address_id") == address_id:
                 self.destination_table.setCurrentCell(row, 0)
                 self._go_to_step(2)
-                self.feedback.setText(
+                self.feedback.show_warning(
                     f"El cliente y lugar de entrega {destination['client_label']} / "
                     f"{destination['address_label']} ya estan cargados. "
-                    "Agregue los articulos en el destino existente."
+                    "Agregue los articulos en el destino existente.",
+                    focus_widget=self.destination_table,
                 )
                 return
         self.destinations.append(
@@ -2277,23 +2296,28 @@ class LoadOrderEntryDialog(QDialog):
         self._render_destinations()
         self.destination_table.setCurrentCell(new_row, 0)
         self._go_to_step(2)
-        self.feedback.setText("Cliente/destino agregado. Ahora agregue productos.")
+        self.feedback.show_success("Cliente/destino agregado. Ahora agregue productos.")
         self._update_save_button_state()
 
     def _remove_destination(self) -> None:
         row = self.destination_table.currentRow()
         if row < 0 or row >= len(self.destinations):
-            self.feedback.setText("Seleccione un cliente/destino.")
+            self.feedback.show_warning(
+                "Seleccione un cliente/destino.", focus_widget=self.destination_table
+            )
             return
         self.destinations.pop(row)
         self._render_destinations()
-        self.feedback.setText("Cliente/destino quitado.")
+        self.feedback.show_success("Cliente/destino quitado.")
         self._update_save_button_state()
 
     def _open_product_dialog(self) -> None:
         row = self.destination_table.currentRow()
         if row < 0 or row >= len(self.destinations):
-            self.feedback.setText("Seleccione un cliente/destino antes de agregar productos.")
+            self.feedback.show_warning(
+                "Seleccione un cliente/destino antes de agregar productos.",
+                focus_widget=self.destination_table,
+            )
             return
         dest = self.destinations[row]
         client = None
@@ -2309,34 +2333,39 @@ class LoadOrderEntryDialog(QDialog):
         for product_row, product in enumerate(dest["products"]):
             if product.get("product_id") == product_id:
                 self.product_table.setCurrentCell(product_row, 0)
-                self.feedback.setText(
+                self.feedback.show_error(
                     f"El articulo {product['product_label']} ya esta cargado para "
                     f"{dest['client_label']} / {dest['address_label']}. "
-                    "Quite el duplicado o edite la linea existente."
+                    "Quite el duplicado o edite la linea existente.",
+                    focus_widget=self.product_table,
                 )
                 return
         self.destinations[row]["products"].append(dialog.product)
         self._render_products(row)
         self._render_destinations()
         self.destination_table.setCurrentCell(row, 0)
-        self.feedback.setText("Producto agregado.")
+        self.feedback.show_success("Producto agregado.")
         self._update_save_button_state()
 
     def _remove_product(self) -> None:
         destination_row = self.destination_table.currentRow()
         product_row = self.product_table.currentRow()
         if destination_row < 0 or destination_row >= len(self.destinations):
-            self.feedback.setText("Seleccione un cliente/destino.")
+            self.feedback.show_warning(
+                "Seleccione un cliente/destino.", focus_widget=self.destination_table
+            )
             return
         products = self.destinations[destination_row]["products"]
         if product_row < 0 or product_row >= len(products):
-            self.feedback.setText("Seleccione un producto.")
+            self.feedback.show_warning(
+                "Seleccione un producto.", focus_widget=self.product_table
+            )
             return
         products.pop(product_row)
         self._render_products(destination_row)
         self._render_destinations()
         self.destination_table.setCurrentCell(destination_row, 0)
-        self.feedback.setText("Producto quitado.")
+        self.feedback.show_success("Producto quitado.")
         self._update_save_button_state()
 
     def _render_destinations(self) -> None:
@@ -2493,21 +2522,29 @@ class LoadOrderEntryDialog(QDialog):
         if not self._is_ready_to_save():
             duplicate_message = self._duplicate_merchandise_message()
             if duplicate_message:
-                self.feedback.setText(
-                    f"No se puede guardar: {duplicate_message} Quite el duplicado."
+                self.feedback.show_error(
+                    f"No se puede guardar: {duplicate_message} Quite el duplicado.",
+                    focus_widget=self.product_table,
                 )
             else:
-                self.feedback.setText("Complete chofer, camion, destino y productos antes de guardar.")
+                self.feedback.show_warning(
+                    "Complete chofer, camion, destino y productos antes de guardar."
+                )
             self._update_save_button_state()
             return
         if self.driver_combo.currentData() is None:
-            self.feedback.setText("Seleccione chofer.")
+            self.feedback.show_warning("Seleccione chofer.", focus_widget=self.driver_combo)
             return
         if self.carrier_combo.currentData() is None:
-            self.feedback.setText("El chofer seleccionado no tiene transportista asignado.")
+            self.feedback.show_warning(
+                "El chofer seleccionado no tiene transportista asignado.",
+                focus_widget=self.driver_combo,
+            )
             return
         if self.truck_combo.currentData() is None:
-            self.feedback.setText("Seleccione camion / patente.")
+            self.feedback.show_warning(
+                "Seleccione camion / patente.", focus_widget=self.truck_combo
+            )
             return
         try:
             destinations = []
@@ -2553,7 +2590,7 @@ class LoadOrderEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 class LoadOrderProductDialog(QDialog):
@@ -2637,8 +2674,7 @@ class LoadOrderProductDialog(QDialog):
         totals_grid.addWidget(self.total_label, 4, 1)
         layout.addLayout(totals_grid)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("productDialogFeedback")
+        self.feedback = FormFeedback("productDialogFeedback")
         layout.addWidget(self.feedback)
 
         footer = QHBoxLayout()
@@ -2694,10 +2730,14 @@ class LoadOrderProductDialog(QDialog):
         product_id = self.product_combo.currentData()
         quantity = self.quantity_input.value()
         if product_id is None:
-            self.feedback.setText("Seleccione un producto.")
+            self.feedback.show_warning(
+                "Seleccione un producto.", focus_widget=self.product_combo
+            )
             return
         if quantity <= 0:
-            self.feedback.setText("La cantidad debe ser mayor a cero.")
+            self.feedback.show_warning(
+                "La cantidad debe ser mayor a cero.", focus_widget=self.quantity_input
+            )
             return
         product = Product.get_by_id(product_id)
         self.product = {
@@ -3296,7 +3336,6 @@ QPushButton[stepNav="true"]:checked {
     border: 1px solid #b7d3f6;
     border-left: 3px solid #0b6fdc;
 }
-#loadOrderDialogFeedback, #productDialogFeedback { color: #b45309; font-size: 12px; }
 #detailTitle { font-size: 16px; font-weight: 700; color: #111827; }
 #detailOrderNumber { color: #0b6fdc; font-size: 20px; font-weight: 700; margin-top: 6px; }
 #detailLabel { color: #64748b; font-size: 12px; margin-top: 7px; }
