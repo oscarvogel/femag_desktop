@@ -481,8 +481,9 @@ def test_trucks_abm_page_creates_edits_and_refreshes_grid(db):
 
 
 def test_truck_dialog_without_carriers_shows_clear_message(db):
-    from PyQt5.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
+    from PyQt5.QtWidgets import QApplication, QLineEdit, QPushButton
 
+    from app.ui.form_feedback import FormFeedback
     from app.ui.master_abm import TruckEntryDialog
 
     app = QApplication.instance() or QApplication([])
@@ -490,9 +491,10 @@ def test_truck_dialog_without_carriers_shows_clear_message(db):
     dialog.findChild(QLineEdit, "truckDomainInput").setText("SINCAR")
     dialog.findChild(QPushButton, "saveTruckButton").click()
 
-    assert dialog.findChild(QLabel, "masterDialogFeedback").text() == (
-        "Debe cargar un transportista antes de crear un camión."
-    )
+    feedback = dialog.findChild(FormFeedback, "masterDialogFeedback")
+    assert feedback.message == "Debe cargar un transportista antes de crear un camión."
+    assert feedback.kind == "warning"
+    assert not feedback.isHidden()
 
 
 def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):

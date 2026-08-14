@@ -82,7 +82,16 @@ def install_client_payment_term_extension() -> None:
             cuit = self.cuit_input.text().strip()
             iva = self.iva_input.text().strip()
             if not name or not cuit or not iva:
-                self.feedback.setText("Complete nombre, CUIT e IVA.")
+                focus_widget = (
+                    self.name_input
+                    if not name
+                    else self.cuit_input
+                    if not cuit
+                    else self.iva_input
+                )
+                self.feedback.show_warning(
+                    "Complete nombre, CUIT e IVA.", focus_widget=focus_widget
+                )
                 return
             try:
                 payment_term_days = ClientService.validate_payment_term_days(
@@ -114,6 +123,6 @@ def install_client_payment_term_extension() -> None:
                     self.saved_record = client
                 self.accept()
             except Exception as exc:
-                self.feedback.setText(str(exc))
+                self.feedback.show_error(str(exc))
 
     master_abm.ClientEntryDialog = ClientEntryDialog
