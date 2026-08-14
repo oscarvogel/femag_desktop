@@ -1168,9 +1168,10 @@ def test_master_abms_search_and_sort_products_carriers_and_drivers(db):
 
 
 def test_clients_abm_searches_clients_and_delivery_places(db):
-    from PyQt5.QtWidgets import QLabel, QLineEdit, QTableWidget
+    from PyQt5.QtWidgets import QLineEdit, QTableWidget
 
     from app.models.masters import Client, ClientAddress
+    from app.ui.form_feedback import FormFeedback
 
     client = Client.create(name="Águila Sur", cuit="30700000003", iva_condition="RI")
     ClientAddress.create(
@@ -1198,4 +1199,7 @@ def test_clients_abm_searches_clients_and_delivery_places(db):
     places_search.setText("sin coincidencia")
     app.processEvents()
     assert places_table.rowCount() == 0
-    assert "No se encontraron" in window.findChild(QLabel, "clientPlacesSearchFeedback").text()
+    feedback = window.findChild(FormFeedback, "clientPlacesSearchFeedback")
+    assert "No se encontraron" in feedback.message
+    assert feedback.kind == "info"
+    assert not feedback.isHidden()

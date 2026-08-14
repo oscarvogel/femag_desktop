@@ -78,6 +78,29 @@ def test_login_branding_does_not_overlap_title_or_subtitle():
     window.close()
 
 
+def test_login_validation_uses_expanding_error_banner():
+    from PyQt5.QtWidgets import QApplication, QDialog
+
+    from app.ui.form_feedback import FormFeedback
+    from app.ui.login_window import LoginWindow
+
+    app = QApplication.instance() or QApplication([])
+    window = LoginWindow(demo_mode=True)
+    QDialog.show(window)
+    app.processEvents()
+    initial_height = window.height()
+
+    window._attempt_login()
+    app.processEvents()
+
+    feedback = window.findChild(FormFeedback, "loginFeedback")
+    assert feedback.kind == "warning"
+    assert feedback.message == "Complete ambos campos para ingresar."
+    assert not feedback.isHidden()
+    assert window.height() >= initial_height
+    window.close()
+
+
 def test_workspace_displays_balanced_branding_and_window_icon(db):
     from PyQt5.QtWidgets import QApplication, QLabel
 

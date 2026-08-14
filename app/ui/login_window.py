@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPu
 from app.models.security import User
 from app.services.auth_service import AuthService
 from app.ui.branding import femag_icon, load_brand_pixmap
+from app.ui.form_feedback import FormFeedback
 from app.ui.user_management import InitialAdminDialog
 
 
@@ -17,7 +18,7 @@ class LoginWindow(QDialog):
         self.setFixedWidth(460)
         self.setStyleSheet(self._STYLES)
         self._build()
-        self.setFixedHeight(self.minimumSizeHint().height())
+        self.setMinimumHeight(self.minimumSizeHint().height())
 
     def _build(self):
         root = QVBoxLayout()
@@ -84,10 +85,7 @@ class LoginWindow(QDialog):
 
         outer_layout.addSpacing(6)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("loginFeedback")
-        self.feedback.setWordWrap(True)
-        self.feedback.setMinimumHeight(20)
+        self.feedback = FormFeedback("loginFeedback")
         outer_layout.addWidget(self.feedback)
 
         outer_layout.addSpacing(10)
@@ -143,17 +141,26 @@ class LoginWindow(QDialog):
     def _fill_demo(self):
         self.username_input.setText("demo")
         self.password_input.setText("demo")
-        self.feedback.setText("")
+        self.feedback.clear_message()
+        self.adjustSize()
 
     def _attempt_login(self):
         username = self.username_input.text().strip()
         password = self.password_input.text()
         if not username or not password:
-            self.feedback.setText("Complete ambos campos para ingresar.")
+            focus_widget = self.username_input if not username else self.password_input
+            self.feedback.show_warning(
+                "Complete ambos campos para ingresar.", focus_widget=focus_widget
+            )
+            self.adjustSize()
             return
         user = AuthService().authenticate(username, password)
         if user is None:
-            self.feedback.setText("Usuario o contrasena incorrectos. Verifique sus credenciales.")
+            self.feedback.show_error(
+                "Usuario o contrasena incorrectos. Verifique sus credenciales.",
+                focus_widget=self.password_input,
+            )
+            self.adjustSize()
             return
         self.authenticated_user = user
         self.accept()
@@ -173,7 +180,8 @@ class LoginWindow(QDialog):
                 values["username"], values["password"]
             )
         except (ValueError, TypeError) as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
+            self.adjustSize()
             return
         self.accept()
 
@@ -230,11 +238,6 @@ class LoginWindow(QDialog):
     }
     QLineEdit::placeholder {
         color: #94a3b8;
-    }
-    #loginFeedback {
-        color: #b91c1c;
-        font-size: 12px;
-        min-height: 20px;
     }
     QPushButton {
         border-radius: 6px;

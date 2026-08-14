@@ -114,7 +114,7 @@ class MasterTableController:
         *,
         table: QTableWidget,
         search_input: QLineEdit,
-        search_feedback: QLabel,
+        search_feedback: FormFeedback,
         rows_fn,
         sort_column: int = 0,
     ):
@@ -172,9 +172,9 @@ class MasterTableController:
 
         query = self.search_input.text().strip()
         if query and not rows:
-            self.search_feedback.setText(f"No se encontraron coincidencias para «{query}».")
+            self.search_feedback.show_info(f"No se encontraron coincidencias para «{query}».")
         else:
-            self.search_feedback.setText("")
+            self.search_feedback.clear_message()
 
 
 def build_master_abm_page(
@@ -186,8 +186,7 @@ def build_master_abm_page(
 ) -> QWidget:
     page = _page(config.title, "ABM minimo para operar Ordenes de carga")
     layout = page.layout()
-    feedback = QLabel("")
-    feedback.setObjectName(f"{config.new_button_name}Feedback")
+    feedback = FormFeedback(f"{config.new_button_name}Feedback")
     feedback.setToolTip(AUTO_ABM_TECHNICAL_DEBT)
     search_input = QLineEdit()
     search_input.setObjectName(f"{config.new_button_name}SearchInput")
@@ -199,8 +198,7 @@ def build_master_abm_page(
     search_row.addWidget(QLabel("Buscar"))
     search_row.addWidget(search_input, 1)
     layout.addLayout(search_row)
-    search_feedback = QLabel("")
-    search_feedback.setObjectName(f"{config.new_button_name}SearchFeedback")
+    search_feedback = FormFeedback(f"{config.new_button_name}SearchFeedback")
     layout.addWidget(search_feedback)
     actions = QHBoxLayout()
     new_button = _action_button(config.new_button_name, "Nuevo")
@@ -236,25 +234,25 @@ def build_master_abm_page(
 
     def open_new() -> None:
         if not can_create:
-            feedback.setText("El perfil actual no permite crear este maestro.")
+            feedback.show_warning("El perfil actual no permite crear este maestro.")
             return
         dialog = config.dialog_class(current_user=current_user, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             table_controller.refresh()
-            feedback.setText("Registro guardado.")
+            feedback.show_success("Registro guardado.")
 
     def open_edit() -> None:
         if not can_modify:
-            feedback.setText("El perfil actual no permite modificar este maestro.")
+            feedback.show_warning("El perfil actual no permite modificar este maestro.")
             return
         row_id = table_controller.selected_id()
         if row_id is None:
-            feedback.setText("Seleccione un registro para editar.")
+            feedback.show_warning("Seleccione un registro para editar.", focus_widget=table)
             return
         dialog = config.dialog_class(current_user=current_user, record_id=row_id, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             table_controller.refresh()
-            feedback.setText("Registro actualizado.")
+            feedback.show_success("Registro actualizado.")
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
@@ -1511,8 +1509,7 @@ def build_client_abm_page(
     can_create = _can_use_menu_action(user, "Maestros", "crear", "Clientes")
     can_modify = _can_use_menu_action(user, "Maestros", "modificar", "Clientes")
 
-    client_feedback = QLabel("")
-    client_feedback.setObjectName("clientAbmFeedback")
+    client_feedback = FormFeedback("clientAbmFeedback")
 
     client_search_input = QLineEdit()
     client_search_input.setObjectName("clientSearchInput")
@@ -1522,8 +1519,7 @@ def build_client_abm_page(
     client_search_row.addWidget(QLabel("Buscar"))
     client_search_row.addWidget(client_search_input, 1)
     layout.addLayout(client_search_row)
-    client_search_feedback = QLabel("")
-    client_search_feedback.setObjectName("clientSearchFeedback")
+    client_search_feedback = FormFeedback("clientSearchFeedback")
     layout.addWidget(client_search_feedback)
 
     client_actions = QHBoxLayout()
@@ -1568,12 +1564,10 @@ def build_client_abm_page(
     places_search_row.addWidget(QLabel("Buscar domicilios"))
     places_search_row.addWidget(places_search_input, 1)
     layout.addLayout(places_search_row)
-    places_search_feedback = QLabel("")
-    places_search_feedback.setObjectName("clientPlacesSearchFeedback")
+    places_search_feedback = FormFeedback("clientPlacesSearchFeedback")
     layout.addWidget(places_search_feedback)
 
-    places_feedback = QLabel("")
-    places_feedback.setObjectName("clientPlacesFeedback")
+    places_feedback = FormFeedback("clientPlacesFeedback")
 
     place_actions = QHBoxLayout()
     add_place_btn = _action_button("addClientPlaceButton", "Agregar")
@@ -1618,15 +1612,15 @@ def build_client_abm_page(
         )
         if cid is None:
             places_table.setRowCount(0)
-            places_search_feedback.setText("")
-            places_feedback.setText("Seleccione un cliente para ver sus domicilios.")
+            places_search_feedback.clear_message()
+            places_feedback.show_info("Seleccione un cliente para ver sus domicilios.")
             return
         places_table_controller.refresh()
         rows = _client_address_rows(cid)
         if not rows:
-            places_feedback.setText("Este cliente no tiene domicilios cargados.")
+            places_feedback.show_info("Este cliente no tiene domicilios cargados.")
         else:
-            places_feedback.setText("")
+            places_feedback.clear_message()
 
     client_table_controller = MasterTableController(
         table=client_table,
@@ -1646,30 +1640,32 @@ def build_client_abm_page(
 
     def open_new_client() -> None:
         if not can_create:
-            client_feedback.setText("El perfil actual no permite crear este maestro.")
+            client_feedback.show_warning("El perfil actual no permite crear este maestro.")
             return
         dialog = ClientEntryDialog(current_user=current_user, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             refresh_clients()
-            client_feedback.setText("Cliente guardado.")
+            client_feedback.show_success("Cliente guardado.")
 
     def open_edit_client() -> None:
         if not can_modify:
-            client_feedback.setText("El perfil actual no permite modificar este maestro.")
+            client_feedback.show_warning("El perfil actual no permite modificar este maestro.")
             return
         cid = selected_client_id()
         if cid is None:
-            client_feedback.setText("Seleccione un cliente para editar.")
+            client_feedback.show_warning("Seleccione un cliente para editar.", focus_widget=client_table)
             return
         dialog = ClientEntryDialog(current_user=current_user, record_id=cid, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             refresh_clients()
-            client_feedback.setText("Cliente actualizado.")
+            client_feedback.show_success("Cliente actualizado.")
 
     def open_client_emails() -> None:
         cid = selected_client_id()
         if cid is None:
-            client_feedback.setText("Seleccione un cliente para administrar emails.")
+            client_feedback.show_warning(
+                "Seleccione un cliente para administrar emails.", focus_widget=client_table
+            )
             return
         ClientEmailsDialog(
             current_user=current_user,
@@ -1680,14 +1676,18 @@ def build_client_abm_page(
     def open_client_ledger() -> None:
         cid = selected_client_id()
         if cid is None or view_ledger_callback is None:
-            client_feedback.setText("Seleccione un cliente para ver su cuenta corriente.")
+            client_feedback.show_warning(
+                "Seleccione un cliente para ver su cuenta corriente.", focus_widget=client_table
+            )
             return
         view_ledger_callback(Client.get_by_id(cid))
 
     def open_opening_balance() -> None:
         cid = selected_client_id()
         if cid is None:
-            client_feedback.setText("Seleccione un cliente para agregar el saldo inicial.")
+            client_feedback.show_warning(
+                "Seleccione un cliente para agregar el saldo inicial.", focus_widget=client_table
+            )
             return
         dialog = ClientOpeningBalanceDialog(
             current_user=current_user,
@@ -1696,33 +1696,38 @@ def build_client_abm_page(
         )
         if dialog.exec_() == QDialog.Accepted:
             refresh_clients()
-            client_feedback.setText("Saldo inicial registrado.")
+            client_feedback.show_success("Saldo inicial registrado.")
 
     def open_new_place() -> None:
         cid = selected_client_id()
         if cid is None:
-            places_feedback.setText("Seleccione un cliente primero.")
+            places_feedback.show_warning("Seleccione un cliente primero.", focus_widget=client_table)
             return
         dialog = ClientAddressEntryDialog(current_user=current_user, client_id=cid, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             refresh_places()
-            places_feedback.setText("Lugar de entrega guardado.")
+            places_feedback.show_success("Lugar de entrega guardado.")
 
     def open_edit_place() -> None:
         item = places_table.item(places_table.currentRow(), 0)
         if item is None:
-            places_feedback.setText("Seleccione un lugar de entrega para editar.")
+            places_feedback.show_warning(
+                "Seleccione un lugar de entrega para editar.", focus_widget=places_table
+            )
             return
         pid = item.data(Qt.UserRole)
         dialog = ClientAddressEntryDialog(current_user=current_user, record_id=pid, parent=parent)
         if dialog.exec_() == QDialog.Accepted:
             refresh_places()
-            places_feedback.setText("Lugar de entrega actualizado.")
+            places_feedback.show_success("Lugar de entrega actualizado.")
 
     def toggle_place_active() -> None:
         item = places_table.item(places_table.currentRow(), 0)
         if item is None:
-            places_feedback.setText("Seleccione un lugar de entrega para activar o desactivar.")
+            places_feedback.show_warning(
+                "Seleccione un lugar de entrega para activar o desactivar.",
+                focus_widget=places_table,
+            )
             return
         pid = item.data(Qt.UserRole)
         address = ClientAddress.get_by_id(pid)
@@ -1730,7 +1735,7 @@ def build_client_abm_page(
         address.save()
         refresh_places()
         status = "activado" if address.active else "desactivado"
-        places_feedback.setText(f"Lugar de entrega {status}.")
+        places_feedback.show_success(f"Lugar de entrega {status}.")
 
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)

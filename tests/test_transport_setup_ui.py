@@ -88,18 +88,26 @@ def test_guided_transport_setup_warns_and_reassigns_existing_relations(db):
     _set_combo(dialog.findChild(QComboBox, "transportSetupDriverInput"), driver.id)
     app.processEvents()
 
-    truck_warning = dialog.findChild(QLabel, "transportSetupTruckWarning").text()
-    driver_warning = dialog.findChild(QLabel, "transportSetupDriverWarning").text()
+    from app.ui.form_feedback import FormFeedback
+
+    truck_feedback = dialog.findChild(FormFeedback, "transportSetupTruckWarning")
+    driver_feedback = dialog.findChild(FormFeedback, "transportSetupDriverWarning")
+    truck_warning = truck_feedback.message
+    driver_warning = driver_feedback.message
     assert "Transporte anterior 266" in truck_warning
     assert "reasignará" in truck_warning
     assert "Transporte anterior 266" in driver_warning
     assert "reasignará" in driver_warning
+    assert truck_feedback.kind == "warning"
+    assert driver_feedback.kind == "warning"
 
     # Cambiamos explícitamente a otra patente del destino y comprobamos también
     # que se informa el cambio del camión habitual del chofer.
     _set_combo(dialog.findChild(QComboBox, "transportSetupTruckInput"), new_truck.id)
     app.processEvents()
-    driver_warning = dialog.findChild(QLabel, "transportSetupDriverWarning").text()
+    driver_warning = dialog.findChild(
+        FormFeedback, "transportSetupDriverWarning"
+    ).message
     assert "camión habitual actual" in driver_warning
 
     # Volvemos a seleccionar la patente que estaba en la otra empresa para

@@ -91,6 +91,9 @@ def test_recipient_dialog_requires_at_least_one_destination(db):
     app.processEvents()
 
     assert dialog.result() != dialog.Accepted
-    assert "Seleccione" in dialog.findChild(
-        QLabel, "accountStatementRecipientsFeedback"
-    ).text()
+    from app.ui.form_feedback import FormFeedback
+
+    feedback = dialog.findChild(FormFeedback, "accountStatementRecipientsFeedback")
+    assert "Seleccione" in feedback.message
+    assert feedback.kind == "warning"
+    assert not feedback.isHidden()

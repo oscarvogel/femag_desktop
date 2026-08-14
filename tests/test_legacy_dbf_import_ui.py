@@ -90,7 +90,9 @@ def test_legacy_dbf_import_page_runs_importer_and_shows_summary(db, monkeypatch)
             "cp850",
         )
     ]
-    feedback = window.findChild(QLabel, "legacyDbfImportFeedback")
+    from app.ui.form_feedback import FormFeedback
+
+    feedback = window.findChild(FormFeedback, "legacyDbfImportFeedback")
     table = window.findChild(QTableWidget, "legacyDbfImportSummaryTable")
     assert "Importación finalizada" in feedback.text()
     assert table.rowCount() == 5
@@ -100,6 +102,8 @@ def test_legacy_dbf_import_page_runs_importer_and_shows_summary(db, monkeypatch)
     assert table.item(0, 1).text() == "2"
     assert table.item(2, 4).text() == "1"
     assert "1 advertencia" in feedback.text()
+    assert feedback.kind == "warning"
+    assert not feedback.isHidden()
 
 
 def test_legacy_dbf_import_refreshes_master_grids(db, monkeypatch):

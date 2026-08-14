@@ -1,3 +1,6 @@
+import ast
+from pathlib import Path
+
 from PyQt5.QtWidgets import QApplication, QLineEdit
 
 from app.ui.form_feedback import FormFeedback
@@ -67,3 +70,65 @@ def test_feedback_can_focus_the_field_that_needs_attention() -> None:
     assert field.focus_requested
     assert feedback.kind == "warning"
     assert app is not None
+
+
+def test_ui_has_no_direct_qlabel_assignments_for_operational_feedback() -> None:
+    """Issue #296: feedback must use FormFeedback, not a styled QLabel."""
+
+    legacy_assignments: list[str] = []
+    feedback_tokens = ("feedback", "warning")
+    feedback_names = {"issue_label", "bulk_preview_label"}
+
+    for path in sorted(Path("app/ui").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            if not (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "QLabel"
+            ):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                name = ast.unparse(target).lower()
+                leaf = name.rsplit(".", 1)[-1]
+                if any(token in leaf for token in feedback_tokens) or leaf in feedback_names:
+                    legacy_assignments.append(f"{path}:{node.lineno} ({name})")
+
+    assert legacy_assignments == []
+
+
+def test_known_inline_feedback_inventory_uses_form_feedback() -> None:
+    inventory = {
+        "app/ui/desktop_app.py": (
+            "accountStatementRecipientsFeedback",
+            "loadOrderFeedback",
+            "legacyDbfImportFeedback",
+            "loadOrderPalletDialogFeedback",
+        ),
+        "app/ui/login_window.py": ("loginFeedback",),
+        "app/ui/user_management.py": ("usersFeedback", "permissionsFeedback"),
+        "app/ui/transport_setup_extension.py": (
+            "transportSetupFeedback",
+            "transportSetupTruckWarning",
+            "transportSetupDriverWarning",
+        ),
+        "app/ui/pallet_composition.py": (
+            "palletCompositionIssues",
+            "bulkPalletAssignmentPreview",
+        ),
+        "app/ui/master_abm.py": (
+            "clientAbmFeedback",
+            "clientSearchFeedback",
+            "clientPlacesSearchFeedback",
+            "clientPlacesFeedback",
+        ),
+    }
+
+    for filename, object_names in inventory.items():
+        source = Path(filename).read_text(encoding="utf-8")
+        for object_name in object_names:
+            assert f'FormFeedback("{object_name}")' in source, (filename, object_name)

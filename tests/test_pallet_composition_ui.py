@@ -275,6 +275,8 @@ def test_pallet_cards_show_individual_invalid_and_complete_states(db):
     assert widget.card_for_sequence(1).property("compositionState") == "invalid"
     assert widget.card_for_sequence(2).property("compositionState") == "complete"
     assert widget.summary_label.text() == "2 pallets · 1 completo · 1 pendiente"
+    assert widget.issue_label.kind == "warning"
+    assert not widget.issue_label.isHidden()
 
 
 def test_zero_weight_marks_only_the_pallet_with_that_snapshot(db):
@@ -365,7 +367,8 @@ def test_bulk_assignment_applies_one_client_product_to_existing_pallets(db):
     app.processEvents()
 
     assert widget.bulk_quantity_input.value() == 4
-    assert "10 pallets x 4 = 40 unidades" in widget.bulk_preview_label.text()
+    assert "10 pallets x 4 = 40 unidades" in widget.bulk_preview_label.message
+    assert widget.bulk_preview_label.kind == "info"
     spy = QSignalSpy(widget.composition_changed)
     widget.bulk_assign_button.click()
     app.processEvents()

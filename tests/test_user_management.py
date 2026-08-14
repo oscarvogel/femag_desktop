@@ -136,6 +136,7 @@ def test_user_management_page_exposes_users_and_permission_matrix(db):
     from PyQt5.QtWidgets import QApplication, QTableWidget, QTabWidget
 
     from app.services.auth_service import AuthService
+    from app.ui.form_feedback import FormFeedback
     from app.ui.user_management import UserManagementPage
 
     _seed_profiles()
@@ -147,4 +148,11 @@ def test_user_management_page_exposes_users_and_permission_matrix(db):
     assert page.findChild(QTabWidget, "userManagementTabs") is not None
     assert page.findChild(QTableWidget, "usersTable") is not None
     assert page.findChild(QTableWidget, "permissionsTable") is not None
+    assert isinstance(page.users_feedback, FormFeedback)
+    assert isinstance(page.permissions_feedback, FormFeedback)
+    page.users_table.clearSelection()
+    page.users_table.setCurrentCell(-1, -1)
+    page._edit_user()
+    assert page.users_feedback.kind == "warning"
+    assert page.users_feedback.message == "Seleccione un usuario."
     page.close()
