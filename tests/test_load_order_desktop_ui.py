@@ -39,6 +39,52 @@ def _complete_order_for_issue(order, current_user):
     return order
 
 
+def test_load_order_product_action_uses_visible_warning_when_destination_is_missing(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+    from app.ui.form_feedback import FormFeedback
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderEntryDialog(
+        LoadOrderService(current_user="issue294_feedback"), "issue294_feedback"
+    )
+    dialog.show()
+    app.processEvents()
+
+    dialog.findChild(QPushButton, "addLoadOrderProductButton").click()
+    app.processEvents()
+
+    feedback = dialog.findChild(FormFeedback, "loadOrderDialogFeedback")
+    destination_table = dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable")
+    assert feedback.message == "Seleccione un cliente/destino antes de agregar productos."
+    assert feedback.kind == "warning"
+    assert not feedback.isHidden()
+    assert feedback.styleSheet()
+    assert destination_table.hasFocus()
+
+
+def test_load_order_product_dialog_uses_visible_warning_for_missing_product(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.ui.desktop_app import LoadOrderProductDialog
+    from app.ui.form_feedback import FormFeedback
+
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderProductDialog()
+    dialog.show()
+    app.processEvents()
+
+    dialog.findChild(QPushButton, "confirmProductButton").click()
+    app.processEvents()
+
+    feedback = dialog.findChild(FormFeedback, "productDialogFeedback")
+    assert feedback.message == "Seleccione un producto."
+    assert feedback.kind == "warning"
+    assert not feedback.isHidden()
+
+
 def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(db):
     from decimal import Decimal
 
@@ -708,11 +754,12 @@ def test_load_order_dialog_driver_autofills_carrier_and_filters_trucks(db):
 
 
 def test_load_order_dialog_rejects_driver_without_carrier(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+    from PyQt5.QtWidgets import QApplication, QComboBox
 
     from app.models.masters import Driver
     from app.services.load_order_service import LoadOrderService
     from app.ui.desktop_app import LoadOrderEntryDialog
+    from app.ui.form_feedback import FormFeedback
 
     app = QApplication.instance() or QApplication([])
     driver = Driver.create(name="Chofer Sin Transporte", carrier=None, cuit="20123456783")
@@ -723,14 +770,15 @@ def test_load_order_dialog_rejects_driver_without_carrier(db):
     driver_combo = dialog.findChild(QComboBox, "loadOrderDriverInput")
     carrier_combo = dialog.findChild(QComboBox, "loadOrderCarrierInput")
     truck_combo = dialog.findChild(QComboBox, "loadOrderTruckInput")
-    feedback = dialog.findChild(QLabel, "loadOrderDialogFeedback")
+    feedback = dialog.findChild(FormFeedback, "loadOrderDialogFeedback")
 
     _set_combo(driver_combo, driver.id)
     app.processEvents()
 
     assert carrier_combo.currentData() is None
     assert truck_combo.count() == 1
-    assert feedback.text() == "El chofer seleccionado no tiene transportista asociado."
+    assert feedback.message == "El chofer seleccionado no tiene transportista asociado."
+    assert feedback.kind == "warning"
 
 
 def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
