@@ -311,12 +311,12 @@ class LoadOrderPrintService:
             for row in sub_block["rows"]:
                 rows.append(
                     [
-                        self._p(""),
+                        "",
                         _quantity(row["quantity"]),
                         self._p(""),
                         self._p(row["product"]),
-                        self._p(row["lote"]),
-                        self._p(row["elab"]),
+                        "",
+                        "",
                     ]
                 )
                 row_index += 1
@@ -324,7 +324,7 @@ class LoadOrderPrintService:
             if row_index - 1 > start:
                 spans.append((2, start, 2, row_index - 1))
         if not has_rows:
-            rows.append([self._p(block["destination"] or "-"), self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
+            rows.append(["", self._p("-"), self._p("-"), self._p("-"), "", ""])
         table = Table(rows, colWidths=[44 * mm, 24 * mm, 16 * mm, 62 * mm, 18 * mm, 18 * mm], repeatRows=2)
         style_commands = [
             ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
