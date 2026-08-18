@@ -1,0 +1,116 @@
+from decimal import Decimal
+
+
+def _destinations(db):
+    from app.models.masters import Client, ClientAddress, Product
+
+    client = Client.create(name="Cliente auto pallets", cuit="30700000981", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Deposito auto",
+    )
+    product = Product.create(
+        name="Fecula auto 25 kg",
+        unit="bolsa",
+        peso_unitario_kg=Decimal("25.000"),
+    )
+    return [
+        {
+            "client_id": client.id,
+            "address_id": address.id,
+            "client_label": client.name,
+            "address_label": address.address,
+            "products": [
+                {
+                    "product_id": product.id,
+                    "product_label": product.name,
+                    "quantity": 60,
+                    "unit": product.unit,
+                }
+            ],
+        }
+    ]
+
+
+def test_auto_proposal_is_preview_until_operator_accepts(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    widget.add_pallets(2)
+
+    assert all(not pallet["allocations"] for pallet in widget.pallet_drafts())
+    widget.propose_distribution_button.click()
+    app.processEvents()
+
+    assert widget.proposal_table.rowCount() == 2
+    assert all(not pallet["allocations"] for pallet in widget.pallet_drafts())
+    assert widget.accept_proposal_button.isEnabled() is True
+
+    widget.accept_proposal_button.click()
+    app.processEvents()
+
+    assert sum(len(pallet["allocations"]) for pallet in widget.pallet_drafts()) > 0
+    assert all(
+        sum(
+            Decimal(str(allocation["quantity"])) * Decimal(str(allocation["peso_unitario_kg"]))
+            for allocation in pallet["allocations"]
+        ) <= Decimal("1000")
+        for pallet in widget.pallet_drafts()
+    )
+
+
+def test_lock_pallet_is_visible_and_reorganize_preserves_it(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+    product = destinations[0]["products"][0]
+    widget.add_allocation(1, destinations[0]["address_id"], product["product_id"], 20)
+    widget._select_pallet(1)
+    widget.lock_pallet_button.click()
+    app.processEvents()
+
+    assert widget.pallet_drafts()[0]["locked"] is True
+    assert "Fijado" in widget.card_for_sequence(1).status_label.text()
+
+    before = [dict(item) for item in widget.pallet_drafts()[0]["allocations"]]
+    widget.reorganize_pending_button.click()
+    app.processEvents()
+    assert widget.accept_proposal_button.isEnabled() is True
+    widget.accept_proposal_button.click()
+    app.processEvents()
+
+    assert widget.pallet_drafts()[0]["locked"] is True
+    assert widget.pallet_drafts()[0]["allocations"] == before
+
+
+def test_pending_grid_replaces_operator_need_for_text_only_summary(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    widget.add_pallets(2)
+    app.processEvents()
+
+    assert widget.pending_table.rowCount() == 1
+    assert widget.pending_table.item(0, 3).text() == "60"
+    assert widget.pending_table.item(0, 6).text() == "60"
+    assert widget.pending_table.item(0, 7).text() == "1.500 kg"
