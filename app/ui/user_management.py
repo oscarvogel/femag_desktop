@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
 from app.models.security import MenuItem, User, UserProfile
 from app.services.auth_service import AuthService
 from app.services.permission_service import ACTIONS, MENU, PermissionService
+from app.ui.form_feedback import FormFeedback
 
 
 class UserDialog(QDialog):
@@ -219,9 +220,7 @@ class UserManagementPage(QWidget):
         self.users_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.users_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.users_table, 1)
-        self.users_feedback = QLabel("")
-        self.users_feedback.setObjectName("usersFeedback")
-        self.users_feedback.setWordWrap(True)
+        self.users_feedback = FormFeedback("usersFeedback")
         layout.addWidget(self.users_feedback)
 
         self.new_user_button.clicked.connect(self._new_user)
@@ -257,8 +256,7 @@ class UserManagementPage(QWidget):
         self.permissions_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.permissions_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.permissions_table, 1)
-        self.permissions_feedback = QLabel("")
-        self.permissions_feedback.setObjectName("permissionsFeedback")
+        self.permissions_feedback = FormFeedback("permissionsFeedback")
         layout.addWidget(self.permissions_feedback)
 
         self.profile_combo.currentIndexChanged.connect(self._load_permissions)
@@ -304,15 +302,15 @@ class UserManagementPage(QWidget):
                 active=values["active"],
             )
         except (ValueError, TypeError, PermissionError) as exc:
-            self.users_feedback.setText(str(exc))
+            self.users_feedback.show_error(str(exc))
             return
         self._refresh_users()
-        self.users_feedback.setText("Usuario creado correctamente.")
+        self.users_feedback.show_success("Usuario creado correctamente.")
 
     def _edit_user(self) -> None:
         user = self._selected_user()
         if user is None:
-            self.users_feedback.setText("Seleccione un usuario.")
+            self.users_feedback.show_warning("Seleccione un usuario.", focus_widget=self.users_table)
             return
         dialog = UserDialog(profiles=self._profiles(), user=user, parent=self)
         if dialog.exec_() != QDialog.Accepted:
@@ -321,29 +319,29 @@ class UserManagementPage(QWidget):
         try:
             self.auth.update_user(user, actor=self.current_user, **{key: values[key] for key in ("username", "profile_name", "display_name", "active")})
         except (ValueError, TypeError, PermissionError) as exc:
-            self.users_feedback.setText(str(exc))
+            self.users_feedback.show_error(str(exc), focus_widget=self.users_table)
             return
         self._refresh_users()
-        self.users_feedback.setText("Usuario actualizado correctamente.")
+        self.users_feedback.show_success("Usuario actualizado correctamente.")
 
     def _toggle_user(self) -> None:
         user = self._selected_user()
         if user is None:
-            self.users_feedback.setText("Seleccione un usuario.")
+            self.users_feedback.show_warning("Seleccione un usuario.", focus_widget=self.users_table)
             return
         target_state = not user.active
         try:
             self.auth.set_active(user, target_state, actor=self.current_user)
         except (ValueError, PermissionError) as exc:
-            self.users_feedback.setText(str(exc))
+            self.users_feedback.show_error(str(exc), focus_widget=self.users_table)
             return
         self._refresh_users()
-        self.users_feedback.setText("Estado de usuario actualizado.")
+        self.users_feedback.show_success("Estado de usuario actualizado.")
 
     def _reset_password(self) -> None:
         user = self._selected_user()
         if user is None:
-            self.users_feedback.setText("Seleccione un usuario.")
+            self.users_feedback.show_warning("Seleccione un usuario.", focus_widget=self.users_table)
             return
         dialog = PasswordDialog(title=f"Restablecer contraseña: {user.username}", parent=self)
         if dialog.exec_() != QDialog.Accepted:
@@ -352,9 +350,11 @@ class UserManagementPage(QWidget):
         try:
             self.auth.change_password(user, password, confirmation, actor=self.current_user, reset=True)
         except (ValueError, PermissionError) as exc:
-            self.users_feedback.setText(str(exc))
+            self.users_feedback.show_error(str(exc), focus_widget=self.users_table)
             return
-        self.users_feedback.setText("Contraseña restablecida. Comuníquela por un canal seguro.")
+        self.users_feedback.show_success(
+            "Contraseña restablecida. Comuníquela por un canal seguro."
+        )
 
     def _load_permissions(self) -> None:
         self._permission_checkboxes.clear()
@@ -396,9 +396,9 @@ class UserManagementPage(QWidget):
         try:
             changed = self.permissions.update_profile_permissions(self.current_user, profile, values)
         except PermissionError as exc:
-            self.permissions_feedback.setText(str(exc))
+            self.permissions_feedback.show_error(str(exc), focus_widget=self.permissions_table)
             return
-        self.permissions_feedback.setText(f"Permisos actualizados: {changed} cambio(s).")
+        self.permissions_feedback.show_success(f"Permisos actualizados: {changed} cambio(s).")
 
 
 class ChangePasswordDialog(PasswordDialog):

@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from app.models.masters import Carrier, Driver, Truck
 from app.services.master_service import MasterService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
+from app.ui.form_feedback import FormFeedback
 
 
 class TransportSetupDialog(QDialog):
@@ -121,10 +122,8 @@ class TransportSetupDialog(QDialog):
         form.addWidget(QLabel("Patente acoplado"), 8, 0)
         form.addWidget(self.trailer_domain_input, 8, 1)
 
-        self.truck_warning = QLabel("")
-        self.truck_warning.setObjectName("transportSetupTruckWarning")
-        self.truck_warning.setWordWrap(True)
-        form.addWidget(self.truck_warning, 9, 1)
+        self.truck_warning = FormFeedback("transportSetupTruckWarning")
+        form.addWidget(self.truck_warning, 9, 0, 1, 2)
 
         section_driver = QLabel("3. Chofer")
         section_driver.setStyleSheet("font-weight: 700;")
@@ -153,16 +152,12 @@ class TransportSetupDialog(QDialog):
         form.addWidget(QLabel("Teléfono"), 14, 0)
         form.addWidget(self.driver_phone_input, 14, 1)
 
-        self.driver_warning = QLabel("")
-        self.driver_warning.setObjectName("transportSetupDriverWarning")
-        self.driver_warning.setWordWrap(True)
-        form.addWidget(self.driver_warning, 15, 1)
+        self.driver_warning = FormFeedback("transportSetupDriverWarning")
+        form.addWidget(self.driver_warning, 15, 0, 1, 2)
 
         layout.addLayout(form)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("transportSetupFeedback")
-        self.feedback.setWordWrap(True)
+        self.feedback = FormFeedback("transportSetupFeedback")
         layout.addWidget(self.feedback)
 
         actions = QHBoxLayout()
@@ -300,7 +295,10 @@ class TransportSetupDialog(QDialog):
                     f"Atención: esta patente está asignada a {truck.carrier.name}. "
                     f"Al guardar se reasignará a {target_name}."
                 )
-        self.truck_warning.setText(truck_message)
+        if truck_message:
+            self.truck_warning.show_warning(truck_message)
+        else:
+            self.truck_warning.clear_message()
 
         driver_message = ""
         driver_id = combo_current_data(self.driver_combo)
@@ -316,7 +314,10 @@ class TransportSetupDialog(QDialog):
                     f"Su camión habitual actual es {driver.usual_truck.domain}; al guardar quedará la patente seleccionada."
                 )
             driver_message = " ".join(messages)
-        self.driver_warning.setText(driver_message)
+        if driver_message:
+            self.driver_warning.show_warning(driver_message)
+        else:
+            self.driver_warning.clear_message()
 
     @staticmethod
     def _find_named_driver(name: str) -> Driver | None:
@@ -338,27 +339,39 @@ class TransportSetupDialog(QDialog):
         driver_name = self.driver_name_input.text().strip()
 
         if carrier_id is None and not carrier_name:
-            self.feedback.setText("Complete el nombre del transportista o seleccione uno existente.")
+            self.feedback.show_warning(
+                "Complete el nombre del transportista o seleccione uno existente.",
+                focus_widget=self.carrier_name_input,
+            )
             return
         if truck_id is None and not domain:
-            self.feedback.setText("Seleccione una patente existente o complete una nueva patente.")
+            self.feedback.show_warning(
+                "Seleccione una patente existente o complete una nueva patente.",
+                focus_widget=self.truck_domain_input,
+            )
             return
         if driver_id is None and not driver_name:
-            self.feedback.setText("Seleccione un chofer existente o complete un nuevo chofer.")
+            self.feedback.show_warning(
+                "Seleccione un chofer existente o complete un nuevo chofer.",
+                focus_widget=self.driver_name_input,
+            )
             return
         if carrier_id is None and self._find_named_carrier(carrier_name) is not None:
-            self.feedback.setText(
-                "Ese transportista ya existe. Selecciónelo en la lista para continuar."
+            self.feedback.show_warning(
+                "Ese transportista ya existe. Selecciónelo en la lista para continuar.",
+                focus_widget=self.carrier_combo,
             )
             return
         if truck_id is None and Truck.get_or_none(Truck.domain == domain) is not None:
-            self.feedback.setText(
-                "Esa patente ya existe. Selecciónela en la lista para poder conservar o cambiar su asignación."
+            self.feedback.show_warning(
+                "Esa patente ya existe. Selecciónela en la lista para poder conservar o cambiar su asignación.",
+                focus_widget=self.truck_combo,
             )
             return
         if driver_id is None and self._find_named_driver(driver_name) is not None:
-            self.feedback.setText(
-                "Ese chofer ya existe. Selecciónelo en la lista para poder conservar o cambiar su asignación."
+            self.feedback.show_warning(
+                "Ese chofer ya existe. Selecciónelo en la lista para poder conservar o cambiar su asignación.",
+                focus_widget=self.driver_combo,
             )
             return
 
@@ -406,7 +419,7 @@ class TransportSetupDialog(QDialog):
                 self.saved_truck = truck
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc))
 
 
 def _selected_transport_context(page: QWidget, title: str) -> tuple[int | None, int | None, int | None]:

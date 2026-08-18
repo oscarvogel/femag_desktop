@@ -33,6 +33,7 @@ from app.services.pallet_composition_service import (
     RequestedLine,
 )
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.form_feedback import FormFeedback
 
 
 def _kg_text(value) -> str:
@@ -191,9 +192,7 @@ class PalletCompositionWidget(QWidget):
         pallet_actions_layout.addWidget(self.clear_assignments_button, 2, 0, 1, 2)
         left_layout.addWidget(pallet_actions)
 
-        self.issue_label = QLabel("")
-        self.issue_label.setObjectName("palletCompositionIssues")
-        self.issue_label.setWordWrap(True)
+        self.issue_label = FormFeedback("palletCompositionIssues")
         left_layout.addWidget(self.issue_label)
         root.addWidget(left, 3)
 
@@ -284,9 +283,8 @@ class PalletCompositionWidget(QWidget):
         self.bulk_quantity_input.setRange(0, 0)
         self.bulk_quantity_input.setDecimals(3)
         bulk_layout.addWidget(self.bulk_quantity_input, 4, 0, 1, 2)
-        self.bulk_preview_label = QLabel("Agregue pallets para usar la asignacion en lote.")
-        self.bulk_preview_label.setObjectName("bulkPalletAssignmentPreview")
-        self.bulk_preview_label.setWordWrap(True)
+        self.bulk_preview_label = FormFeedback("bulkPalletAssignmentPreview")
+        self.bulk_preview_label.show_info("Agregue pallets para usar la asignacion en lote.")
         bulk_layout.addWidget(self.bulk_preview_label, 5, 0, 1, 2)
         self.bulk_assign_button = QPushButton("Asignar a pallets")
         self.bulk_assign_button.setObjectName("assignPalletsBatchButton")
@@ -684,9 +682,13 @@ class PalletCompositionWidget(QWidget):
                 f"{'completo' if complete_count == 1 else 'completos'} · {pending_count} "
                 f"{'pendiente' if pending_count == 1 else 'pendientes'}"
             )
-        self.issue_label.setText(
-            "\n".join(issue.message for issue in result.issues if issue.code != "no_pallets")
+        issue_message = "\n".join(
+            issue.message for issue in result.issues if issue.code != "no_pallets"
         )
+        if issue_message:
+            self.issue_label.show_warning(issue_message)
+        else:
+            self.issue_label.clear_message()
         while self.card_grid.count():
             item = self.card_grid.takeAt(0)
             widget = item.widget()
@@ -900,7 +902,7 @@ class PalletCompositionWidget(QWidget):
                 Decimal(str(self.bulk_quantity_input.value())),
             )
         except ValueError as exc:
-            self.bulk_preview_label.setText(str(exc))
+            self.bulk_preview_label.show_error(str(exc))
 
     def _remove_allocation(self, row: int) -> None:
         if self._selected_sequence is None:
@@ -1021,18 +1023,20 @@ class PalletCompositionWidget(QWidget):
         )
         self.bulk_assign_button.setEnabled(can_assign_bulk)
         if address_id is None or product_id is None:
-            self.bulk_preview_label.setText("Seleccione cliente/destino y articulo.")
+            self.bulk_preview_label.show_info("Seleccione cliente/destino y articulo.")
         elif not has_targets:
-            self.bulk_preview_label.setText("Agregue pallets para usar la asignacion en lote.")
+            self.bulk_preview_label.show_info(
+                "Agregue pallets para usar la asignacion en lote."
+            )
         elif bulk_quantity <= 0:
-            self.bulk_preview_label.setText("Ingrese una cantidad por pallet.")
+            self.bulk_preview_label.show_info("Ingrese una cantidad por pallet.")
         elif bulk_total > remaining:
-            self.bulk_preview_label.setText(
+            self.bulk_preview_label.show_warning(
                 f"La asignacion suma {_quantity_text(bulk_total)} unidades y supera "
                 f"las {_quantity_text(remaining)} pendientes."
             )
         else:
-            self.bulk_preview_label.setText(
+            self.bulk_preview_label.show_info(
                 f"{target_count} pallets x {_quantity_text(bulk_quantity)} = "
                 f"{_quantity_text(bulk_total)} unidades. "
                 f"Pendiente despues: {_quantity_text(remaining - bulk_total)}."

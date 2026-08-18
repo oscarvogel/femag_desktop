@@ -166,8 +166,7 @@ class _AccountStatementRecipientsDialog(QDialog):
         self.subject_input = QLineEdit(f"Extracto de cuenta corriente - {client_name}")
         self.subject_input.setObjectName("accountStatementEmailSubjectInput")
         layout.addWidget(self.subject_input)
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("accountStatementRecipientsFeedback")
+        self.feedback = FormFeedback("accountStatementRecipientsFeedback")
         layout.addWidget(self.feedback)
         actions = QHBoxLayout()
         actions.addStretch(1)
@@ -192,10 +191,16 @@ class _AccountStatementRecipientsDialog(QDialog):
 
     def _confirm(self) -> None:
         if not self.selected_recipients():
-            self.feedback.setText("Seleccione al menos un destinatario.")
+            self.feedback.show_warning(
+                "Seleccione al menos un destinatario.",
+                focus_widget=self.recipients_list,
+            )
             return
         if not self.subject():
-            self.feedback.setText("El asunto es obligatorio.")
+            self.feedback.show_warning(
+                "El asunto es obligatorio.",
+                focus_widget=self.subject_input,
+            )
             return
         self.accept()
 
@@ -863,8 +868,7 @@ class FemagDesktopWindow(QMainWindow):
 
         layout.addWidget(_load_order_metrics_strip(service))
 
-        feedback = QLabel("")
-        feedback.setObjectName("loadOrderFeedback")
+        feedback = FormFeedback("loadOrderFeedback")
 
         left_panel = QFrame()
         left_panel.setObjectName("contentPanel")
@@ -920,6 +924,7 @@ class FemagDesktopWindow(QMainWindow):
 
         left_layout.addLayout(actions)
         left_layout.addLayout(search_row)
+        left_layout.addWidget(feedback)
 
         table = QTableWidget(0, len(spec.table_columns))
         table.setObjectName("loadOrdersTable")
@@ -932,13 +937,12 @@ class FemagDesktopWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
-        left_layout.addWidget(feedback)
         layout.addWidget(left_panel, 1)
 
         def refresh(*, query: str | None = None) -> None:
             rows = service.list_orders() if hasattr(service, "list_orders") else []
             if not hasattr(service, "list_orders"):
-                feedback.setText("Listado operativo pendiente de la capa funcional correspondiente.")
+                feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
             query = (query if query is not None else search_input.text()).strip()
             if query:
                 rows = [order for order in rows if _matches_load_order_query(order, query)]
@@ -1053,7 +1057,7 @@ class FemagDesktopWindow(QMainWindow):
         def open_detail_dialog() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para ver el detalle.")
+                feedback.show_warning("Seleccione una orden para ver el detalle.", focus_widget=table)
                 return
             LoadOrderDetailDialog(order, self).exec_()
 
@@ -1062,44 +1066,52 @@ class FemagDesktopWindow(QMainWindow):
             if dialog.exec_() == QDialog.Accepted and dialog.created_order is not None:
                 selected_order_id["value"] = dialog.created_order.id
                 refresh()
-                feedback.setText(f"Orden {_format_order_number(dialog.created_order.order_number)} guardada.")
+                feedback.show_success(
+                    f"Orden {_format_order_number(dialog.created_order.order_number)} guardada."
+                )
 
         def open_edit_order_dialog() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para editar.")
+                feedback.show_warning("Seleccione una orden para editar.", focus_widget=table)
                 return
             if not order.is_unissued:
-                feedback.setText("Solo se pueden editar ordenes pendientes.")
+                feedback.show_warning("Solo se pueden editar ordenes pendientes.", focus_widget=table)
                 return
             dialog = LoadOrderEntryDialog(service, self.shell.username, self, order=order)
             if dialog.exec_() == QDialog.Accepted and dialog.created_order is not None:
                 selected_order_id["value"] = dialog.created_order.id
                 refresh()
-                feedback.setText(f"Orden {_format_order_number(dialog.created_order.order_number)} actualizada.")
+                feedback.show_success(
+                    f"Orden {_format_order_number(dialog.created_order.order_number)} actualizada."
+                )
 
         def open_pallets_dialog() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para preparar sus pallets.")
+                feedback.show_warning(
+                    "Seleccione una orden para preparar sus pallets.", focus_widget=table
+                )
                 return
             if order.is_unissued:
                 try:
                     service.validate_merchandise_uniqueness(order)
                 except ValueError as exc:
-                    feedback.setText(
+                    feedback.show_error(
                         f"No se pueden armar los pallets: {exc} Edite la orden para corregirla."
                     )
                     return
             if not order.is_unissued and not order.pallets.exists():
-                feedback.setText("La orden seleccionada no tiene pallets para consultar.")
+                feedback.show_warning(
+                    "La orden seleccionada no tiene pallets para consultar.", focus_widget=table
+                )
                 return
             read_only = not order.is_unissued
             dialog = LoadOrderPalletDialog(service, order, self, read_only=read_only)
             if dialog.exec_() == QDialog.Accepted:
                 selected_order_id["value"] = order.id
                 refresh()
-                feedback.setText(
+                feedback.show_success(
                     f"Pallets de la orden {_format_order_number(order.order_number)} guardados."
                 )
 
@@ -1110,36 +1122,40 @@ class FemagDesktopWindow(QMainWindow):
         def issue() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para emitir.")
+                feedback.show_warning("Seleccione una orden para emitir.", focus_widget=table)
                 return
             try:
                 issued = operation_service.issue(order)
-                feedback.setText(f"Orden {_format_order_number(issued.order_number)} emitida.")
+                feedback.show_success(
+                    f"Orden {_format_order_number(issued.order_number)} emitida."
+                )
                 selected_order_id["value"] = issued.id
                 refresh()
             except Exception as exc:
-                feedback.setText(str(exc))
+                feedback.show_error(str(exc), focus_widget=table)
 
         def annul() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para anular.")
+                feedback.show_warning("Seleccione una orden para anular.", focus_widget=table)
                 return
             try:
                 annulled = operation_service.annul(order, can_annul=_can_annul_load_orders(self.user))
-                feedback.setText(f"Orden {_format_order_number(annulled.order_number)} anulada.")
+                feedback.show_success(
+                    f"Orden {_format_order_number(annulled.order_number)} anulada."
+                )
                 selected_order_id["value"] = annulled.id
                 refresh()
             except Exception as exc:
-                feedback.setText(str(exc))
+                feedback.show_error(str(exc), focus_widget=table)
 
         def close_order() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para cerrar.")
+                feedback.show_warning("Seleccione una orden para cerrar.", focus_widget=table)
                 return
             if order.status != LoadOrder.STATUS_ISSUED:
-                feedback.setText("Solo se pueden cerrar ordenes emitidas.")
+                feedback.show_warning("Solo se pueden cerrar ordenes emitidas.", focus_widget=table)
                 return
             dialog = LoadOrderClosureDialog(
                 order=order,
@@ -1151,7 +1167,7 @@ class FemagDesktopWindow(QMainWindow):
                 closure = dialog.closure()
                 closed = LoadOrder.get_by_id(closure.order.id)
                 payment_status = closure_service.payment_status(closure).replace("_", " ")
-                feedback.setText(
+                feedback.show_success(
                     f"Orden {_format_order_number(closed.order_number)} cerrada: {payment_status}."
                 )
                 selected_order_id["value"] = closed.id
@@ -1160,67 +1176,67 @@ class FemagDesktopWindow(QMainWindow):
         def print_order() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para imprimir.")
+                feedback.show_warning("Seleccione una orden para imprimir.", focus_widget=table)
                 return
             try:
                 path = operation_service.print_order(order)
                 resolved_path = Path(path).resolve()
-                feedback.setText(f"PDF generado correctamente: {resolved_path}")
+                feedback.show_success(f"PDF generado correctamente: {resolved_path}")
                 try:
                     _open_print_output(resolved_path)
                 except Exception as open_exc:
-                    feedback.setText(
+                    feedback.show_warning(
                         f"PDF generado correctamente: {resolved_path}. "
                         f"No se pudo abrir automaticamente: {open_exc}"
                     )
                 set_action_state(order)
             except Exception as exc:
-                feedback.setText(str(exc))
+                feedback.show_error(str(exc), focus_widget=table)
 
         def reprint_order() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para reimprimir.")
+                feedback.show_warning("Seleccione una orden para reimprimir.", focus_widget=table)
                 return
             try:
                 path = operation_service.reprint_order(order, can_reprint=can_reprint)
                 resolved_path = Path(path).resolve()
-                feedback.setText(f"Reimpresión generada correctamente: {resolved_path}")
+                feedback.show_success(f"Reimpresión generada correctamente: {resolved_path}")
                 try:
                     _open_print_output(resolved_path)
                 except Exception as open_exc:
-                    feedback.setText(
+                    feedback.show_warning(
                         f"Reimpresión generada correctamente: {resolved_path}. "
                         f"No se pudo abrir automaticamente: {open_exc}"
                     )
                 set_action_state(order)
             except Exception as exc:
-                feedback.setText(str(exc))
+                feedback.show_error(str(exc), focus_widget=table)
 
         def print_budget() -> None:
             order = selected_order()
             if order is None:
-                feedback.setText("Seleccione una orden para presupuestar.")
+                feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
                 return
             try:
                 path = operation_service.export_combined_budget(order)
                 resolved = Path(path).resolve()
-                feedback.setText(f"Presupuesto generado: {resolved}")
+                feedback.show_success(f"Presupuesto generado: {resolved}")
                 try:
                     _open_print_output(resolved)
                 except Exception:
                     pass
             except Exception as exc:
-                feedback.setText(str(exc))
+                feedback.show_error(str(exc), focus_widget=table)
 
         def search_orders() -> None:
             query = search_input.text().strip()
             refresh(query=query)
             count = _load_order_table_order_count(table)
             if query:
-                feedback.setText(f"Buscar '{query}': {count} resultado(s).")
+                feedback.show_info(f"Buscar '{query}': {count} resultado(s).")
             else:
-                feedback.setText(f"Buscar: {count} orden(es).")
+                feedback.show_info(f"Buscar: {count} orden(es).")
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
@@ -1288,9 +1304,8 @@ class FemagDesktopWindow(QMainWindow):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        feedback = QLabel("Seleccione uno o más DBF para ejecutar la importación.")
-        feedback.setObjectName("legacyDbfImportFeedback")
-        feedback.setWordWrap(True)
+        feedback = FormFeedback("legacyDbfImportFeedback")
+        feedback.show_info("Seleccione uno o más DBF para ejecutar la importación.")
         layout.addWidget(feedback)
 
         table = QTableWidget(0, 6)
@@ -1304,7 +1319,10 @@ class FemagDesktopWindow(QMainWindow):
         def run_import() -> None:
             paths = {entity: field.text().strip() for entity, field in path_inputs.items() if field.text().strip()}
             if not paths:
-                feedback.setText("Indicar al menos un archivo DBF para importar.")
+                feedback.show_warning(
+                    "Indicar al menos un archivo DBF para importar.",
+                    focus_widget=next(iter(path_inputs.values())),
+                )
                 table.setRowCount(0)
                 return
             try:
@@ -1314,7 +1332,7 @@ class FemagDesktopWindow(QMainWindow):
                     encoding=encoding_input.text().strip() or "cp1252",
                 )
             except Exception as exc:
-                feedback.setText(f"No se pudo importar: {exc}")
+                feedback.show_error(f"No se pudo importar: {exc}")
                 return
             _fill_legacy_import_summary(table, summary)
             self._refresh_master_routes()
@@ -1324,10 +1342,14 @@ class FemagDesktopWindow(QMainWindow):
                 if isinstance(values, dict)
             )
             warning_label = "advertencia" if warning_count == 1 else "advertencias"
-            feedback.setText(
+            message = (
                 f"Importación finalizada con {warning_count} {warning_label}. "
                 "Revise el resumen, las advertencias y los errores por entidad."
             )
+            if warning_count:
+                feedback.show_warning(message)
+            else:
+                feedback.show_success(message)
 
         run_button.clicked.connect(run_import)
         return page
@@ -1740,9 +1762,7 @@ class LoadOrderPalletDialog(QDialog):
         self.pallet_widget.setEnabled(not read_only)
         root.addWidget(self.pallet_widget, 1)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("loadOrderPalletDialogFeedback")
-        self.feedback.setWordWrap(True)
+        self.feedback = FormFeedback("loadOrderPalletDialogFeedback")
         root.addWidget(self.feedback)
 
         footer = QHBoxLayout()
@@ -1859,7 +1879,7 @@ class LoadOrderPalletDialog(QDialog):
             )
             self.accept()
         except Exception as exc:
-            self.feedback.setText(str(exc))
+            self.feedback.show_error(str(exc), focus_widget=self.pallet_widget)
 
 
 class LoadOrderEntryDialog(QDialog):

@@ -85,6 +85,43 @@ def test_load_order_product_dialog_uses_visible_warning_for_missing_product(db):
     assert not feedback.isHidden()
 
 
+def test_load_order_page_shows_issue_failure_above_table_as_error_banner(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.form_feedback import FormFeedback
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="issue296_feedback", password_hash="x", profile=profile)
+    data = _master_data()
+    order = LoadOrderService(current_user=user.username).create_order(
+        **_valid_order_payload(data)
+    )
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    window._navigate_to_route("load_orders")
+    window.show()
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    feedback = window.findChild(FormFeedback, "loadOrderFeedback")
+    table.setCurrentCell(0, 0)
+    window.findChild(QPushButton, "issueLoadOrderButton").click()
+    app.processEvents()
+
+    assert order.status == order.STATUS_PENDING
+    assert feedback.kind == "error"
+    assert "no tiene pallets" in feedback.message.lower()
+    assert not feedback.isHidden()
+    assert feedback.styleSheet()
+    assert feedback.geometry().bottom() <= table.geometry().top()
+    assert table.hasFocus()
+
+
 def test_load_order_is_saved_before_pallets_and_composition_has_its_own_dialog(db):
     from decimal import Decimal
 
