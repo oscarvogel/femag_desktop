@@ -82,7 +82,10 @@ def test_proposal_is_preview_and_does_not_mutate_current_pallet_drafts():
 
 
 def test_locked_pallet_is_preserved_when_reorganizing_pending_load():
-    pallets = _empty_pallets(2)
+    # La orden pesa 2.700 kg. Con un pallet fijado en 1.000 kg y maximo de
+    # 1.500 kg por pallet hacen falta al menos dos pallets libres para poder
+    # completar la redistribucion sin violar capacidad.
+    pallets = _empty_pallets(3)
     pallets[0]["allocations"] = [
         {
             "client_id": 10,
