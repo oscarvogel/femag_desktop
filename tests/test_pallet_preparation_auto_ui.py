@@ -170,3 +170,104 @@ def test_truck_capacity_excess_is_prominent_and_includes_loose_goods(db):
     assert "Camion: 1.500 kg / 1.200 kg" in widget.capacity_summary_label.text()
     assert "EXCEDIDO por 300 kg" in widget.capacity_summary_label.text()
     assert "#b53b3b" in widget.capacity_summary_label.styleSheet()
+
+
+def test_permanent_summary_tracks_assigned_loose_and_pending(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+    product = destinations[0]["products"][0]
+    address_id = destinations[0]["address_id"]
+    widget.add_allocation(1, address_id, product["product_id"], 20)
+    widget.add_loose_allocation(address_id, product["product_id"], 10)
+    app.processEvents()
+
+    summary = widget.order_flow_summary_label.text()
+    assert "Pedido: 60" in summary
+    assert "En pallets: 20" in summary
+    assert "Suelto: 10" in summary
+    assert "Pendiente: 30" in summary
+    assert "Pallets: 2" in summary
+
+
+def test_pending_grid_can_filter_by_client_destination_or_product(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    widget.add_pallets(1)
+
+    widget.pending_filter_input.setText("fecula auto")
+    app.processEvents()
+    assert widget.pending_table.rowCount() == 1
+
+    widget.pending_filter_input.setText("cliente inexistente")
+    app.processEvents()
+    assert widget.pending_table.rowCount() == 0
+
+    widget.pending_filter_input.clear()
+    app.processEvents()
+    assert widget.pending_table.rowCount() == 1
+
+
+def test_recalculate_all_requires_confirmation_and_only_builds_preview(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+    product = destinations[0]["products"][0]
+    widget.add_allocation(1, destinations[0]["address_id"], product["product_id"], 20)
+    widget._select_pallet(1)
+    widget.lock_pallet_button.click()
+    before = widget.pallet_drafts()
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
+    widget.recalculate_all_button.click()
+    app.processEvents()
+    assert widget._prepared_proposal is None
+    assert widget.pallet_drafts() == before
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    widget.recalculate_all_button.click()
+    app.processEvents()
+    assert widget._prepared_proposal is not None
+    assert widget.pallet_drafts() == before
+    assert all(pallet.locked is False for pallet in widget._prepared_proposal.proposal.pallets)
+
+
+def test_pallet_over_global_max_is_marked_as_exceeded(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(1)
+    product = destinations[0]["products"][0]
+    widget.add_allocation(1, destinations[0]["address_id"], product["product_id"], 50)
+    app.processEvents()
+
+    card = widget.card_for_sequence(1)
+    assert "EXCEDIDO" in card.status_label.text()
+    assert "max 1.000 kg" in card.status_label.text()
+    assert card.property("compositionState") == "invalid"
