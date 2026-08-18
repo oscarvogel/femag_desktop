@@ -138,6 +138,7 @@ class Truck(BaseModel):
     domain = CharField(unique=True)
     trailer_domain = CharField(null=True)
     carrier = ForeignKeyField(Carrier, backref="trucks", null=True)
+    max_load_kg = DecimalField(max_digits=12, decimal_places=3, null=True)
     active = BooleanField(default=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
