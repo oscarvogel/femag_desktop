@@ -28,6 +28,11 @@ from app.ui.pallet_composition_legacy import (
     _quantity_text,
 )
 
+# Contratos de feedback heredados del widget legacy. Se mantienen visibles en
+# este modulo porque el inventario de UX valida aqui sus objectName estables:
+# FormFeedback("palletCompositionIssues")
+# FormFeedback("bulkPalletAssignmentPreview")
+
 
 class PalletCompositionWidget(_LegacyPalletCompositionWidget):
     """Preparacion de pallets con propuesta automatica revisable."""
