@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QFrame,
     QHeaderView,
     QLabel,
+    QInputDialog,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -96,6 +97,18 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.recalculate_all_button.setProperty("secondary", True)
         self.recalculate_all_button.clicked.connect(self.confirm_recalculate_all)
         batch_layout.addWidget(self.recalculate_all_button, 5, 0, 1, 2)
+
+        self.configure_pallet_capacity_button = QPushButton("Configurar maximo kg por pallet")
+        self.configure_pallet_capacity_button.setObjectName("configurePalletMaxKgButton")
+        self.configure_pallet_capacity_button.setProperty("secondary", True)
+        self.configure_pallet_capacity_button.clicked.connect(self.configure_pallet_capacity)
+        batch_layout.addWidget(self.configure_pallet_capacity_button, 6, 0, 1, 2)
+
+        self.configure_truck_capacity_button = QPushButton("Configurar capacidad del camion")
+        self.configure_truck_capacity_button.setObjectName("configureTruckMaxKgButton")
+        self.configure_truck_capacity_button.setProperty("secondary", True)
+        self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
+        batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
 
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
@@ -240,6 +253,61 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             return
         self._prepare_distribution(preserve_current=False, respect_locked=False)
 
+    def configure_pallet_capacity(self) -> None:
+        current = PalletCapacityService.pallet_max_kg() or Decimal("1000")
+        value, accepted = QInputDialog.getDouble(
+            self,
+            "Maximo kg por pallet",
+            "Maximo permitido por pallet (kg):",
+            float(current),
+            0.001,
+            999999999.0,
+            3,
+        )
+        if not accepted:
+            return
+        saved = PalletCapacityService.set_pallet_max_kg(Decimal(str(value)))
+        self.issue_label.show_success(f"Maximo por pallet actualizado a {_kg_text(saved)}.")
+        self._refresh_auto_distribution_ui()
+
+    def _current_truck(self):
+        candidates = []
+        source_parent = getattr(self, "_capacity_source_parent", None)
+        if source_parent is not None:
+            candidates.append(source_parent)
+        parent = self.parentWidget()
+        while parent is not None:
+            if parent not in candidates:
+                candidates.append(parent)
+            parent = parent.parentWidget()
+        for container in candidates:
+            order = getattr(container, "order", None)
+            truck = getattr(order, "truck", None) if order is not None else None
+            if truck is not None:
+                return truck
+        return None
+
+    def configure_truck_capacity(self) -> None:
+        truck = self._current_truck()
+        if truck is None:
+            self.issue_label.show_warning("No se pudo identificar el camion de la orden actual.")
+            return
+        current = PalletCapacityService.truck_max_load_kg(truck) or Decimal("30000")
+        value, accepted = QInputDialog.getDouble(
+            self,
+            "Capacidad del camion",
+            "Capacidad maxima del camion (kg):",
+            float(current),
+            0.001,
+            999999999.0,
+            3,
+        )
+        if not accepted:
+            return
+        saved = PalletCapacityService.set_truck_max_load_kg(truck, Decimal(str(value)))
+        self.set_truck_capacity_kg(saved)
+        self.issue_label.show_success(f"Capacidad del camion actualizada a {_kg_text(saved)}.")
+
     def _render_prepared_proposal(self) -> None:
         prepared = self._prepared_proposal
         self.proposal_table.setRowCount(0)
@@ -352,24 +420,10 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             self._refresh_auto_distribution_ui()
 
     def _sync_truck_capacity_from_parent(self) -> None:
-        candidates = []
-        source_parent = getattr(self, "_capacity_source_parent", None)
-        if source_parent is not None:
-            candidates.append(source_parent)
-
-        parent = self.parentWidget()
-        while parent is not None:
-            if parent not in candidates:
-                candidates.append(parent)
-            parent = parent.parentWidget()
-
-        for container in candidates:
-            order = getattr(container, "order", None)
-            truck = getattr(order, "truck", None) if order is not None else None
-            if truck is None:
-                continue
-            self.set_truck_capacity_kg(getattr(truck, "max_load_kg", None))
+        truck = self._current_truck()
+        if truck is None:
             return
+        self.set_truck_capacity_kg(getattr(truck, "max_load_kg", None))
 
     def _current_rows(self) -> list[dict]:
         assigned_by_key: dict[tuple[int, int], Decimal] = {}
@@ -537,6 +591,8 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.propose_distribution_button.setEnabled(has_pallets)
         self.reorganize_pending_button.setEnabled(has_pallets)
         self.recalculate_all_button.setEnabled(has_pallets)
+        self.configure_pallet_capacity_button.setEnabled(True)
+        self.configure_truck_capacity_button.setEnabled(self._current_truck() is not None)
         self.lock_pallet_button.setEnabled(self._selected_sequence is not None)
         if self._selected_sequence in self._locked_sequences:
             self.lock_pallet_button.setText("Liberar pallet")
