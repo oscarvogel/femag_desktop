@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 from app.models.masters import Product
 from app.services.pallet_capacity_service import PalletCapacityService
 from app.services.pallet_preparation_planner import PalletPreparationPlanner
+from app.ui.form_feedback import FormFeedback
 from app.ui.pallet_composition_legacy import *  # noqa: F401,F403
 from app.ui.pallet_composition_legacy import (
     PalletCompositionWidget as _LegacyPalletCompositionWidget,
@@ -32,6 +33,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
     Conserva el comportamiento operativo existente y agrega una capa de UX
     para proponer, revisar y aceptar una distribucion antes de tocar el borrador
     actual. Los pallets fijados quedan fuera de las reorganizaciones.
+
+    Los controles heredados siguen siendo FormFeedback("palletCompositionIssues")
+    y FormFeedback("bulkPalletAssignmentPreview").
     """
 
     def __init__(self, *, destinations: list[dict] | None = None, parent=None):
@@ -78,14 +82,16 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.lock_pallet_button.clicked.connect(self.toggle_selected_pallet_lock)
         editor_layout.insertWidget(1, self.lock_pallet_button)
 
-        proposal_tab = QWidget()
-        proposal_tab.setObjectName("palletEditorTabProposal")
-        proposal_layout = QVBoxLayout(proposal_tab)
-        proposal_layout.setContentsMargins(0, 8, 0, 0)
-        self.proposal_feedback = QLabel("Genere una propuesta para revisarla antes de aplicarla.")
-        self.proposal_feedback.setObjectName("palletProposalFeedback")
-        self.proposal_feedback.setWordWrap(True)
-        proposal_layout.addWidget(self.proposal_feedback)
+        # Mantener las cuatro tabs operativas existentes. La propuesta automatica
+        # vive dentro de Masiva y la grilla de pendientes dentro de Asignaciones,
+        # evitando volver a ensanchar/elevar el editor en notebooks chicas.
+        bulk_tab = self.findChild(QWidget, "palletEditorTabBulk")
+        proposal_layout = bulk_tab.layout()
+        self.proposal_feedback = FormFeedback("palletProposalFeedback")
+        self.proposal_feedback.show_info(
+            "Genere una propuesta para revisarla antes de aplicarla."
+        )
+        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.proposal_feedback)
         self.proposal_table = QTableWidget(0, 6)
         self.proposal_table.setObjectName("palletDistributionProposalTable")
         self.proposal_table.setHorizontalHeaderLabels(
@@ -95,23 +101,20 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.proposal_table.verticalHeader().setVisible(False)
         self.proposal_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.proposal_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        proposal_layout.addWidget(self.proposal_table, 1)
+        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.proposal_table, 1)
         self.accept_proposal_button = QPushButton("Aceptar distribucion")
         self.accept_proposal_button.setObjectName("acceptPalletDistributionButton")
         self.accept_proposal_button.clicked.connect(self.accept_prepared_proposal)
-        proposal_layout.addWidget(self.accept_proposal_button)
+        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.accept_proposal_button)
         self.cancel_proposal_button = QPushButton("Cancelar propuesta")
         self.cancel_proposal_button.setObjectName("cancelPalletDistributionButton")
         self.cancel_proposal_button.setProperty("secondary", True)
         self.cancel_proposal_button.clicked.connect(self.cancel_prepared_proposal)
-        proposal_layout.addWidget(self.cancel_proposal_button)
-        self.editor_tabs.addTab(proposal_tab, "Propuesta")
-        self._proposal_tab_index = self.editor_tabs.indexOf(proposal_tab)
+        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.cancel_proposal_button)
+        self._proposal_tab_index = self.editor_tabs.indexOf(bulk_tab)
 
-        pending_tab = QWidget()
-        pending_tab.setObjectName("palletEditorTabPending")
-        pending_layout = QVBoxLayout(pending_tab)
-        pending_layout.setContentsMargins(0, 8, 0, 0)
+        allocations_tab = self.findChild(QWidget, "palletEditorTabAllocations")
+        pending_layout = allocations_tab.layout()
         self.pending_table = QTableWidget(0, 8)
         self.pending_table.setObjectName("palletPendingTable")
         self.pending_table.setHorizontalHeaderLabels(
@@ -122,7 +125,6 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.pending_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.pending_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         pending_layout.addWidget(self.pending_table, 1)
-        self.editor_tabs.addTab(pending_tab, "Pendientes")
 
     def _planning_destinations(self) -> list[dict]:
         loose_by_key: dict[tuple[int, int], Decimal] = {}
@@ -156,6 +158,8 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             for destination in self._destinations
             for product in destination.get("products") or []
         }
+        if not product_ids:
+            return {}
         weights = {}
         for product in Product.select().where(Product.id.in_(product_ids)):
             weights[int(product.id)] = Decimal(str(product.peso_unitario_kg or 0))
@@ -194,7 +198,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         prepared = self._prepared_proposal
         self.proposal_table.setRowCount(0)
         if prepared is None:
-            self.proposal_feedback.setText("Genere una propuesta para revisarla antes de aplicarla.")
+            self.proposal_feedback.show_info(
+                "Genere una propuesta para revisarla antes de aplicarla."
+            )
             self.accept_proposal_button.setEnabled(False)
             self.cancel_proposal_button.setEnabled(False)
             return
@@ -213,7 +219,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             for column, value in enumerate(values):
                 self.proposal_table.setItem(row, column, QTableWidgetItem(value))
         if prepared.is_complete:
-            self.proposal_feedback.setText(
+            self.proposal_feedback.show_info(
                 "Propuesta completa. Revise los pallets y acepte para aplicar la distribucion."
             )
         else:
@@ -221,7 +227,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                 (Decimal(str(row["pending_kg"])) for row in prepared.pending_rows),
                 Decimal("0"),
             )
-            self.proposal_feedback.setText(
+            self.proposal_feedback.show_warning(
                 f"La capacidad disponible no alcanza: quedan {_kg_text(pending_kg)} pendientes."
             )
         self.accept_proposal_button.setEnabled(prepared.is_complete)
@@ -405,9 +411,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                     f"Camion: {_kg_text(transport_kg)} / {_kg_text(self._truck_max_load_kg)} · margen {_kg_text(margin)}"
                 )
             else:
-                parts.append(
-                    f"Camion excedido por {_kg_text(-margin)}"
-                )
+                parts.append(f"Camion excedido por {_kg_text(-margin)}")
         self.capacity_summary_label.setText(" · ".join(parts))
         self.propose_distribution_button.setEnabled(bool(self._pallets))
         self.reorganize_pending_button.setEnabled(bool(self._pallets))
