@@ -47,6 +47,11 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.composition_changed.connect(self._invalidate_prepared_proposal)
         self._refresh_auto_distribution_ui()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._sync_truck_capacity_from_parent()
+        self._refresh_auto_distribution_ui()
+
     def _refresh(self) -> None:
         super()._refresh()
         if hasattr(self, "pending_table"):
@@ -305,6 +310,26 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         if hasattr(self, "capacity_summary_label"):
             self._refresh_auto_distribution_ui()
 
+    def _sync_truck_capacity_from_parent(self) -> None:
+        """Toma la capacidad del camion de la orden contenedora al mostrarse.
+
+        LoadOrderPalletDialog ya conserva ``order`` y el widget se reparenta al
+        dialogo cuando entra en su layout. Esto evita duplicar la capacidad en
+        drafts de UI y mantiene una unica fuente: Truck.max_load_kg.
+        """
+        parent = self.parentWidget()
+        while parent is not None:
+            order = getattr(parent, "order", None)
+            truck = getattr(order, "truck", None) if order is not None else None
+            if truck is not None:
+                value = getattr(truck, "max_load_kg", None)
+                if value in (None, "", 0):
+                    self._truck_max_load_kg = None
+                else:
+                    self._truck_max_load_kg = Decimal(str(value)).quantize(Decimal("0.001"))
+                return
+            parent = parent.parentWidget()
+
     def _current_rows(self) -> list[dict]:
         assigned_by_key: dict[tuple[int, int], Decimal] = {}
         loose_by_key: dict[tuple[int, int], Decimal] = {}
@@ -404,6 +429,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             parts.append(f"Maximo por pallet: {_kg_text(max_kg)}")
         else:
             parts.append("Maximo por pallet: sin configurar")
+        truck_exceeded = False
         if self._truck_max_load_kg:
             margin = self._truck_max_load_kg - transport_kg
             if margin >= 0:
@@ -411,8 +437,21 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                     f"Camion: {_kg_text(transport_kg)} / {_kg_text(self._truck_max_load_kg)} · margen {_kg_text(margin)}"
                 )
             else:
-                parts.append(f"Camion excedido por {_kg_text(-margin)}")
+                truck_exceeded = True
+                parts.append(
+                    f"Camion: {_kg_text(transport_kg)} / {_kg_text(self._truck_max_load_kg)} · EXCEDIDO por {_kg_text(-margin)}"
+                )
+        else:
+            parts.append(f"Camion: {_kg_text(transport_kg)} · capacidad sin configurar")
         self.capacity_summary_label.setText(" · ".join(parts))
+        if truck_exceeded:
+            self.capacity_summary_label.setStyleSheet(
+                "color: #ffffff; background: #b53b3b; border-radius: 5px; padding: 4px; font-weight: 800;"
+            )
+        else:
+            self.capacity_summary_label.setStyleSheet(
+                "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
+            )
         self.propose_distribution_button.setEnabled(bool(self._pallets))
         self.reorganize_pending_button.setEnabled(bool(self._pallets))
         self.lock_pallet_button.setEnabled(self._selected_sequence is not None)
