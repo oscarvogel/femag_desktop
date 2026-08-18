@@ -35,6 +35,37 @@ def test_print_service_exports_load_order_pdf_with_real_format_fields(db, tmp_pa
     assert AuditLog.select().where(AuditLog.action == "imprimir").count() == 1
 
 
+def test_detail_rows_leave_client_lote_and_elab_cells_blank_for_depot_completion():
+    from app.services.load_order_print_service import LoadOrderPrintService
+
+    service = LoadOrderPrintService(current_user="admin")
+    table = service._destination_table(
+        {
+            "destination": "CLIENTE - DESTINO",
+            "pallet_blocks": [
+                {
+                    "label": "13",
+                    "rows": [
+                        {
+                            "quantity": 60,
+                            "product": "BOL.FEC. NATIVA X25KG",
+                            "lote": "LOTE-INTERNO",
+                            "elab": "18/08/26",
+                        }
+                    ],
+                }
+            ],
+            "loose_block": None,
+            "unassigned_block": None,
+        }
+    )
+
+    detail_row = table._cellvalues[2]
+    assert detail_row[0] == ""
+    assert detail_row[4] == ""
+    assert detail_row[5] == ""
+
+
 def test_company_name_is_omitted_from_budget_prints(db, tmp_path):
     from app.services.load_order_print_service import LoadOrderPrintService
 
