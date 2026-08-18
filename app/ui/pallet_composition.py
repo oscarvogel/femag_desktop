@@ -43,8 +43,8 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self._locked_sequences: set[int] = set()
         self._truck_max_load_kg: Decimal | None = None
         super().__init__(destinations=destinations, parent=parent)
-        # QObject/QWidget puede reinicializar atributos Python durante su init.
-        # Guardamos la fuente de capacidad recien despues del constructor Qt.
+        # Qt puede reconstruir/reparentar wrappers durante QWidget.__init__.
+        # Guardamos la fuente original despues del constructor para no perderla.
         self._capacity_source_parent = parent
         self._install_auto_distribution_ui()
         self.composition_changed.connect(self._invalidate_prepared_proposal)
