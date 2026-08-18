@@ -114,3 +114,59 @@ def test_pending_grid_replaces_operator_need_for_text_only_summary(db):
     assert widget.pending_table.item(0, 3).text() == "60"
     assert widget.pending_table.item(0, 6).text() == "60"
     assert widget.pending_table.item(0, 7).text() == "1.500 kg"
+
+
+def test_truck_capacity_is_inherited_from_container_order_and_shows_margin(db):
+    from types import SimpleNamespace
+
+    from PyQt5.QtWidgets import QApplication, QWidget
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    host = QWidget()
+    host.order = SimpleNamespace(
+        truck=SimpleNamespace(max_load_kg=Decimal("1200.000"))
+    )
+    widget = PalletCompositionWidget(destinations=destinations, parent=host)
+    widget.add_pallets(2)
+    product = destinations[0]["products"][0]
+    widget.add_allocation(1, destinations[0]["address_id"], product["product_id"], 40)
+    widget.show()
+    app.processEvents()
+
+    assert widget._truck_max_load_kg == Decimal("1200.000")
+    assert "Camion: 1.000 kg / 1.200 kg" in widget.capacity_summary_label.text()
+    assert "margen 200 kg" in widget.capacity_summary_label.text()
+
+
+def test_truck_capacity_excess_is_prominent_and_includes_loose_goods(db):
+    from types import SimpleNamespace
+
+    from PyQt5.QtWidgets import QApplication, QWidget
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    destinations = _destinations(db)
+    host = QWidget()
+    host.order = SimpleNamespace(
+        truck=SimpleNamespace(max_load_kg=Decimal("1200.000"))
+    )
+    widget = PalletCompositionWidget(destinations=destinations, parent=host)
+    widget.add_pallets(2)
+    product = destinations[0]["products"][0]
+    address_id = destinations[0]["address_id"]
+    widget.add_allocation(1, address_id, product["product_id"], 40)
+    widget.add_loose_allocation(address_id, product["product_id"], 20)
+    widget.show()
+    app.processEvents()
+
+    assert "Camion: 1.500 kg / 1.200 kg" in widget.capacity_summary_label.text()
+    assert "EXCEDIDO por 300 kg" in widget.capacity_summary_label.text()
+    assert "#b53b3b" in widget.capacity_summary_label.styleSheet()
