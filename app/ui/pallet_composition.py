@@ -48,6 +48,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self._capacity_source_parent = parent
         self._install_auto_distribution_ui()
         self.composition_changed.connect(self._invalidate_prepared_proposal)
+        # Sincronizar tambien al construir: en tests/headless el parent puede no
+        # mostrarse y, por lo tanto, showEvent no llega a dispararse.
+        self._sync_truck_capacity_from_parent()
         self._refresh_auto_distribution_ui()
 
     def showEvent(self, event) -> None:
@@ -90,9 +93,6 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.lock_pallet_button.clicked.connect(self.toggle_selected_pallet_lock)
         editor_layout.insertWidget(1, self.lock_pallet_button)
 
-        # Mantener las cuatro tabs operativas existentes. La propuesta automatica
-        # vive dentro de Masiva y la grilla de pendientes dentro de Asignaciones,
-        # evitando volver a ensanchar/elevar el editor en notebooks chicas.
         bulk_tab = self.findChild(QWidget, "palletEditorTabBulk")
         proposal_layout = bulk_tab.layout()
         self.proposal_feedback = FormFeedback("palletProposalFeedback")
