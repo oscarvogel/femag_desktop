@@ -889,155 +889,133 @@ class PalletCompositionWidget(QWidget):
     def _assign_bulk_from_editor(self) -> None:
         address_id = self.destination_combo.currentData()
         product_id = self.product_combo.currentData()
-        if address_id is None or product_id is None:
-            return
         start = self.bulk_start_input.value()
         count = self.bulk_target_count_input.value()
+        quantity = Decimal(str(self.bulk_quantity_input.value()))
+        if address_id is None or product_id is None or count <= 0 or quantity <= 0:
+            return
         sequences = list(range(start, start + count))
         try:
-            self.add_allocations_bulk(
-                sequences,
-                address_id,
-                product_id,
-                Decimal(str(self.bulk_quantity_input.value())),
-            )
+            self.add_allocations_bulk(sequences, address_id, product_id, quantity)
         except ValueError as exc:
             self.bulk_preview_label.show_error(str(exc))
 
-    def _remove_allocation(self, row: int) -> None:
-        if self._selected_sequence is None:
-            return
-        pallet = self._pallet(self._selected_sequence)
-        if 0 <= row < len(pallet["allocations"]):
-            pallet["allocations"].pop(row)
+    def _remove_allocation(self, sequence: int, allocation_index: int) -> None:
+        pallet = self._pallet(sequence)
+        if 0 <= allocation_index < len(pallet["allocations"]):
+            pallet["allocations"].pop(allocation_index)
+            self._selected_sequence = sequence
             self._refresh()
             self.composition_changed.emit()
 
-    def _remove_loose_row(self, row: int) -> None:
-        self.remove_loose_allocation(row)
+    def _render_editor(self) -> None:
+        pallet = None
+        if self._selected_sequence is not None:
+            pallet = next(
+                (item for item in self._pallets if item["sequence"] == self._selected_sequence),
+                None,
+            )
+        self.editor_title.setText(
+            f"PALLET {self._selected_sequence}" if pallet is not None else "Seleccione un pallet"
+        )
+        self.allocation_table.setRowCount(0)
+        if pallet is not None:
+            for row, allocation in enumerate(pallet["allocations"]):
+                self.allocation_table.insertRow(row)
+                destination = self._destination(allocation["address_id"])
+                kilos = Decimal(str(allocation["quantity"])) * Decimal(
+                    str(allocation["peso_unitario_kg"])
+                )
+                values = (
+                    f"{destination['client_label']} / {destination['address_label']}",
+                    allocation["product_label"],
+                    _quantity_text(allocation["quantity"]),
+                    _kg_text(kilos),
+                )
+                for column, value in enumerate(values):
+                    self.allocation_table.setItem(row, column, QTableWidgetItem(value))
+                remove_button = QPushButton("Quitar")
+                remove_button.setObjectName(f"removePalletProductButton_{row}")
+                remove_button.clicked.connect(
+                    lambda _checked=False, sequence=pallet["sequence"], index=row: self._remove_allocation(
+                        sequence, index
+                    )
+                )
+                self.allocation_table.setCellWidget(row, 4, remove_button)
+            if self.allocation_table.rowCount():
+                self.allocation_table.selectRow(0)
+        self._render_loose_table()
+        self._suggest_remaining_quantity()
+        self._update_editor_actions()
 
     def _render_loose_table(self) -> None:
-        selected_row = self.loose_table.currentRow()
-        self.loose_table.setRowCount(len(self._loose))
+        self.loose_table.setRowCount(0)
         for row, allocation in enumerate(self._loose):
+            self.loose_table.insertRow(row)
             destination = self._destination(allocation["address_id"])
-            kilos = Decimal(str(allocation["quantity"])) * Decimal(str(allocation["peso_unitario_kg"]))
+            kilos = Decimal(str(allocation["quantity"])) * Decimal(
+                str(allocation["peso_unitario_kg"])
+            )
             values = (
-                f"{destination['client_label']} · {destination['address_label']}",
-                allocation.get("product_label", str(allocation["product_id"])),
-                f"{allocation['quantity']:g}",
+                f"{destination['client_label']} / {destination['address_label']}",
+                allocation["product_label"],
+                _quantity_text(allocation["quantity"]),
                 _kg_text(kilos),
             )
             for column, value in enumerate(values):
                 self.loose_table.setItem(row, column, QTableWidgetItem(value))
             remove_button = QPushButton("Quitar")
             remove_button.setObjectName(f"removeLooseAllocationButton_{row}")
-            remove_button.setToolTip("Quitar esta asignacion suelta")
             remove_button.clicked.connect(
-                lambda _checked=False, loose_row=row: self._remove_loose_row(loose_row)
+                lambda _checked=False, index=row: self.remove_loose_allocation(index)
             )
             self.loose_table.setCellWidget(row, 4, remove_button)
-        if self._loose:
-            self.loose_table.selectRow(min(max(selected_row, 0), len(self._loose) - 1))
-
-    def _render_editor(self) -> None:
-        self._render_loose_table()
-        if self._selected_sequence is None:
-            self.editor_title.setText("Marcar mercaderia como suelta o agregar un pallet")
-            self.allocation_table.setRowCount(0)
-            self.allocation_table.setEnabled(False)
-            for control in (
-                self.destination_combo,
-                self.product_combo,
-                self.quantity_input,
-            ):
-                control.setEnabled(True)
-            self._suggest_remaining_quantity()
-            self._update_editor_actions()
-            return
-        pallet = self._pallet(self._selected_sequence)
-        self.editor_title.setText(f"PALLET {self._selected_sequence}")
-        for control in (
-            self.destination_combo,
-            self.product_combo,
-            self.quantity_input,
-            self.allocation_table,
-        ):
-            control.setEnabled(True)
-        selected_row = self.allocation_table.currentRow()
-        self.allocation_table.setRowCount(len(pallet["allocations"]))
-        for row, allocation in enumerate(pallet["allocations"]):
-            destination = self._destination(allocation["address_id"])
-            kilos = Decimal(str(allocation["quantity"])) * Decimal(str(allocation["peso_unitario_kg"]))
-            values = (
-                f"{destination['client_label']} · {destination['address_label']}",
-                allocation.get("product_label", str(allocation["product_id"])),
-                f"{allocation['quantity']:g}",
-                _kg_text(kilos),
-            )
-            for column, value in enumerate(values):
-                self.allocation_table.setItem(row, column, QTableWidgetItem(value))
-            remove_button = QPushButton("Quitar")
-            remove_button.setObjectName(f"removePalletProductButton_{row}")
-            remove_button.setToolTip("Quitar este producto del pallet")
-            remove_button.clicked.connect(
-                lambda _checked=False, allocation_row=row: self._remove_allocation(allocation_row)
-            )
-            self.allocation_table.setCellWidget(row, 4, remove_button)
-        if pallet["allocations"]:
-            self.allocation_table.selectRow(min(max(selected_row, 0), len(pallet["allocations"]) - 1))
-        self._suggest_remaining_quantity()
+        if self.loose_table.rowCount():
+            self.loose_table.selectRow(0)
 
     def _update_editor_actions(self) -> None:
-        has_pallet = self._selected_sequence is not None
-        has_selection = (
-            self.destination_combo.currentData() is not None and self.product_combo.currentData() is not None
+        pallet_selected = self._selected_sequence is not None and bool(self._pallets)
+        has_destination = self.destination_combo.currentData() is not None
+        has_product = self.product_combo.currentData() is not None
+        remaining = Decimal("0")
+        if has_destination and has_product:
+            remaining = self._remaining_quantity(
+                self.destination_combo.currentData(), self.product_combo.currentData()
+            )
+        can_allocate = pallet_selected and has_product and remaining > 0
+        self.add_allocation_button.setEnabled(can_allocate and self.quantity_input.value() > 0)
+        self.add_loose_button.setEnabled(can_allocate and self.quantity_input.value() > 0)
+        self.bulk_assign_button.setEnabled(
+            can_allocate
+            and self.bulk_target_count_input.value() > 0
+            and self.bulk_quantity_input.value() > 0
         )
-        can_add = (
-            has_pallet
-            and has_selection
-            and self.quantity_input.value() > 0
-        )
-        self.add_allocation_button.setEnabled(can_add)
-        self.add_loose_button.setEnabled(
-            has_selection
-            and self.quantity_input.value() > 0
-        )
+        self.allocation_table.setEnabled(pallet_selected)
+        self._update_bulk_preview()
+
+    def _update_bulk_preview(self) -> None:
         address_id = self.destination_combo.currentData()
         product_id = self.product_combo.currentData()
-        target_count = self.bulk_target_count_input.value()
-        bulk_quantity = Decimal(str(self.bulk_quantity_input.value()))
-        remaining = (
-            self._remaining_quantity(address_id, product_id)
-            if address_id is not None and product_id is not None
-            else Decimal("0")
-        )
-        bulk_total = bulk_quantity * target_count
-        has_targets = bool(self._pallets) and target_count > 0
-        can_assign_bulk = (
-            has_targets
-            and address_id is not None
-            and product_id is not None
-            and bulk_quantity > 0
-            and bulk_total <= remaining
-        )
-        self.bulk_assign_button.setEnabled(can_assign_bulk)
+        if not self._pallets:
+            self.bulk_preview_label.show_info("Agregue pallets para usar la asignacion en lote.")
+            return
         if address_id is None or product_id is None:
-            self.bulk_preview_label.show_info("Seleccione cliente/destino y articulo.")
-        elif not has_targets:
-            self.bulk_preview_label.show_info(
-                "Agregue pallets para usar la asignacion en lote."
+            self.bulk_preview_label.show_info("Seleccione cliente y articulo para repartir mercaderia.")
+            return
+        count = self.bulk_target_count_input.value()
+        quantity = Decimal(str(self.bulk_quantity_input.value()))
+        remaining = self._remaining_quantity(address_id, product_id)
+        total = quantity * count
+        after = remaining - total
+        if total <= 0:
+            self.bulk_preview_label.show_info("Indique cantidad de pallets y cantidad por pallet.")
+            return
+        if after < 0:
+            self.bulk_preview_label.show_error(
+                f"La asignacion supera lo pendiente en {_quantity_text(-after)} unidades."
             )
-        elif bulk_quantity <= 0:
-            self.bulk_preview_label.show_info("Ingrese una cantidad por pallet.")
-        elif bulk_total > remaining:
-            self.bulk_preview_label.show_warning(
-                f"La asignacion suma {_quantity_text(bulk_total)} unidades y supera "
-                f"las {_quantity_text(remaining)} pendientes."
-            )
-        else:
-            self.bulk_preview_label.show_info(
-                f"{target_count} pallets x {_quantity_text(bulk_quantity)} = "
-                f"{_quantity_text(bulk_total)} unidades. "
-                f"Pendiente despues: {_quantity_text(remaining - bulk_total)}."
-            )
+            return
+        self.bulk_preview_label.show_info(
+            f"{count} pallets x {_quantity_text(quantity)} = {_quantity_text(total)} unidades · "
+            f"quedaran {_quantity_text(after)} pendientes."
+        )
