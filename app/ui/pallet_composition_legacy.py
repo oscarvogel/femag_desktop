@@ -158,8 +158,15 @@ class PalletCompositionWidget(QWidget):
         left_layout.addWidget(total_frame)
 
         scroll = QScrollArea()
+        scroll.setObjectName("palletCardScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        # Keep the card area bounded so the batch actions and dialog footer
+        # remain visible on notebook-height windows. Extra pallet rows still
+        # remain reachable through the scroll area.
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        scroll.setMinimumHeight(0)
+        scroll.setMaximumHeight(170)
         self.card_container = QWidget()
         self.card_grid = QGridLayout(self.card_container)
         self.card_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -206,8 +213,12 @@ class PalletCompositionWidget(QWidget):
         editor_scroll.setWidgetResizable(True)
         editor_scroll.setFrameShape(QFrame.NoFrame)
         editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        editor_scroll.setMinimumSize(0, 0)
+        editor_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         editor_content = QWidget()
         editor_content.setObjectName("palletEditorContent")
+        editor_content.setMinimumSize(0, 0)
+        editor_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         editor = QVBoxLayout(editor_content)
         editor.setContentsMargins(0, 0, 0, 0)
         self.editor_title = QLabel("Seleccione un pallet")
@@ -219,6 +230,8 @@ class PalletCompositionWidget(QWidget):
         # propia tab en vez de estar siempre visible abajo.
         self.editor_tabs = QTabWidget()
         self.editor_tabs.setObjectName("palletEditorTabs")
+        self.editor_tabs.setMinimumSize(0, 0)
+        self.editor_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         tab_individual = QWidget()
         tab_individual.setObjectName("palletEditorTabIndividual")

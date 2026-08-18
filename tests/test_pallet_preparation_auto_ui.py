@@ -67,6 +67,20 @@ def test_auto_proposal_is_preview_until_operator_accepts(db):
     )
 
 
+def test_pallet_cards_keep_batch_actions_visible_on_short_windows(db):
+    from PyQt5.QtWidgets import QApplication, QScrollArea, QSizePolicy
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    card_scroll = widget.findChild(QScrollArea, "palletCardScroll")
+
+    assert card_scroll is not None
+    assert card_scroll.sizePolicy().verticalPolicy() == QSizePolicy.Preferred
+    assert card_scroll.maximumHeight() == 170
+
+
 def test_lock_pallet_is_visible_and_reorganize_preserves_it(db):
     from PyQt5.QtWidgets import QApplication
 
