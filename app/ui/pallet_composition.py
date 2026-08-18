@@ -42,6 +42,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self._prepared_proposal = None
         self._locked_sequences: set[int] = set()
         self._truck_max_load_kg: Decimal | None = None
+        # El widget legacy puede ser reparentado por layouts internos. Conservamos
+        # la fuente original para poder resolver la orden/camion de forma estable.
+        self._capacity_source_parent = parent
         super().__init__(destinations=destinations, parent=parent)
         self._install_auto_distribution_ui()
         self.composition_changed.connect(self._invalidate_prepared_proposal)
@@ -313,22 +316,28 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
     def _sync_truck_capacity_from_parent(self) -> None:
         """Toma la capacidad del camion de la orden contenedora al mostrarse.
 
-        LoadOrderPalletDialog ya conserva ``order`` y el widget se reparenta al
-        dialogo cuando entra en su layout. Esto evita duplicar la capacidad en
-        drafts de UI y mantiene una unica fuente: Truck.max_load_kg.
+        Se conserva el parent recibido por constructor y, ademas, se recorre la
+        jerarquia Qt actual. Asi funciona tanto cuando el widget se crea con un
+        contenedor explicito como cuando un layout lo reparenta al dialogo real.
         """
+        candidates = []
+        source_parent = getattr(self, "_capacity_source_parent", None)
+        if source_parent is not None:
+            candidates.append(source_parent)
+
         parent = self.parentWidget()
         while parent is not None:
-            order = getattr(parent, "order", None)
-            truck = getattr(order, "truck", None) if order is not None else None
-            if truck is not None:
-                value = getattr(truck, "max_load_kg", None)
-                if value in (None, "", 0):
-                    self._truck_max_load_kg = None
-                else:
-                    self._truck_max_load_kg = Decimal(str(value)).quantize(Decimal("0.001"))
-                return
+            if parent not in candidates:
+                candidates.append(parent)
             parent = parent.parentWidget()
+
+        for container in candidates:
+            order = getattr(container, "order", None)
+            truck = getattr(order, "truck", None) if order is not None else None
+            if truck is None:
+                continue
+            self.set_truck_capacity_kg(getattr(truck, "max_load_kg", None))
+            return
 
     def _current_rows(self) -> list[dict]:
         assigned_by_key: dict[tuple[int, int], Decimal] = {}
