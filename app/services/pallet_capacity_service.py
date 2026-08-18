@@ -7,7 +7,6 @@ from app.models.system import AppParameter
 
 
 PALLET_MAX_KG_KEY = "pallet_max_kg"
-DEFAULT_PALLET_MAX_KG = Decimal("1500.000")
 
 
 def _decimal(value) -> Decimal:
@@ -24,14 +23,14 @@ class PalletCapacityService:
     """Centraliza limites de peso usados por Preparacion de pallets."""
 
     @classmethod
-    def pallet_max_kg(cls) -> Decimal:
+    def pallet_max_kg(cls) -> Decimal | None:
         row = AppParameter.get_or_none(AppParameter.key == PALLET_MAX_KG_KEY)
         if row is None or not (row.value or "").strip():
-            return DEFAULT_PALLET_MAX_KG
+            return None
         try:
             return _decimal(row.value)
         except ValueError:
-            return DEFAULT_PALLET_MAX_KG
+            return None
 
     @classmethod
     def set_pallet_max_kg(cls, value) -> Decimal:
