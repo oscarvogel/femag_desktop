@@ -42,10 +42,10 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self._prepared_proposal = None
         self._locked_sequences: set[int] = set()
         self._truck_max_load_kg: Decimal | None = None
-        # El widget legacy puede ser reparentado por layouts internos. Conservamos
-        # la fuente original para poder resolver la orden/camion de forma estable.
-        self._capacity_source_parent = parent
         super().__init__(destinations=destinations, parent=parent)
+        # QObject/QWidget puede reinicializar atributos Python durante su init.
+        # Guardamos la fuente de capacidad recien despues del constructor Qt.
+        self._capacity_source_parent = parent
         self._install_auto_distribution_ui()
         self.composition_changed.connect(self._invalidate_prepared_proposal)
         self._refresh_auto_distribution_ui()
