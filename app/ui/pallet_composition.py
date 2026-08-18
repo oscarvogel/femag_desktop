@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
     QFrame,
     QHeaderView,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -28,28 +30,16 @@ from app.ui.pallet_composition_legacy import (
 
 
 class PalletCompositionWidget(_LegacyPalletCompositionWidget):
-    """Preparacion de pallets con propuesta automatica revisable.
-
-    Conserva el comportamiento operativo existente y agrega una capa de UX
-    para proponer, revisar y aceptar una distribucion antes de tocar el borrador
-    actual. Los pallets fijados quedan fuera de las reorganizaciones.
-
-    Los controles heredados siguen siendo FormFeedback("palletCompositionIssues")
-    y FormFeedback("bulkPalletAssignmentPreview").
-    """
+    """Preparacion de pallets con propuesta automatica revisable."""
 
     def __init__(self, *, destinations: list[dict] | None = None, parent=None):
         self._prepared_proposal = None
         self._locked_sequences: set[int] = set()
         self._truck_max_load_kg: Decimal | None = None
         super().__init__(destinations=destinations, parent=parent)
-        # Qt puede reconstruir/reparentar wrappers durante QWidget.__init__.
-        # Guardamos la fuente original despues del constructor para no perderla.
         self._capacity_source_parent = parent
         self._install_auto_distribution_ui()
         self.composition_changed.connect(self._invalidate_prepared_proposal)
-        # Sincronizar tambien al construir: en tests/headless el parent puede no
-        # mostrarse y, por lo tanto, showEvent no llega a dispararse.
         self._sync_truck_capacity_from_parent()
         self._refresh_auto_distribution_ui()
 
@@ -65,9 +55,19 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
 
     def _install_auto_distribution_ui(self) -> None:
         total_layout = self.total_kg_label.parentWidget().layout()
+        self.order_flow_summary_label = QLabel("")
+        self.order_flow_summary_label.setObjectName("palletOrderFlowSummary")
+        self.order_flow_summary_label.setAlignment(Qt.AlignCenter)
+        self.order_flow_summary_label.setWordWrap(True)
+        self.order_flow_summary_label.setStyleSheet(
+            "color: #ffffff; background: transparent; border: 0; font-weight: 700;"
+        )
+        total_layout.addWidget(self.order_flow_summary_label)
+
         self.capacity_summary_label = QLabel("")
         self.capacity_summary_label.setObjectName("palletCapacitySummary")
         self.capacity_summary_label.setAlignment(Qt.AlignCenter)
+        self.capacity_summary_label.setWordWrap(True)
         self.capacity_summary_label.setStyleSheet(
             "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
         )
@@ -85,6 +85,12 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.reorganize_pending_button.setProperty("secondary", True)
         self.reorganize_pending_button.clicked.connect(self.reorganize_pending)
         batch_layout.addWidget(self.reorganize_pending_button, 4, 0, 1, 2)
+
+        self.recalculate_all_button = QPushButton("Recalcular toda la carga")
+        self.recalculate_all_button.setObjectName("recalculateAllPalletsButton")
+        self.recalculate_all_button.setProperty("secondary", True)
+        self.recalculate_all_button.clicked.connect(self.confirm_recalculate_all)
+        batch_layout.addWidget(self.recalculate_all_button, 5, 0, 1, 2)
 
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
@@ -123,6 +129,14 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
 
         allocations_tab = self.findChild(QWidget, "palletEditorTabAllocations")
         pending_layout = allocations_tab.layout()
+        self.pending_filter_input = QLineEdit()
+        self.pending_filter_input.setObjectName("palletPendingFilterInput")
+        self.pending_filter_input.setClearButtonEnabled(True)
+        self.pending_filter_input.setPlaceholderText(
+            "Filtrar pendientes por cliente, destino o producto..."
+        )
+        self.pending_filter_input.textChanged.connect(self._render_pending_table)
+        pending_layout.addWidget(self.pending_filter_input)
         self.pending_table = QTableWidget(0, 8)
         self.pending_table.setObjectName("palletPendingTable")
         self.pending_table.setHorizontalHeaderLabels(
@@ -173,7 +187,12 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             weights[int(product.id)] = Decimal(str(product.peso_unitario_kg or 0))
         return weights
 
-    def _prepare_distribution(self, *, preserve_current: bool) -> None:
+    def _prepare_distribution(
+        self,
+        *,
+        preserve_current: bool,
+        respect_locked: bool = True,
+    ) -> None:
         max_kg = PalletCapacityService.pallet_max_kg()
         if max_kg is None:
             self.issue_label.show_warning(
@@ -186,7 +205,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                 pallets=self.pallet_drafts(),
                 product_weights=self._product_weights(),
                 max_kg_per_pallet=max_kg,
-                locked_sequences=set(self._locked_sequences),
+                locked_sequences=(set(self._locked_sequences) if respect_locked else set()),
                 preserve_unlocked_allocations=preserve_current,
             )
         except ValueError as exc:
@@ -201,6 +220,20 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
 
     def reorganize_pending(self) -> None:
         self._prepare_distribution(preserve_current=True)
+
+    def confirm_recalculate_all(self) -> None:
+        if not self._pallets:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Recalcular toda la carga",
+            "Se generara una propuesta nueva desde cero. Las asignaciones actuales no se modificaran hasta que acepte la propuesta. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._prepare_distribution(preserve_current=False, respect_locked=False)
 
     def _render_prepared_proposal(self) -> None:
         prepared = self._prepared_proposal
@@ -314,12 +347,6 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             self._refresh_auto_distribution_ui()
 
     def _sync_truck_capacity_from_parent(self) -> None:
-        """Toma la capacidad del camion de la orden contenedora al mostrarse.
-
-        Se conserva el parent recibido por constructor y, ademas, se recorre la
-        jerarquia Qt actual. Asi funciona tanto cuando el widget se crea con un
-        contenedor explicito como cuando un layout lo reparenta al dialogo real.
-        """
         candidates = []
         source_parent = getattr(self, "_capacity_source_parent", None)
         if source_parent is not None:
@@ -377,10 +404,44 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                 )
         return rows
 
+    def _render_order_flow_summary(self, rows: list[dict]) -> None:
+        requested = sum((row["requested"] for row in rows), Decimal("0"))
+        assigned = sum((row["assigned"] for row in rows), Decimal("0"))
+        loose = sum((row["loose"] for row in rows), Decimal("0"))
+        pending = sum((row["pending"] for row in rows), Decimal("0"))
+        self.order_flow_summary_label.setText(
+            " · ".join(
+                (
+                    f"Pedido: {_quantity_text(requested)}",
+                    f"En pallets: {_quantity_text(assigned)}",
+                    f"Suelto: {_quantity_text(loose)}",
+                    f"Pendiente: {_quantity_text(pending)}",
+                    f"Pallets: {len(self._pallets)}",
+                )
+            )
+        )
+
     def _render_pending_table(self) -> None:
         rows = self._current_rows()
+        self._render_order_flow_summary(rows)
+        needle = (
+            self.pending_filter_input.text().strip().casefold()
+            if hasattr(self, "pending_filter_input")
+            else ""
+        )
+        visible_rows = []
+        for row in rows:
+            if row["pending"] <= 0:
+                continue
+            haystack = " ".join(
+                (str(row["client"]), str(row["destination"]), str(row["product"]))
+            ).casefold()
+            if needle and needle not in haystack:
+                continue
+            visible_rows.append(row)
+
         self.pending_table.setRowCount(0)
-        for row_index, row in enumerate(rows):
+        for row_index, row in enumerate(visible_rows):
             self.pending_table.insertRow(row_index)
             values = (
                 row["client"],
@@ -418,12 +479,18 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                     f"PALLET {pallet['sequence']}{'  🔒' if locked else ''}"
                 )
                 if max_kg:
-                    occupation = (pallet_kg / max_kg * Decimal("100")) if max_kg else Decimal("0")
-                    base_status = card.status_label.text().split(" · ")[0]
+                    occupation = pallet_kg / max_kg * Decimal("100")
+                    exceeded = pallet_kg > max_kg
+                    if exceeded:
+                        card.set_state("invalid")
+                        base_status = "EXCEDIDO"
+                    else:
+                        base_status = card.status_label.text().split(" · ")[0]
                     card.status_label.setText(
-                        f"{base_status} · {occupation.quantize(Decimal('1'))}%"
+                        f"{base_status} · max {_kg_text(max_kg)} · {occupation.quantize(Decimal('1'))}%"
                         + (" · Fijado" if locked else "")
                     )
+
         loose_kg = sum(
             (
                 Decimal(str(allocation["quantity"]))
@@ -461,8 +528,10 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             self.capacity_summary_label.setStyleSheet(
                 "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
             )
-        self.propose_distribution_button.setEnabled(bool(self._pallets))
-        self.reorganize_pending_button.setEnabled(bool(self._pallets))
+        has_pallets = bool(self._pallets)
+        self.propose_distribution_button.setEnabled(has_pallets)
+        self.reorganize_pending_button.setEnabled(has_pallets)
+        self.recalculate_all_button.setEnabled(has_pallets)
         self.lock_pallet_button.setEnabled(self._selected_sequence is not None)
         if self._selected_sequence in self._locked_sequences:
             self.lock_pallet_button.setText("Liberar pallet")
