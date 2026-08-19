@@ -20,18 +20,19 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
 
     @staticmethod
     def _snapshot_trailer_domain(order) -> str:
-        """Imprime el semi/acoplado de la orden y cubre órdenes previas al snapshot.
-
-        Las órdenes nuevas conservan `LoadOrder.trailer_domain` como fuente histórica.
-        Para órdenes existentes sin snapshot, se usa el dominio de semi/acoplado del
-        camión asociado para no dejar vacía la fila operativa de la impresión.
-        """
+        """Muestra en la misma línea los dominios de semi/acoplado disponibles."""
         snapshot = (getattr(order, "trailer_domain", None) or "").strip()
-        if snapshot:
-            return snapshot
         truck = getattr(order, "truck", None)
-        fallback = (getattr(truck, "trailer_domain", None) or "").strip() if truck is not None else ""
-        return fallback or "-"
+        truck_trailer = (
+            (getattr(truck, "trailer_domain", None) or "").strip()
+            if truck is not None
+            else ""
+        )
+        domains = []
+        for domain in (snapshot, truck_trailer):
+            if domain and domain not in domains:
+                domains.append(domain)
+        return " / ".join(domains) if domains else "-"
 
     def _destination_detail_block(self, order, destination) -> dict[str, object]:
         block = super()._destination_detail_block(order, destination)
