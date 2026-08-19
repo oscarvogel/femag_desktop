@@ -1,6 +1,3 @@
-from collections import OrderedDict
-
-
 def _service():
     from app.services.consolidated_load_order_print_service import ConsolidatedLoadOrderPrintService
 
@@ -102,12 +99,6 @@ def test_operation_service_uses_consolidated_printer():
     from app.services.consolidated_load_order_print_service import ConsolidatedLoadOrderPrintService
     from app.services.load_order_operation_service import LoadOrderOperationService
 
-    operation = object.__new__(LoadOrderOperationService)
-    operation.current_user = "admin"
-    operation.audit_service = None
-
-    # Regression guard sobre el wiring productivo: el constructor debe referenciar
-    # explícitamente el impresor consolidado y no depender de reemplazos en UI.
     names = LoadOrderOperationService.__init__.__code__.co_names
     assert "ConsolidatedLoadOrderPrintService" in names
     assert ConsolidatedLoadOrderPrintService.__name__ == "ConsolidatedLoadOrderPrintService"
