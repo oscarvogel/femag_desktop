@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from html import escape
 
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -145,7 +146,16 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
             self._p("Elab.", bold=True),
         ]
         rows = [header]
-        rows.append([Paragraph(str(block["destination"] or "-"), self.styles["dest_banner"]), "", "", "", "", ""])
+        rows.append(
+            [
+                Paragraph(escape(str(block["destination"] or "-")), self.styles["dest_banner"]),
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
 
         consolidated = block.get("consolidated_rows") or self._consolidate_rows(block)
         if consolidated:
