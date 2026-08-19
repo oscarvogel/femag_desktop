@@ -140,7 +140,9 @@ def test_case_2_mixed_pallet_three_allocations_in_one_grouped_block(db, tmp_path
     assert "ALMIDÓN DE MAÍZ" in normalized_text
     assert "NATIVA 500g" in normalized_text
     assert "NATIVA 1kg" in normalized_text
-    assert "LOTE-19" in normalized_text
+    # Desde #301, lote y elaboración quedan vacíos en la impresión operativa para carga manual.
+    assert "LOTE-19" not in normalized_text
+    assert "05/03/26" not in normalized_text
     assert "3 pallets" not in normalized_text
     assert "1 pallet" in normalized_text
 
