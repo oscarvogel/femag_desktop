@@ -18,15 +18,15 @@ _FEEDBACK_STYLES: dict[FeedbackKind, tuple[str, str, str, str, str]] = {
 
 
 class FormFeedback(QLabel):
-    """Visible, semantic feedback for FEMAG forms.
+    """Semantic non-modal toast feedback for FEMAG forms.
 
-    Normal instances are rendered inline by the layout that owns them. If a
-    feedback label is accidentally created without a parent/layout, it is
-    converted into a lightweight toast attached to the active application
-    window instead of becoming an independent top-level window.
+    Every ``FormFeedback`` is rendered as a lightweight toast attached to the
+    top-level window that owns the form. This keeps success, information,
+    warning and non-blocking error messages out of the layout and avoids
+    independent windows that the operator must close manually.
     """
 
-    FLOATING_TOAST_TIMEOUT_MS = 3000
+    TOAST_TIMEOUT_MS = 3000
 
     def __init__(self, object_name: str = "formFeedback", parent=None) -> None:
         super().__init__(parent)
@@ -54,23 +54,32 @@ class FormFeedback(QLabel):
     def is_floating_toast(self) -> bool:
         return self._floating_toast
 
-    def _ensure_host_parent(self) -> None:
-        if self.parentWidget() is not None:
-            return
+    def _resolve_host(self) -> QWidget | None:
+        parent = self.parentWidget()
+        if parent is not None:
+            host = parent.window()
+            if host is not self:
+                return host
+
         app = QApplication.instance()
         if app is None:
-            return
+            return None
         host = app.activeWindow()
         if host is None and app.focusWidget() is not None:
             host = app.focusWidget().window()
+        return host
+
+    def _ensure_toast_parent(self) -> None:
+        host = self._resolve_host()
         if host is None:
             return
-        self.setParent(host)
+        if self.parentWidget() is not host:
+            self.setParent(host)
         self.setWindowFlags(Qt.Widget)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._floating_toast = True
 
-    def _position_floating_toast(self) -> None:
+    def _position_toast(self) -> None:
         if not self._floating_toast:
             return
         host = self.parentWidget()
@@ -98,7 +107,7 @@ class FormFeedback(QLabel):
             raise ValueError(f"Tipo de feedback no soportado: {kind}")
 
         self._dismiss_timer.stop()
-        self._ensure_host_parent()
+        self._ensure_toast_parent()
 
         title, icon, background, border, foreground = _FEEDBACK_STYLES[kind]
         self._message = clean_message
@@ -119,9 +128,9 @@ class FormFeedback(QLabel):
             "}"
         )
         self.show()
-        self._position_floating_toast()
+        self._position_toast()
         if self._floating_toast:
-            self._dismiss_timer.start(self.FLOATING_TOAST_TIMEOUT_MS)
+            self._dismiss_timer.start(self.TOAST_TIMEOUT_MS)
         if focus_widget is not None:
             focus_widget.setFocus()
 
