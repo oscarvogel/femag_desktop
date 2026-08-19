@@ -18,6 +18,22 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
         text = "" if value is None else str(value).strip()
         return "" if text == "-" else text
 
+    @staticmethod
+    def _snapshot_trailer_domain(order) -> str:
+        """Muestra en la misma línea los dominios de semi/acoplado disponibles."""
+        snapshot = (getattr(order, "trailer_domain", None) or "").strip()
+        truck = getattr(order, "truck", None)
+        truck_trailer = (
+            (getattr(truck, "trailer_domain", None) or "").strip()
+            if truck is not None
+            else ""
+        )
+        domains = []
+        for domain in (snapshot, truck_trailer):
+            if domain and domain not in domains:
+                domains.append(domain)
+        return " / ".join(domains) if domains else "-"
+
     def _detail_flowables(self, order) -> list:
         blocks = self._detail_blocks(order)
         flowables = []
