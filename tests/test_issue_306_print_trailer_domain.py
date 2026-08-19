@@ -31,13 +31,22 @@ def test_transport_table_prints_truck_and_trailer_domains_for_legacy_order():
     assert ["Dominio semi/acoplado:", "BMG576"] in rows
 
 
-def test_transport_table_prefers_order_trailer_snapshot_when_available():
+def test_transport_table_prints_both_semi_acoplado_domains_separated_by_slash():
     service = _service()
-    table = service._transport_table(_order(truck_trailer="TRAILERACTUAL", snapshot="TRAILERHISTORICO"))
+    table = service._transport_table(
+        _order(truck_trailer="ACOPLADO456", snapshot="BMG576")
+    )
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert ["Dominio semi/acoplado:", "TRAILERHISTORICO"] in rows
-    assert all("TRAILERACTUAL" not in row for row in rows)
+    assert ["Dominio semi/acoplado:", "BMG576 / ACOPLADO456"] in rows
+
+
+def test_transport_table_does_not_duplicate_same_semi_acoplado_domain():
+    service = _service()
+    table = service._transport_table(_order(truck_trailer="BMG576", snapshot="BMG576"))
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert ["Dominio semi/acoplado:", "BMG576"] in rows
 
 
 def test_transport_table_keeps_dash_when_no_trailer_data_exists():
