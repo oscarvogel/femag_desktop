@@ -49,8 +49,10 @@ def test_same_product_on_many_pallets_becomes_one_row_with_total():
 
     service = service.__class__(current_user="test")
     table = service._destination_table(block)
+    # Layout #308: Producto | Cant. pallets | Cantidad total | Lote | Elab.
+    assert len(table._cellvalues[2]) == 5
+    assert table._cellvalues[2][3] == ""
     assert table._cellvalues[2][4] == ""
-    assert table._cellvalues[2][5] == ""
 
 
 def test_heterogeneous_pallet_quantities_keep_per_pallet_information():
