@@ -6,7 +6,7 @@ from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
 from app.services.client_credit_service import ClientCreditService
-from app.services.load_order_print_service import LoadOrderPrintService
+from app.services.consolidated_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
 
@@ -22,7 +22,7 @@ class LoadOrderOperationService:
         self.prints_dir = Path(prints_dir)
         self.audit_service = audit_service or AuditService()
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
-        self.prints = LoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.prints = ConsolidatedLoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
         self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
 
     def issue(self, order: LoadOrder) -> LoadOrder:
