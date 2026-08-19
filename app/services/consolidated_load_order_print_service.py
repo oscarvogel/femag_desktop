@@ -5,7 +5,7 @@ from html import escape
 
 from reportlab.lib import colors
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, Table, TableStyle
+from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from app.services.load_order_print_service import LoadOrderPrintService, _quantity
 
@@ -33,6 +33,17 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
             if domain and domain not in domains:
                 domains.append(domain)
         return " / ".join(domains) if domains else "-"
+
+    def _detail_flowables(self, order) -> list:
+        blocks = self._detail_blocks(order)
+        flowables = []
+        for index, block in enumerate(blocks):
+            flowables.append(KeepTogether(self._destination_table(block)))
+            if index < len(blocks) - 1:
+                flowables.append(Spacer(1, 3 * mm))
+        flowables.append(Spacer(1, 4 * mm))
+        flowables.append(self._totals_table(order, blocks))
+        return flowables
 
     def _destination_detail_block(self, order, destination) -> dict[str, object]:
         block = super()._destination_detail_block(order, destination)
@@ -166,7 +177,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
     def _destination_table(self, block: dict[str, object]) -> Table:
         header = [
             self._p("Producto / detalle", bold=True),
-            self._p("Pallets", bold=True),
             self._p("Cant. pallets", bold=True),
             self._p("Cantidad total", bold=True),
             self._p("Lote", bold=True),
@@ -180,7 +190,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                 "",
                 "",
                 "",
-                "",
             ]
         )
 
@@ -190,7 +199,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                 rows.append(
                     [
                         self._p(row["product"]),
-                        self._p(row["pallets"]),
                         self._p(row["pallet_count"] if row["pallet_count"] else "-"),
                         self._p(_quantity(row["quantity"])),
                         self._p(row["lote"]) if row["lote"] else "",
@@ -198,9 +206,9 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                     ]
                 )
         else:
-            rows.append([self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
+            rows.append([self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
 
-        table = Table(rows, colWidths=[58 * mm, 42 * mm, 20 * mm, 24 * mm, 18 * mm, 18 * mm], repeatRows=2)
+        table = Table(rows, colWidths=[82 * mm, 26 * mm, 30 * mm, 21 * mm, 21 * mm], repeatRows=2)
         table.setStyle(
             TableStyle(
                 [
@@ -211,9 +219,9 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("TOPPADDING", (0, 0), (-1, -1), 3),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                    ("ALIGN", (2, 0), (3, -1), "CENTER"),
-                    ("SPAN", (0, 1), (5, 1)),
-                    ("BACKGROUND", (0, 1), (5, 1), colors.whitesmoke),
+                    ("ALIGN", (1, 0), (2, -1), "CENTER"),
+                    ("SPAN", (0, 1), (4, 1)),
+                    ("BACKGROUND", (0, 1), (4, 1), colors.whitesmoke),
                 ]
             )
         )
