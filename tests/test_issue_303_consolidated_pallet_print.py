@@ -42,10 +42,15 @@ def test_same_product_on_many_pallets_becomes_one_row_with_total():
             "pallets": "3–16",
             "pallet_count": 14,
             "quantity": 840.0,
-            "lote": "-",
-            "elab": "-",
+            "lote": "",
+            "elab": "",
         }
     ]
+
+    service = service.__class__(current_user="test")
+    table = service._destination_table(block)
+    assert table._cellvalues[2][4] == ""
+    assert table._cellvalues[2][5] == ""
 
 
 def test_heterogeneous_pallet_quantities_keep_per_pallet_information():
@@ -74,6 +79,8 @@ def test_heterogeneous_pallet_quantities_keep_per_pallet_information():
     assert row["pallets"] == "3–15 (60 c/u) · 16 (50 c/u)"
     assert row["pallet_count"] == 14
     assert row["quantity"] == 830.0
+    assert row["lote"] == "L1"
+    assert row["elab"] == ""
 
 
 def test_loose_merchandise_is_visible_without_counting_as_pallet():
@@ -93,6 +100,8 @@ def test_loose_merchandise_is_visible_without_counting_as_pallet():
     assert row["pallets"] == "Suelto (5)"
     assert row["pallet_count"] == 0
     assert row["quantity"] == 5.0
+    assert row["lote"] == ""
+    assert row["elab"] == ""
 
 
 def test_operation_service_uses_consolidated_printer():

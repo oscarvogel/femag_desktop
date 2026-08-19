@@ -13,6 +13,11 @@ from app.services.load_order_print_service import LoadOrderPrintService, _quanti
 class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
     """Vista consolidada de pallets para la impresión operativa de órdenes."""
 
+    @staticmethod
+    def _optional_operational_value(value: object) -> str:
+        text = "" if value is None else str(value).strip()
+        return "" if text == "-" else text
+
     def _destination_detail_block(self, order, destination) -> dict[str, object]:
         block = super()._destination_detail_block(order, destination)
         block["consolidated_rows"] = self._consolidate_rows(block)
@@ -29,13 +34,15 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
         for pallet_block in block.get("pallet_blocks", []):
             sequence = int(pallet_block["label"])
             for row in pallet_block["rows"]:
-                key = (str(row["product"]), str(row.get("lote") or "-"), str(row.get("elab") or "-"))
+                lote = self._optional_operational_value(row.get("lote"))
+                elab = self._optional_operational_value(row.get("elab"))
+                key = (str(row["product"]), lote, elab)
                 item = grouped.setdefault(
                     key,
                     {
                         "product": row["product"],
-                        "lote": row.get("lote") or "-",
-                        "elab": row.get("elab") or "-",
+                        "lote": lote,
+                        "elab": elab,
                         "pallet_quantities": OrderedDict(),
                         "loose_quantity": 0.0,
                         "unassigned_quantity": 0.0,
@@ -47,13 +54,15 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
         loose = block.get("loose_block")
         if loose:
             for row in loose["rows"]:
-                key = (str(row["product"]), str(row.get("lote") or "-"), str(row.get("elab") or "-"))
+                lote = self._optional_operational_value(row.get("lote"))
+                elab = self._optional_operational_value(row.get("elab"))
+                key = (str(row["product"]), lote, elab)
                 item = grouped.setdefault(
                     key,
                     {
                         "product": row["product"],
-                        "lote": row.get("lote") or "-",
-                        "elab": row.get("elab") or "-",
+                        "lote": lote,
+                        "elab": elab,
                         "pallet_quantities": OrderedDict(),
                         "loose_quantity": 0.0,
                         "unassigned_quantity": 0.0,
@@ -64,13 +73,15 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
         unassigned = block.get("unassigned_block")
         if unassigned:
             for row in unassigned["rows"]:
-                key = (str(row["product"]), str(row.get("lote") or "-"), str(row.get("elab") or "-"))
+                lote = self._optional_operational_value(row.get("lote"))
+                elab = self._optional_operational_value(row.get("elab"))
+                key = (str(row["product"]), lote, elab)
                 item = grouped.setdefault(
                     key,
                     {
                         "product": row["product"],
-                        "lote": row.get("lote") or "-",
-                        "elab": row.get("elab") or "-",
+                        "lote": lote,
+                        "elab": elab,
                         "pallet_quantities": OrderedDict(),
                         "loose_quantity": 0.0,
                         "unassigned_quantity": 0.0,
@@ -166,8 +177,8 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                         self._p(row["pallets"]),
                         self._p(row["pallet_count"] if row["pallet_count"] else "-"),
                         self._p(_quantity(row["quantity"])),
-                        self._p(row["lote"]),
-                        self._p(row["elab"]),
+                        self._p(row["lote"]) if row["lote"] else "",
+                        self._p(row["elab"]) if row["elab"] else "",
                     ]
                 )
         else:
