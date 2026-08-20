@@ -16,6 +16,8 @@ class ClientAccountMovement(BaseModel):
     TYPE_MANUAL_DEBIT_REVERSAL = "manual_debit_reversal"
     TYPE_MANUAL_CREDIT = "manual_credit"
     TYPE_MANUAL_CREDIT_REVERSAL = "manual_credit_reversal"
+    TYPE_RETURN_CREDIT = "return_credit"
+    TYPE_RETURN_CREDIT_REVERSAL = "return_credit_reversal"
 
     client = ForeignKeyField(Client, backref="account_movements")
     load_order = ForeignKeyField(LoadOrder, backref="account_movements", null=True)
