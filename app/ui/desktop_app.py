@@ -71,6 +71,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
+from app.services.client_manual_credit_service import ClientManualCreditService
 from app.services.client_email_service import ClientEmailService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.ui.form_feedback import FormFeedback
@@ -83,6 +84,7 @@ from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
+from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
@@ -622,6 +624,7 @@ class FemagDesktopWindow(QMainWindow):
             current_user=self.shell.username,
             register_payment_callback=self._open_payment_dialog,
             register_manual_debit_callback=self._open_manual_debit_dialog,
+            register_manual_credit_callback=self._open_manual_credit_dialog,
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
             email_statement_callback=self._email_account_statement,
@@ -632,6 +635,7 @@ class FemagDesktopWindow(QMainWindow):
             ),
             annul_payment_callback=self._annul_payment,
             reverse_manual_debit_callback=self._reverse_manual_debit,
+            reverse_manual_credit_callback=self._reverse_manual_credit,
             can_annul_payments=_can_annul_payments(self.user),
             parent=self,
         )
@@ -743,6 +747,21 @@ class FemagDesktopWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted and dialog.registered_debit() is not None:
             self._refresh_customer_ledger_after_payment()
 
+    def _open_manual_credit_dialog(self, preset_client=None) -> None:
+        try:
+            dialog = ClientManualCreditDialog(
+                current_user=self.shell.username,
+                preset_client=preset_client,
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Crédito manual", f"No se pudo abrir el formulario: {exc}"
+            )
+            return
+        if dialog.exec_() == QDialog.Accepted and dialog.registered_credit() is not None:
+            self._refresh_customer_ledger_after_payment()
+
     def _print_payment_receipt(self, payment: ClientPayment) -> None:
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
@@ -799,6 +818,30 @@ class FemagDesktopWindow(QMainWindow):
             self,
             "Reversar débito",
             "El débito manual fue reversado correctamente.",
+        )
+
+    def _reverse_manual_credit(self, movement) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Reversar crédito",
+            "¿Confirma el reverso del crédito manual seleccionado? "
+            "Se generará un movimiento inverso y se conservará la auditoría.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            ClientManualCreditService(
+                current_user=self.shell.username
+            ).reverse_manual_credit(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar crédito", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Reversar crédito",
+            "El crédito manual fue reversado correctamente.",
         )
 
     def _refresh_customer_ledger_after_payment(self) -> None:

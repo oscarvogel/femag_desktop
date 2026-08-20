@@ -220,23 +220,24 @@ def test_payment_schema_includes_annulment_tracking_columns(db):
     }.issubset(columns)
 
 
-def test_account_movement_schema_includes_manual_debit_fields(db):
+def test_account_movement_schema_includes_manual_adjustment_fields(db):
     columns = {column.name for column in db.get_columns("clientaccountmovement")}
 
-    assert {"movement_date", "reference"}.issubset(columns)
+    assert {"movement_date", "reference", "observations"}.issubset(columns)
 
 
-def test_runtime_schema_adds_manual_debit_fields_to_legacy_account_movements(db):
+def test_runtime_schema_adds_manual_adjustment_fields_to_legacy_account_movements(db):
     from app.config.schema import ensure_runtime_schema, validate_runtime_schema
 
     db.execute_sql("ALTER TABLE clientaccountmovement DROP COLUMN movement_date")
     db.execute_sql("ALTER TABLE clientaccountmovement DROP COLUMN reference")
+    db.execute_sql("ALTER TABLE clientaccountmovement DROP COLUMN observations")
 
     ensure_runtime_schema(db)
     validate_runtime_schema(db)
 
     columns = {column.name for column in db.get_columns("clientaccountmovement")}
-    assert {"movement_date", "reference"}.issubset(columns)
+    assert {"movement_date", "reference", "observations"}.issubset(columns)
 
 
 def test_runtime_schema_creates_load_order_closure_table_and_active_index(db):
