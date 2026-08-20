@@ -23,6 +23,7 @@ from app.models.load_orders import (
     LoadOrderPallet,
     LoadOrderPalletAllocation,
     LoadOrderProduct,
+    LoadOrderReturnLine,
     LoadOrderStatusHistory,
 )
 from app.models.security import MenuItem, Permission, User, UserProfile
@@ -55,6 +56,7 @@ ALL_MODELS = [
     LoadOrderPalletAllocation,
     LoadOrderStatusHistory,
     LoadOrderClosure,
+    LoadOrderReturnLine,
     LoadOrderBudgetStatus,
     AppParameter,
     NumberSequence,

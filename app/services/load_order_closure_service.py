@@ -5,7 +5,7 @@ from peewee import IntegrityError
 from app.config.database import database_proxy
 from app.models.base import utc_now
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderClosure
+from app.models.load_orders import LoadOrder, LoadOrderClosure, LoadOrderProduct, LoadOrderReturnLine
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.audit_service import AuditService
@@ -42,6 +42,7 @@ class LoadOrderClosureService:
         *,
         observations: str | None = None,
         payments: list[dict] | None = None,
+        returns: list[dict] | None = None,
         no_payment_reason: str | None = None,
     ) -> LoadOrderClosure:
         order = self._require_order(order)
@@ -51,6 +52,7 @@ class LoadOrderClosureService:
         normalized_observations = (observations or "").strip() or None
         normalized_no_payment_reason = (no_payment_reason or "").strip() or None
         payment_specs = self._normalize_payment_specs(order, payments or [])
+        return_specs = self._normalize_return_specs(order, returns or [])
         if not payment_specs and normalized_no_payment_reason is None:
             raise LoadOrderClosureError(
                 "Debe registrar al menos un pago o indicar el motivo del cierre sin pago."
@@ -76,6 +78,32 @@ class LoadOrderClosureService:
                 raise LoadOrderClosureError("La orden ya tiene un cierre de entrega activo.") from exc
             for payment_spec in payment_specs:
                 self.payments.register_payment(closure=closure, **payment_spec)
+            for return_spec in return_specs:
+                return_line = LoadOrderReturnLine.create(
+                    closure=closure,
+                    order_product=return_spec["order_product"],
+                    client=return_spec["client"],
+                    quantity=return_spec["quantity"],
+                    reason=return_spec["reason"],
+                    unit_price=return_spec["unit_price"],
+                    credit_amount=return_spec["credit_amount"],
+                    created_by=self.current_user,
+                )
+                self.audit_service.record(
+                    user=self.current_user,
+                    module="Ordenes de carga",
+                    action="registrar devolucion",
+                    record_ref=f"LoadOrderReturnLine:{return_line.id}",
+                    new_value={
+                        "closure_id": closure.id,
+                        "order_id": order.id,
+                        "order_product_id": return_line.order_product_id,
+                        "client_id": return_line.client_id,
+                        "quantity": return_line.quantity,
+                        "reason": return_line.reason,
+                        "credit_amount": return_line.credit_amount,
+                    },
+                )
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_CLOSED,
@@ -92,6 +120,8 @@ class LoadOrderClosureService:
                     "observations": closure.observations,
                     "no_payment_reason": closure.no_payment_reason,
                     "payment_ids": [payment.id for payment in closure.payments],
+                    "return_line_ids": [row.id for row in closure.return_lines],
+                    "return_credit_amount": self.return_credit_total(closure),
                     "payment_status": self.payment_status(closure),
                 },
             )
@@ -139,6 +169,7 @@ class LoadOrderClosureService:
                     "reopened_at": reopened_at.isoformat(timespec="seconds"),
                     "reopened_by": self.current_user,
                     "reason": normalized_reason,
+                    "return_line_ids": [row.id for row in closure.return_lines],
                 },
             )
         return LoadOrder.get_by_id(order.id)
@@ -186,6 +217,10 @@ class LoadOrderClosureService:
             return self.PAYMENT_STATUS_UNPAID
         return self.PAYMENT_STATUS_PARTIAL
 
+    def return_credit_total(self, closure: LoadOrderClosure) -> float:
+        closure = LoadOrderClosure.get_by_id(closure.id)
+        return round(sum(float(row.credit_amount) for row in closure.return_lines), 2)
+
     def active_closure(self, order: LoadOrder) -> LoadOrderClosure | None:
         order = self._require_order(order)
         return (
@@ -231,6 +266,49 @@ class LoadOrderClosureService:
                     "method": spec.get("method", ClientPayment.METHOD_CASH),
                     "reference": (spec.get("reference") or "").strip() or None,
                     "observations": (spec.get("observations") or "").strip() or None,
+                }
+            )
+        return normalized
+
+    def _normalize_return_specs(self, order: LoadOrder, returns: list[dict]) -> list[dict]:
+        normalized = []
+        seen_line_ids = set()
+        for spec in returns:
+            line = spec.get("order_product")
+            if not isinstance(line, LoadOrderProduct) or line.id is None:
+                raise LoadOrderClosureError("Cada devolucion debe corresponder a un renglon de la orden.")
+            try:
+                line = LoadOrderProduct.get_by_id(line.id)
+            except LoadOrderProduct.DoesNotExist as exc:
+                raise LoadOrderClosureError("El renglon indicado para la devolucion no existe.") from exc
+            if line.order_id != order.id:
+                raise LoadOrderClosureError("No se puede devolver un renglon de otra orden.")
+            if line.id in seen_line_ids:
+                raise LoadOrderClosureError("Cada renglon puede registrarse una sola vez como devolucion.")
+            seen_line_ids.add(line.id)
+            quantity = round(float(spec.get("quantity") or 0), 3)
+            if quantity <= 0:
+                raise LoadOrderClosureError("La cantidad devuelta debe ser mayor a cero.")
+            if quantity > float(line.quantity) + 0.0005:
+                raise LoadOrderClosureError(
+                    f"La devolucion de {line.product.name} supera la cantidad entregada."
+                )
+            reason = (spec.get("reason") or "").strip()
+            if not reason:
+                raise LoadOrderClosureError("Debe indicar el motivo de cada devolucion.")
+            client = line.destination.client if line.destination_id else order.client
+            if client is None:
+                raise LoadOrderClosureError("El renglon devuelto no tiene cliente asociado.")
+            unit_price = round(float(line.total) / float(line.quantity), 6) if line.quantity else 0.0
+            credit_amount = round(unit_price * quantity, 2)
+            normalized.append(
+                {
+                    "order_product": line,
+                    "client": client,
+                    "quantity": quantity,
+                    "reason": reason,
+                    "unit_price": unit_price,
+                    "credit_amount": credit_amount,
                 }
             )
         return normalized
