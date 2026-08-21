@@ -49,7 +49,7 @@ def test_regular_detail_rowspans_pallet_count_for_products_in_same_pallet():
     assert rows[3][1] == ""
     assert rows[4][1] == ""
     assert rows[5][1] == ""
-    assert (1, 2, 1, 5) in table._spanRanges
+    assert ("SPAN", (1, 2), (1, 5)) in table._spanCmds
 
 
 def test_preparation_sheet_rowspans_pallet_count_for_products_in_same_pallet():
@@ -61,4 +61,4 @@ def test_preparation_sheet_rowspans_pallet_count_for_products_in_same_pallet():
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert rows[5][2] == ""
-    assert (2, 2, 2, 5) in table._spanRanges
+    assert ("SPAN", (2, 2), (2, 5)) in table._spanCmds
