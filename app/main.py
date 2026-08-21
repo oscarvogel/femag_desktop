@@ -5,10 +5,12 @@ import sys
 from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
+from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.product_code_extension import install_desktop_product_code_extension
 
 
 install_desktop_product_code_extension()
+install_managerial_dashboard_extension()
 
 
 def smoke_check() -> str:
