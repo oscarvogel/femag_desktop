@@ -34,6 +34,7 @@ class MasterService:
         name: str,
         unit: str,
         *,
+        codigo: str | None = None,
         peso_unitario_kg: Decimal = Decimal("0.000"),
         precio_lista_1: float = 0.0,
         precio_lista_2: float = 0.0,
@@ -42,6 +43,9 @@ class MasterService:
         product_kind: str = "producto",
         tipo_iva: TipoIVA | None = None,
     ) -> Product:
+        codigo = self._normalize_product_code(codigo)
+        if codigo is not None:
+            self._validate_unique_product_code(codigo)
         peso_unitario_kg = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if peso_unitario_kg < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
@@ -50,6 +54,7 @@ class MasterService:
         tipo_iva = tipo_iva or TipoIVA.iva_default()
         self._validate_tipo_iva(tipo_iva)
         row = Product.create(
+            codigo=codigo,
             name=name,
             unit=unit,
             peso_unitario_kg=peso_unitario_kg,
@@ -67,7 +72,12 @@ class MasterService:
         self._record(
             "Product",
             row,
-            {"name": name, "unit": unit, "peso_unitario_kg": str(peso_unitario_kg)},
+            {
+                "codigo": codigo,
+                "name": name,
+                "unit": unit,
+                "peso_unitario_kg": str(peso_unitario_kg),
+            },
         )
         return row
 
@@ -77,11 +87,15 @@ class MasterService:
         name: str,
         unit: str,
         *,
+        codigo: str | None = None,
         peso_unitario_kg=Decimal("0"),
         product_kind="producto",
         tipo_iva: TipoIVA | None = None,
         **prices,
     ) -> Product:
+        codigo = self._normalize_product_code(codigo)
+        if codigo is not None:
+            self._validate_unique_product_code(codigo, exclude_id=product.id)
         weight = Decimal(str(peso_unitario_kg)).quantize(Decimal("0.001"))
         if weight < 0:
             raise ValueError("El peso unitario no puede ser negativo.")
@@ -89,6 +103,7 @@ class MasterService:
             raise ValueError("La clasificación del artículo no es válida.")
         tipo_iva = tipo_iva or product.tipo_iva or TipoIVA.iva_default()
         self._validate_tipo_iva(tipo_iva)
+        product.codigo = codigo
         product.name, product.unit = name, unit
         product.peso_unitario_kg, product.product_kind = weight, product_kind
         product.tipo_iva = tipo_iva
@@ -99,6 +114,19 @@ class MasterService:
         product.precio_neto_base = product.precio_lista_1
         product.save()
         return product
+
+    @staticmethod
+    def _normalize_product_code(codigo: str | None) -> str | None:
+        normalized = (codigo or "").strip()
+        return normalized or None
+
+    @staticmethod
+    def _validate_unique_product_code(codigo: str, *, exclude_id: int | None = None) -> None:
+        query = Product.select().where(fn.LOWER(Product.codigo) == codigo.lower())
+        if exclude_id is not None:
+            query = query.where(Product.id != exclude_id)
+        if query.exists():
+            raise ValueError(f"Ya existe un artículo con el código {codigo}.")
 
     @staticmethod
     def _validate_tipo_iva(tipo_iva: TipoIVA | None) -> None:
