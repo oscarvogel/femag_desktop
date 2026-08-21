@@ -46,8 +46,8 @@ def test_regular_detail_places_total_before_pallets_and_rowspans_shared_pallet()
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
     assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
-    assert rows[2][1] == "30"
-    assert rows[2][2] == "1"
+    assert rows[2][1] == "30 BOLSAS"
+    assert rows[2][2] == "1 pallet"
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert rows[5][2] == ""
@@ -70,7 +70,7 @@ def test_preparation_sheet_places_total_before_pallets_and_rowspans_shared_palle
         "Elab.",
     ]
     assert rows[2][2] == "30"
-    assert rows[2][3] == "1"
+    assert rows[2][3] == "1 pallet"
     assert rows[3][3] == ""
     assert rows[4][3] == ""
     assert rows[5][3] == ""
@@ -102,7 +102,7 @@ def test_pallet_count_falls_back_to_consolidated_value_when_signature_is_unavail
     table = service._destination_table(block)
     prep_table = service._preparation_destination_table(block)
 
-    assert _plain_text(table._cellvalues[2][1]) == "480"
-    assert _plain_text(table._cellvalues[2][2]) == "8"
+    assert _plain_text(table._cellvalues[2][1]) == "480 BOLSAS"
+    assert _plain_text(table._cellvalues[2][2]) == "8 pallets"
     assert _plain_text(prep_table._cellvalues[2][2]) == "480"
-    assert _plain_text(prep_table._cellvalues[2][3]) == "8"
+    assert _plain_text(prep_table._cellvalues[2][3]) == "8 pallets"

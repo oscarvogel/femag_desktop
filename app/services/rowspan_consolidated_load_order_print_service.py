@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from html import escape
 
 from reportlab.lib import colors
@@ -19,11 +20,54 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
 
     def _center_p(self, value: object) -> Paragraph:
         style = ParagraphStyle(
-            "load_order_center_cell",
+            "load_order_emphasized_quantity",
             parent=self.styles["cell"],
             alignment=TA_CENTER,
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=10.5,
         )
         return Paragraph(escape(str(value or "-")), style)
+
+    @staticmethod
+    def _is_one(value: object) -> bool:
+        try:
+            return Decimal(str(value)) == Decimal("1")
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    def _quantity_with_unit(self, quantity: object, unit: object) -> str:
+        quantity_text = _quantity(quantity)
+        unit_text = str(unit or "").strip().upper()
+        if not unit_text:
+            return quantity_text
+
+        if self._is_one(quantity):
+            label = {
+                "BOLSAS": "BOLSA",
+                "UNIDADES": "UNIDAD",
+                "KILOS": "KILO",
+            }.get(unit_text, unit_text)
+        else:
+            label = {
+                "BOLSA": "BOLSAS",
+                "UNIDAD": "UNIDADES",
+                "KILO": "KILOS",
+            }.get(unit_text, unit_text)
+
+        return f"{quantity_text} {label}"
+
+    @staticmethod
+    def _pallet_label(value: object) -> str:
+        text = str(value or "").strip()
+        if not text or text == "-":
+            return "-"
+        try:
+            count = Decimal(text)
+        except InvalidOperation:
+            return text
+        noun = "pallet" if count == Decimal("1") else "pallets"
+        return f"{text} {noun}"
 
     def _pallet_signature(self, block: dict[str, object], consolidated_row: dict[str, object]) -> tuple[int, ...]:
         """Devuelve los pallets físicos asociados a la fila consolidada.
@@ -118,8 +162,8 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                 rows.append(
                     [
                         self._p(row["product"]),
-                        self._center_p(_quantity(row["quantity"])),
-                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
+                        self._center_p(self._quantity_with_unit(row["quantity"], row.get("unit"))),
+                        self._center_p(self._pallet_label(pallet_values[index])) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
@@ -183,7 +227,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                         self._p(row["product"]),
                         self._p(row.get("unit") or "-"),
                         self._center_p(_quantity(row["quantity"])),
-                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
+                        self._center_p(self._pallet_label(pallet_values[index])) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
