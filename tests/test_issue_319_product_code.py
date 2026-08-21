@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_product_code_is_editable_unique_and_does_not_change_primary_key(db):
+    from app.models.masters import Product
     from app.services.master_service import MasterService
 
     service = MasterService(current_user="issue319")
@@ -18,7 +19,7 @@ def test_product_code_is_editable_unique_and_does_not_change_primary_key(db):
         service.create_product("Otro almidón", "kg", codigo=" 100 ")
 
     service.update_product(product, product.name, product.unit, codigo="200-A")
-    product.refresh()
+    product = Product.get_by_id(original_id)
 
     assert product.id == original_id
     assert product.codigo == "200-A"
