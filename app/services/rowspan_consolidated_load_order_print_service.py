@@ -16,8 +16,13 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
     """Impresión consolidada preservando el rowspan de pallets compartidos."""
 
     def _pallet_signature(self, block: dict[str, object], consolidated_row: dict[str, object]) -> tuple[int, ...]:
+        """Devuelve los pallets físicos asociados a la fila consolidada.
+
+        La unidad no forma parte de la identidad operativa de la asignación. Puede venir
+        vacía en datos históricos o diferir en snapshots, por lo que usarla para reconstruir
+        la relación producto/pallet puede hacer desaparecer un conteo válido.
+        """
         target_product = str(consolidated_row.get("product", ""))
-        target_unit = self._optional_operational_value(consolidated_row.get("unit"))
         target_lote = self._optional_operational_value(consolidated_row.get("lote"))
         target_elab = self._optional_operational_value(consolidated_row.get("elab"))
         sequences: list[int] = []
@@ -26,7 +31,6 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
             for row in pallet_block.get("rows", []):
                 if (
                     str(row.get("product", "")) == target_product
-                    and self._optional_operational_value(row.get("unit")) == target_unit
                     and self._optional_operational_value(row.get("lote")) == target_lote
                     and self._optional_operational_value(row.get("elab")) == target_elab
                 ):
@@ -43,7 +47,16 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         pallet_column: int,
     ) -> tuple[list[tuple], list[str]]:
         signatures = [self._pallet_signature(block, row) for row in consolidated]
-        display_values = [str(len(signature)) if signature else "-" for signature in signatures]
+        # El consolidado ya trae el conteo correcto. La reconstrucción de la firma se usa
+        # solamente para saber qué filas comparten exactamente los mismos pallets y poder
+        # aplicar el SPAN. Si no se puede reconstruir (datos históricos/incompletos), nunca
+        # debemos reemplazar un pallet_count válido por "-".
+        display_values = [
+            str(len(signature)) if signature else (
+                str(row.get("pallet_count")) if row.get("pallet_count") else "-"
+            )
+            for signature, row in zip(signatures, consolidated)
+        ]
         spans: list[tuple] = []
 
         start = 0
