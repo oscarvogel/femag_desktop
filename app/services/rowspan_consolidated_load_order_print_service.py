@@ -19,9 +19,12 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
 
     def _center_p(self, value: object) -> Paragraph:
         style = ParagraphStyle(
-            "load_order_center_cell",
+            "load_order_emphasized_quantity",
             parent=self.styles["cell"],
             alignment=TA_CENTER,
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=10.5,
         )
         return Paragraph(escape(str(value or "-")), style)
 
