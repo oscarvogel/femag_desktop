@@ -8,6 +8,7 @@ PLACEHOLDER_MESSAGE = "Funcionalidad prevista para una próxima entrega."
 
 REAL_MODULES = {
     "Dashboard": "dashboard",
+    "Dashboard Gerencial": "managerial_dashboard",
     "Pendientes": "pending",
     "Órdenes de carga": "load_orders",
     "Cuenta corriente": "customer_ledger",
@@ -46,7 +47,11 @@ class MenuService:
     def get_menu_tree_for_user(self, user: User) -> list[MenuNode]:
         sections: list[MenuNode] = []
         for section, titles in MENU.items():
-            children = [self._build_child(user, section, title) for title in titles if self._can_view(user, section, title)]
+            children = [
+                self._build_child(user, section, title)
+                for title in titles
+                if self._can_view(user, section, title)
+            ]
             if children:
                 sections.append(MenuNode(title=section, children=children))
         return sections
