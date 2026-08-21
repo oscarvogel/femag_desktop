@@ -37,11 +37,7 @@ class FormFeedback(QLabel):
         self._message = ""
         self._kind: FeedbackKind = "info"
         self._floating_toast = False
-        # The feedback widget can be reparented from a form layout to its
-        # top-level window when it becomes a floating toast.  Qt may destroy
-        # QObject children during that transition, so create the timer only
-        # after the final toast parent has been established.
-        self._dismiss_timer: QTimer | None = None
+        self._dismiss_generation = 0
         self.hide()
 
     @property
@@ -81,30 +77,25 @@ class FormFeedback(QLabel):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._floating_toast = True
 
-    def _ensure_dismiss_timer(self) -> QTimer:
-        timer = self._dismiss_timer
-        if timer is not None:
-            try:
-                timer.isActive()
-                return timer
-            except RuntimeError:
-                # Its C++ object was deleted while the feedback widget changed
-                # parent.  Drop the stale Python wrapper and recreate it.
-                pass
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(self.clear_message)
-        self._dismiss_timer = timer
-        return timer
+    def _schedule_dismiss(self) -> None:
+        """Schedule dismissal without keeping a QObject timer as a child.
 
-    def _stop_dismiss_timer(self) -> None:
-        timer = self._dismiss_timer
-        if timer is None:
-            return
-        try:
-            timer.stop()
-        except RuntimeError:
-            self._dismiss_timer = None
+        ``FormFeedback`` can move from a page/layout to its top-level window
+        when it first becomes a toast. Persistent QObject children may be
+        destroyed by that reparenting in some Qt/offscreen environments. A
+        static ``singleShot`` plus a generation token avoids stale C++ wrappers
+        and prevents an older timeout from hiding a newer message.
+        """
+        self._dismiss_generation += 1
+        generation = self._dismiss_generation
+        QTimer.singleShot(
+            self.TOAST_TIMEOUT_MS,
+            lambda: self._clear_if_generation(generation),
+        )
+
+    def _clear_if_generation(self, generation: int) -> None:
+        if generation == self._dismiss_generation:
+            self.clear_message()
 
     def _position_toast(self) -> None:
         if not self._floating_toast:
@@ -134,8 +125,9 @@ class FormFeedback(QLabel):
             raise ValueError(f"Tipo de feedback no soportado: {kind}")
 
         self._ensure_toast_parent()
-        timer = self._ensure_dismiss_timer()
-        timer.stop()
+        # Invalidate a timeout belonging to the previous message before
+        # rendering this one.
+        self._dismiss_generation += 1
 
         title, icon, background, border, foreground = _FEEDBACK_STYLES[kind]
         self._message = clean_message
@@ -158,7 +150,7 @@ class FormFeedback(QLabel):
         self.show()
         self._position_toast()
         if self._floating_toast:
-            timer.start(self.TOAST_TIMEOUT_MS)
+            self._schedule_dismiss()
         if focus_widget is not None:
             focus_widget.setFocus()
 
@@ -175,7 +167,7 @@ class FormFeedback(QLabel):
         self.show_message(message, "error", focus_widget=focus_widget)
 
     def clear_message(self) -> None:
-        self._stop_dismiss_timer()
+        self._dismiss_generation += 1
         self._message = ""
         self.setAccessibleDescription("")
         super().clear()
