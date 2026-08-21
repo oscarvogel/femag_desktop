@@ -21,10 +21,7 @@ class ManagerialAccessService:
     def authorize(self, username: str, password: str, *, requested_by: User | None = None) -> User | None:
         username = (username or "").strip()
         user = User.get_or_none(User.username == username, User.active == True)  # noqa: E712
-        valid_password = bool(
-            user is not None
-            and self.auth_service._verify_password(password, user.password_hash)
-        )
+        valid_password = bool(user is not None and self._password_matches(user, password))
         allowed = bool(
             valid_password
             and user is not None
@@ -33,6 +30,9 @@ class ManagerialAccessService:
         authorized = user if allowed else None
         self._audit(requested_by=requested_by, authorizer=user, granted=allowed)
         return authorized
+
+    def _password_matches(self, user: User, password: str) -> bool:
+        return self.auth_service._verify_password(password, user.password_hash)
 
     def _audit(self, *, requested_by: User | None, authorizer: User | None, granted: bool) -> None:
         requester = requested_by.username if requested_by is not None else None
