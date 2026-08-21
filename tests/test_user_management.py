@@ -76,6 +76,7 @@ def test_seed_defaults_consolidates_legacy_profile_names_and_is_idempotent(db):
     assert {profile.name for profile in UserProfile.select().order_by(UserProfile.name)} == {
         "Administrador",
         "Administración",
+        "Gerencia",
         "Secretaría",
         "Solo consulta",
     }
