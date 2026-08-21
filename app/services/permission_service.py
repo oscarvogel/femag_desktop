@@ -55,9 +55,7 @@ def _profile_key(name: str) -> str:
     )
 
 
-_CANONICAL_PROFILE_BY_KEY = {
-    _profile_key(name): name for name in PROFILE_ACTIONS
-}
+_CANONICAL_PROFILE_BY_KEY = {_profile_key(name): name for name in PROFILE_ACTIONS}
 
 
 def canonical_profile_name(name: str) -> str:
@@ -150,11 +148,7 @@ class PermissionService:
                 None,
             )
             if target is None:
-                target = (
-                    candidates[0]
-                    if candidates
-                    else UserProfile.create(name=canonical_name)
-                )
+                target = candidates[0] if candidates else UserProfile.create(name=canonical_name)
                 if target.name != canonical_name:
                     target.name = canonical_name
                     target.save()
@@ -225,10 +219,68 @@ class PermissionService:
 
     def require_administrator(self, user: User | None) -> User:
         if not self.is_administrator(user):
-            raise PermissionError("La operación requiere un administrador habilitado.")
+            raise PermissionError("Esta operación requiere un administrador habilitado.")
         return user
 
     def require_managerial_dashboard(self, user: User | None) -> User:
         if not self.can_view_managerial_dashboard(user):
             raise PermissionError("No tiene permiso para ver el Dashboard Gerencial.")
         return user
+
+    def permissions_for_profile(self, profile: UserProfile) -> dict[tuple[int, str], bool]:
+        return {
+            (permission.menu_item_id, permission.action): bool(permission.allowed)
+            for permission in Permission.select().where(Permission.profile == profile)
+        }
+
+    def update_profile_permissions(
+        self,
+        actor: User,
+        profile: UserProfile,
+        values: dict[tuple[int, str], bool],
+    ) -> int:
+        self.require_administrator(actor)
+        changed = 0
+        for (menu_item_id, action), allowed in values.items():
+            permission = Permission.get_or_none(
+                Permission.profile == profile,
+                Permission.menu_item == menu_item_id,
+                Permission.action == action,
+            )
+            if permission is None:
+                permission = Permission.create(
+                    profile=profile,
+                    menu_item=menu_item_id,
+                    action=action,
+                    allowed=bool(allowed),
+                )
+                old_allowed = None
+            else:
+                old_allowed = bool(permission.allowed)
+                if old_allowed == bool(allowed):
+                    continue
+                permission.allowed = bool(allowed)
+                permission.save()
+            changed += 1
+            self.audit_service.record(
+                user=actor.username,
+                module="Sistema",
+                action="modificar permiso",
+                record_ref=f"Permission:{permission.id}",
+                old_value={
+                    "profile": profile.name,
+                    "menu_item_id": menu_item_id,
+                    "action": action,
+                    "allowed": old_allowed,
+                },
+                new_value={
+                    "profile": profile.name,
+                    "menu_item_id": menu_item_id,
+                    "action": action,
+                    "allowed": bool(allowed),
+                },
+            )
+        return changed
+
+    def requires_admin_password(self, action: str) -> bool:
+        return action.lower() in SENSITIVE_ACTIONS
