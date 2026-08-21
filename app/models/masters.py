@@ -106,6 +106,7 @@ class ClientAddress(BaseModel):
 
 
 class Product(BaseModel):
+    # Nullable only for compatibility with legacy/imported rows. Manual CRUD requires it.
     codigo = CharField(null=True)
     name = CharField(unique=True)
     unit = CharField()
@@ -126,9 +127,6 @@ class Product(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_products", null=True)
-
-    class Meta:
-        indexes = ((('codigo',), True),)
 
 
 class Carrier(BaseModel):
