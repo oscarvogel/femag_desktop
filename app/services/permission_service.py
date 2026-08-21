@@ -20,7 +20,7 @@ ACTIONS = [
 
 
 MENU = {
-    "Inicio": ["Dashboard", "Pendientes", "Accesos rápidos"],
+    "Inicio": ["Dashboard", "Dashboard Gerencial", "Pendientes", "Accesos rápidos"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
@@ -39,6 +39,7 @@ MENU = {
 
 PROFILE_ACTIONS = {
     "Administrador": set(ACTIONS),
+    "Gerencia": {"ver", "reimprimir"},
     "Secretaría": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
     "Administración": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
     "Solo consulta": {"ver", "reimprimir"},
@@ -68,6 +69,7 @@ def canonical_profile_name(name: str) -> str:
     normalized = " ".join((name or "").strip().split())
     return _CANONICAL_PROFILE_BY_KEY.get(_profile_key(normalized), normalized)
 
+
 SENSITIVE_ACTIONS = {"anular remito", "modificar pago", "anular pago", "cambiar saldo inicial"}
 
 
@@ -96,15 +98,42 @@ class PermissionService:
                     for profile_name, allowed_actions in PROFILE_ACTIONS.items():
                         profile = profiles[profile_name]
                         for action in ACTIONS:
-                            allowed = action in allowed_actions
-                            if section == "Sistema" and profile_name != "Administrador":
-                                allowed = False
+                            allowed = self._default_allowed(
+                                profile_name=profile_name,
+                                section=section,
+                                title=title,
+                                action=action,
+                                allowed_actions=allowed_actions,
+                            )
                             Permission.get_or_create(
                                 profile=profile,
                                 menu_item=item,
                                 action=action,
                                 defaults={"allowed": allowed},
                             )
+
+    @staticmethod
+    def _default_allowed(
+        *,
+        profile_name: str,
+        section: str,
+        title: str,
+        action: str,
+        allowed_actions: set[str],
+    ) -> bool:
+        if profile_name == "Administrador":
+            return action in allowed_actions
+        if profile_name == "Gerencia":
+            return (
+                action == "ver"
+                and section == "Inicio"
+                and title in {"Dashboard", "Dashboard Gerencial"}
+            )
+        if section == "Sistema":
+            return False
+        if section == "Inicio" and title == "Dashboard Gerencial":
+            return False
+        return action in allowed_actions
 
     def _ensure_canonical_profiles(self) -> dict[str, UserProfile]:
         """Create official profiles and consolidate legacy accent variants."""
@@ -153,7 +182,6 @@ class PermissionService:
                 permission.profile = target
                 permission.save()
             else:
-                # The canonical profile is authoritative when both rows exist.
                 permission.delete_instance()
         duplicate.delete_instance()
 
@@ -172,6 +200,13 @@ class PermissionService:
             query = query.where(MenuItem.title == title)
         return query.exists()
 
+    def can_view_managerial_dashboard(self, user: User | None) -> bool:
+        return bool(
+            user is not None
+            and user.active
+            and self.has_permission(user, "Inicio", "ver", "Dashboard Gerencial")
+        )
+
     @staticmethod
     def is_administrator(user: User | None) -> bool:
         return bool(
@@ -180,54 +215,20 @@ class PermissionService:
             and user.profile.name.strip().lower() == "administrador"
         )
 
-    def require_administrator(self, user: User | None) -> None:
+    @staticmethod
+    def is_manager(user: User | None) -> bool:
+        return bool(
+            user is not None
+            and user.active
+            and canonical_profile_name(user.profile.name) == "Gerencia"
+        )
+
+    def require_administrator(self, user: User | None) -> User:
         if not self.is_administrator(user):
-            raise PermissionError("Esta operación requiere un administrador habilitado.")
+            raise PermissionError("La operación requiere un administrador habilitado.")
+        return user
 
-    def permissions_for_profile(self, profile: UserProfile) -> dict[tuple[int, str], bool]:
-        return {
-            (permission.menu_item_id, permission.action): bool(permission.allowed)
-            for permission in Permission.select().where(Permission.profile == profile)
-        }
-
-    def update_profile_permissions(
-        self,
-        actor: User,
-        profile: UserProfile,
-        values: dict[tuple[int, str], bool],
-    ) -> int:
-        self.require_administrator(actor)
-        changed = 0
-        for (menu_item_id, action), allowed in values.items():
-            permission = Permission.get_or_none(
-                Permission.profile == profile,
-                Permission.menu_item == menu_item_id,
-                Permission.action == action,
-            )
-            if permission is None:
-                permission = Permission.create(
-                    profile=profile,
-                    menu_item=menu_item_id,
-                    action=action,
-                    allowed=bool(allowed),
-                )
-                old_allowed = None
-            else:
-                old_allowed = bool(permission.allowed)
-                if old_allowed == bool(allowed):
-                    continue
-                permission.allowed = bool(allowed)
-                permission.save()
-            changed += 1
-            self.audit_service.record(
-                user=actor.username,
-                module="Sistema",
-                action="modificar permiso",
-                record_ref=f"Permission:{permission.id}",
-                old_value={"profile": profile.name, "menu_item_id": menu_item_id, "action": action, "allowed": old_allowed},
-                new_value={"profile": profile.name, "menu_item_id": menu_item_id, "action": action, "allowed": bool(allowed)},
-            )
-        return changed
-
-    def requires_admin_password(self, action: str) -> bool:
-        return action.lower() in SENSITIVE_ACTIONS
+    def require_managerial_dashboard(self, user: User | None) -> User:
+        if not self.can_view_managerial_dashboard(user):
+            raise PermissionError("No tiene permiso para ver el Dashboard Gerencial.")
+        return user
