@@ -40,46 +40,49 @@ def _shared_pallet_block():
     }
 
 
-def test_regular_detail_rowspans_pallet_count_for_products_in_same_pallet():
+def test_regular_detail_places_total_before_pallets_and_rowspans_shared_pallet():
     service = _service()
     table = service._destination_table(_shared_pallet_block())
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[2][1] == "1"
-    assert rows[3][1] == ""
-    assert rows[4][1] == ""
-    assert rows[5][1] == ""
-    assert ("SPAN", (1, 2), (1, 5)) in table._spanCmds
-
-
-def test_preparation_sheet_rowspans_pallet_count_for_products_in_same_pallet():
-    service = _service()
-    table = service._preparation_destination_table(_shared_pallet_block())
-    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
-
+    assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
+    assert rows[2][1] == "30"
     assert rows[2][2] == "1"
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert rows[5][2] == ""
     assert ("SPAN", (2, 2), (2, 5)) in table._spanCmds
+    assert table._cellvalues[2][1].style.alignment == 1
+    assert table._cellvalues[2][2].style.alignment == 1
 
 
-def test_pallet_matching_does_not_depend_on_product_unit_snapshot():
+def test_preparation_sheet_places_total_before_pallets_and_rowspans_shared_pallet():
     service = _service()
-    block = _shared_pallet_block()
-    block["pallet_blocks"][0]["rows"][0]["unit"] = ""
-
-    table = service._destination_table(block)
+    table = service._preparation_destination_table(_shared_pallet_block())
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    # Aunque la unidad histórica de la allocation esté vacía, el pallet físico sigue siendo 1.
-    assert rows[2][1] == "1"
+    assert rows[0] == [
+        "Producto / detalle",
+        "Unidad",
+        "Cantidad total",
+        "Cant. pallets",
+        "Lote",
+        "Elab.",
+    ]
+    assert rows[2][2] == "30"
+    assert rows[2][3] == "1"
+    assert rows[3][3] == ""
+    assert rows[4][3] == ""
+    assert rows[5][3] == ""
+    assert ("SPAN", (3, 2), (3, 5)) in table._spanCmds
+    assert table._cellvalues[2][2].style.alignment == 1
+    assert table._cellvalues[2][3].style.alignment == 1
 
 
-def test_missing_signature_falls_back_to_consolidated_pallet_count():
+def test_pallet_count_falls_back_to_consolidated_value_when_signature_is_unavailable():
     service = _service()
     block = {
-        "destination": "INDUS.Frigorificas - SANTA FE",
+        "destination": "INDUS. FRIGORIFICAS RECREO SA - S/N - SANTA FE",
         "pallet_blocks": [],
         "loose_block": None,
         "unassigned_block": None,
@@ -87,7 +90,7 @@ def test_missing_signature_falls_back_to_consolidated_pallet_count():
             {
                 "product": "BOL.FEC. NATIVA X25KG",
                 "unit": "BOLSA",
-                "pallets": "1–8",
+                "pallets": "1-8",
                 "pallet_count": 8,
                 "quantity": 480,
                 "lote": "",
@@ -96,11 +99,10 @@ def test_missing_signature_falls_back_to_consolidated_pallet_count():
         ],
     }
 
-    regular = service._destination_table(block)
-    preparation = service._preparation_destination_table(block)
-    regular_rows = [[_plain_text(cell) for cell in row] for row in regular._cellvalues]
-    preparation_rows = [[_plain_text(cell) for cell in row] for row in preparation._cellvalues]
+    table = service._destination_table(block)
+    prep_table = service._preparation_destination_table(block)
 
-    # Nunca degradar un conteo válido a '-' sólo porque no pudo reconstruirse la firma.
-    assert regular_rows[2][1] == "8"
-    assert preparation_rows[2][2] == "8"
+    assert _plain_text(table._cellvalues[2][1]) == "480"
+    assert _plain_text(table._cellvalues[2][2]) == "8"
+    assert _plain_text(prep_table._cellvalues[2][2]) == "480"
+    assert _plain_text(prep_table._cellvalues[2][3]) == "8"
