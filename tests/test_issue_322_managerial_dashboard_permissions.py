@@ -1,4 +1,4 @@
-from app.models.security import Permission, User, UserProfile
+from app.models.security import MenuItem, Permission, User, UserProfile
 from app.services.permission_service import PermissionService
 from app.ui.menu import build_sidebar_tree_spec
 
@@ -47,16 +47,13 @@ def test_explicit_permission_can_enable_managerial_dashboard_for_other_profile(d
     service.seed_defaults()
     profile = UserProfile.get(UserProfile.name == "Administración")
     user = User.create(username="administracion_autorizada", password_hash="x", profile=profile)
-
-    permission = (
-        Permission.select()
-        .where(
-            Permission.profile == profile,
-            Permission.action == "ver",
-        )
-        .join_from(Permission, Permission.menu_item.rel_model)
-        .where(Permission.menu_item.rel_model.title == "Dashboard Gerencial")
-        .get()
+    item = MenuItem.get(
+        (MenuItem.section == "Inicio") & (MenuItem.title == "Dashboard Gerencial")
+    )
+    permission = Permission.get(
+        (Permission.profile == profile)
+        & (Permission.menu_item == item)
+        & (Permission.action == "ver")
     )
     permission.allowed = True
     permission.save()
