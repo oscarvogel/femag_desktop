@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QMessageBox
 
 from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
+from app.services.menu_service import set_managerial_dashboard_menu_enabled
 from app.services.permission_service import PermissionService
 
 
@@ -13,9 +14,10 @@ _INSTALLED = False
 def install_managerial_dashboard_extension() -> None:
     """Open the managerial dashboard as local HTML in the system browser.
 
-    The sidebar and permission model remain native FEMAG concerns. The report
-    itself is generated from the same Python reporting service and rendered by
-    the workstation browser, avoiding an embedded Chromium dependency.
+    The permission exists independently, but the sidebar entry is enabled only
+    when the real desktop integration is installed. This keeps direct shell
+    users/tests backward compatible and avoids publishing a route without its
+    navigation handler.
     """
     global _INSTALLED
     if _INSTALLED:
@@ -23,6 +25,7 @@ def install_managerial_dashboard_extension() -> None:
 
     from app.ui.desktop_app import FemagDesktopWindow
 
+    set_managerial_dashboard_menu_enabled(True)
     original_navigate = FemagDesktopWindow._navigate
 
     def _navigate_with_managerial_dashboard(self, row: int) -> None:
