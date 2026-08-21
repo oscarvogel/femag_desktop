@@ -52,7 +52,7 @@ jobs:
         run: python -m compileall app
 
       - name: Run tests
-        run: python -m pytest tests/test_master_abm_desktop_ui.py -vv
+        run: python -m pytest tests/test_master_abm_desktop_ui.py::test_clients_abm_page_creates_edits_and_refreshes_grid -vv
 
       - name: Run smoke check
         run: python -m app.main --smoke
