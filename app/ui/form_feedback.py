@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from typing import Literal
 
 from PyQt5.QtCore import QTimer, Qt
@@ -89,16 +90,33 @@ class FormFeedback(QLabel):
         self._floating_toast = True
 
     def _schedule_dismiss(self) -> None:
+        """Dismiss later without retaining or calling a deleted Qt wrapper."""
         self._dismiss_generation += 1
         generation = self._dismiss_generation
-        QTimer.singleShot(
-            self.TOAST_TIMEOUT_MS,
-            lambda: self._clear_if_generation(generation),
-        )
+        feedback_ref = weakref.ref(self)
+
+        def dismiss_if_alive() -> None:
+            feedback = feedback_ref()
+            if feedback is None:
+                return
+            try:
+                feedback._clear_if_generation(generation)
+            except RuntimeError:
+                # The Python wrapper can briefly outlive its C++ QLabel after a
+                # page/dialog is destroyed. Exceptions escaping a Qt timer slot
+                # can abort the interpreter, so a stale toast must be a no-op.
+                return
+
+        QTimer.singleShot(self.TOAST_TIMEOUT_MS, dismiss_if_alive)
 
     def _clear_if_generation(self, generation: int) -> None:
-        if generation == self._dismiss_generation:
+        if generation != self._dismiss_generation:
+            return
+        try:
             self.clear_message()
+        except RuntimeError:
+            # C++ widget already destroyed; nothing remains to hide.
+            return
 
     def _position_toast(self) -> None:
         if not self._floating_toast:
