@@ -3,6 +3,8 @@ from __future__ import annotations
 from html import escape
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, Table, TableStyle
 
@@ -14,6 +16,14 @@ from app.services.load_order_print_service import _quantity
 
 class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
     """Impresión consolidada preservando el rowspan de pallets compartidos."""
+
+    def _center_p(self, value: object) -> Paragraph:
+        style = ParagraphStyle(
+            "load_order_center_cell",
+            parent=self.styles["cell"],
+            alignment=TA_CENTER,
+        )
+        return Paragraph(escape(str(value or "-")), style)
 
     def _pallet_signature(self, block: dict[str, object], consolidated_row: dict[str, object]) -> tuple[int, ...]:
         """Devuelve los pallets físicos asociados a la fila consolidada.
@@ -47,10 +57,6 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         pallet_column: int,
     ) -> tuple[list[tuple], list[str]]:
         signatures = [self._pallet_signature(block, row) for row in consolidated]
-        # El consolidado ya trae el conteo correcto. La reconstrucción de la firma se usa
-        # solamente para saber qué filas comparten exactamente los mismos pallets y poder
-        # aplicar el SPAN. Si no se puede reconstruir (datos históricos/incompletos), nunca
-        # debemos reemplazar un pallet_count válido por "-".
         display_values = [
             str(len(signature)) if signature else (
                 str(row.get("pallet_count")) if row.get("pallet_count") else "-"
@@ -83,8 +89,8 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
     def _destination_table(self, block: dict[str, object]) -> Table:
         header = [
             self._p("Producto / detalle", bold=True),
-            self._p("Cant. pallets", bold=True),
             self._p("Cantidad total", bold=True),
+            self._p("Cant. pallets", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
@@ -106,22 +112,22 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                 block,
                 consolidated,
                 first_table_row=2,
-                pallet_column=1,
+                pallet_column=2,
             )
             for index, row in enumerate(consolidated):
                 rows.append(
                     [
                         self._p(row["product"]),
-                        self._p(pallet_values[index]) if pallet_values[index] else "",
-                        self._p(_quantity(row["quantity"])),
+                        self._center_p(_quantity(row["quantity"])),
+                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
                 )
         else:
-            rows.append([self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
+            rows.append([self._p("-"), self._center_p("-"), self._center_p("-"), self._p("-"), self._p("-")])
 
-        table = Table(rows, colWidths=[82 * mm, 26 * mm, 30 * mm, 21 * mm, 21 * mm], repeatRows=2)
+        table = Table(rows, colWidths=[82 * mm, 30 * mm, 26 * mm, 21 * mm, 21 * mm], repeatRows=2)
         table.setStyle(
             TableStyle(
                 [
@@ -145,8 +151,8 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         header = [
             self._p("Producto / detalle", bold=True),
             self._p("Unidad", bold=True),
-            self._p("Cant. pallets", bold=True),
             self._p("Cantidad total", bold=True),
+            self._p("Cant. pallets", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
@@ -169,23 +175,23 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                 block,
                 consolidated,
                 first_table_row=2,
-                pallet_column=2,
+                pallet_column=3,
             )
             for index, row in enumerate(consolidated):
                 rows.append(
                     [
                         self._p(row["product"]),
                         self._p(row.get("unit") or "-"),
-                        self._p(pallet_values[index]) if pallet_values[index] else "",
-                        self._p(_quantity(row["quantity"])),
+                        self._center_p(_quantity(row["quantity"])),
+                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
                 )
         else:
-            rows.append([self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
+            rows.append([self._p("-"), self._p("-"), self._center_p("-"), self._center_p("-"), self._p("-"), self._p("-")])
 
-        table = Table(rows, colWidths=[60 * mm, 20 * mm, 23 * mm, 27 * mm, 25 * mm, 25 * mm], repeatRows=2)
+        table = Table(rows, colWidths=[60 * mm, 20 * mm, 27 * mm, 23 * mm, 25 * mm, 25 * mm], repeatRows=2)
         table.setStyle(
             TableStyle(
                 [
