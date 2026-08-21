@@ -5,6 +5,7 @@ from app.services.permission_service import MENU
 
 
 PLACEHOLDER_MESSAGE = "Funcionalidad prevista para una próxima entrega."
+_MANAGERIAL_DASHBOARD_MENU_ENABLED = False
 
 REAL_MODULES = {
     "Dashboard": "dashboard",
@@ -31,6 +32,15 @@ REAL_MODULES = {
     "Importación": "imports",
     "Accesos rápidos": "quick_actions",
 }
+
+
+def set_managerial_dashboard_menu_enabled(enabled: bool = True) -> None:
+    global _MANAGERIAL_DASHBOARD_MENU_ENABLED
+    _MANAGERIAL_DASHBOARD_MENU_ENABLED = bool(enabled)
+
+
+def managerial_dashboard_menu_enabled() -> bool:
+    return _MANAGERIAL_DASHBOARD_MENU_ENABLED
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,8 @@ class MenuService:
         )
 
     def _can_view(self, user: User, section: str, title: str) -> bool:
+        if title == "Dashboard Gerencial" and not managerial_dashboard_menu_enabled():
+            return False
         return (
             Permission.select()
             .join(MenuItem)
