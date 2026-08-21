@@ -1,11 +1,16 @@
 from app.models.security import MenuItem, Permission, User, UserProfile
+from app.services.menu_service import set_managerial_dashboard_menu_enabled
 from app.services.permission_service import PermissionService
 from app.ui.menu import build_sidebar_tree_spec
 
 
 def _sidebar_titles(user: User) -> list[str]:
-    spec = build_sidebar_tree_spec(user)
-    return [item.title for section in spec.sections for item in section.items]
+    set_managerial_dashboard_menu_enabled(True)
+    try:
+        spec = build_sidebar_tree_spec(user)
+        return [item.title for section in spec.sections for item in section.items]
+    finally:
+        set_managerial_dashboard_menu_enabled(False)
 
 
 def test_manager_profile_sees_only_managerial_home_defaults(db):
