@@ -13,13 +13,11 @@ def install_product_code_extension() -> None:
     """Extend the product master with a stable editable business code."""
     from app.ui import master_abm
 
-    base_dialog = master_abm.ProductEntryDialog
-    if getattr(base_dialog, "_product_code_extension_installed", False):
+    if getattr(master_abm.master_abm_configs, "_product_code_extension_installed", False):
         return
+    base_dialog = master_abm.ProductEntryDialog
 
-    class ProductEntryDialog(base_dialog):
-        _product_code_extension_installed = True
-
+    class ProductCodeEntryDialog(base_dialog):
         def _build(self) -> None:
             layout = master_abm._entry_layout(self, "Producto / presentacion")
             form = QGridLayout()
@@ -45,9 +43,7 @@ def install_product_code_extension() -> None:
             enable_combo_autocomplete(self.iva_input, placeholder="Buscar IVA...")
             iva_default = TipoIVA.iva_default()
             for tipo_iva in TipoIVA.select().where(TipoIVA.activo == True).order_by(TipoIVA.nombre):  # noqa: E712
-                self.iva_input.addItem(
-                    f"{tipo_iva.nombre} ({tipo_iva.porcentaje:g}%)", tipo_iva.id
-                )
+                self.iva_input.addItem(f"{tipo_iva.nombre} ({tipo_iva.porcentaje:g}%)", tipo_iva.id)
             default_index = self.iva_input.findData(iva_default.id)
             if default_index >= 0:
                 self.iva_input.setCurrentIndex(default_index)
@@ -89,10 +85,7 @@ def install_product_code_extension() -> None:
                 self.unit_input.setText("kg")
                 return
             product = Product.get_by_id(self.record_id)
-            if (
-                product.tipo_iva_id is not None
-                and self.iva_input.findData(product.tipo_iva_id) < 0
-            ):
+            if product.tipo_iva_id is not None and self.iva_input.findData(product.tipo_iva_id) < 0:
                 tipo_iva = product.tipo_iva
                 self.iva_input.addItem(
                     f"{tipo_iva.nombre} ({tipo_iva.porcentaje:g}%) — Inactivo",
@@ -102,14 +95,10 @@ def install_product_code_extension() -> None:
             self.name_input.setText(product.name)
             self.unit_input.setText(product.unit)
             self.weight_input.setValue(float(product.peso_unitario_kg))
-            self.kind_input.setCurrentIndex(
-                max(self.kind_input.findData(product.product_kind or "revisar"), 0)
-            )
+            self.kind_input.setCurrentIndex(max(self.kind_input.findData(product.product_kind or "revisar"), 0))
             if product.tipo_iva_id is not None:
                 self.iva_input.setCurrentIndex(self.iva_input.findData(product.tipo_iva_id))
-            self.price_list_1_input.setText(
-                master_abm._money_text(product.precio_lista_1 or product.precio_neto_base)
-            )
+            self.price_list_1_input.setText(master_abm._money_text(product.precio_lista_1 or product.precio_neto_base))
             self.price_list_2_input.setText(master_abm._money_text(product.precio_lista_2))
             self.price_list_3_input.setText(master_abm._money_text(product.precio_lista_3))
             self.price_list_4_input.setText(master_abm._money_text(product.precio_lista_4))
@@ -119,36 +108,18 @@ def install_product_code_extension() -> None:
             name = self.name_input.text().strip()
             unit = self.unit_input.text().strip()
             if not codigo or not name or not unit:
-                focus_widget = (
-                    self.code_input
-                    if not codigo
-                    else self.name_input
-                    if not name
-                    else self.unit_input
-                )
-                self.feedback.show_warning(
-                    "Complete código, producto y unidad.", focus_widget=focus_widget
-                )
+                focus_widget = self.code_input if not codigo else self.name_input if not name else self.unit_input
+                self.feedback.show_warning("Complete código, producto y unidad.", focus_widget=focus_widget)
                 return
             try:
                 prices = {
-                    "precio_lista_1": master_abm._parse_float(
-                        self.price_list_1_input.text()
-                    ),
-                    "precio_lista_2": master_abm._parse_float(
-                        self.price_list_2_input.text()
-                    ),
-                    "precio_lista_3": master_abm._parse_float(
-                        self.price_list_3_input.text()
-                    ),
-                    "precio_lista_4": master_abm._parse_float(
-                        self.price_list_4_input.text()
-                    ),
+                    "precio_lista_1": master_abm._parse_float(self.price_list_1_input.text()),
+                    "precio_lista_2": master_abm._parse_float(self.price_list_2_input.text()),
+                    "precio_lista_3": master_abm._parse_float(self.price_list_3_input.text()),
+                    "precio_lista_4": master_abm._parse_float(self.price_list_4_input.text()),
                 }
                 tipo_iva_id = self.iva_input.currentData()
-                tipo_iva = (
-                    TipoIVA.get_by_id(tipo_iva_id) if tipo_iva_id is not None else None
-                )
+                tipo_iva = TipoIVA.get_by_id(tipo_iva_id) if tipo_iva_id is not None else None
                 service = MasterService(self.current_user)
                 if self.record_id is None:
                     self.saved_record = service.create_product(
@@ -183,17 +154,11 @@ def install_product_code_extension() -> None:
                     product.codigo or "",
                     product.name,
                     product.unit,
-                    (
-                        f"{product.peso_unitario_kg:.3f} kg"
-                        if product.peso_unitario_kg > 0
-                        else "Peso pendiente"
-                    ),
+                    f"{product.peso_unitario_kg:.3f} kg" if product.peso_unitario_kg > 0 else "Peso pendiente",
                     master_abm.product_kind_label(product.product_kind),
                     "Sí" if master_abm.product_is_loadable(product) else "No",
                     "Pendiente" if product.review_required else "Confirmado",
-                    master_abm._money_text(
-                        product.precio_lista_1 or product.precio_neto_base
-                    ),
+                    master_abm._money_text(product.precio_lista_1 or product.precio_neto_base),
                     master_abm._money_text(product.precio_lista_2),
                     master_abm._money_text(product.precio_lista_3),
                     master_abm._money_text(product.precio_lista_4),
@@ -210,30 +175,16 @@ def install_product_code_extension() -> None:
         configs = base_configs()
         configs["products"] = master_abm.MasterAbmConfig(
             "Productos",
-            [
-                "Código",
-                "Producto",
-                "Unidad",
-                "Peso",
-                "Clasificación",
-                "Órdenes",
-                "Revisión",
-                "Lista 1",
-                "Lista 2",
-                "Lista 3",
-                "Lista 4",
-                "Estado",
-            ],
+            ["Código", "Producto", "Unidad", "Peso", "Clasificación", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             product_rows,
-            ProductEntryDialog,
+            ProductCodeEntryDialog,
             "newProductButton",
             "editProductButton",
             search_placeholder="Buscar productos por código o nombre...",
         )
         return configs
 
-    master_abm.ProductEntryDialog = ProductEntryDialog
-    master_abm._product_rows = product_rows
+    master_abm_configs._product_code_extension_installed = True
     master_abm.master_abm_configs = master_abm_configs
 
 
@@ -249,10 +200,7 @@ def install_desktop_product_code_extension() -> None:
             return [
                 (product.id, product_display_label(product))
                 for product in Product.select()
-                .where(
-                    (Product.active == True)  # noqa: E712
-                    & (Product.product_kind == "producto")
-                )
+                .where((Product.active == True) & (Product.product_kind == "producto"))  # noqa: E712
                 .order_by(Product.codigo, Product.name)
             ]
         except (desktop_app.InterfaceError, desktop_app.OperationalError):
