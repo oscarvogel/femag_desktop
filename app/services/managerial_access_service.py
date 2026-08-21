@@ -20,15 +20,19 @@ class ManagerialAccessService:
 
     def authorize(self, username: str, password: str, *, requested_by: User | None = None) -> User | None:
         username = (username or "").strip()
-        user = self.auth_service.authenticate(username, password)
-        if user is None:
-            self._audit(requested_by=requested_by, authorizer=None, granted=False)
-            return None
-        if not self.permission_service.can_view_managerial_dashboard(user):
-            self._audit(requested_by=requested_by, authorizer=user, granted=False)
-            return None
-        self._audit(requested_by=requested_by, authorizer=user, granted=True)
-        return user
+        user = User.get_or_none(User.username == username, User.active == True)  # noqa: E712
+        valid_password = bool(
+            user is not None
+            and self.auth_service._verify_password(password, user.password_hash)
+        )
+        allowed = bool(
+            valid_password
+            and user is not None
+            and self.permission_service.can_view_managerial_dashboard(user)
+        )
+        authorized = user if allowed else None
+        self._audit(requested_by=requested_by, authorizer=user, granted=allowed)
+        return authorized
 
     def _audit(self, *, requested_by: User | None, authorizer: User | None, granted: bool) -> None:
         requester = requested_by.username if requested_by is not None else None
