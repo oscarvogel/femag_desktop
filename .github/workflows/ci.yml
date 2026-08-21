@@ -52,7 +52,7 @@ jobs:
         run: python -m compileall app
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest -x -vv
 
       - name: Run smoke check
         run: python -m app.main --smoke
