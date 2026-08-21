@@ -10,7 +10,6 @@ from app.ui.product_code_extension import install_desktop_product_code_extension
 
 
 install_desktop_product_code_extension()
-install_managerial_dashboard_extension()
 
 
 def smoke_check() -> str:
@@ -46,6 +45,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         from app.ui.window_policy import install_workspace_window_policy
 
         install_workspace_window_policy()
+        install_managerial_dashboard_extension()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.
         raise RuntimeError(
