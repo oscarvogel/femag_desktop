@@ -9,30 +9,25 @@ from app.services.permission_service import PermissionService
 
 
 _INSTALLED = False
+_ORIGINAL_NAVIGATE = None
 
 
 def install_managerial_dashboard_extension() -> None:
-    """Open the managerial dashboard as local HTML in the system browser.
-
-    The permission exists independently, but the sidebar entry is enabled only
-    when the real desktop integration is installed. This keeps direct shell
-    users/tests backward compatible and avoids publishing a route without its
-    navigation handler.
-    """
-    global _INSTALLED
+    """Open the managerial dashboard as local HTML in the system browser."""
+    global _INSTALLED, _ORIGINAL_NAVIGATE
     if _INSTALLED:
         return
 
     from app.ui.desktop_app import FemagDesktopWindow
 
     set_managerial_dashboard_menu_enabled(True)
-    original_navigate = FemagDesktopWindow._navigate
+    _ORIGINAL_NAVIGATE = FemagDesktopWindow._navigate
 
     def _navigate_with_managerial_dashboard(self, row: int) -> None:
         item = self.nav.item(row)
         route = item.data(Qt.UserRole) if item else None
         if route != "managerial_dashboard":
-            original_navigate(self, row)
+            _ORIGINAL_NAVIGATE(self, row)
             return
         if not PermissionService().can_view_managerial_dashboard(self.user):
             QMessageBox.warning(
@@ -52,3 +47,19 @@ def install_managerial_dashboard_extension() -> None:
 
     FemagDesktopWindow._navigate = _navigate_with_managerial_dashboard
     _INSTALLED = True
+
+
+def uninstall_managerial_dashboard_extension() -> None:
+    """Restore the original shell state; intended for isolated UI tests."""
+    global _INSTALLED, _ORIGINAL_NAVIGATE
+    if not _INSTALLED:
+        set_managerial_dashboard_menu_enabled(False)
+        return
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    if _ORIGINAL_NAVIGATE is not None:
+        FemagDesktopWindow._navigate = _ORIGINAL_NAVIGATE
+    set_managerial_dashboard_menu_enabled(False)
+    _ORIGINAL_NAVIGATE = None
+    _INSTALLED = False
