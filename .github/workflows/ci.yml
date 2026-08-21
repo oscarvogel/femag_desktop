@@ -52,7 +52,7 @@ jobs:
         run: python -m compileall app
 
       - name: Run tests
-        run: python -m pytest tests/test_issue_278_opening_balance.py::test_clients_action_registers_once_and_disables_immediately -vv
+        run: python -m pytest
 
       - name: Run smoke check
         run: python -m app.main --smoke
