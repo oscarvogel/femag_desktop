@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMessageBox
+
+from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
 from app.services.permission_service import PermissionService
-from app.ui.managerial_dashboard import ManagerialDashboardPage
 
 
 _INSTALLED = False
 
 
 def install_managerial_dashboard_extension() -> None:
-    """Attach the managerial dashboard page to the desktop shell once.
+    """Open the managerial dashboard as local HTML in the system browser.
 
-    The main desktop window is intentionally kept stable because it is a very
-    large integration module. This extension registers the real page after the
-    normal shell build while preserving the sidebar route and permission model.
+    The sidebar and permission model remain native FEMAG concerns. The report
+    itself is generated from the same Python reporting service and rendered by
+    the workstation browser, avoiding an embedded Chromium dependency.
     """
     global _INSTALLED
     if _INSTALLED:
@@ -20,18 +23,29 @@ def install_managerial_dashboard_extension() -> None:
 
     from app.ui.desktop_app import FemagDesktopWindow
 
-    original_build = FemagDesktopWindow._build
+    original_navigate = FemagDesktopWindow._navigate
 
-    def _build_with_managerial_dashboard(self) -> None:
-        original_build(self)
+    def _navigate_with_managerial_dashboard(self, row: int) -> None:
+        item = self.nav.item(row)
+        route = item.data(Qt.UserRole) if item else None
+        if route != "managerial_dashboard":
+            original_navigate(self, row)
+            return
         if not PermissionService().can_view_managerial_dashboard(self.user):
+            QMessageBox.warning(
+                self,
+                "Dashboard Gerencial",
+                "El usuario actual no tiene permiso para ver el Dashboard Gerencial.",
+            )
             return
-        if "managerial_dashboard" in self._route_indexes:
-            return
-        self._add_page(
-            "managerial_dashboard",
-            ManagerialDashboardPage(parent=self),
-        )
+        try:
+            ManagerialDashboardHtmlReport().open()
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Dashboard Gerencial",
+                f"No se pudo generar el dashboard gerencial:\n{exc}",
+            )
 
-    FemagDesktopWindow._build = _build_with_managerial_dashboard
+    FemagDesktopWindow._navigate = _navigate_with_managerial_dashboard
     _INSTALLED = True
