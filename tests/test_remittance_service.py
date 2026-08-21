@@ -75,6 +75,7 @@ def test_issue_requires_physical_form_number_and_locks_editing(db):
 
 
 def test_create_from_order_copies_exactly_one_destination_without_mutating_order(db):
+    from app.models.load_orders import LoadOrderDestination
     from app.services.load_order_service import LoadOrderService
     from app.services.remittance_service import RemittanceService
     from tests.conftest import _multi_client_data
@@ -98,7 +99,7 @@ def test_create_from_order_copies_exactly_one_destination_without_mutating_order
         ],
         pallets=[],
     )
-    destination = order.destinations.order_by(1).first()
+    destination = order.destinations.order_by(LoadOrderDestination.sequence).first()
     original_status = order.status
 
     remittance = RemittanceService(current_user="admin").create_from_order(
