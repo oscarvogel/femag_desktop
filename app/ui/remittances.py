@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, QUrl, Qt
+from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -24,7 +26,11 @@ from PyQt5.QtWidgets import (
 from app.models.load_orders import LoadOrder
 from app.models.masters import Client, ClientAddress, Product
 from app.models.remittances import Remittance
+from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceService
+
+
+REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
 
 
 class RemittanceDialog(QDialog):
@@ -62,6 +68,7 @@ class RemittanceDialog(QDialog):
         root.addWidget(self.items, 1)
 
         add_row = QPushButton("+ Agregar producto")
+        add_row.setObjectName("addRemittanceItemButton")
         add_row.clicked.connect(self._add_item_row)
         root.addWidget(add_row)
 
@@ -130,6 +137,10 @@ class RemittanceDialog(QDialog):
         editable = r.status == Remittance.STATUS_DRAFT
         self.client_combo.setEnabled(editable)
         self.address_combo.setEnabled(editable)
+        self.date_input.setEnabled(editable)
+        self.point_input.setEnabled(editable)
+        self.number_input.setEnabled(editable)
+        self.reference_input.setEnabled(editable)
         self.items.setEnabled(editable)
 
     def _payload_items(self) -> list[dict]:
@@ -203,7 +214,7 @@ class OrderDestinationDialog(QDialog):
         layout.addRow("Orden", self.order_combo)
         layout.addRow("Cliente / destino", self.destination_combo)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._accept_if_valid)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
@@ -217,18 +228,29 @@ class OrderDestinationDialog(QDialog):
             label = f"{destination.client.name} - {destination.delivery_address.address}"
             self.destination_combo.addItem(label, destination.id)
 
+    def _accept_if_valid(self) -> None:
+        if not self.order_combo.currentData():
+            QMessageBox.warning(self, "Remito", "No hay una Orden de carga seleccionada.")
+            return
+        if not self.destination_combo.currentData():
+            QMessageBox.warning(self, "Remito", "La Orden de carga no tiene un destino seleccionable.")
+            return
+        self.accept()
+
     def selection(self):
         if not self.order_combo.currentData() or not self.destination_combo.currentData():
             return None, None
         order = LoadOrder.get_by_id(self.order_combo.currentData())
-        destination = order.destinations.where(order.destinations.model.id == self.destination_combo.currentData()).first()
+        destination_id = self.destination_combo.currentData()
+        destination = order.destinations.where(order.destinations.model.id == destination_id).first()
         return order, destination
 
 
 class RemittancesPage(QWidget):
-    def __init__(self, *, current_user: str, parent=None):
+    def __init__(self, *, current_user: str, parent=None, output_dir: Path | None = None):
         super().__init__(parent)
         self.current_user = current_user
+        self.output_dir = output_dir or REMITTANCE_PRINTS_DIR
         layout = QVBoxLayout(self)
         title = QLabel("Remitos")
         title.setObjectName("pageTitle")
@@ -239,12 +261,20 @@ class RemittancesPage(QWidget):
         new_button.setObjectName("newRemittanceButton")
         from_order = QPushButton("Crear desde Orden de carga")
         from_order.setObjectName("newRemittanceFromOrderButton")
-        issue_button = QPushButton("Emitir")
         edit_button = QPushButton("Editar")
+        edit_button.setObjectName("editRemittanceButton")
+        issue_button = QPushButton("Emitir")
+        issue_button.setObjectName("issueRemittanceButton")
+        print_button = QPushButton("Imprimir formulario")
+        print_button.setObjectName("printRemittanceButton")
+        calibration_button = QPushButton("Hoja de calibración")
+        calibration_button.setObjectName("remittanceCalibrationButton")
         actions.addWidget(new_button)
         actions.addWidget(from_order)
         actions.addWidget(edit_button)
         actions.addWidget(issue_button)
+        actions.addWidget(print_button)
+        actions.addWidget(calibration_button)
         actions.addStretch(1)
         layout.addLayout(actions)
 
@@ -262,6 +292,8 @@ class RemittancesPage(QWidget):
         from_order.clicked.connect(self._from_order)
         edit_button.clicked.connect(self._edit)
         issue_button.clicked.connect(self._issue)
+        print_button.clicked.connect(self._print_selected)
+        calibration_button.clicked.connect(self._print_calibration)
         self.refresh()
 
     def refresh(self) -> None:
@@ -305,16 +337,27 @@ class RemittancesPage(QWidget):
         if order is None or destination is None:
             return
         try:
-            RemittanceService(self.current_user).create_from_order(order=order, destination=destination)
+            remittance = RemittanceService(self.current_user).create_from_order(
+                order=order,
+                destination=destination,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Remito", str(exc))
             return
         self.refresh()
+        QMessageBox.information(
+            self,
+            "Remito creado",
+            f"Se creó {remittance.remittance_number} en borrador. Complete el número del formulario antes de emitir.",
+        )
 
     def _edit(self) -> None:
         remittance = self._selected()
         if remittance is None:
             QMessageBox.information(self, "Remitos", "Seleccione un remito.")
+            return
+        if remittance.status != Remittance.STATUS_DRAFT:
+            QMessageBox.information(self, "Remitos", "Solo los remitos en borrador pueden editarse.")
             return
         if RemittanceDialog(current_user=self.current_user, remittance=remittance, parent=self).exec_() == QDialog.Accepted:
             self.refresh()
@@ -325,8 +368,52 @@ class RemittancesPage(QWidget):
             QMessageBox.information(self, "Remitos", "Seleccione un remito.")
             return
         try:
-            RemittanceService(self.current_user).issue(remittance)
+            emitted = RemittanceService(self.current_user).issue(remittance)
         except Exception as exc:
             QMessageBox.warning(self, "Emitir remito", str(exc))
             return
         self.refresh()
+        QMessageBox.information(
+            self,
+            "Remito emitido",
+            f"{emitted.remittance_number} quedó emitido y ya no puede editarse.",
+        )
+
+    def _print_selected(self) -> None:
+        remittance = self._selected()
+        if remittance is None:
+            QMessageBox.information(self, "Remitos", "Seleccione un remito.")
+            return
+        physical = (
+            f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+            if remittance.physical_point_of_sale and remittance.physical_number
+            else remittance.remittance_number
+        )
+        output = self.output_dir / f"remito_{physical.replace('-', '_')}.pdf"
+        try:
+            pdf_path = RemittancePrintService(current_user=self.current_user).export_preprinted(
+                remittance,
+                output,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Imprimir remito", str(exc))
+            return
+        self._open_pdf(pdf_path)
+
+    def _print_calibration(self) -> None:
+        output = self.output_dir / "calibracion_remito_preimpreso.pdf"
+        try:
+            pdf_path = RemittancePrintService(current_user=self.current_user).export_calibration(output)
+        except Exception as exc:
+            QMessageBox.warning(self, "Calibración de remito", str(exc))
+            return
+        self._open_pdf(pdf_path)
+
+    @staticmethod
+    def _open_pdf(path: Path) -> None:
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+            QMessageBox.information(
+                None,
+                "Remitos",
+                f"El PDF se generó correctamente en:\n{path}",
+            )
