@@ -89,7 +89,7 @@ class FormFeedback(QLabel):
         self.setMaximumWidth(min(420, available_width))
         self.adjustSize()
         x = max(16, host.width() - self.width() - 24)
-        self.move(x, 24)
+        self.move(x, 0)
         self.raise_()
 
     def show_message(
