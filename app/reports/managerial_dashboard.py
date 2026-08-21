@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable
@@ -8,7 +9,14 @@ from peewee import fn
 
 from app.config.database import database_proxy
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 from app.models.masters import Client, Product
 
 
@@ -85,13 +93,10 @@ class ManagerialSnapshot:
 class ManagerialDashboardService:
     """Central source of truth for the first managerial dashboard.
 
-    The V1 policy intentionally considers only *closed* load orders as effective
-    dispatches.  The policy is injectable because FEMAG still has to validate
-    whether an issued order should already count as a dispatch.
-
-    Returns are not silently deducted in V1.  They remain auditable in their own
-    operational records and will be incorporated once the business rule from the
-    functional document is confirmed.
+    V1 considers only closed load orders as effective dispatches by default.
+    Physical pallet/loose allocations are the primary source for dispatched
+    kilos. Any quantity not physically allocated falls back to the product's
+    configured unit weight, so partial preparation is not double counted.
     """
 
     def __init__(
@@ -138,18 +143,8 @@ class ManagerialDashboardService:
             .where(order_filter)
             .scalar()
         )
-        kilos = (
-            LoadOrderProduct.select(
-                fn.COALESCE(fn.SUM(LoadOrderProduct.quantity * Product.peso_unitario_kg), 0)
-            )
-            .join(LoadOrder)
-            .switch(LoadOrderProduct)
-            .join(Product)
-            .where(order_filter)
-            .scalar()
-        )
         valued_dispatches = round(float(total or 0), 2)
-        tonnes = round(float(kilos or 0) / 1000.0, 3)
+        tonnes = round(self._dispatch_kilos(period) / 1000.0, 3)
         average_ticket = round(valued_dispatches / order_count, 2) if order_count else 0.0
         return {
             "valued_dispatches": valued_dispatches,
@@ -157,6 +152,101 @@ class ManagerialDashboardService:
             "orders": float(order_count),
             "average_ticket": average_ticket,
         }
+
+    def _dispatch_line_rows(self, period: ReportPeriod) -> list[dict]:
+        if database_proxy.obj is None:
+            return []
+        return list(
+            LoadOrderProduct.select(
+                LoadOrderProduct.order.alias("order_id"),
+                LoadOrderProduct.destination.alias("destination_id"),
+                LoadOrderProduct.product.alias("product_id"),
+                LoadOrderProduct.quantity.alias("quantity"),
+                LoadOrderProduct.total.alias("total"),
+                Product.name.alias("product_name"),
+                Product.peso_unitario_kg.alias("fallback_weight"),
+                Client.id.alias("client_id"),
+                Client.name.alias("client_name"),
+            )
+            .join(LoadOrder)
+            .switch(LoadOrderProduct)
+            .join(Product)
+            .switch(LoadOrderProduct)
+            .join(LoadOrderDestination, on=(LoadOrderProduct.destination == LoadOrderDestination.id))
+            .join(Client, on=(LoadOrderDestination.client == Client.id))
+            .where(self._effective_order_filter(period))
+            .dicts()
+        )
+
+    def _physical_allocations(self, period: ReportPeriod) -> dict[tuple[int, int, int], dict[str, float]]:
+        physical: dict[tuple[int, int, int], dict[str, float]] = defaultdict(
+            lambda: {"quantity": 0.0, "kilos": 0.0}
+        )
+        order_filter = self._effective_order_filter(period)
+
+        pallet_rows = (
+            LoadOrderPalletAllocation.select(
+                LoadOrderPallet.order.alias("order_id"),
+                LoadOrderPalletAllocation.destination.alias("destination_id"),
+                LoadOrderPalletAllocation.product.alias("product_id"),
+                LoadOrderPalletAllocation.quantity.alias("quantity"),
+                LoadOrderPalletAllocation.peso_unitario_kg.alias("weight"),
+            )
+            .join(LoadOrderPallet)
+            .join(LoadOrder)
+            .where(order_filter)
+            .dicts()
+        )
+        for row in pallet_rows:
+            key = (int(row["order_id"]), int(row["destination_id"]), int(row["product_id"]))
+            quantity = float(row["quantity"] or 0)
+            weight = float(row["weight"] or 0)
+            physical[key]["quantity"] += quantity
+            physical[key]["kilos"] += quantity * weight
+
+        loose_rows = (
+            LoadOrderLooseAllocation.select(
+                LoadOrderLooseAllocation.order.alias("order_id"),
+                LoadOrderLooseAllocation.destination.alias("destination_id"),
+                LoadOrderLooseAllocation.product.alias("product_id"),
+                LoadOrderLooseAllocation.quantity.alias("quantity"),
+                LoadOrderLooseAllocation.peso_unitario_kg.alias("weight"),
+            )
+            .join(LoadOrder)
+            .where(order_filter)
+            .dicts()
+        )
+        for row in loose_rows:
+            key = (int(row["order_id"]), int(row["destination_id"]), int(row["product_id"]))
+            quantity = float(row["quantity"] or 0)
+            weight = float(row["weight"] or 0)
+            physical[key]["quantity"] += quantity
+            physical[key]["kilos"] += quantity * weight
+        return physical
+
+    def _dispatch_breakdown(self, period: ReportPeriod) -> list[dict]:
+        physical = self._physical_allocations(period)
+        rows: list[dict] = []
+        for line in self._dispatch_line_rows(period):
+            key = (int(line["order_id"]), int(line["destination_id"]), int(line["product_id"]))
+            actual = physical.get(key, {"quantity": 0.0, "kilos": 0.0})
+            line_quantity = max(float(line["quantity"] or 0), 0.0)
+            physical_quantity = min(max(float(actual["quantity"]), 0.0), line_quantity)
+            # If bad historical data allocates more than the ordered quantity,
+            # keep the physical kilos but do not add a negative fallback.
+            physical_kilos = max(float(actual["kilos"]), 0.0)
+            remaining_quantity = max(line_quantity - physical_quantity, 0.0)
+            fallback_weight = max(float(line["fallback_weight"] or 0), 0.0)
+            rows.append(
+                {
+                    **line,
+                    "kilos": physical_kilos + (remaining_quantity * fallback_weight),
+                }
+            )
+        return rows
+
+    def _dispatch_kilos(self, period: ReportPeriod) -> float:
+        return round(sum(float(row["kilos"]) for row in self._dispatch_breakdown(period)), 3)
 
     def total_receivables(self) -> float:
         if database_proxy.obj is None:
@@ -169,102 +259,84 @@ class ManagerialDashboardService:
         return round(max(float(total or 0), 0.0), 2)
 
     def overdue_receivables(self, *, as_of: date | None = None) -> float:
-        """Estimate overdue exposure assuming collections cancel the oldest debt.
+        """Estimate overdue exposure with two grouped ledger queries.
 
-        The ledger currently has no per-document payment allocation.  Therefore
-        V1 caps overdue positive documents at the client's current positive
-        balance.  This prevents a paid historic document from inflating the
-        consolidated overdue KPI while keeping the result auditable.
+        Payments are not allocated to individual documents yet. For each client,
+        overdue positive documents are therefore capped by the client's current
+        positive balance, preserving the existing conservative V1 rule without
+        issuing N+1 queries.
         """
         if database_proxy.obj is None:
             return 0.0
         reference_date = as_of or date.today()
-        total_overdue = 0.0
-        for client in Client.select():
-            balance = (
-                ClientAccountMovement.select(fn.COALESCE(fn.SUM(ClientAccountMovement.total_amount), 0))
-                .where(
-                    ClientAccountMovement.client == client,
-                    ClientAccountMovement.currency == self.currency,
-                )
-                .scalar()
+        balance_rows = (
+            ClientAccountMovement.select(
+                ClientAccountMovement.client.alias("client_id"),
+                fn.COALESCE(fn.SUM(ClientAccountMovement.total_amount), 0).alias("balance"),
             )
-            positive_balance = max(float(balance or 0), 0.0)
-            if positive_balance <= 0:
-                continue
-            overdue_documents = (
-                ClientAccountMovement.select(fn.COALESCE(fn.SUM(ClientAccountMovement.total_amount), 0))
-                .where(
-                    ClientAccountMovement.client == client,
-                    ClientAccountMovement.currency == self.currency,
-                    ClientAccountMovement.due_date.is_null(False),
-                    ClientAccountMovement.due_date < reference_date,
-                    ClientAccountMovement.total_amount > 0,
-                )
-                .scalar()
-            )
-            total_overdue += min(positive_balance, max(float(overdue_documents or 0), 0.0))
-        return round(total_overdue, 2)
-
-    def top_clients(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
-        if database_proxy.obj is None:
-            return []
-        rows = (
-            LoadOrderProduct.select(
-                Client.id.alias("client_id"),
-                Client.name.alias("client_name"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.total), 0).alias("total"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.quantity * Product.peso_unitario_kg), 0).alias("kilos"),
-            )
-            .join(LoadOrderDestination, on=(LoadOrderProduct.destination == LoadOrderDestination.id))
-            .join(Client, on=(LoadOrderDestination.client == Client.id))
-            .switch(LoadOrderProduct)
-            .join(Product)
-            .switch(LoadOrderProduct)
-            .join(LoadOrder)
-            .where(self._effective_order_filter(period))
-            .group_by(Client.id, Client.name)
-            .order_by(fn.SUM(LoadOrderProduct.total).desc())
-            .limit(limit)
+            .where(ClientAccountMovement.currency == self.currency)
+            .group_by(ClientAccountMovement.client)
             .dicts()
         )
+        overdue_rows = (
+            ClientAccountMovement.select(
+                ClientAccountMovement.client.alias("client_id"),
+                fn.COALESCE(fn.SUM(ClientAccountMovement.total_amount), 0).alias("overdue"),
+            )
+            .where(
+                ClientAccountMovement.currency == self.currency,
+                ClientAccountMovement.due_date.is_null(False),
+                ClientAccountMovement.due_date < reference_date,
+                ClientAccountMovement.total_amount > 0,
+            )
+            .group_by(ClientAccountMovement.client)
+            .dicts()
+        )
+        balances = {int(row["client_id"]): max(float(row["balance"] or 0), 0.0) for row in balance_rows}
+        overdue = {int(row["client_id"]): max(float(row["overdue"] or 0), 0.0) for row in overdue_rows}
+        total = sum(min(balance, overdue.get(client_id, 0.0)) for client_id, balance in balances.items())
+        return round(total, 2)
+
+    def top_clients(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
+        aggregated: dict[int, dict] = {}
+        for row in self._dispatch_breakdown(period):
+            client_id = int(row["client_id"])
+            target = aggregated.setdefault(
+                client_id,
+                {"client_id": client_id, "name": row["client_name"], "total": 0.0, "kilos": 0.0},
+            )
+            target["total"] += float(row["total"] or 0)
+            target["kilos"] += float(row["kilos"] or 0)
+        ordered = sorted(aggregated.values(), key=lambda row: row["total"], reverse=True)[:limit]
         return [
             {
                 "client_id": row["client_id"],
-                "name": row["client_name"],
-                "total": round(float(row["total"] or 0), 2),
-                "tonnes": round(float(row["kilos"] or 0) / 1000.0, 3),
+                "name": row["name"],
+                "total": round(row["total"], 2),
+                "tonnes": round(row["kilos"] / 1000.0, 3),
             }
-            for row in rows
+            for row in ordered
         ]
 
     def top_products(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
-        if database_proxy.obj is None:
-            return []
-        rows = (
-            LoadOrderProduct.select(
-                Product.id.alias("product_id"),
-                Product.name.alias("product_name"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.total), 0).alias("total"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.quantity * Product.peso_unitario_kg), 0).alias("kilos"),
+        aggregated: dict[int, dict] = {}
+        for row in self._dispatch_breakdown(period):
+            product_id = int(row["product_id"])
+            target = aggregated.setdefault(
+                product_id,
+                {"product_id": product_id, "name": row["product_name"], "total": 0.0, "kilos": 0.0},
             )
-            .join(Product)
-            .switch(LoadOrderProduct)
-            .join(LoadOrder)
-            .where(self._effective_order_filter(period))
-            .group_by(Product.id, Product.name)
-            .order_by(fn.SUM(LoadOrderProduct.quantity * Product.peso_unitario_kg).desc())
-            .limit(limit)
-            .dicts()
-        )
+            target["total"] += float(row["total"] or 0)
+            target["kilos"] += float(row["kilos"] or 0)
+        ordered = sorted(aggregated.values(), key=lambda row: row["kilos"], reverse=True)[:limit]
         return [
             {
                 "product_id": row["product_id"],
-                "name": row["product_name"],
-                "total": round(float(row["total"] or 0), 2),
-                "tonnes": round(float(row["kilos"] or 0) / 1000.0, 3),
+                "name": row["name"],
+                "total": round(row["total"], 2),
+                "tonnes": round(row["kilos"] / 1000.0, 3),
             }
-            for row in rows
+            for row in ordered
         ]
 
     def order_status_distribution(self, period: ReportPeriod) -> list[dict]:
