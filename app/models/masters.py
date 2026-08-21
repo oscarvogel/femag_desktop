@@ -48,6 +48,11 @@ def product_is_loadable(product: "Product") -> bool:
     return product.product_kind == PRODUCT_KIND_PRODUCT
 
 
+def product_display_label(product: "Product") -> str:
+    codigo = (product.codigo or "").strip()
+    return f"{codigo} - {product.name}" if codigo else product.name
+
+
 class TipoIVA(BaseModel):
     nombre = CharField(unique=True)
     porcentaje = FloatField()
@@ -101,6 +106,8 @@ class ClientAddress(BaseModel):
 
 
 class Product(BaseModel):
+    # Nullable only for compatibility with legacy/imported rows. Manual CRUD requires it.
+    codigo = CharField(null=True)
     name = CharField(unique=True)
     unit = CharField()
     peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
