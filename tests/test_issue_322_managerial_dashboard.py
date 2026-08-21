@@ -1,9 +1,17 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 
@@ -140,6 +148,41 @@ def test_dashboard_counts_only_closed_orders_by_default(db):
     assert metrics["valued_dispatches"] == 100000
     assert metrics["tonnes"] == 1.0
     assert metrics["average_ticket"] == 100000
+
+
+def test_dashboard_tonnes_prioritize_physical_allocations_and_fallback_only_remainder(db):
+    client = _client("Cliente Fisico", "30700000328")
+    product = Product.create(name="Producto Fisico", unit="bolsa", peso_unitario_kg=25)
+    order = _closed_order(
+        number=32228,
+        order_date=date(2026, 8, 18),
+        client=client,
+        product=product,
+        quantity=100,
+        total=250000,
+    )
+    destination = order.destinations.get()
+    pallet = LoadOrderPallet.create(order=order, sequence=1)
+    LoadOrderPalletAllocation.create(
+        pallet=pallet,
+        destination=destination,
+        product=product,
+        quantity=Decimal("40"),
+        peso_unitario_kg=Decimal("24"),
+    )
+    LoadOrderLooseAllocation.create(
+        order=order,
+        destination=destination,
+        product=product,
+        quantity=Decimal("10"),
+        peso_unitario_kg=Decimal("26"),
+    )
+
+    period = ReportPeriod(date(2026, 8, 1), date(2026, 8, 31))
+    metrics = ManagerialDashboardService()._period_metrics(period)
+
+    # 40*24 + 10*26 physical + remaining 50*25 fallback = 2,470 kg.
+    assert metrics["tonnes"] == 2.47
 
 
 def test_dashboard_effective_status_policy_is_injectable(db):
