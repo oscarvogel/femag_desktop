@@ -27,12 +27,12 @@ def test_parentless_feedback_is_attached_to_active_window_as_toast():
     assert feedback.isWindow() is False
     assert feedback.isVisible() is True
     assert feedback.message == "Cliente actualizado."
-    assert feedback._dismiss_timer.isActive() is True
+    assert feedback._dismiss_generation > 0
 
     host.close()
 
 
-def test_layout_owned_feedback_is_detached_from_layout_and_shown_as_toast():
+def test_layout_owned_feedback_floats_inside_its_original_container():
     from PyQt5.QtWidgets import QApplication, QVBoxLayout, QWidget
 
     from app.ui.form_feedback import FormFeedback
@@ -54,16 +54,20 @@ def test_layout_owned_feedback_is_detached_from_layout_and_shown_as_toast():
     feedback.show_info("Seleccione un cliente.")
     app.processEvents()
 
-    assert feedback.parentWidget() is host
+    # The toast must not be reparented while live: doing so invalidates QObject
+    # children in some PyQt/offscreen environments. It is detached only from
+    # geometry management and floats inside the form that created it.
+    assert feedback.parentWidget() is container
+    assert container_layout.indexOf(feedback) == -1
     assert feedback.is_floating_toast is True
     assert feedback.isWindow() is False
     assert feedback.isVisible() is True
-    assert feedback._dismiss_timer.isActive() is True
+    assert feedback._dismiss_generation > 0
 
     host.close()
 
 
-def test_feedback_inside_dialog_uses_dialog_as_toast_host():
+def test_feedback_inside_dialog_stays_owned_by_its_form_container():
     from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout, QWidget
 
     from app.ui.form_feedback import FormFeedback
@@ -83,9 +87,10 @@ def test_feedback_inside_dialog_uses_dialog_as_toast_host():
     feedback.show_warning("Complete los datos obligatorios.")
     app.processEvents()
 
-    assert feedback.parentWidget() is dialog
+    assert feedback.parentWidget() is form_container
+    assert form_layout.indexOf(feedback) == -1
     assert feedback.is_floating_toast is True
     assert feedback.isWindow() is False
-    assert feedback._dismiss_timer.isActive() is True
+    assert feedback._dismiss_generation > 0
 
     dialog.close()

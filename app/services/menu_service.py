@@ -5,9 +5,11 @@ from app.services.permission_service import MENU
 
 
 PLACEHOLDER_MESSAGE = "Funcionalidad prevista para una próxima entrega."
+_MANAGERIAL_DASHBOARD_MENU_ENABLED = False
 
 REAL_MODULES = {
     "Dashboard": "dashboard",
+    "Dashboard Gerencial": "managerial_dashboard",
     "Pendientes": "pending",
     "Órdenes de carga": "load_orders",
     "Cuenta corriente": "customer_ledger",
@@ -32,6 +34,15 @@ REAL_MODULES = {
 }
 
 
+def set_managerial_dashboard_menu_enabled(enabled: bool = True) -> None:
+    global _MANAGERIAL_DASHBOARD_MENU_ENABLED
+    _MANAGERIAL_DASHBOARD_MENU_ENABLED = bool(enabled)
+
+
+def managerial_dashboard_menu_enabled() -> bool:
+    return _MANAGERIAL_DASHBOARD_MENU_ENABLED
+
+
 @dataclass(frozen=True)
 class MenuNode:
     title: str
@@ -46,7 +57,11 @@ class MenuService:
     def get_menu_tree_for_user(self, user: User) -> list[MenuNode]:
         sections: list[MenuNode] = []
         for section, titles in MENU.items():
-            children = [self._build_child(user, section, title) for title in titles if self._can_view(user, section, title)]
+            children = [
+                self._build_child(user, section, title)
+                for title in titles
+                if self._can_view(user, section, title)
+            ]
             if children:
                 sections.append(MenuNode(title=section, children=children))
         return sections
@@ -63,6 +78,8 @@ class MenuService:
         )
 
     def _can_view(self, user: User, section: str, title: str) -> bool:
+        if title == "Dashboard Gerencial" and not managerial_dashboard_menu_enabled():
+            return False
         return (
             Permission.select()
             .join(MenuItem)

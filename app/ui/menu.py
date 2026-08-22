@@ -59,11 +59,18 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
 
     principal_items = [
         approved_item("Dashboard"),
-        approved_item("Órdenes de carga"),
-        approved_item("Remitos"),
-        approved_item("F150", "Generar F150"),
-        approved_item("Clientes"),
     ]
+    managerial_dashboard = approved_item("Dashboard Gerencial")
+    if managerial_dashboard.action_key is not None:
+        principal_items.append(managerial_dashboard)
+    principal_items.extend(
+        [
+            approved_item("Órdenes de carga"),
+            approved_item("Remitos"),
+            approved_item("F150", "Generar F150"),
+            approved_item("Clientes"),
+        ]
+    )
     if transport_children:
         principal_items.append(MenuItemView(title="Transporte", children=transport_children))
     principal_items.extend(
