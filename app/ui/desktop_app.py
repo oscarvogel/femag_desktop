@@ -52,6 +52,7 @@ from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.models.payments import ClientPayment
+from app.models.remittances import RemittanceSeries
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_SHARED,
@@ -374,6 +375,12 @@ class FemagDesktopWindow(QMainWindow):
         for button in (notifications, help_button, settings, change_password, logout):
             button.setObjectName("topbarIconButton")
         change_password.clicked.connect(self._open_change_password)
+        can_configure = PermissionService.is_administrator(self.user)
+        settings.setEnabled(can_configure)
+        if can_configure:
+            settings.clicked.connect(lambda: self._navigate_to_route("remittance_series"))
+        else:
+            settings.setToolTip("Sólo un administrador puede configurar la numeración.")
         logout.clicked.connect(self._logout)
         user = QLabel(f"{self.shell.username}\n{self.shell.profile}")
         user.setObjectName("userBlock")
@@ -3215,6 +3222,19 @@ def _ensure_demo_user(*, demo_mode: bool = False):
 
 
 def _seed_demo_masters():
+    RemittanceSeries.get_or_create(
+        name="Talonario demo",
+        defaults={
+            "document_type": "Remito R",
+            "point_of_sale": "0001",
+            "next_number": 10678,
+            "end_number": 10999,
+            "active": True,
+            "is_default": True,
+            "created_by": "demo",
+            "updated_by": "demo",
+        },
+    )
     if _demo_data_exists():
         return
     carrier = Carrier.get_or_create(

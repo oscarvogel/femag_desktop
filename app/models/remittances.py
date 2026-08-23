@@ -1,10 +1,24 @@
 from datetime import date
 
-from peewee import CharField, DateField, DecimalField, ForeignKeyField, TextField
+from peewee import BooleanField, CharField, DateField, DecimalField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+
+
+class RemittanceSeries(BaseModel):
+    """Talonario físico utilizado para numerar remitos preimpresos."""
+
+    name = CharField(unique=True)
+    document_type = CharField(default="Remito R")
+    point_of_sale = CharField()
+    next_number = IntegerField(default=1)
+    end_number = IntegerField(null=True)
+    active = BooleanField(default=True)
+    is_default = BooleanField(default=False)
+    created_by = CharField(null=True)
+    updated_by = CharField(null=True)
 
 
 class Remittance(BaseModel):
@@ -27,6 +41,7 @@ class Remittance(BaseModel):
     client = ForeignKeyField(Client, backref="remittances")
     delivery_address = ForeignKeyField(ClientAddress, backref="remittances")
     source_order = ForeignKeyField(LoadOrder, backref="remittances", null=True, on_delete="SET NULL")
+    series = ForeignKeyField(RemittanceSeries, backref="remittances", null=True, on_delete="SET NULL")
     carrier = ForeignKeyField(Carrier, backref="remittances", null=True, on_delete="SET NULL")
     truck = ForeignKeyField(Truck, backref="remittances", null=True, on_delete="SET NULL")
     driver = ForeignKeyField(Driver, backref="remittances", null=True, on_delete="SET NULL")

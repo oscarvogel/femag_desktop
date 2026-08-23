@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt5.QtCore import QDate, QUrl, Qt
 from PyQt5.QtGui import QDesktopServices, QDoubleValidator
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -20,6 +21,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -28,9 +30,9 @@ from PyQt5.QtWidgets import (
 
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
-from app.models.remittances import Remittance
+from app.models.remittances import Remittance, RemittanceSeries
 from app.services.remittance_print_service import RemittancePrintService
-from app.services.remittance_service import RemittanceService
+from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 
 
 REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
@@ -60,20 +62,21 @@ class RemittanceDialog(QDialog):
         self.truck_combo.setObjectName("remittanceTruckInput")
         self.driver_combo = QComboBox()
         self.driver_combo.setObjectName("remittanceDriverInput")
-        self.point_input = QLineEdit()
-        self.point_input.setPlaceholderText("0001")
-        self.number_input = QLineEdit()
-        self.number_input.setPlaceholderText("00010678")
+        self.series_combo = QComboBox()
+        self.series_combo.setObjectName("remittanceSeriesInput")
+        self.number_preview = QLineEdit()
+        self.number_preview.setObjectName("remittanceNumberPreview")
+        self.number_preview.setReadOnly(True)
         self.reference_input = QLineEdit()
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("remittanceObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones opcionales")
         form.addWidget(QLabel("Fecha"), 0, 0)
         form.addWidget(self.date_input, 0, 1)
-        form.addWidget(QLabel("Punto de venta"), 0, 2)
-        form.addWidget(self.point_input, 0, 3)
-        form.addWidget(QLabel("N° formulario"), 0, 4)
-        form.addWidget(self.number_input, 0, 5)
+        form.addWidget(QLabel("Talonario"), 0, 2)
+        form.addWidget(self.series_combo, 0, 3)
+        form.addWidget(QLabel("Próximo remito"), 0, 4)
+        form.addWidget(self.number_preview, 0, 5)
         form.addWidget(QLabel("Cliente"), 1, 0)
         form.addWidget(self.client_combo, 1, 1, 1, 2)
         form.addWidget(QLabel("Domicilio"), 1, 3)
@@ -120,6 +123,7 @@ class RemittanceDialog(QDialog):
         self.client_combo.currentIndexChanged.connect(self._refresh_addresses)
         self._load_clients()
         self._load_transport()
+        self._load_series()
         if self.remittance is not None:
             self._load_remittance()
         elif self.items.rowCount() == 0:
@@ -154,6 +158,22 @@ class RemittanceDialog(QDialog):
             self.truck_combo.addItem(truck.domain, truck.id)
         for driver in Driver.select().where(Driver.active == True).order_by(Driver.name):  # noqa: E712
             self.driver_combo.addItem(driver.name, driver.id)
+
+    def _load_series(self) -> None:
+        self.series_combo.clear()
+        for series in (
+            RemittanceSeries.select()
+            .where(RemittanceSeries.active == True)  # noqa: E712
+            .order_by(RemittanceSeries.is_default.desc(), RemittanceSeries.name)
+        ):
+            self.series_combo.addItem(series.name, series.id)
+        self.series_combo.currentIndexChanged.connect(self._refresh_number_preview)
+        self._refresh_number_preview()
+
+    def _refresh_number_preview(self) -> None:
+        series_id = self.series_combo.currentData()
+        series = RemittanceSeries.get_by_id(series_id) if series_id else None
+        self.number_preview.setText(RemittanceSeriesService.preview(series))
 
     @staticmethod
     def _selected_model(combo: QComboBox, model):
@@ -192,8 +212,14 @@ class RemittanceDialog(QDialog):
         if index >= 0:
             self.address_combo.setCurrentIndex(index)
         self.date_input.setDate(QDate(r.date.year, r.date.month, r.date.day))
-        self.point_input.setText(r.physical_point_of_sale or "")
-        self.number_input.setText(r.physical_number or "")
+        if r.series_id:
+            index = self.series_combo.findData(r.series_id)
+            if index >= 0:
+                self.series_combo.setCurrentIndex(index)
+        if r.physical_point_of_sale and r.physical_number:
+            self.number_preview.setText(f"{r.physical_point_of_sale}-{r.physical_number}")
+        else:
+            self._refresh_number_preview()
         self.reference_input.setText(r.document_reference or "")
         self.observations_input.setText(r.observations or "")
         for combo, record_id in (
@@ -211,8 +237,7 @@ class RemittanceDialog(QDialog):
         self.client_combo.setEnabled(editable)
         self.address_combo.setEnabled(editable)
         self.date_input.setEnabled(editable)
-        self.point_input.setEnabled(editable)
-        self.number_input.setEnabled(editable)
+        self.series_combo.setEnabled(editable)
         self.reference_input.setEnabled(editable)
         self.observations_input.setEnabled(editable)
         self.carrier_combo.setEnabled(editable)
@@ -253,6 +278,7 @@ class RemittanceDialog(QDialog):
             carrier = self._selected_model(self.carrier_combo, Carrier)
             truck = self._selected_model(self.truck_combo, Truck)
             driver = self._selected_model(self.driver_combo, Driver)
+            series = self._selected_model(self.series_combo, RemittanceSeries)
             service = RemittanceService(self.current_user)
             if self.remittance is None:
                 self.remittance = service.create_manual(
@@ -260,13 +286,12 @@ class RemittanceDialog(QDialog):
                     delivery_address=address,
                     items=items,
                     remittance_date=date_value,
-                    physical_point_of_sale=self.point_input.text(),
-                    physical_number=self.number_input.text(),
                     document_reference=self.reference_input.text().strip() or None,
                     observations=self.observations_input.text().strip() or None,
                     carrier=carrier,
                     truck=truck,
                     driver=driver,
+                    series=series,
                 )
             else:
                 self.remittance = service.update_draft(
@@ -275,13 +300,12 @@ class RemittanceDialog(QDialog):
                     delivery_address=address,
                     items=items,
                     date=date_value,
-                    physical_point_of_sale=self.point_input.text(),
-                    physical_number=self.number_input.text(),
                     document_reference=self.reference_input.text().strip() or None,
                     observations=self.observations_input.text().strip() or None,
                     carrier=carrier,
                     truck=truck,
                     driver=driver,
+                    series=series,
                 )
         except Exception as exc:
             QMessageBox.warning(self, "Remito", str(exc))
@@ -334,6 +358,168 @@ class OrderDestinationDialog(QDialog):
         destination_id = self.destination_combo.currentData()
         destination = order.destinations.where(order.destinations.model.id == destination_id).first()
         return order, destination
+
+
+class RemittanceSeriesDialog(QDialog):
+    def __init__(self, *, current_user: str, series: RemittanceSeries | None = None, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.series = series
+        self.setWindowTitle("Talonario de remitos")
+        self.resize(520, 320)
+        form = QFormLayout(self)
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("remittanceSeriesNameInput")
+        self.type_input = QLineEdit("Remito R")
+        self.type_input.setReadOnly(True)
+        self.point_input = QLineEdit()
+        self.point_input.setObjectName("remittanceSeriesPointInput")
+        self.point_input.setPlaceholderText("0001")
+        self.next_input = QSpinBox()
+        self.next_input.setObjectName("remittanceSeriesNextInput")
+        self.next_input.setRange(1, 99999999)
+        self.end_input = QSpinBox()
+        self.end_input.setObjectName("remittanceSeriesEndInput")
+        self.end_input.setRange(0, 99999999)
+        self.end_input.setSpecialValueText("Sin límite")
+        self.active_input = QCheckBox("Talonario activo")
+        self.active_input.setChecked(True)
+        self.default_input = QCheckBox("Usar de forma predeterminada")
+        self.default_input.setChecked(RemittanceSeriesService.default() is None)
+        form.addRow("Nombre", self.name_input)
+        form.addRow("Tipo de comprobante", self.type_input)
+        form.addRow("Punto de venta", self.point_input)
+        form.addRow("Próximo número", self.next_input)
+        form.addRow("Número final", self.end_input)
+        form.addRow(self.active_input)
+        form.addRow(self.default_input)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setText("Guardar")
+        buttons.button(QDialogButtonBox.Cancel).setText("Cancelar")
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        if series is not None:
+            self.name_input.setText(series.name)
+            self.point_input.setText(series.point_of_sale)
+            self.next_input.setValue(series.next_number)
+            self.end_input.setValue(series.end_number or 0)
+            self.active_input.setChecked(series.active)
+            self.default_input.setChecked(series.is_default)
+
+    def _save(self) -> None:
+        try:
+            self.series = RemittanceSeriesService(self.current_user).save(
+                series=self.series,
+                name=self.name_input.text(),
+                point_of_sale=self.point_input.text(),
+                next_number=self.next_input.value(),
+                end_number=self.end_input.value() or None,
+                active=self.active_input.isChecked(),
+                is_default=self.default_input.isChecked(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Talonario de remitos", str(exc))
+            return
+        self.accept()
+
+
+class RemittanceSeriesPage(QWidget):
+    def __init__(self, *, current_user: str, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        layout = QVBoxLayout(self)
+        title = QLabel("Talonarios y numeración de remitos")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        help_text = QLabel(
+            "El próximo número se reserva al emitir. Los borradores no consumen hojas del talonario."
+        )
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+        actions = QHBoxLayout()
+        new_button = QPushButton("+ Nuevo talonario")
+        new_button.setObjectName("newRemittanceSeriesButton")
+        edit_button = QPushButton("Editar")
+        edit_button.setObjectName("editRemittanceSeriesButton")
+        skip_button = QPushButton("Saltar hoja")
+        skip_button.setObjectName("skipRemittanceSeriesNumberButton")
+        actions.addWidget(new_button)
+        actions.addWidget(edit_button)
+        actions.addWidget(skip_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        self.table = QTableWidget(0, 7)
+        self.table.setObjectName("remittanceSeriesTable")
+        self.table.setHorizontalHeaderLabels(
+            ["Talonario", "Tipo", "Punto de venta", "Próximo", "Hasta", "Estado", "Uso"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        layout.addWidget(self.table, 1)
+        new_button.clicked.connect(self._new)
+        edit_button.clicked.connect(self._edit)
+        skip_button.clicked.connect(self._skip)
+        self.refresh()
+
+    def refresh(self) -> None:
+        rows = list(RemittanceSeries.select().order_by(RemittanceSeries.name))
+        self.table.setRowCount(len(rows))
+        for row, series in enumerate(rows):
+            values = [
+                series.name,
+                series.document_type,
+                series.point_of_sale,
+                f"{series.next_number:08d}",
+                f"{series.end_number:08d}" if series.end_number else "Sin límite",
+                "Activo" if series.active else "Inactivo",
+                "Predeterminado" if series.is_default else "Alternativo",
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.UserRole, series.id)
+                self.table.setItem(row, column, item)
+
+    def _selected(self) -> RemittanceSeries | None:
+        item = self.table.item(self.table.currentRow(), 0)
+        return RemittanceSeries.get_by_id(item.data(Qt.UserRole)) if item else None
+
+    def _new(self) -> None:
+        if RemittanceSeriesDialog(current_user=self.current_user, parent=self).exec_() == QDialog.Accepted:
+            self.refresh()
+
+    def _edit(self) -> None:
+        series = self._selected()
+        if series is None:
+            QMessageBox.information(self, "Talonarios", "Seleccione un talonario.")
+            return
+        if RemittanceSeriesDialog(
+            current_user=self.current_user,
+            series=series,
+            parent=self,
+        ).exec_() == QDialog.Accepted:
+            self.refresh()
+
+    def _skip(self) -> None:
+        series = self._selected()
+        if series is None:
+            QMessageBox.information(self, "Talonarios", "Seleccione un talonario.")
+            return
+        reason, accepted = QInputDialog.getMultiLineText(
+            self,
+            "Saltar hoja del talonario",
+            f"Motivo para no utilizar {series.point_of_sale}-{series.next_number:08d}:",
+        )
+        if not accepted:
+            return
+        try:
+            RemittanceSeriesService(self.current_user).skip_number(series, reason=reason)
+        except Exception as exc:
+            QMessageBox.warning(self, "Talonarios", str(exc))
+            return
+        self.refresh()
 
 
 class RemittancesPage(QWidget):

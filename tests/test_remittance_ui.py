@@ -49,6 +49,61 @@ def test_manual_dialog_exposes_transport_and_observations(db):
     assert buttons.button(QDialogButtonBox.Cancel).text() == "Cancelar"
 
 
+def test_manual_dialog_previews_default_series_without_consuming_number(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit
+
+    from app.models.remittances import RemittanceSeries
+    from app.services.remittance_service import RemittanceSeriesService
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    series = RemittanceSeriesService("ui_series").save(
+        name="Talonario UI",
+        point_of_sale="1",
+        next_number=10678,
+        is_default=True,
+    )
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_series")
+    app.processEvents()
+
+    selector = dialog.findChild(QComboBox, "remittanceSeriesInput")
+    preview = dialog.findChild(QLineEdit, "remittanceNumberPreview")
+    assert selector.currentData() == series.id
+    assert preview.isReadOnly()
+    assert preview.text() == "0001-00010678 (se asigna al emitir)"
+    assert RemittanceSeries.get_by_id(series.id).next_number == 10678
+
+
+def test_series_configuration_page_lists_numbering_and_actions(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.services.remittance_service import RemittanceSeriesService
+    from app.ui.remittances import RemittanceSeriesPage
+
+    RemittanceSeriesService("ui_series").save(
+        name="Talonario configuración",
+        point_of_sale="0003",
+        next_number=45,
+        end_number=100,
+        is_default=True,
+    )
+    app = QApplication.instance() or QApplication([])
+    page = RemittanceSeriesPage(current_user="ui_series")
+    app.processEvents()
+
+    for object_name in (
+        "newRemittanceSeriesButton",
+        "editRemittanceSeriesButton",
+        "skipRemittanceSeriesNumberButton",
+    ):
+        assert page.findChild(QPushButton, object_name) is not None
+    assert page.table.rowCount() == 1
+    assert page.table.item(0, 2).text() == "0003"
+    assert page.table.item(0, 3).text() == "00000045"
+
+
 def test_manual_dialog_persists_transport_and_observations(db):
     from PyQt5.QtWidgets import QApplication
 

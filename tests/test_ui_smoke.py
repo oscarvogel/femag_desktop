@@ -5,7 +5,7 @@ import sys
 def test_menu_filters_items_by_permission(db):
     from app.services.auth_service import AuthService
     from app.services.permission_service import PermissionService
-    from app.ui.menu import build_menu
+    from app.ui.menu import build_menu, build_sidebar_tree_spec
 
     PermissionService().seed_defaults()
     viewer = AuthService().create_user("consulta", "clave", "Solo consulta")
@@ -14,6 +14,9 @@ def test_menu_filters_items_by_permission(db):
 
     assert "Sistema" not in [section.title for section in menu if section.items]
     assert any(item.title == "Clientes" for section in menu for item in section.items)
+    assert "Configuración" not in [
+        item.title for section in build_sidebar_tree_spec(viewer).sections for item in section.items
+    ]
 
 
 def test_dashboard_counts_and_future_placeholder(db):
@@ -131,6 +134,21 @@ def test_sidebar_spec_exposes_legacy_dbf_import_page(db):
 
     assert import_item.placeholder is False
     assert import_item.route_key == "legacy_dbf_import"
+
+
+def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_remittance_config", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    config = next(item for item in principal.items if item.title == "Configuración")
+
+    assert config.placeholder is False
+    assert config.route_key == "remittance_series"
 
 
 def test_app_smoke_command_runs():

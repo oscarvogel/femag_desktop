@@ -73,9 +73,12 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Cuenta corriente", route_key="customer_ledger"),
             approved_item("Reportes", route_key="placeholder"),
-            approved_item("Configuración", "Parámetros", route_key="placeholder"),
         ]
     )
+    if menu_items.get("Parámetros") is not None:
+        principal_items.append(
+            approved_item("Configuración", "Parámetros", route_key="remittance_series")
+        )
 
     system_children = [
         item
