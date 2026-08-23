@@ -36,6 +36,39 @@ def test_calibration_pdf_is_generated(db, tmp_path):
     assert output.stat().st_size > 0
 
 
+def test_preview_pdf_is_generated_for_draft_and_is_audited(db, tmp_path):
+    from app.models.audit import AuditLog
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    remittance = RemittanceService(current_user="ui_preview").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+        items=[
+            {
+                "product": data["product"],
+                "quantity": 760,
+                "printed_description": "BOL FECULA 2° CALIDAD",
+            }
+        ],
+    )
+
+    output = tmp_path / "preview_no_fiscal.pdf"
+    result = RemittancePrintService(current_user="ui_preview").export_preview(remittance, output)
+
+    assert result == output
+    assert output.exists()
+    assert output.stat().st_size > 0
+    audit = AuditLog.select().where(AuditLog.record_ref == f"Remittance:{remittance.id}").order_by(AuditLog.id.desc()).first()
+    assert audit.action == "vista previa"
+    assert audit.new_value["mode"] == "preview_no_fiscal"
+
+
 def test_preprinted_pdf_only_requires_issued_remittance(db, tmp_path):
     import pytest
 
