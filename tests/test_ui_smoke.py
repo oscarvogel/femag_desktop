@@ -56,7 +56,7 @@ def test_dashboard_counts_and_future_placeholder(db):
     assert future_module_message() == "Funcionalidad prevista para una próxima entrega."
 
 
-def test_menu_marks_load_orders_as_real_module(db):
+def test_menu_marks_operational_modules_as_real(db):
     from app.services.auth_service import AuthService
     from app.services.permission_service import PermissionService
     from app.ui.menu import build_menu
@@ -81,7 +81,7 @@ def test_menu_marks_load_orders_as_real_module(db):
     )
 
     assert load_order_item.placeholder is False
-    assert remittance_item.placeholder is True
+    assert remittance_item.placeholder is False
     assert summary_item.placeholder is True
 
 
