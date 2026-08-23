@@ -69,18 +69,84 @@ class RemittancePrintService:
         remittance = Remittance.get_by_id(remittance.id)
         if remittance.status != Remittance.STATUS_ISSUED:
             raise ValueError("Solo se pueden imprimir remitos emitidos.")
+        items = self._validated_items(remittance)
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        pdf = canvas.Canvas(str(output), pagesize=A4)
+        pdf.setTitle(f"Remito {remittance.remittance_number}")
+        pdf.setFont("Helvetica", 9)
+        self._draw_variable_fields(pdf, remittance, items)
+        pdf.showPage()
+        pdf.save()
+        self._audit_export(remittance, output, mode="preimpreso")
+        return output
+
+    def export_preview(self, remittance: Remittance, output_path: str | Path) -> Path:
+        """Genera una vista esquemática no fiscal para revisar posiciones y contenido.
+
+        A diferencia de ``export_preprinted`` esta salida dibuja referencias visuales
+        mínimas para que el operador pueda verificar el layout sin consumir una hoja
+        del talonario real. No intenta recrear el formulario fiscal/preimpreso.
+        """
+        remittance = Remittance.get_by_id(remittance.id)
+        items = self._validated_items(remittance)
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        pdf = canvas.Canvas(str(output), pagesize=A4)
+        pdf.setTitle(f"Vista previa no fiscal - {remittance.remittance_number}")
+
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(15 * MM, 286 * MM, "FEMAG - VISTA PREVIA DE REMITO / NO FISCAL")
+        pdf.setFont("Helvetica", 7)
+        pdf.drawString(
+            15 * MM,
+            281 * MM,
+            "Referencia para validar datos y alineación. No reemplaza el formulario preimpreso.",
+        )
+
+        pdf.setLineWidth(0.4)
+        pdf.rect(15 * MM, 188 * MM, 180 * MM, 78 * MM)
+        pdf.rect(15 * MM, 62 * MM, 180 * MM, 120 * MM)
+        pdf.rect(15 * MM, 30 * MM, 180 * MM, 25 * MM)
+        pdf.setFont("Helvetica", 6)
+        pdf.drawString(17 * MM, 263 * MM, "CLIENTE / DESTINO")
+        pdf.drawString(17 * MM, 179 * MM, "DETALLE")
+        pdf.drawString(17 * MM, 52 * MM, "TRANSPORTE")
+
+        pdf.setFont("Helvetica", 9)
+        self._draw_variable_fields(pdf, remittance, items)
+        pdf.showPage()
+        pdf.save()
+        self._audit_export(remittance, output, mode="preview_no_fiscal")
+        return output
+
+    def export_calibration(self, output_path: str | Path) -> Path:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        pdf = canvas.Canvas(str(output), pagesize=A4)
+        pdf.setFont("Helvetica", 7)
+        for x in range(10, 201, 10):
+            pdf.line(x * MM, 10 * MM, x * MM, 287 * MM)
+            pdf.drawString((x + 1) * MM, 12 * MM, str(x))
+        for y in range(10, 288, 10):
+            pdf.line(10 * MM, y * MM, 200 * MM, y * MM)
+            pdf.drawString(12 * MM, (y + 1) * MM, str(y))
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(15 * MM, 292 * MM, "FEMAG - hoja de calibracion de remito preimpreso")
+        pdf.showPage()
+        pdf.save()
+        return output
+
+    def _validated_items(self, remittance: Remittance):
         items = list(remittance.items)
         if len(items) > self.template.max_detail_rows:
             raise ValueError(
                 f"El remito tiene {len(items)} renglones y el formulario admite "
                 f"hasta {self.template.max_detail_rows}."
             )
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        pdf = canvas.Canvas(str(output), pagesize=A4)
-        pdf.setTitle(f"Remito {remittance.remittance_number}")
-        pdf.setFont("Helvetica", 9)
+        return items
 
+    def _draw_variable_fields(self, pdf, remittance: Remittance, items) -> None:
         self._text(pdf, self.template.date_x, self.template.date_y, remittance.date.strftime("%d/%m/%Y"))
         self._text(pdf, self.template.client_x, self.template.client_y, remittance.client_name)
         self._text(pdf, self.template.address_x, self.template.address_y, remittance.delivery_address_text)
@@ -102,40 +168,21 @@ class RemittancePrintService:
         self._text(pdf, self.template.driver_x, self.template.driver_y, remittance.driver_name or "")
         self._text(pdf, self.template.driver_document_x, self.template.driver_document_y, remittance.driver_document or "")
 
-        pdf.showPage()
-        pdf.save()
+    def _audit_export(self, remittance: Remittance, output: Path, *, mode: str) -> None:
         self.audit_service.record(
             user=self.current_user,
             module="Remitos",
-            action="imprimir",
+            action="imprimir" if mode == "preimpreso" else "vista previa",
             record_ref=f"Remittance:{remittance.id}",
             new_value={
                 "remittance_number": remittance.remittance_number,
                 "physical_number": self._physical_number(remittance),
-                "mode": "preimpreso",
+                "mode": mode,
                 "output": str(output),
                 "offset_x_mm": self.template.offset_x,
                 "offset_y_mm": self.template.offset_y,
             },
         )
-        return output
-
-    def export_calibration(self, output_path: str | Path) -> Path:
-        output = Path(output_path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        pdf = canvas.Canvas(str(output), pagesize=A4)
-        pdf.setFont("Helvetica", 7)
-        for x in range(10, 201, 10):
-            pdf.line(x * MM, 10 * MM, x * MM, 287 * MM)
-            pdf.drawString((x + 1) * MM, 12 * MM, str(x))
-        for y in range(10, 288, 10):
-            pdf.line(10 * MM, y * MM, 200 * MM, y * MM)
-            pdf.drawString(12 * MM, (y + 1) * MM, str(y))
-        pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(15 * MM, 292 * MM, "FEMAG - hoja de calibracion de remito preimpreso")
-        pdf.showPage()
-        pdf.save()
-        return output
 
     def _text(self, pdf, x_mm: float, y_mm_from_bottom: float, value: str) -> None:
         x = (x_mm + self.template.offset_x) * MM
