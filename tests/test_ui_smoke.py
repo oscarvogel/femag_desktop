@@ -166,7 +166,8 @@ def test_sidebar_spec_exposes_legacy_dbf_import_page(db):
     user = AuthService().create_user("admin_import_menu", "clave", "Administrador")
 
     principal = build_sidebar_tree_spec(user).sections[0]
-    import_item = next(item for item in principal.items if item.title == "Importación DBF")
+    system = next(item for item in principal.items if item.title == "Sistema")
+    import_item = next(item for item in system.children if item.title == "Importación DBF")
 
     assert import_item.placeholder is False
     assert import_item.route_key == "legacy_dbf_import"
@@ -181,10 +182,25 @@ def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
     user = AuthService().create_user("admin_remittance_config", "clave", "Administrador")
 
     principal = build_sidebar_tree_spec(user).sections[0]
-    config = next(item for item in principal.items if item.title == "Configuración")
+    system = next(item for item in principal.items if item.title == "Sistema")
+    config = next(item for item in system.children if item.title == "Configuración")
 
     assert config.placeholder is False
     assert config.route_key == "remittance_series"
+
+
+def test_sidebar_places_customer_ledger_below_reports(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_sidebar_order", "clave", "Administrador")
+
+    titles = [item.title for item in build_sidebar_tree_spec(user).sections[0].items]
+
+    assert titles.index("Cuenta corriente") == titles.index("Reportes") + 1
+    assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
 
 
 def test_app_smoke_command_runs():

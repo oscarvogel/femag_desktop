@@ -79,19 +79,16 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
     principal_items.extend(
         [
-            approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
-            approved_item("Cuenta corriente", route_key="customer_ledger"),
             approved_item("Reportes", route_key="placeholder"),
+            approved_item("Cuenta corriente", route_key="customer_ledger"),
         ]
     )
-    if menu_items.get("Parámetros") is not None:
-        principal_items.append(
-            approved_item("Configuración", "Parámetros", route_key="remittance_series")
-        )
 
     system_children = [
         item
         for item in (
+            approved_item("Configuración", "Parámetros", route_key="remittance_series"),
+            approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Usuarios", route_key="user_management"),
             approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
         )
