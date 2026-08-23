@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from typing import Literal
 
 from PyQt5.QtCore import QTimer, Qt
@@ -20,10 +21,11 @@ _FEEDBACK_STYLES: dict[FeedbackKind, tuple[str, str, str, str, str]] = {
 class FormFeedback(QLabel):
     """Semantic non-modal toast feedback for FEMAG forms.
 
-    Every ``FormFeedback`` is rendered as a lightweight toast attached to the
-    top-level window that owns the form. This keeps success, information,
-    warning and non-blocking error messages out of the layout and avoids
-    independent windows that the operator must close manually.
+    The label remains owned by the page/dialog that created it. On first use it
+    is detached from that parent's layout and positioned as a floating child.
+    Keeping the same QObject parent is important: reparenting a live PyQt widget
+    can invalidate C++ children and produce hard interpreter aborts in offscreen
+    environments as well as intermittent workstation crashes.
     """
 
     TOAST_TIMEOUT_MS = 3000
@@ -37,9 +39,8 @@ class FormFeedback(QLabel):
         self._message = ""
         self._kind: FeedbackKind = "info"
         self._floating_toast = False
-        self._dismiss_timer = QTimer(self)
-        self._dismiss_timer.setSingleShot(True)
-        self._dismiss_timer.timeout.connect(self.clear_message)
+        self._dismiss_generation = 0
+        self._toast_host: QWidget | None = None
         self.hide()
 
     @property
@@ -57,9 +58,7 @@ class FormFeedback(QLabel):
     def _resolve_host(self) -> QWidget | None:
         parent = self.parentWidget()
         if parent is not None:
-            host = parent.window()
-            if host is not self:
-                return host
+            return parent
 
         app = QApplication.instance()
         if app is None:
@@ -70,26 +69,66 @@ class FormFeedback(QLabel):
         return host
 
     def _ensure_toast_parent(self) -> None:
+        if self._floating_toast:
+            return
         host = self._resolve_host()
         if host is None:
             return
-        if self.parentWidget() is not host:
+
+        # In normal FEMAG forms ``layout.addWidget`` has already assigned the
+        # feedback label to its page/dialog. Detach it from geometry management
+        # without changing the QObject parent so it can float safely.
+        if self.parentWidget() is None:
             self.setParent(host)
+        layout = host.layout()
+        if layout is not None:
+            layout.removeWidget(self)
+
+        self._toast_host = host
         self.setWindowFlags(Qt.Widget)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._floating_toast = True
 
+    def _schedule_dismiss(self) -> None:
+        """Dismiss later without retaining or calling a deleted Qt wrapper."""
+        self._dismiss_generation += 1
+        generation = self._dismiss_generation
+        feedback_ref = weakref.ref(self)
+
+        def dismiss_if_alive() -> None:
+            feedback = feedback_ref()
+            if feedback is None:
+                return
+            try:
+                feedback._clear_if_generation(generation)
+            except RuntimeError:
+                # The Python wrapper can briefly outlive its C++ QLabel after a
+                # page/dialog is destroyed. Exceptions escaping a Qt timer slot
+                # can abort the interpreter, so a stale toast must be a no-op.
+                return
+
+        QTimer.singleShot(self.TOAST_TIMEOUT_MS, dismiss_if_alive)
+
+    def _clear_if_generation(self, generation: int) -> None:
+        if generation != self._dismiss_generation:
+            return
+        try:
+            self.clear_message()
+        except RuntimeError:
+            # C++ widget already destroyed; nothing remains to hide.
+            return
+
     def _position_toast(self) -> None:
         if not self._floating_toast:
             return
-        host = self.parentWidget()
+        host = self._toast_host or self.parentWidget()
         if host is None:
             return
-        available_width = max(host.width() - 48, 220)
+        available_width = max(host.width() - 32, 220)
         self.setMaximumWidth(min(420, available_width))
         self.adjustSize()
-        x = max(16, host.width() - self.width() - 24)
-        self.move(x, 24)
+        x = max(8, host.width() - self.width() - 16)
+        self.move(x, 0)
         self.raise_()
 
     def show_message(
@@ -106,8 +145,8 @@ class FormFeedback(QLabel):
         if kind not in _FEEDBACK_STYLES:
             raise ValueError(f"Tipo de feedback no soportado: {kind}")
 
-        self._dismiss_timer.stop()
         self._ensure_toast_parent()
+        self._dismiss_generation += 1
 
         title, icon, background, border, foreground = _FEEDBACK_STYLES[kind]
         self._message = clean_message
@@ -130,7 +169,7 @@ class FormFeedback(QLabel):
         self.show()
         self._position_toast()
         if self._floating_toast:
-            self._dismiss_timer.start(self.TOAST_TIMEOUT_MS)
+            self._schedule_dismiss()
         if focus_widget is not None:
             focus_widget.setFocus()
 
@@ -147,7 +186,7 @@ class FormFeedback(QLabel):
         self.show_message(message, "error", focus_widget=focus_widget)
 
     def clear_message(self) -> None:
-        self._dismiss_timer.stop()
+        self._dismiss_generation += 1
         self._message = ""
         self.setAccessibleDescription("")
         super().clear()
