@@ -55,15 +55,26 @@ def _admin_window(username: str):
 
 def _run_modal(app, trigger, fill_dialog):
     from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QDialog
+
+    callback_errors = []
 
     def fill_active_dialog():
         dialog = app.activeModalWidget()
-        assert dialog is not None
-        fill_dialog(dialog)
+        try:
+            assert dialog is not None
+            fill_dialog(dialog)
+            assert dialog.result() == QDialog.Accepted
+        except BaseException as exc:
+            callback_errors.append(exc)
+            if dialog is not None:
+                dialog.reject()
 
     QTimer.singleShot(0, fill_active_dialog)
     trigger()
     app.processEvents()
+    if callback_errors:
+        raise callback_errors[0]
 
 
 def test_minimal_master_dialogs_create_load_order_ready_data(db):
@@ -725,14 +736,17 @@ def test_products_abm_page_creates_edits_and_refreshes_grid(db):
     assert table is not None
 
     def fill_new(dialog):
+        dialog.findChild(QLineEdit, "productCodeInput").setText("P-DEMO-UI")
         dialog.findChild(QLineEdit, "productNameInput").setText("Producto Demo UI")
         dialog.findChild(QLineEdit, "productUnitInput").setText("bolsas")
         dialog.findChild(QPushButton, "saveProductButton").click()
 
     _run_modal(app, lambda: window.findChild(QPushButton, "newProductButton").click(), fill_new)
     product = Product.get(Product.name == "Producto Demo UI")
+    assert product.codigo == "P-DEMO-UI"
     assert product.unit == "bolsas"
-    assert table.item(0, 0).text() == "Producto Demo UI"
+    assert table.item(0, 0).text() == "P-DEMO-UI"
+    assert table.item(0, 1).text() == "Producto Demo UI"
 
     def fill_edit(dialog):
         dialog.findChild(QLineEdit, "productNameInput").setText("Producto Demo UI Editado")
@@ -742,7 +756,8 @@ def test_products_abm_page_creates_edits_and_refreshes_grid(db):
     _run_modal(app, lambda: window.findChild(QPushButton, "editProductButton").click(), fill_edit)
     product = Product.get_by_id(product.id)
     assert product.name == "Producto Demo UI Editado"
-    assert table.item(0, 0).text() == "Producto Demo UI Editado"
+    assert table.item(0, 0).text() == "P-DEMO-UI"
+    assert table.item(0, 1).text() == "Producto Demo UI Editado"
 
 def test_product_dialog_saves_four_price_lists(db):
     from PyQt5.QtWidgets import QApplication, QLineEdit, QPushButton
@@ -1127,25 +1142,26 @@ def test_master_abms_search_and_sort_products_carriers_and_drivers(db):
     carrier_sur = Carrier.create(name="Logística Sur", cuit="30700000002")
     Driver.create(name="Bruno Chofer", carrier=carrier_nandu, document="DNI1")
     Driver.create(name="Ana Chofer", carrier=carrier_sur, document="DNI2")
-    Product.create(name="Zeta Producto", unit="kg")
-    Product.create(name="Árbol Producto", unit="kg")
+    Product.create(codigo="200", name="Zeta Producto", unit="kg")
+    Product.create(codigo="100", name="Árbol Producto", unit="kg")
 
     app, window = _admin_window("admin_master_search_sort")
 
     _navigate_to_route(window, "products")
     product_table = window.findChild(QTableWidget, "newProductButtonTable")
     product_search = window.findChild(QLineEdit, "newProductButtonSearchInput")
-    assert [product_table.item(row, 0).text() for row in range(product_table.rowCount())] == [
+    assert [product_table.item(row, 1).text() for row in range(product_table.rowCount())] == [
         "Árbol Producto",
         "Zeta Producto",
     ]
     product_search.setText("arbol")
     app.processEvents()
     assert product_table.rowCount() == 1
-    assert product_table.item(0, 0).text() == "Árbol Producto"
+    assert product_table.item(0, 1).text() == "Árbol Producto"
     product_search.clear()
-    product_table.horizontalHeader().sectionClicked.emit(0)
-    assert [product_table.item(row, 0).text() for row in range(product_table.rowCount())] == [
+    product_table.horizontalHeader().sectionClicked.emit(1)
+    product_table.horizontalHeader().sectionClicked.emit(1)
+    assert [product_table.item(row, 1).text() for row in range(product_table.rowCount())] == [
         "Zeta Producto",
         "Árbol Producto",
     ]

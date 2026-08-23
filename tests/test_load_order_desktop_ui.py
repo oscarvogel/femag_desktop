@@ -118,7 +118,8 @@ def test_load_order_page_shows_issue_failure_above_table_as_error_banner(db):
     assert "no tiene pallets" in feedback.message.lower()
     assert not feedback.isHidden()
     assert feedback.styleSheet()
-    assert feedback.geometry().bottom() <= table.geometry().top()
+    assert feedback.is_floating_toast is True
+    assert feedback.y() == 0
     assert table.hasFocus()
 
 
