@@ -105,3 +105,36 @@ def test_preprinted_pdf_only_requires_issued_remittance(db, tmp_path):
     assert isinstance(output, Path)
     assert output.exists()
     assert output.stat().st_size > 0
+
+
+def test_sidebar_opens_real_remittances_page(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.remittances import RemittancesPage
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="ui_remittance_sidebar", password_hash="x", profile=profile)
+
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    assert "remittances" in window._route_indexes
+    remittance_row = next(
+        row
+        for row in range(window.nav.count())
+        if window.nav.item(row).text().strip() == "Remitos"
+    )
+    item = window.nav.item(remittance_row)
+    assert item.data(Qt.UserRole) == "remittances"
+
+    window.nav.setCurrentRow(remittance_row)
+    app.processEvents()
+
+    assert window._current_route == "remittances"
+    assert isinstance(window.stack.currentWidget(), RemittancesPage)
