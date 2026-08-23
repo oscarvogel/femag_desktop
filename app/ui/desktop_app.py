@@ -583,6 +583,15 @@ class FemagDesktopWindow(QMainWindow):
         if btn and btn.isEnabled():
             btn.click()
 
+    def _handle_dashboard_new_remittance(self) -> None:
+        self._navigate_to_route("remittances")
+        page = self.stack.currentWidget()
+        if page is None:
+            return
+        btn = page.findChild(QPushButton, "newRemittanceButton")
+        if btn and btn.isEnabled():
+            btn.click()
+
     def _handle_dashboard_open_customer_ledger(self) -> None:
         self._navigate_to_route("customer_ledger")
 
@@ -866,6 +875,8 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_search_load_order)
                 elif action.route_key == "clients.new":
                     button.clicked.connect(self._handle_dashboard_new_client)
+                elif action.route_key == "remittances.new":
+                    button.clicked.connect(self._handle_dashboard_new_remittance)
                 elif action.route_key == "customer_ledger.view":
                     button.clicked.connect(self._handle_dashboard_open_customer_ledger)
                 elif action.route_key == "customer_ledger.register_payment":

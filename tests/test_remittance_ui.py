@@ -15,7 +15,9 @@ def test_remittance_page_exposes_operational_actions(db, tmp_path):
         "newRemittanceFromOrderButton",
         "editRemittanceButton",
         "issueRemittanceButton",
+        "previewRemittanceButton",
         "printRemittanceButton",
+        "annulRemittanceButton",
         "remittanceCalibrationButton",
     ):
         button = page.findChild(QPushButton, object_name)
@@ -23,6 +25,112 @@ def test_remittance_page_exposes_operational_actions(db, tmp_path):
         assert button.isEnabled()
 
     assert page.table.columnCount() == 7
+
+
+def test_manual_dialog_exposes_transport_and_observations(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittances")
+    app.processEvents()
+
+    assert dialog.findChild(QComboBox, "remittanceCarrierInput").findData(data["carrier"].id) >= 0
+    assert dialog.findChild(QComboBox, "remittanceTruckInput").findData(data["truck"].id) >= 0
+    assert dialog.findChild(QComboBox, "remittanceDriverInput").findData(data["driver"].id) >= 0
+    assert dialog.findChild(QLineEdit, "remittanceObservationsInput") is not None
+
+
+def test_manual_dialog_persists_transport_and_observations(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.remittances import Remittance
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittances")
+    dialog.client_combo.setCurrentIndex(dialog.client_combo.findData(data["client"].id))
+    dialog.address_combo.setCurrentIndex(dialog.address_combo.findData(data["address"].id))
+    dialog.carrier_combo.setCurrentIndex(dialog.carrier_combo.findData(data["carrier"].id))
+    dialog.truck_combo.setCurrentIndex(dialog.truck_combo.findData(data["truck"].id))
+    dialog.driver_combo.setCurrentIndex(dialog.driver_combo.findData(data["driver"].id))
+    dialog.items.cellWidget(0, 0).setCurrentIndex(
+        dialog.items.cellWidget(0, 0).findData(data["product"].id)
+    )
+    dialog.items.item(0, 1).setText("25")
+    dialog.items.item(0, 2).setText("Producto de prueba")
+    dialog.observations_input.setText("Entregar por portón lateral")
+
+    dialog._save()
+    app.processEvents()
+
+    remittance = Remittance.get()
+    assert remittance.carrier_id == data["carrier"].id
+    assert remittance.truck_id == data["truck"].id
+    assert remittance.driver_id == data["driver"].id
+    assert remittance.observations == "Entregar por portón lateral"
+
+
+def test_page_preview_action_generates_selected_draft_pdf(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    remittance = RemittanceService("ui_preview_action").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1, "printed_description": "Producto"}],
+    )
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(current_user="ui_preview_action", output_dir=tmp_path)
+    page.table.selectRow(0)
+    opened = []
+    monkeypatch.setattr(page, "_open_pdf", opened.append)
+
+    page._preview_selected()
+
+    expected = tmp_path / f"vista_previa_{remittance.remittance_number.replace('-', '_')}.pdf"
+    assert opened == [expected]
+    assert expected.exists()
+
+
+def test_page_annul_action_requires_reason_and_refreshes_state(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.models.remittances import Remittance
+    from app.services.remittance_service import RemittanceService
+    from app.ui import remittances as remittances_ui
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    remittance = RemittanceService("ui_annul_action").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1, "printed_description": "Producto"}],
+    )
+    app = QApplication.instance() or QApplication([])
+    page = remittances_ui.RemittancesPage(current_user="ui_annul_action", output_dir=tmp_path)
+    page.table.selectRow(0)
+    monkeypatch.setattr(
+        remittances_ui.QInputDialog,
+        "getMultiLineText",
+        lambda *_args, **_kwargs: ("Formulario dañado", True),
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
+
+    page._annul_selected()
+
+    updated = Remittance.get_by_id(remittance.id)
+    assert updated.status == Remittance.STATUS_ANNULLED
+    assert updated.annulment_reason == "Formulario dañado"
 
 
 def test_calibration_pdf_is_generated(db, tmp_path):
