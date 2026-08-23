@@ -110,6 +110,80 @@ def test_validate_runtime_schema_reports_missing_indexes(db):
     assert "loadorderpallet" in str(exc_info.value)
 
 
+def test_backfill_missing_column_default_uses_mysql_placeholder():
+    from collections import namedtuple
+
+    from app.config.schema import _ensure_model_columns
+    from app.models.masters import Product
+
+    Column = namedtuple("Column", "name null")
+
+    class MySQLDatabase:
+        param = "%s"
+
+        def __init__(self):
+            self.statements = []
+
+        def get_columns(self, _table_name):
+            return [
+                Column(field.column_name, field.null)
+                for field in Product._meta.sorted_fields
+                if field.column_name != "review_required"
+            ]
+
+        def execute_sql(self, sql, params=None):
+            if params is not None:
+                sql % params
+            self.statements.append((sql, params))
+
+    database = MySQLDatabase()
+
+    _ensure_model_columns(database, Product)
+
+    assert (
+        "UPDATE `product` SET `review_required` = %s "
+        "WHERE `review_required` IS NULL",
+        (1,),
+    ) in database.statements
+
+
+def test_backfill_repairs_existing_nullable_mysql_column_after_partial_migration():
+    from collections import namedtuple
+
+    from app.config.schema import _ensure_model_columns
+    from app.models.masters import Product
+
+    Column = namedtuple("Column", "name null")
+
+    class MySQLDatabase:
+        param = "%s"
+
+        def __init__(self):
+            self.statements = []
+
+        def get_columns(self, _table_name):
+            return [
+                Column(
+                    field.column_name,
+                    True if field.column_name == "review_required" else field.null,
+                )
+                for field in Product._meta.sorted_fields
+            ]
+
+        def execute_sql(self, sql, params=None):
+            self.statements.append((sql, params))
+
+    database = MySQLDatabase()
+
+    _ensure_model_columns(database, Product)
+
+    assert (
+        "UPDATE `product` SET `review_required` = %s "
+        "WHERE `review_required` IS NULL",
+        (1,),
+    ) in database.statements
+
+
 def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     from app.config.database import bind_database
     from app.config.schema import ensure_runtime_schema
@@ -186,6 +260,7 @@ def test_ensure_runtime_schema_adds_missing_columns_to_existing_tables():
     assert columns["usual_truck_id"].null is True
     assert truck_columns["trailer_domain"].null is True
     assert truck_columns["carrier_id"].null is True
+    assert db.execute_sql("SELECT available FROM driver WHERE id = 1").fetchone() == (1,)
     assert db.execute_sql("SELECT name, carrier_id FROM driver WHERE id = 1").fetchone() == (
         "Chofer existente",
         1,
