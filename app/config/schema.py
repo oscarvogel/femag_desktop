@@ -303,6 +303,8 @@ def _ensure_model_columns(database, model) -> None:
             )
             _backfill_column_default(database, table_name, column_name, field)
             continue
+        if not field.null and existing_column.null:
+            _backfill_column_default(database, table_name, column_name, field)
         if field.null and existing_column.null is False:
             if _supports_modify_column(database):
                 database.execute_sql(
@@ -316,9 +318,10 @@ def _ensure_model_columns(database, model) -> None:
 def _backfill_column_default(database, table_name: str, column_name: str, field) -> None:
     default = field.default
     if default is not None and not callable(default):
+        placeholder = getattr(database, "param", "?")
         database.execute_sql(
             f"UPDATE `{_escape_identifier(table_name)}` "
-            f"SET `{_escape_identifier(column_name)}` = ? "
+            f"SET `{_escape_identifier(column_name)}` = {placeholder} "
             f"WHERE `{_escape_identifier(column_name)}` IS NULL",
             (int(default) if isinstance(default, bool) else default,),
         )
