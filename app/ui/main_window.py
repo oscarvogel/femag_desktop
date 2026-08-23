@@ -45,6 +45,7 @@ def _install_remittances_page() -> None:
         original_add_master_pages(window)
         if "remittances" in window._route_indexes:
             return
+        from app.ui.f150 import F150Page
         from app.ui.remittances import RemittanceSeriesPage, RemittancesPage
 
         window._add_page(
@@ -54,6 +55,10 @@ def _install_remittances_page() -> None:
         window._add_page(
             "remittance_series",
             RemittanceSeriesPage(current_user=window.shell.username, parent=window),
+        )
+        window._add_page(
+            "f150",
+            F150Page(current_user=window.shell.username, parent=window),
         )
 
     FemagDesktopWindow._add_master_pages = _add_master_pages_with_remittances

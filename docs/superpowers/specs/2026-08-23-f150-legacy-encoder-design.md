@@ -25,16 +25,15 @@ El formulario anterior genera:
 - Evitar sobrescritura accidental de un archivo existente.
 - Cubrir el contrato con pruebas unitarias independientes de la base de datos.
 
-## Fuera de alcance de este corte
+## Flujo operativo agregado
 
-- Cambios en los modelos o en la estructura MySQL.
-- Adaptación automática desde `Remittance`.
-- Persistencia e historial de lotes F150.
-- Pantalla de filtros y selección múltiple.
-- Marcado de remitos ya incluidos.
-
-Esos puntos continúan en el issue #11 y deben implementarse sobre este contrato,
-sin duplicar la lógica de codificación.
+- Adaptación de remitos emitidos al contrato F150.
+- Persistencia de lote, hash SHA-256 y snapshot de cada remito.
+- Relación única que impide incluir nuevamente un remito ya generado.
+- Auditoría de usuario, archivo y remitos incluidos.
+- Pantalla con filtros por fecha, cliente, número, estado e inclusión.
+- Selección múltiple, validación visible, generación e historial de lotes.
+- Acceso real desde el sidebar y el dashboard.
 
 ## Riesgos y datos faltantes
 
@@ -48,9 +47,12 @@ obtienen y cómo se congelan, como mínimo:
 - clasificaciones de producto `rh1` a `rh4` y rubro;
 - precio unitario y total del renglón.
 
-No se deben completar estos valores con datos inventados ni consultar maestros
-mutables luego de generar el lote. El adaptador MySQL deberá construir un
-snapshot auditable al momento de la generación.
+El adaptador actual usa exclusivamente valores disponibles en MySQL y deja
+vacíos los campos opcionales no modelados. No inventa códigos. Precio y total
+se calculan desde `Product.precio_neto_base` y quedan congelados en el snapshot
+del lote. Antes de declarar compatibilidad fiscal definitiva se deben incorporar
+los códigos faltantes a los maestros y contrastar un archivo real con el
+receptor del F150.
 
 ## Validación
 

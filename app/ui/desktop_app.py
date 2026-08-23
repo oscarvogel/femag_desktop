@@ -884,6 +884,8 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_new_client)
                 elif action.route_key == "remittances.new":
                     button.clicked.connect(self._handle_dashboard_new_remittance)
+                elif action.route_key == "f150":
+                    button.clicked.connect(lambda _checked=False: self._navigate_to_route("f150"))
                 elif action.route_key == "customer_ledger.view":
                     button.clicked.connect(self._handle_dashboard_open_customer_ledger)
                 elif action.route_key == "customer_ledger.register_payment":

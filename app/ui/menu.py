@@ -52,7 +52,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         for item in (
             approved_item("Órdenes de carga"),
             approved_item("Remitos"),
-            approved_item("F150", "Generar F150"),
+            approved_item("F150", "Generar F150", route_key="f150"),
         )
         if item.route_key != "placeholder" or item.action_key is not None
     ]
