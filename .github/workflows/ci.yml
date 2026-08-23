@@ -51,9 +51,6 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall app
 
-      - name: Diagnose load-order UI regression
-        run: python -m pytest tests/test_load_order_desktop_ui.py::test_load_order_page_shows_issue_failure_above_table_as_error_banner -vv
-
       - name: Run tests
         run: python -m pytest
 
