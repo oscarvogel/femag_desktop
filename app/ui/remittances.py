@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PyQt5.QtCore import QDate, QUrl, Qt
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QDoubleValidator
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -170,9 +170,17 @@ class RemittanceDialog(QDialog):
             index = combo.findData(product_id)
             if index >= 0:
                 combo.setCurrentIndex(index)
+        quantity_input = QLineEdit(str(quantity))
+        quantity_input.setObjectName(f"remittanceItemQuantityInput{row}")
+        quantity_input.setPlaceholderText("0,000")
+        quantity_input.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        quantity_input.setValidator(QDoubleValidator(0.001, 99999999999.999, 3, quantity_input))
+        description_input = QLineEdit(description)
+        description_input.setObjectName(f"remittanceItemDescriptionInput{row}")
+        description_input.setPlaceholderText("Descripción que se imprimirá")
         self.items.setCellWidget(row, 0, combo)
-        self.items.setItem(row, 1, QTableWidgetItem(str(quantity)))
-        self.items.setItem(row, 2, QTableWidgetItem(description))
+        self.items.setCellWidget(row, 1, quantity_input)
+        self.items.setCellWidget(row, 2, description_input)
 
     def _load_remittance(self) -> None:
         r = self.remittance
@@ -217,12 +225,14 @@ class RemittanceDialog(QDialog):
         for row in range(self.items.rowCount()):
             combo = self.items.cellWidget(row, 0)
             product_id = combo.currentData() if combo else None
-            quantity_text = (self.items.item(row, 1).text() if self.items.item(row, 1) else "").strip()
-            description = (self.items.item(row, 2).text() if self.items.item(row, 2) else "").strip()
+            quantity_input = self.items.cellWidget(row, 1)
+            description_input = self.items.cellWidget(row, 2)
+            quantity_text = (quantity_input.text() if quantity_input else "").strip()
+            description = (description_input.text() if description_input else "").strip()
             if not product_id and not quantity_text and not description:
                 continue
             try:
-                quantity = Decimal(quantity_text)
+                quantity = Decimal(quantity_text.replace(",", "."))
             except (InvalidOperation, ValueError):
                 raise ValueError(f"Cantidad inválida en la fila {row + 1}.") from None
             payload.append(

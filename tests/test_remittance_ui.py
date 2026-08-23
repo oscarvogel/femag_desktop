@@ -67,8 +67,8 @@ def test_manual_dialog_persists_transport_and_observations(db):
     dialog.items.cellWidget(0, 0).setCurrentIndex(
         dialog.items.cellWidget(0, 0).findData(data["product"].id)
     )
-    dialog.items.item(0, 1).setText("25")
-    dialog.items.item(0, 2).setText("Producto de prueba")
+    dialog.items.cellWidget(0, 1).setText("25")
+    dialog.items.cellWidget(0, 2).setText("Producto de prueba")
     dialog.observations_input.setText("Entregar por portón lateral")
 
     dialog._save()
@@ -79,6 +79,28 @@ def test_manual_dialog_persists_transport_and_observations(db):
     assert remittance.truck_id == data["truck"].id
     assert remittance.driver_id == data["driver"].id
     assert remittance.observations == "Entregar por portón lateral"
+
+
+def test_detail_quantity_and_description_are_direct_editors(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_direct_detail")
+    app.processEvents()
+
+    quantity = dialog.items.cellWidget(0, 1)
+    description = dialog.items.cellWidget(0, 2)
+    assert isinstance(quantity, QLineEdit)
+    assert isinstance(description, QLineEdit)
+    assert quantity.validator() is not None
+    quantity.setText("12,5")
+    description.setText("Producto cargado con un clic")
+    assert quantity.text() == "12,5"
+    assert description.text() == "Producto cargado con un clic"
 
 
 def test_page_preview_action_generates_selected_draft_pdf(db, tmp_path, monkeypatch):
