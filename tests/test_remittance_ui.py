@@ -315,6 +315,8 @@ def test_sidebar_opens_real_remittances_page(db):
     app.processEvents()
 
     assert "remittances" in window._route_indexes
+    window._navigate_to_route("remittances")
+    app.processEvents()
     remittance_row = next(
         row
         for row in range(window.nav.count())

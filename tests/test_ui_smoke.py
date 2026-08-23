@@ -88,7 +88,7 @@ def test_menu_marks_operational_modules_as_real(db):
     assert summary_item.placeholder is True
 
 
-def test_sidebar_spec_groups_transport_abms(db):
+def test_sidebar_spec_groups_operations_and_masters(db):
     from app.services.auth_service import AuthService
     from app.services.permission_service import PermissionService
     from app.ui.menu import build_sidebar_tree_spec
@@ -97,13 +97,48 @@ def test_sidebar_spec_groups_transport_abms(db):
     user = AuthService().create_user("admin_transport_menu", "clave", "Administrador")
 
     principal = build_sidebar_tree_spec(user).sections[0]
-    transport = next(item for item in principal.items if item.title == "Transporte")
+    operations = next(item for item in principal.items if item.title == "Operaciones")
+    masters = next(item for item in principal.items if item.title == "Maestros")
 
-    assert [child.title for child in transport.children] == ["Transportistas", "Choferes", "Camiones"]
-    assert [child.route_key for child in transport.children] == ["carriers", "drivers", "trucks"]
-    assert "Choferes" not in [item.title for item in principal.items]
-    assert "Transportistas" not in [item.title for item in principal.items]
-    assert "Camiones" not in [item.title for item in principal.items]
+    assert [child.title for child in operations.children] == ["Órdenes de carga", "Remitos", "F150"]
+    assert [child.route_key for child in operations.children] == ["load_orders", "remittances", "placeholder"]
+    assert [child.title for child in masters.children] == [
+        "Clientes",
+        "Productos",
+        "Tipos de IVA",
+        "Transportistas",
+        "Choferes",
+        "Camiones",
+    ]
+    assert [child.route_key for child in masters.children] == [
+        "clients",
+        "products",
+        "vat_types",
+        "carriers",
+        "drivers",
+        "trucks",
+    ]
+
+
+def test_sidebar_accordion_keeps_only_one_group_expanded(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_sidebar_accordion", password_hash="x", profile=profile)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+
+    window._toggle_sidebar_group("Operaciones")
+    assert window._expanded_sidebar_groups == {"Operaciones"}
+    window._toggle_sidebar_group("Maestros")
+    app.processEvents()
+
+    assert window._expanded_sidebar_groups == {"Maestros"}
 
 
 def test_sidebar_spec_exposes_vat_types_crud(db):
@@ -115,7 +150,8 @@ def test_sidebar_spec_exposes_vat_types_crud(db):
     user = AuthService().create_user("admin_vat_types_menu", "clave", "Administrador")
 
     principal = build_sidebar_tree_spec(user).sections[0]
-    vat_types = next(item for item in principal.items if item.title == "Tipos de IVA")
+    masters = next(item for item in principal.items if item.title == "Maestros")
+    vat_types = next(item for item in masters.children if item.title == "Tipos de IVA")
 
     assert vat_types.placeholder is False
     assert vat_types.route_key == "vat_types"

@@ -458,7 +458,7 @@ class FemagDesktopWindow(QMainWindow):
                     if item.children:
                         group_key = f"group:{item.title}"
                         row.setData(Qt.UserRole, group_key)
-                        row.setToolTip("Mostrar u ocultar ABMs relacionados.")
+                        row.setToolTip("Mostrar u ocultar opciones relacionadas.")
                         self.nav.addItem(row)
                         child_routes = {child.route_key for child in item.children}
                         if self._current_route in child_routes:
@@ -491,7 +491,7 @@ class FemagDesktopWindow(QMainWindow):
         if group_title in self._expanded_sidebar_groups:
             self._expanded_sidebar_groups.remove(group_title)
         else:
-            self._expanded_sidebar_groups.add(group_title)
+            self._expanded_sidebar_groups = {group_title}
         self._populate_sidebar()
 
     def _statusbar(self) -> QWidget:
@@ -544,8 +544,8 @@ class FemagDesktopWindow(QMainWindow):
                 if not item.children:
                     continue
                 for child in item.children:
-                    if child.route_key == route and item.title not in self._expanded_sidebar_groups:
-                        self._expanded_sidebar_groups.add(item.title)
+                    if child.route_key == route and self._expanded_sidebar_groups != {item.title}:
+                        self._expanded_sidebar_groups = {item.title}
                         self._populate_sidebar()
                         return
 
