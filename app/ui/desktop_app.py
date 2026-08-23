@@ -5,7 +5,7 @@ from pathlib import Path
 import webbrowser
 
 from peewee import InterfaceError, OperationalError
-from PyQt5.QtCore import QDate, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, pyqtSignal
+from PyQt5.QtCore import QDate, QEvent, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -1482,6 +1482,39 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
     return button
 
 
+class _FieldFocusNavigation(QObject):
+    """Keep Tab and Enter navigation consistent across one-line fields."""
+
+    def __init__(self, owner: QWidget, controls: tuple[QWidget, ...]):
+        super().__init__(owner)
+        self.owner = owner
+        for control in controls:
+            control.installEventFilter(self)
+            line_edit_getter = getattr(control, "lineEdit", None)
+            line_edit = line_edit_getter() if callable(line_edit_getter) else None
+            if line_edit is not None and line_edit is not control:
+                line_edit.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() != QEvent.KeyPress:
+            return False
+        if event.key() in (Qt.Key_Tab, Qt.Key_Backtab):
+            if event.key() == Qt.Key_Backtab or event.modifiers() & Qt.ShiftModifier:
+                self.owner.focusPreviousChild()
+            else:
+                self.owner.focusNextChild()
+            return True
+        if event.key() not in (Qt.Key_Return, Qt.Key_Enter):
+            return False
+        combo = watched if isinstance(watched, QComboBox) else watched.parentWidget()
+        if isinstance(combo, QComboBox):
+            completer = combo.completer()
+            if completer is not None and completer.popup().isVisible():
+                return False
+        self.owner.focusNextChild()
+        return True
+
+
 def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
     item = QTableWidgetItem("")
     item.setData(Qt.UserRole, order.id)
@@ -1953,7 +1986,10 @@ class LoadOrderEntryDialog(QDialog):
         title = QLabel("Editar orden de carga" if self.order is not None else "Nueva orden de carga")
         title.setObjectName("dialogTitle")
         root.addWidget(title)
-        hint = QLabel("Seleccione el chofer. El transportista se cargara automaticamente. Luego elija camion, semi/acoplado (opcional) y complete los destinos.")
+        hint = QLabel(
+            "Seleccione el chofer. El transportista se cargara automaticamente. "
+            "Use Tab o Enter para avanzar por los campos; luego complete los destinos."
+        )
         hint.setObjectName("formHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -1981,6 +2017,7 @@ class LoadOrderEntryDialog(QDialog):
             button.setProperty("stepNav", True)
             button.setCheckable(True)
             button.setCursor(Qt.PointingHandCursor)
+            button.setFocusPolicy(Qt.NoFocus)
             button.clicked.connect(lambda _checked=False, row=index: self._go_to_step(row))
             self.step_buttons.append(button)
             step_layout.addWidget(button)
@@ -2052,13 +2089,16 @@ class LoadOrderEntryDialog(QDialog):
         self.address_combo = QComboBox()
         self.address_combo.setObjectName("loadOrderAddressInput")
         enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
-        add_destination_button = _action_button("addLoadOrderClientButton", "Agregar cliente/destino")
+        self.add_destination_button = _action_button(
+            "addLoadOrderClientButton", "Agregar cliente/destino"
+        )
         remove_destination_button = _action_button("removeLoadOrderClientButton", "Quitar seleccionado", secondary=True)
+        remove_destination_button.setFocusPolicy(Qt.NoFocus)
         destination_inputs.addWidget(QLabel("Cliente"), 0, 0)
         destination_inputs.addWidget(self.client_combo, 0, 1)
         destination_inputs.addWidget(QLabel("Destino"), 1, 0)
         destination_inputs.addWidget(self.address_combo, 1, 1)
-        destination_inputs.addWidget(add_destination_button, 2, 0)
+        destination_inputs.addWidget(self.add_destination_button, 2, 0)
         destination_inputs.addWidget(remove_destination_button, 2, 1)
         destination_layout.addLayout(destination_inputs)
         self.destination_table = QTableWidget(0, 5)
@@ -2069,6 +2109,7 @@ class LoadOrderEntryDialog(QDialog):
         self.destination_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.destination_table.verticalHeader().setVisible(False)
         self.destination_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.destination_table.setTabKeyNavigation(False)
         self.destination_table.setMinimumHeight(180)
         destination_layout.addWidget(self.destination_table)
         destination_description_label = QLabel("Descripción del presupuesto del cliente/destino seleccionado")
@@ -2081,6 +2122,7 @@ class LoadOrderEntryDialog(QDialog):
         )
         self.destination_budget_description_input.setMaximumHeight(90)
         self.destination_budget_description_input.setEnabled(False)
+        self.destination_budget_description_input.setTabChangesFocus(True)
         destination_layout.addWidget(self.destination_budget_description_input)
         self.step_stack.addWidget(destination)
 
@@ -2093,9 +2135,12 @@ class LoadOrderEntryDialog(QDialog):
         product_title.setObjectName("sectionTitle")
         product_layout.addWidget(product_title)
         product_actions = QHBoxLayout()
-        add_product_button = _action_button("addLoadOrderProductButton", "Agregar producto")
+        self.add_product_button = _action_button(
+            "addLoadOrderProductButton", "Agregar producto"
+        )
         remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
-        product_actions.addWidget(add_product_button)
+        remove_product_button.setFocusPolicy(Qt.NoFocus)
+        product_actions.addWidget(self.add_product_button)
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
@@ -2105,6 +2150,7 @@ class LoadOrderEntryDialog(QDialog):
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.product_table.setTabKeyNavigation(False)
         self.product_table.setMinimumHeight(160)
         product_layout.addWidget(self.product_table)
         self.step_stack.addWidget(product)
@@ -2131,6 +2177,7 @@ class LoadOrderEntryDialog(QDialog):
         self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.review_table.verticalHeader().setVisible(False)
         self.review_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.review_table.setFocusPolicy(Qt.NoFocus)
         self.review_table.setMinimumHeight(260)
         review_layout.addWidget(self.review_table)
         self.step_stack.addWidget(review)
@@ -2143,8 +2190,10 @@ class LoadOrderEntryDialog(QDialog):
         footer = QHBoxLayout()
         self.previous_step_button = _action_button("previousLoadOrderStepButton", "Anterior", secondary=True)
         self.next_step_button = _action_button("nextLoadOrderStepButton", "Siguiente", secondary=True)
+        self.previous_step_button.setFocusPolicy(Qt.NoFocus)
         footer.addStretch(1)
         cancel_button = _action_button("cancelLoadOrderButton", "Cancelar", secondary=True)
+        cancel_button.setFocusPolicy(Qt.NoFocus)
         self.save_button = _action_button("saveLoadOrderButton", "Guardar orden")
         footer.addWidget(self.previous_step_button)
         footer.addWidget(self.next_step_button)
@@ -2154,9 +2203,9 @@ class LoadOrderEntryDialog(QDialog):
 
         self.previous_step_button.clicked.connect(self._previous_step)
         self.next_step_button.clicked.connect(self._next_step)
-        add_destination_button.clicked.connect(self._add_destination)
+        self.add_destination_button.clicked.connect(self._add_destination)
         remove_destination_button.clicked.connect(self._remove_destination)
-        add_product_button.clicked.connect(self._open_product_dialog)
+        self.add_product_button.clicked.connect(self._open_product_dialog)
         remove_product_button.clicked.connect(self._remove_product)
         self.save_button.clicked.connect(self._save)
         cancel_button.clicked.connect(self.reject)
@@ -2168,6 +2217,7 @@ class LoadOrderEntryDialog(QDialog):
         self.carrier_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
         self.truck_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
         self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
+        self._configure_keyboard_navigation()
         self._go_to_step(0)
         self._update_save_button_state()
 
@@ -2181,6 +2231,49 @@ class LoadOrderEntryDialog(QDialog):
             button.setChecked(button_index == index)
         self.previous_step_button.setEnabled(index > 0)
         self.next_step_button.setEnabled(index < self.step_stack.count() - 1)
+        self._focus_step(index)
+
+    def _configure_keyboard_navigation(self) -> None:
+        focus_chain = (
+            self.order_date,
+            self.driver_combo,
+            self.truck_combo,
+            self.trailer_combo,
+            self.observations_input,
+            self.client_combo,
+            self.address_combo,
+            self.add_destination_button,
+            self.destination_table,
+            self.destination_budget_description_input,
+            self.add_product_button,
+            self.product_table,
+            self.next_step_button,
+            self.save_button,
+        )
+        for current, following in zip(focus_chain, focus_chain[1:]):
+            QWidget.setTabOrder(current, following)
+        self._field_focus_filter = _FieldFocusNavigation(
+            self,
+            (
+                self.order_date,
+                self.driver_combo,
+                self.truck_combo,
+                self.trailer_combo,
+                self.observations_input,
+                self.client_combo,
+                self.address_combo,
+            ),
+        )
+
+    def _focus_step(self, index: int) -> None:
+        first_control = {
+            0: self.order_date,
+            1: self.client_combo,
+            2: self.add_product_button,
+            3: self.save_button,
+        }[index]
+        if first_control.isEnabled():
+            first_control.setFocus(Qt.TabFocusReason)
 
     def _previous_step(self) -> None:
         self._go_to_step(self.step_stack.currentIndex() - 1)
@@ -2408,6 +2501,7 @@ class LoadOrderEntryDialog(QDialog):
         self._render_destinations()
         self.destination_table.setCurrentCell(row, 0)
         self.feedback.show_success("Producto agregado.")
+        self.add_product_button.setFocus(Qt.TabFocusReason)
         self._update_save_button_state()
 
     def _remove_product(self) -> None:
@@ -2743,9 +2837,10 @@ class LoadOrderProductDialog(QDialog):
         footer = QHBoxLayout()
         footer.addStretch(1)
         cancel_button = _action_button("cancelProductButton", "Cancelar", secondary=True)
-        add_button = _action_button("confirmProductButton", "Agregar")
+        cancel_button.setFocusPolicy(Qt.NoFocus)
+        self.add_button = _action_button("confirmProductButton", "Agregar")
         footer.addWidget(cancel_button)
-        footer.addWidget(add_button)
+        footer.addWidget(self.add_button)
         layout.addLayout(footer)
 
         _fill_combo(self.product_combo, _product_options())
@@ -2754,7 +2849,26 @@ class LoadOrderProductDialog(QDialog):
         self.precio_input.valueChanged.connect(self._recalculate)
         self.descuento_input.valueChanged.connect(self._recalculate)
         cancel_button.clicked.connect(self.reject)
-        add_button.clicked.connect(self._accept_product)
+        self.add_button.clicked.connect(self._accept_product)
+        focus_chain = (
+            self.product_combo,
+            self.quantity_input,
+            self.precio_input,
+            self.descuento_input,
+            self.add_button,
+        )
+        for current, following in zip(focus_chain, focus_chain[1:]):
+            QWidget.setTabOrder(current, following)
+        self._field_focus_filter = _FieldFocusNavigation(
+            self,
+            (
+                self.product_combo,
+                self.quantity_input,
+                self.precio_input,
+                self.descuento_input,
+            ),
+        )
+        self.product_combo.setFocus(Qt.TabFocusReason)
 
     def _on_product_changed(self) -> None:
         product_id = self.product_combo.currentData()
