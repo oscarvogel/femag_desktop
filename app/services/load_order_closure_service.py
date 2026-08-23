@@ -10,6 +10,7 @@ from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.audit_service import AuditService
 from app.services.client_payment_service import ClientPaymentService
+from app.services.load_order_return_credit_service import LoadOrderReturnCreditService
 from app.services.load_order_service import LoadOrderService
 
 
@@ -32,6 +33,10 @@ class LoadOrderClosureService:
             audit_service=self.audit_service,
         )
         self.payments = ClientPaymentService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
+        self.return_credits = LoadOrderReturnCreditService(
             current_user=current_user,
             audit_service=self.audit_service,
         )
@@ -104,6 +109,7 @@ class LoadOrderClosureService:
                         "credit_amount": return_line.credit_amount,
                     },
                 )
+            credit_movements = self.return_credits.generate_for_closure(closure)
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_CLOSED,
@@ -122,6 +128,7 @@ class LoadOrderClosureService:
                     "payment_ids": [payment.id for payment in closure.payments],
                     "return_line_ids": [row.id for row in closure.return_lines],
                     "return_credit_amount": self.return_credit_total(closure),
+                    "return_credit_movement_ids": [row.id for row in credit_movements],
                     "payment_status": self.payment_status(closure),
                 },
             )
@@ -145,6 +152,7 @@ class LoadOrderClosureService:
                     "Debe anular los pagos activos del cierre antes de reabrir la entrega."
                 )
 
+            credit_reversals = self.return_credits.reverse_for_closure(closure)
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_ISSUED,
@@ -170,6 +178,7 @@ class LoadOrderClosureService:
                     "reopened_by": self.current_user,
                     "reason": normalized_reason,
                     "return_line_ids": [row.id for row in closure.return_lines],
+                    "return_credit_reversal_ids": [row.id for row in credit_reversals],
                 },
             )
         return LoadOrder.get_by_id(order.id)
