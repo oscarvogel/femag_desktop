@@ -3,6 +3,7 @@
 from app.ui.client_payment_term_extension import install_client_payment_term_extension
 from app.ui.customer_ledger_due_date_extension import install_customer_ledger_due_date_extension
 from app.ui.pallet_actions_compact_extension import install_compact_pallet_actions
+from app.ui.product_code_extension import install_product_code_extension
 from app.ui.transport_setup_extension import install_transport_setup_extension
 
 
@@ -10,3 +11,4 @@ install_client_payment_term_extension()
 install_customer_ledger_due_date_extension()
 install_transport_setup_extension()
 install_compact_pallet_actions()
+install_product_code_extension()
