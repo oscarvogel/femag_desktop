@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -40,9 +42,14 @@ class RemittanceDialog(QDialog):
         self.current_user = current_user
         self.remittance = remittance
         self.setWindowTitle("Remito")
-        self.resize(820, 620)
+        self.resize(1080, 720)
+        self.setMinimumSize(920, 650)
         root = QVBoxLayout(self)
-        form = QFormLayout()
+        header_group = QGroupBox("Cabecera del remito")
+        header_group.setObjectName("remittanceHeaderGroup")
+        form = QGridLayout(header_group)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
         self.client_combo = QComboBox()
@@ -61,20 +68,37 @@ class RemittanceDialog(QDialog):
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("remittanceObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones opcionales")
-        form.addRow("Fecha", self.date_input)
-        form.addRow("Cliente", self.client_combo)
-        form.addRow("Domicilio", self.address_combo)
-        form.addRow("Transportista", self.carrier_combo)
-        form.addRow("Camión", self.truck_combo)
-        form.addRow("Chofer", self.driver_combo)
-        form.addRow("Punto de venta", self.point_input)
-        form.addRow("N° formulario", self.number_input)
-        form.addRow("Doc. N° / referencia", self.reference_input)
-        form.addRow("Observaciones", self.observations_input)
-        root.addLayout(form)
+        form.addWidget(QLabel("Fecha"), 0, 0)
+        form.addWidget(self.date_input, 0, 1)
+        form.addWidget(QLabel("Punto de venta"), 0, 2)
+        form.addWidget(self.point_input, 0, 3)
+        form.addWidget(QLabel("N° formulario"), 0, 4)
+        form.addWidget(self.number_input, 0, 5)
+        form.addWidget(QLabel("Cliente"), 1, 0)
+        form.addWidget(self.client_combo, 1, 1, 1, 2)
+        form.addWidget(QLabel("Domicilio"), 1, 3)
+        form.addWidget(self.address_combo, 1, 4, 1, 2)
+        form.addWidget(QLabel("Transportista"), 2, 0)
+        form.addWidget(self.carrier_combo, 2, 1)
+        form.addWidget(QLabel("Camión"), 2, 2)
+        form.addWidget(self.truck_combo, 2, 3)
+        form.addWidget(QLabel("Chofer"), 2, 4)
+        form.addWidget(self.driver_combo, 2, 5)
+        form.addWidget(QLabel("Doc. N° / referencia"), 3, 0)
+        form.addWidget(self.reference_input, 3, 1, 1, 2)
+        form.addWidget(QLabel("Observaciones"), 3, 3)
+        form.addWidget(self.observations_input, 3, 4, 1, 2)
+        for column in (1, 3, 5):
+            form.setColumnStretch(column, 1)
+        root.addWidget(header_group)
+
+        detail_label = QLabel("Detalle de productos")
+        detail_label.setObjectName("remittanceDetailTitle")
+        root.addWidget(detail_label)
 
         self.items = QTableWidget(0, 3)
         self.items.setObjectName("remittanceItemsTable")
+        self.items.setMinimumHeight(280)
         self.items.setHorizontalHeaderLabels(["Producto", "Cantidad", "Descripción impresa"])
         self.items.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.items.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -87,6 +111,8 @@ class RemittanceDialog(QDialog):
         root.addWidget(add_row)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setText("Guardar")
+        buttons.button(QDialogButtonBox.Cancel).setText("Cancelar")
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)

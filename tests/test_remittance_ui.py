@@ -28,7 +28,7 @@ def test_remittance_page_exposes_operational_actions(db, tmp_path):
 
 
 def test_manual_dialog_exposes_transport_and_observations(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit
+    from PyQt5.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QGroupBox, QLineEdit
 
     from app.ui.remittances import RemittanceDialog
     from tests.conftest import _master_data
@@ -42,6 +42,11 @@ def test_manual_dialog_exposes_transport_and_observations(db):
     assert dialog.findChild(QComboBox, "remittanceTruckInput").findData(data["truck"].id) >= 0
     assert dialog.findChild(QComboBox, "remittanceDriverInput").findData(data["driver"].id) >= 0
     assert dialog.findChild(QLineEdit, "remittanceObservationsInput") is not None
+    assert dialog.findChild(QGroupBox, "remittanceHeaderGroup") is not None
+    assert dialog.items.minimumHeight() == 280
+    buttons = dialog.findChild(QDialogButtonBox)
+    assert buttons.button(QDialogButtonBox.Save).text() == "Guardar"
+    assert buttons.button(QDialogButtonBox.Cancel).text() == "Cancelar"
 
 
 def test_manual_dialog_persists_transport_and_observations(db):
