@@ -25,10 +25,41 @@ class MainShellSpec:
     status_bar: ShellStatusBarSpec
 
 
+def _install_remittances_page() -> None:
+    """Registra la pagina de Remitos en el shell real sin duplicarla.
+
+    ``desktop_app`` concentra actualmente el registro de paginas en un unico
+    metodo grande. Este puente mantiene el cambio de #10 aislado y permite que
+    la ruta del sidebar abra el modulo real mientras el PR sigue en draft.
+    """
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    if getattr(FemagDesktopWindow, "_remittances_page_installed", False):
+        return
+
+    original_build = FemagDesktopWindow._build
+
+    def _build_with_remittances(window) -> None:
+        original_build(window)
+        if "remittances" in window._route_indexes:
+            return
+        from app.ui.remittances import RemittancesPage
+
+        window._add_page(
+            "remittances",
+            RemittancesPage(current_user=window.shell.username, parent=window),
+        )
+
+    FemagDesktopWindow._build = _build_with_remittances
+    FemagDesktopWindow._remittances_page_installed = True
+
+
 class MainWindow:
     def __init__(self, user: User | None = None, *, demo_mode: bool = False):
         self.user = user
         self.demo_mode = demo_mode
+        _install_remittances_page()
         self.sidebar_tree: SidebarTreeSpec | None = build_sidebar_tree_spec(user) if user else None
         self.shell_spec = self._build_shell_spec()
 
