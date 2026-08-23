@@ -26,11 +26,12 @@ class MainShellSpec:
 
 
 def _install_remittances_page() -> None:
-    """Registra la pagina de Remitos en el shell real sin duplicarla.
+    """Registra Remitos en el shell sin envolver el ciclo completo de construcción.
 
-    ``desktop_app`` concentra actualmente el registro de paginas en un unico
-    metodo grande. Este puente mantiene el cambio de #10 aislado y permite que
-    la ruta del sidebar abra el modulo real mientras el PR sigue en draft.
+    ``FemagDesktopWindow._build`` concentra señales, navegación y creación de páginas.
+    Envolver ese método completo deja efectos globales sobre todos los tests/UI que
+    crean ventanas. Para #10 sólo extendemos el punto donde se registran las páginas
+    maestras, de modo que Remitos se agregue durante el flujo normal del shell.
     """
 
     from app.ui.desktop_app import FemagDesktopWindow
@@ -38,10 +39,10 @@ def _install_remittances_page() -> None:
     if getattr(FemagDesktopWindow, "_remittances_page_installed", False):
         return
 
-    original_build = FemagDesktopWindow._build
+    original_add_master_pages = FemagDesktopWindow._add_master_pages
 
-    def _build_with_remittances(window) -> None:
-        original_build(window)
+    def _add_master_pages_with_remittances(window) -> None:
+        original_add_master_pages(window)
         if "remittances" in window._route_indexes:
             return
         from app.ui.remittances import RemittancesPage
@@ -51,7 +52,7 @@ def _install_remittances_page() -> None:
             RemittancesPage(current_user=window.shell.username, parent=window),
         )
 
-    FemagDesktopWindow._build = _build_with_remittances
+    FemagDesktopWindow._add_master_pages = _add_master_pages_with_remittances
     FemagDesktopWindow._remittances_page_installed = True
 
 
