@@ -118,7 +118,8 @@ def test_load_order_page_shows_issue_failure_above_table_as_error_banner(db):
     assert "no tiene pallets" in feedback.message.lower()
     assert not feedback.isHidden()
     assert feedback.styleSheet()
-    assert feedback.geometry().bottom() <= table.geometry().top()
+    assert feedback.is_floating_toast is True
+    assert feedback.y() == 0
     assert table.hasFocus()
 
 
@@ -1999,3 +2000,85 @@ def test_load_order_dialog_auto_selects_single_compatible_truck(db):
     app.processEvents()
 
     assert truck_combo.currentData() == truck.id
+
+
+def test_load_order_keyboard_flow_skips_automatic_fields_and_focuses_each_step(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    def assert_focus_inside(control):
+        focused = app.focusWidget()
+        assert focused is control or control.isAncestorOf(focused)
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="issue247"), "issue247")
+    dialog.show()
+    app.processEvents()
+
+    dialog.order_date.setFocus()
+    QTest.keyClick(dialog.order_date, Qt.Key_Tab)
+    assert_focus_inside(dialog.driver_combo)
+
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert_focus_inside(dialog.truck_combo)
+    assert dialog.carrier_combo.isEnabled() is False
+
+    dialog.observations_input.setFocus()
+    QTest.keyClick(dialog.observations_input, Qt.Key_Return)
+    assert app.focusWidget() is dialog.next_step_button
+
+    dialog.next_step_button.click()
+    app.processEvents()
+    assert dialog.step_stack.currentIndex() == 1
+    assert_focus_inside(dialog.client_combo)
+
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
+    assert_focus_inside(dialog.address_combo)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
+    assert app.focusWidget() is dialog.add_destination_button
+
+    dialog.destination_budget_description_input.setEnabled(True)
+    dialog.destination_budget_description_input.setFocus()
+    QTest.keyClick(dialog.destination_budget_description_input, Qt.Key_Tab)
+    assert app.focusWidget() is dialog.next_step_button
+
+    _set_combo(dialog.client_combo, data["client"].id)
+    _set_combo(dialog.address_combo, data["address"].id)
+    dialog.add_destination_button.click()
+    app.processEvents()
+
+    assert dialog.step_stack.currentIndex() == 2
+    assert app.focusWidget() is dialog.add_product_button
+
+
+def test_product_dialog_tab_and_enter_follow_manual_input_order(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.desktop_app import LoadOrderProductDialog
+
+    def assert_focus_inside(control):
+        focused = app.focusWidget()
+        assert focused is control or control.isAncestorOf(focused)
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    dialog = LoadOrderProductDialog(client=data["client"])
+    dialog.show()
+    dialog.product_combo.setFocus()
+    app.processEvents()
+
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
+    assert_focus_inside(dialog.quantity_input)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert_focus_inside(dialog.precio_input)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert_focus_inside(dialog.descuento_input)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert app.focusWidget() is dialog.add_button
