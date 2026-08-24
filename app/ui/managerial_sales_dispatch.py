@@ -20,11 +20,11 @@ from PyQt5.QtWidgets import (
 
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, Product
-from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
 from app.reports.managerial_sales_dispatch import (
     ManagerialSalesDispatchService,
     SalesDispatchFilters,
 )
+from app.reports.managerial_sales_dispatch_html import ManagerialSalesDispatchHtmlReport
 
 
 class NumericTableItem(QTableWidgetItem):
@@ -85,9 +85,9 @@ class ManagerialSalesDispatchDialog(QDialog):
         heading.addWidget(subtitle)
         header.addLayout(heading, 1)
 
-        dashboard = QPushButton("Abrir Dashboard Gerencial")
-        dashboard.setToolTip("Abrir el resumen gerencial en HTML")
-        dashboard.clicked.connect(self.open_managerial_dashboard)
+        dashboard = QPushButton("Ver dashboard de ventas y despachos")
+        dashboard.setToolTip("Abrir un dashboard HTML con los filtros actuales de este informe")
+        dashboard.clicked.connect(self.open_sales_dispatch_dashboard)
         header.addWidget(dashboard, 0, Qt.AlignTop)
         root.addLayout(header)
 
@@ -158,14 +158,14 @@ class ManagerialSalesDispatchDialog(QDialog):
         bottom.addWidget(close)
         root.addLayout(bottom)
 
-    def open_managerial_dashboard(self) -> None:
+    def open_sales_dispatch_dashboard(self) -> None:
         try:
-            ManagerialDashboardHtmlReport().open()
+            ManagerialSalesDispatchHtmlReport(service=self.service).open(self.current_filters())
         except Exception as exc:
             QMessageBox.critical(
                 self,
-                "Dashboard Gerencial",
-                f"No se pudo abrir el Dashboard Gerencial:\n{exc}",
+                "Dashboard de ventas y despachos",
+                f"No se pudo abrir el dashboard de ventas y despachos:\n{exc}",
             )
 
     def _load_filter_options(self) -> None:
