@@ -69,6 +69,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             "color: #ffffff; background: transparent; border: 0; font-weight: 700;"
         )
         total_layout.addWidget(self.order_flow_summary_label)
+        self.order_flow_summary_label.setStyleSheet(
+            "color: #ffffff; background: transparent; border: 0; font-weight: 700; font-size: 11px;"
+        )
 
         self.capacity_summary_label = QLabel("")
         self.capacity_summary_label.setObjectName("palletCapacitySummary")
@@ -78,10 +81,12 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
         )
         total_layout.addWidget(self.capacity_summary_label)
+        total_frame = self.total_kg_label.parentWidget()
+        total_frame.setMaximumHeight(145)
 
         batch_frame = self.findChild(QFrame, "palletBatchActions")
         batch_layout = batch_frame.layout()
-        self.propose_distribution_button = QPushButton("Proponer distribucion automatica")
+        self.propose_distribution_button = QPushButton("Proponer distribucion")
         self.propose_distribution_button.setObjectName("proposePalletDistributionButton")
         self.propose_distribution_button.clicked.connect(self.propose_distribution)
         batch_layout.addWidget(self.propose_distribution_button, 3, 0, 1, 2)
@@ -98,17 +103,42 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.recalculate_all_button.clicked.connect(self.confirm_recalculate_all)
         batch_layout.addWidget(self.recalculate_all_button, 5, 0, 1, 2)
 
-        self.configure_pallet_capacity_button = QPushButton("Configurar maximo kg por pallet")
+        self.configure_pallet_capacity_button = QPushButton("Kg/pallet")
         self.configure_pallet_capacity_button.setObjectName("configurePalletMaxKgButton")
         self.configure_pallet_capacity_button.setProperty("secondary", True)
         self.configure_pallet_capacity_button.clicked.connect(self.configure_pallet_capacity)
         batch_layout.addWidget(self.configure_pallet_capacity_button, 6, 0, 1, 2)
 
-        self.configure_truck_capacity_button = QPushButton("Configurar capacidad del camion")
+        self.configure_truck_capacity_button = QPushButton("Cap. camion")
         self.configure_truck_capacity_button.setObjectName("configureTruckMaxKgButton")
         self.configure_truck_capacity_button.setProperty("secondary", True)
         self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
         batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
+
+        batch_label_item = batch_layout.itemAtPosition(0, 0)
+        batch_label = batch_label_item.widget() if batch_label_item is not None else None
+        while batch_layout.count():
+            batch_layout.takeAt(0)
+        batch_layout.setHorizontalSpacing(6)
+        batch_layout.setVerticalSpacing(0)
+        if batch_label is not None:
+            batch_label.setText("Agregar:")
+            batch_layout.addWidget(batch_label, 0, 0)
+        self.bulk_pallet_count_input.setMaximumWidth(74)
+        batch_layout.addWidget(self.bulk_pallet_count_input, 0, 1)
+        batch_layout.addWidget(self.add_pallet_button, 0, 2)
+        batch_layout.addWidget(self.propose_distribution_button, 0, 3)
+        batch_layout.addWidget(self.reorganize_pending_button, 0, 4)
+        batch_layout.addWidget(self.recalculate_all_button, 0, 5)
+        batch_layout.addWidget(self.configure_pallet_capacity_button, 0, 6)
+        batch_layout.addWidget(self.configure_truck_capacity_button, 0, 7)
+        self.clear_assignments_button.setText("Quitar asignaciones")
+        self.clear_assignments_button.setStyleSheet(
+            "QPushButton { color: #9b2c2c; font-weight: 700; }"
+        )
+        batch_layout.addWidget(self.clear_assignments_button, 0, 8)
+        for column in range(3, 9):
+            batch_layout.setColumnStretch(column, 1)
 
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
