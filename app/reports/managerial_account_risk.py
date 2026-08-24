@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
@@ -42,6 +42,8 @@ class ManagerialAccountRiskService:
     reason, positive due documents are consumed against the current positive
     client balance from oldest to newest. This keeps overdue/future buckets
     mutually exclusive and consistent with the dashboard's conservative cap.
+    Reversed source documents are removed from the due-document pool while the
+    signed reversal itself continues affecting the account balance exactly once.
     """
 
     VALID_STATES = {"all", "with_debt", "without_debt", "overdue"}
@@ -76,10 +78,17 @@ class ManagerialAccountRiskService:
         raw_balance = round(sum(float(m.total_amount or 0) for m in movements), 2)
         balance = max(raw_balance, 0.0)
 
+        reversed_ids = {
+            int(m.reverses_id)
+            for m in movements
+            if m.is_reversal and m.reverses_id is not None
+        }
         positive_docs = [
             m
             for m in movements
-            if float(m.total_amount or 0) > 0 and m.due_date is not None
+            if float(m.total_amount or 0) > 0
+            and m.due_date is not None
+            and m.id not in reversed_ids
         ]
         positive_docs.sort(key=lambda m: (m.due_date, m.id))
 
