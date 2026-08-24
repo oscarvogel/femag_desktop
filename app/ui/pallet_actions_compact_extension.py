@@ -39,10 +39,13 @@ def _compact_batch_actions(widget) -> None:
         widget.clear_assignments_button,
     )
     for button in buttons:
-        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        button.setMinimumWidth(0)
         button.setMaximumHeight(34)
 
-    widget.bulk_pallet_count_input.setMaximumWidth(72)
+    widget.bulk_pallet_count_input.setMinimumWidth(44)
+    widget.bulk_pallet_count_input.setMaximumWidth(64)
+    widget.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     widget.clear_assignments_button.setToolTip(
         "Quita todas las asignaciones de mercaderia de los pallets."
     )
