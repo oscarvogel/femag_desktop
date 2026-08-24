@@ -191,20 +191,25 @@ def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
 
 def test_sidebar_places_customer_ledger_after_managerial_block(db):
     from app.services.auth_service import AuthService
+    from app.services.menu_service import set_managerial_dashboard_menu_enabled
     from app.services.permission_service import PermissionService
     from app.ui.menu import build_sidebar_tree_spec
 
     PermissionService().seed_defaults()
     user = AuthService().create_user("admin_sidebar_order", "clave", "Administrador")
 
-    principal = build_sidebar_tree_spec(user).sections[0]
-    titles = [item.title for item in principal.items]
-    managerial = next(item for item in principal.items if item.title == "Dashboard Gerencial")
+    set_managerial_dashboard_menu_enabled(True)
+    try:
+        principal = build_sidebar_tree_spec(user).sections[0]
+        titles = [item.title for item in principal.items]
+        managerial = next(item for item in principal.items if item.title == "Dashboard Gerencial")
 
-    assert [child.title for child in managerial.children] == ["Resumen gerencial", "Ventas y despachos"]
-    assert [child.route_key for child in managerial.children] == ["managerial_dashboard", "managerial_sales_dispatch"]
-    assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
-    assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
+        assert [child.title for child in managerial.children] == ["Resumen gerencial", "Ventas y despachos"]
+        assert [child.route_key for child in managerial.children] == ["managerial_dashboard", "managerial_sales_dispatch"]
+        assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
+        assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
+    finally:
+        set_managerial_dashboard_menu_enabled(False)
 
 
 def test_app_smoke_command_runs():
