@@ -115,31 +115,6 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
         batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
 
-        batch_label_item = batch_layout.itemAtPosition(0, 0)
-        batch_label = batch_label_item.widget() if batch_label_item is not None else None
-        while batch_layout.count():
-            batch_layout.takeAt(0)
-        batch_layout.setHorizontalSpacing(6)
-        batch_layout.setVerticalSpacing(0)
-        if batch_label is not None:
-            batch_label.setText("Agregar:")
-            batch_layout.addWidget(batch_label, 0, 0)
-        self.bulk_pallet_count_input.setMaximumWidth(74)
-        batch_layout.addWidget(self.bulk_pallet_count_input, 0, 1)
-        batch_layout.addWidget(self.add_pallet_button, 0, 2)
-        batch_layout.addWidget(self.propose_distribution_button, 0, 3)
-        batch_layout.addWidget(self.reorganize_pending_button, 0, 4)
-        batch_layout.addWidget(self.recalculate_all_button, 0, 5)
-        batch_layout.addWidget(self.configure_pallet_capacity_button, 0, 6)
-        batch_layout.addWidget(self.configure_truck_capacity_button, 0, 7)
-        self.clear_assignments_button.setText("Quitar asignaciones")
-        self.clear_assignments_button.setStyleSheet(
-            "QPushButton { color: #9b2c2c; font-weight: 700; }"
-        )
-        batch_layout.addWidget(self.clear_assignments_button, 0, 8)
-        for column in range(3, 9):
-            batch_layout.setColumnStretch(column, 1)
-
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
         self.lock_pallet_button.setObjectName("togglePalletLockButton")
