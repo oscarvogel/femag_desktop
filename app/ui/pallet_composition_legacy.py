@@ -61,18 +61,19 @@ class PalletCard(QFrame):
         # composicion entre en pantallas chicas (notebooks 1280x720). Sigue
         # siendo cuadrada porque Qt respeta mismo ancho/alto cuando ambos
         # limites inferior y superior son iguales.
-        self.setMinimumSize(150, 150)
-        self.setMaximumSize(200, 200)
+        self.setMinimumSize(128, 128)
+        self.setMaximumSize(160, 160)
         size_policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         size_policy.setHeightForWidth(True)
         self.setSizePolicy(size_policy)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(10, 9, 10, 9)
+        layout.setSpacing(3)
         self.title_label = QLabel(f"PALLET {sequence}")
-        self.title_label.setStyleSheet("font-weight: 800; font-size: 15px;")
+        self.title_label.setStyleSheet("font-weight: 800; font-size: 13px;")
         self.kg_label = QLabel("0 kg")
         self.kg_label.setAlignment(Qt.AlignCenter)
-        self.kg_label.setStyleSheet("font-weight: 900; font-size: 27px;")
+        self.kg_label.setStyleSheet("font-weight: 900; font-size: 22px;")
         self.article_count_label = QLabel("0 articulos")
         self.client_count_label = QLabel("0 clientes")
         self.status_label = QLabel("Incompleto")
@@ -128,6 +129,7 @@ class PalletCompositionWidget(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(7)
         heading = QLabel("Composicion de pallets")
         heading.setObjectName("palletCompositionTitle")
         heading.setStyleSheet("font-size: 18px; font-weight: 800;")
@@ -139,6 +141,9 @@ class PalletCompositionWidget(QWidget):
             "QFrame#loadOrderKgTotalFrame { background-color: #173a59; border: 0; border-radius: 12px; }"
         )
         total_layout = QVBoxLayout(total_frame)
+        total_layout.setContentsMargins(12, 8, 12, 8)
+        total_layout.setSpacing(2)
+        total_frame.setMaximumHeight(132)
         total_caption = QLabel("TOTAL DE LA ORDEN")
         total_caption.setAlignment(Qt.AlignCenter)
         total_caption.setStyleSheet("color: #ffffff; background: transparent; border: 0;")
@@ -146,7 +151,7 @@ class PalletCompositionWidget(QWidget):
         self.total_kg_label.setObjectName("loadOrderTotalKg")
         self.total_kg_label.setAlignment(Qt.AlignCenter)
         self.total_kg_label.setStyleSheet(
-            "font-size: 38px; font-weight: 900; color: #ffffff; background: transparent; border: 0;"
+            "font-size: 32px; font-weight: 900; color: #ffffff; background: transparent; border: 0;"
         )
         self.summary_label = QLabel("0 pallets · 0 completos · 0 pendientes")
         self.summary_label.setObjectName("loadOrderPalletSummary")
@@ -164,13 +169,13 @@ class PalletCompositionWidget(QWidget):
         # Keep the card area bounded so the batch actions and dialog footer
         # remain visible on notebook-height windows. Extra pallet rows still
         # remain reachable through the scroll area.
-        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        scroll.setMinimumHeight(0)
-        scroll.setMaximumHeight(170)
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll.setMinimumHeight(220)
         self.card_container = QWidget()
         self.card_grid = QGridLayout(self.card_container)
         self.card_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.card_grid.setSpacing(10)
+        self.card_grid.setHorizontalSpacing(8)
+        self.card_grid.setVerticalSpacing(8)
         scroll.setWidget(self.card_container)
         left_layout.addWidget(scroll, 1)
 
@@ -369,6 +374,25 @@ class PalletCompositionWidget(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._fit_destination_combo_to_editor()
+        self._reflow_cards()
+
+    def _card_columns(self) -> int:
+        scroll = self.findChild(QScrollArea, "palletCardScroll")
+        available = scroll.viewport().width() if scroll is not None else self.width()
+        card_width = 136
+        spacing = self.card_grid.horizontalSpacing()
+        columns = max(3, available // max(card_width + spacing, 1))
+        return min(6, columns)
+
+    def _reflow_cards(self) -> None:
+        if not self._cards:
+            return
+        columns = self._card_columns()
+        ordered = [self._cards[key] for key in sorted(self._cards)]
+        for card in ordered:
+            self.card_grid.removeWidget(card)
+        for index, card in enumerate(ordered):
+            self.card_grid.addWidget(card, index // columns, index % columns)
 
     def eventFilter(self, watched, event) -> bool:
         if watched is self.editor_panel and event.type() == QEvent.Resize:
@@ -752,6 +776,7 @@ class PalletCompositionWidget(QWidget):
                 "background: transparent; border: 0;"
             )
             self.card_grid.addWidget(empty_state, 0, 0, 1, 3)
+        columns = self._card_columns()
         for index, pallet in enumerate(self._pallets):
             card = PalletCard(pallet["sequence"])
             pallet_result = result_by_sequence[pallet["sequence"]]
@@ -764,7 +789,7 @@ class PalletCompositionWidget(QWidget):
             )
             card.set_state(states[pallet["sequence"]])
             card.selected.connect(self._select_pallet)
-            self.card_grid.addWidget(card, index // 3, index % 3)
+            self.card_grid.addWidget(card, index // columns, index % columns)
             self._cards[pallet["sequence"]] = card
         self.add_pallet_button.setText("+ Agregar pallet" if self._pallets else "Agregar primer pallet")
         self.clear_assignments_button.setEnabled(
