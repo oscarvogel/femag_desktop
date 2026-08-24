@@ -17,24 +17,9 @@ def _navigate_to_route(window, route):
     nav = window.findChild(QListWidget, "sidebar")
     assert nav is not None
 
-    def select_visible_route() -> bool:
-        for row in range(nav.count()):
-            item = nav.item(row)
-            if item.data(Qt.UserRole) == route:
-                nav.setCurrentRow(row)
-                return True
-        return False
-
-    if select_visible_route():
-        return
-    for row in range(nav.count()):
-        item = nav.item(row)
-        if item.data(Qt.UserRole) == "group:Transporte":
-            nav.setCurrentRow(row)
-            break
-    if select_visible_route():
-        return
-    raise AssertionError(f"Route not found in sidebar: {route}")
+    window._navigate_to_route(route)
+    visible_routes = [nav.item(row).data(Qt.UserRole) for row in range(nav.count())]
+    assert route in visible_routes, f"Route not found in sidebar: {route}"
 
 
 def _admin_window(username: str):
@@ -329,7 +314,7 @@ def test_unassigned_imported_truck_dialog_opens_for_manual_correction(db):
     assert dialog.findChild(QLineEdit, "truckTrailerDomainInput").text() == "SIN456"
 
 
-def test_desktop_sidebar_groups_transport_abms_without_breaking_routes(db):
+def test_desktop_sidebar_groups_master_abms_without_breaking_routes(db):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QListWidget, QPushButton
 
@@ -338,15 +323,22 @@ def test_desktop_sidebar_groups_transport_abms_without_breaking_routes(db):
     assert nav is not None
 
     rows = [nav.item(row) for row in range(nav.count())]
-    transport_row = next(row for row, item in enumerate(rows) if item.text() == "Transporte")
-    assert nav.item(transport_row).data(Qt.UserRole) == "group:Transporte"
+    masters_row = next(row for row, item in enumerate(rows) if item.text() == "Maestros")
+    assert nav.item(masters_row).data(Qt.UserRole) == "group:Maestros"
 
-    nav.setCurrentRow(transport_row)
+    nav.setCurrentRow(masters_row)
     app.processEvents()
     rows = [nav.item(row) for row in range(nav.count())]
     labels = [item.text().strip() for item in rows]
-    transport_index = labels.index("Transporte")
-    assert labels[transport_index + 1 : transport_index + 4] == ["Transportistas", "Choferes", "Camiones"]
+    masters_index = labels.index("Maestros")
+    assert labels[masters_index + 1 : masters_index + 7] == [
+        "Clientes",
+        "Productos",
+        "Tipos de IVA",
+        "Transportistas",
+        "Choferes",
+        "Camiones",
+    ]
 
     _navigate_to_route(window, "carriers")
     assert window.stack.currentIndex() == window._route_indexes["carriers"]

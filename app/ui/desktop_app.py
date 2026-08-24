@@ -52,6 +52,7 @@ from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.models.payments import ClientPayment
+from app.models.remittances import RemittanceSeries
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_SHARED,
@@ -374,6 +375,12 @@ class FemagDesktopWindow(QMainWindow):
         for button in (notifications, help_button, settings, change_password, logout):
             button.setObjectName("topbarIconButton")
         change_password.clicked.connect(self._open_change_password)
+        can_configure = PermissionService.is_administrator(self.user)
+        settings.setEnabled(can_configure)
+        if can_configure:
+            settings.clicked.connect(lambda: self._navigate_to_route("remittance_series"))
+        else:
+            settings.setToolTip("Sólo un administrador puede configurar la numeración.")
         logout.clicked.connect(self._logout)
         user = QLabel(f"{self.shell.username}\n{self.shell.profile}")
         user.setObjectName("userBlock")
@@ -451,7 +458,7 @@ class FemagDesktopWindow(QMainWindow):
                     if item.children:
                         group_key = f"group:{item.title}"
                         row.setData(Qt.UserRole, group_key)
-                        row.setToolTip("Mostrar u ocultar ABMs relacionados.")
+                        row.setToolTip("Mostrar u ocultar opciones relacionadas.")
                         self.nav.addItem(row)
                         child_routes = {child.route_key for child in item.children}
                         if self._current_route in child_routes:
@@ -484,7 +491,7 @@ class FemagDesktopWindow(QMainWindow):
         if group_title in self._expanded_sidebar_groups:
             self._expanded_sidebar_groups.remove(group_title)
         else:
-            self._expanded_sidebar_groups.add(group_title)
+            self._expanded_sidebar_groups = {group_title}
         self._populate_sidebar()
 
     def _statusbar(self) -> QWidget:
@@ -537,8 +544,8 @@ class FemagDesktopWindow(QMainWindow):
                 if not item.children:
                     continue
                 for child in item.children:
-                    if child.route_key == route and item.title not in self._expanded_sidebar_groups:
-                        self._expanded_sidebar_groups.add(item.title)
+                    if child.route_key == route and self._expanded_sidebar_groups != {item.title}:
+                        self._expanded_sidebar_groups = {item.title}
                         self._populate_sidebar()
                         return
 
@@ -580,6 +587,15 @@ class FemagDesktopWindow(QMainWindow):
         if page is None:
             return
         btn = page.findChild(QPushButton, "newClientButton")
+        if btn and btn.isEnabled():
+            btn.click()
+
+    def _handle_dashboard_new_remittance(self) -> None:
+        self._navigate_to_route("remittances")
+        page = self.stack.currentWidget()
+        if page is None:
+            return
+        btn = page.findChild(QPushButton, "newRemittanceButton")
         if btn and btn.isEnabled():
             btn.click()
 
@@ -866,6 +882,8 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_search_load_order)
                 elif action.route_key == "clients.new":
                     button.clicked.connect(self._handle_dashboard_new_client)
+                elif action.route_key == "remittances.new":
+                    button.clicked.connect(self._handle_dashboard_new_remittance)
                 elif action.route_key == "customer_ledger.view":
                     button.clicked.connect(self._handle_dashboard_open_customer_ledger)
                 elif action.route_key == "customer_ledger.register_payment":
@@ -3318,6 +3336,19 @@ def _ensure_demo_user(*, demo_mode: bool = False):
 
 
 def _seed_demo_masters():
+    RemittanceSeries.get_or_create(
+        name="Talonario demo",
+        defaults={
+            "document_type": "Remito R",
+            "point_of_sale": "0001",
+            "next_number": 10678,
+            "end_number": 10999,
+            "active": True,
+            "is_default": True,
+            "created_by": "demo",
+            "updated_by": "demo",
+        },
+    )
     if _demo_data_exists():
         return
     carrier = Carrier.get_or_create(

@@ -47,9 +47,22 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             disabled_reason=source.disabled_reason,
         )
 
-    transport_children = [
+    operations_children = [
         item
         for item in (
+            approved_item("Órdenes de carga"),
+            approved_item("Remitos"),
+            approved_item("F150", "Generar F150"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
+    master_children = [
+        item
+        for item in (
+            approved_item("Clientes"),
+            approved_item("Productos"),
+            approved_item("Tipos de IVA"),
             approved_item("Transportistas"),
             approved_item("Choferes"),
             approved_item("Camiones"),
@@ -59,27 +72,23 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
 
     principal_items = [
         approved_item("Dashboard"),
-        approved_item("Órdenes de carga"),
-        approved_item("Remitos"),
-        approved_item("F150", "Generar F150"),
-        approved_item("Clientes"),
     ]
-    if transport_children:
-        principal_items.append(MenuItemView(title="Transporte", children=transport_children))
+    if operations_children:
+        principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
+    if master_children:
+        principal_items.append(MenuItemView(title="Maestros", children=master_children))
     principal_items.extend(
         [
-            approved_item("Productos"),
-            approved_item("Tipos de IVA"),
-            approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
-            approved_item("Cuenta corriente", route_key="customer_ledger"),
             approved_item("Reportes", route_key="placeholder"),
-            approved_item("Configuración", "Parámetros", route_key="placeholder"),
+            approved_item("Cuenta corriente", route_key="customer_ledger"),
         ]
     )
 
     system_children = [
         item
         for item in (
+            approved_item("Configuración", "Parámetros", route_key="remittance_series"),
+            approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Usuarios", route_key="user_management"),
             approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
         )
