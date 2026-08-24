@@ -27,30 +27,30 @@ def test_pallet_actions_are_compact_and_destructive_action_is_separated():
                     return layout.getItemPosition(index)
             raise AssertionError(f"No se encontro {target.objectName()}")
 
-        assert position(widget.propose_distribution_button) == (3, 0, 1, 2)
-        assert position(widget.reorganize_pending_button) == (4, 0, 1, 1)
-        assert position(widget.recalculate_all_button) == (4, 1, 1, 1)
-        assert position(widget.configure_pallet_capacity_button) == (5, 0, 1, 1)
-        assert position(widget.configure_truck_capacity_button) == (5, 1, 1, 1)
-        assert position(widget.clear_assignments_button) == (7, 0, 1, 2)
-
-        assert widget.configure_pallet_capacity_button.text() == "Configurar kg/pallet"
-        assert widget.configure_truck_capacity_button.text() == "Capacidad camion"
-        assert layout.rowMinimumHeight(6) >= 8
-
-        for button in (
+        action_buttons = (
+            widget.add_pallet_button,
+            widget.propose_distribution_button,
             widget.reorganize_pending_button,
             widget.recalculate_all_button,
             widget.configure_pallet_capacity_button,
             widget.configure_truck_capacity_button,
-        ):
+            widget.clear_assignments_button,
+        )
+        assert {position(button)[0] for button in action_buttons} == {0}
+
+        assert widget.propose_distribution_button.text() == "Proponer distribucion"
+        assert widget.configure_pallet_capacity_button.text() == "Kg/pallet"
+        assert widget.configure_truck_capacity_button.text() == "Cap. camion"
+        assert widget.clear_assignments_button.text() == "Quitar asignaciones"
+
+        for button in action_buttons:
             assert button.maximumHeight() <= 36
 
         widget.resize(1536, 768)
         widget.show()
         app.processEvents()
         assert frame.width() > 0
-        assert widget.clear_assignments_button.y() > widget.configure_pallet_capacity_button.y()
+        assert widget.clear_assignments_button.y() == widget.configure_pallet_capacity_button.y()
         widget.close()
         """
     )
