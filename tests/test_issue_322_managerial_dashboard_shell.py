@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-def test_managerial_dashboard_opens_local_html_from_desktop_shell_for_admin(db, monkeypatch):
+def test_managerial_dashboard_opens_local_html_from_grouped_desktop_shell_for_admin(db, monkeypatch):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
 
@@ -26,6 +26,13 @@ def test_managerial_dashboard_opens_local_html_from_desktop_shell_for_admin(db, 
         app = QApplication.instance() or QApplication([])
         window = FemagDesktopWindow(user=admin, demo_mode=True)
 
+        group_row = next(
+            index
+            for index in range(window.nav.count())
+            if window.nav.item(index).data(Qt.UserRole) == "group:Dashboard Gerencial"
+        )
+        window._navigate(group_row)
+
         row = next(
             index
             for index in range(window.nav.count())
@@ -36,7 +43,7 @@ def test_managerial_dashboard_opens_local_html_from_desktop_shell_for_admin(db, 
         assert app is not None
         assert opened == [True]
         assert "managerial_dashboard" not in window._route_indexes
-        assert window.nav.item(row).text() == "Dashboard Gerencial"
+        assert window.nav.item(row).text().strip() == "Resumen gerencial"
         window.close()
     finally:
         uninstall_managerial_dashboard_extension()
