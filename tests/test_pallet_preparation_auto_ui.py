@@ -77,8 +77,9 @@ def test_pallet_cards_keep_batch_actions_visible_on_short_windows(db):
     card_scroll = widget.findChild(QScrollArea, "palletCardScroll")
 
     assert card_scroll is not None
-    assert card_scroll.sizePolicy().verticalPolicy() == QSizePolicy.Preferred
-    assert card_scroll.maximumHeight() == 170
+    assert card_scroll.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert card_scroll.minimumHeight() >= 220
+    assert card_scroll.maximumHeight() > 170
 
 
 def test_lock_pallet_is_visible_and_reorganize_preserves_it(db):
