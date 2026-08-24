@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
 
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, Product
+from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
 from app.reports.managerial_sales_dispatch import (
     ManagerialSalesDispatchService,
     SalesDispatchFilters,
@@ -72,14 +73,23 @@ class ManagerialSalesDispatchDialog(QDialog):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
+        header = QHBoxLayout()
+        heading = QVBoxLayout()
         title = QLabel("Ventas y despachos")
         title.setStyleSheet("font-size: 22px; font-weight: 700;")
         subtitle = QLabel(
             "Detalle auditable de los despachos valorizados. Por defecto muestra órdenes Cerradas, igual que el Dashboard Gerencial."
         )
         subtitle.setStyleSheet("color: #64748b;")
-        root.addWidget(title)
-        root.addWidget(subtitle)
+        heading.addWidget(title)
+        heading.addWidget(subtitle)
+        header.addLayout(heading, 1)
+
+        dashboard = QPushButton("Abrir Dashboard Gerencial")
+        dashboard.setToolTip("Abrir el resumen gerencial en HTML")
+        dashboard.clicked.connect(self.open_managerial_dashboard)
+        header.addWidget(dashboard, 0, Qt.AlignTop)
+        root.addLayout(header)
 
         filters = QGridLayout()
         self.date_from = QDateEdit(calendarPopup=True)
@@ -147,6 +157,16 @@ class ManagerialSalesDispatchDialog(QDialog):
         bottom.addStretch(1)
         bottom.addWidget(close)
         root.addLayout(bottom)
+
+    def open_managerial_dashboard(self) -> None:
+        try:
+            ManagerialDashboardHtmlReport().open()
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Dashboard Gerencial",
+                f"No se pudo abrir el Dashboard Gerencial:\n{exc}",
+            )
 
     def _load_filter_options(self) -> None:
         self._fill_combo(self.client_combo, "Todos", Client.select().order_by(Client.name), lambda item: item.name)
