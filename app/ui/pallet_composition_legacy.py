@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_DOWN
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import QEvent, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -61,18 +61,19 @@ class PalletCard(QFrame):
         # composicion entre en pantallas chicas (notebooks 1280x720). Sigue
         # siendo cuadrada porque Qt respeta mismo ancho/alto cuando ambos
         # limites inferior y superior son iguales.
-        self.setMinimumSize(150, 150)
-        self.setMaximumSize(200, 200)
+        self.setMinimumSize(128, 128)
+        self.setMaximumSize(160, 160)
         size_policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         size_policy.setHeightForWidth(True)
         self.setSizePolicy(size_policy)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(10, 9, 10, 9)
+        layout.setSpacing(3)
         self.title_label = QLabel(f"PALLET {sequence}")
-        self.title_label.setStyleSheet("font-weight: 800; font-size: 15px;")
+        self.title_label.setStyleSheet("font-weight: 800; font-size: 13px;")
         self.kg_label = QLabel("0 kg")
         self.kg_label.setAlignment(Qt.AlignCenter)
-        self.kg_label.setStyleSheet("font-weight: 900; font-size: 27px;")
+        self.kg_label.setStyleSheet("font-weight: 900; font-size: 22px;")
         self.article_count_label = QLabel("0 articulos")
         self.client_count_label = QLabel("0 clientes")
         self.status_label = QLabel("Incompleto")
@@ -128,6 +129,7 @@ class PalletCompositionWidget(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(7)
         heading = QLabel("Composicion de pallets")
         heading.setObjectName("palletCompositionTitle")
         heading.setStyleSheet("font-size: 18px; font-weight: 800;")
@@ -139,6 +141,9 @@ class PalletCompositionWidget(QWidget):
             "QFrame#loadOrderKgTotalFrame { background-color: #173a59; border: 0; border-radius: 12px; }"
         )
         total_layout = QVBoxLayout(total_frame)
+        total_layout.setContentsMargins(12, 8, 12, 8)
+        total_layout.setSpacing(2)
+        total_frame.setMaximumHeight(132)
         total_caption = QLabel("TOTAL DE LA ORDEN")
         total_caption.setAlignment(Qt.AlignCenter)
         total_caption.setStyleSheet("color: #ffffff; background: transparent; border: 0;")
@@ -146,7 +151,7 @@ class PalletCompositionWidget(QWidget):
         self.total_kg_label.setObjectName("loadOrderTotalKg")
         self.total_kg_label.setAlignment(Qt.AlignCenter)
         self.total_kg_label.setStyleSheet(
-            "font-size: 38px; font-weight: 900; color: #ffffff; background: transparent; border: 0;"
+            "font-size: 32px; font-weight: 900; color: #ffffff; background: transparent; border: 0;"
         )
         self.summary_label = QLabel("0 pallets · 0 completos · 0 pendientes")
         self.summary_label.setObjectName("loadOrderPalletSummary")
@@ -164,13 +169,13 @@ class PalletCompositionWidget(QWidget):
         # Keep the card area bounded so the batch actions and dialog footer
         # remain visible on notebook-height windows. Extra pallet rows still
         # remain reachable through the scroll area.
-        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        scroll.setMinimumHeight(0)
-        scroll.setMaximumHeight(170)
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll.setMinimumHeight(220)
         self.card_container = QWidget()
         self.card_grid = QGridLayout(self.card_container)
         self.card_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.card_grid.setSpacing(10)
+        self.card_grid.setHorizontalSpacing(8)
+        self.card_grid.setVerticalSpacing(8)
         scroll.setWidget(self.card_container)
         left_layout.addWidget(scroll, 1)
 
@@ -206,15 +211,16 @@ class PalletCompositionWidget(QWidget):
         self.editor_panel = QFrame()
         self.editor_panel.setObjectName("palletEditorPanel")
         self.editor_panel.setMinimumWidth(240)
+        self.editor_panel.installEventFilter(self)
         editor_panel_layout = QVBoxLayout(self.editor_panel)
         editor_panel_layout.setContentsMargins(0, 0, 0, 0)
-        editor_scroll = QScrollArea()
-        editor_scroll.setObjectName("palletEditorScroll")
-        editor_scroll.setWidgetResizable(True)
-        editor_scroll.setFrameShape(QFrame.NoFrame)
-        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        editor_scroll.setMinimumSize(0, 0)
-        editor_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.editor_scroll = QScrollArea()
+        self.editor_scroll.setObjectName("palletEditorScroll")
+        self.editor_scroll.setWidgetResizable(True)
+        self.editor_scroll.setFrameShape(QFrame.NoFrame)
+        self.editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.editor_scroll.setMinimumSize(0, 0)
+        self.editor_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         editor_content = QWidget()
         editor_content.setObjectName("palletEditorContent")
         editor_content.setMinimumSize(0, 0)
@@ -241,6 +247,14 @@ class PalletCompositionWidget(QWidget):
         self.destination_combo = QComboBox()
         self.destination_combo.setObjectName("palletDestinationInput")
         enable_combo_autocomplete(self.destination_combo, placeholder="Buscar destino...")
+        self.destination_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.destination_combo.setMinimumContentsLength(1)
+        self.destination_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.destination_combo.lineEdit().setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
         layout_individual.addWidget(self.destination_combo)
         layout_individual.addWidget(QLabel("Articulo"))
         self.product_combo = QComboBox()
@@ -344,15 +358,52 @@ class PalletCompositionWidget(QWidget):
         self.editor_tabs.addTab(tab_suelto, "Suelto")
 
         editor.addWidget(self.editor_tabs, 1)
-        editor_scroll.setWidget(editor_content)
-        editor_panel_layout.addWidget(editor_scroll)
+        self.editor_scroll.setWidget(editor_content)
+        editor_panel_layout.addWidget(self.editor_scroll)
         self.destination_combo.currentIndexChanged.connect(self._refresh_product_combo)
+        self.destination_combo.currentIndexChanged.connect(
+            self._sync_destination_tooltip
+        )
         self.product_combo.currentIndexChanged.connect(self._suggest_remaining_quantity)
         self.quantity_input.valueChanged.connect(self._update_editor_actions)
         self.bulk_start_input.valueChanged.connect(self._bulk_start_changed)
         self.bulk_target_count_input.valueChanged.connect(self._suggest_bulk_quantity)
         self.bulk_quantity_input.valueChanged.connect(self._update_editor_actions)
         root.addWidget(self.editor_panel, 2)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_destination_combo_to_editor()
+        self._reflow_cards()
+
+    def _card_columns(self) -> int:
+        scroll = self.findChild(QScrollArea, "palletCardScroll")
+        available = scroll.viewport().width() if scroll is not None else self.width()
+        card_width = 136
+        spacing = self.card_grid.horizontalSpacing()
+        columns = max(3, available // max(card_width + spacing, 1))
+        return min(6, columns)
+
+    def _reflow_cards(self) -> None:
+        if not self._cards:
+            return
+        columns = self._card_columns()
+        ordered = [self._cards[key] for key in sorted(self._cards)]
+        for card in ordered:
+            self.card_grid.removeWidget(card)
+        for index, card in enumerate(ordered):
+            self.card_grid.addWidget(card, index // columns, index % columns)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.editor_panel and event.type() == QEvent.Resize:
+            self._fit_destination_combo_to_editor(event.size().width())
+        return super().eventFilter(watched, event)
+
+    def _fit_destination_combo_to_editor(self, panel_width: int | None = None) -> None:
+        if not hasattr(self, "editor_scroll") or not hasattr(self, "destination_combo"):
+            return
+        available_width = max((panel_width or self.editor_panel.width()) - 4, 120)
+        self.destination_combo.setMaximumWidth(available_width)
 
     def set_destinations(self, destinations: list[dict]) -> None:
         self._destinations = destinations
@@ -725,6 +776,7 @@ class PalletCompositionWidget(QWidget):
                 "background: transparent; border: 0;"
             )
             self.card_grid.addWidget(empty_state, 0, 0, 1, 3)
+        columns = self._card_columns()
         for index, pallet in enumerate(self._pallets):
             card = PalletCard(pallet["sequence"])
             pallet_result = result_by_sequence[pallet["sequence"]]
@@ -737,7 +789,7 @@ class PalletCompositionWidget(QWidget):
             )
             card.set_state(states[pallet["sequence"]])
             card.selected.connect(self._select_pallet)
-            self.card_grid.addWidget(card, index // 3, index % 3)
+            self.card_grid.addWidget(card, index // columns, index % columns)
             self._cards[pallet["sequence"]] = card
         self.add_pallet_button.setText("+ Agregar pallet" if self._pallets else "Agregar primer pallet")
         self.clear_assignments_button.setEnabled(
@@ -797,7 +849,18 @@ class PalletCompositionWidget(QWidget):
         index = self.destination_combo.findData(selected)
         if index >= 0:
             self.destination_combo.setCurrentIndex(index)
+        self._sync_destination_tooltip()
         self._refresh_product_combo()
+
+    def _sync_destination_tooltip(self) -> None:
+        index = self.destination_combo.currentIndex()
+        full_label = self.destination_combo.itemText(index) if index >= 0 else ""
+        self.destination_combo.setToolTip(full_label)
+        line_edit = self.destination_combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setToolTip(
+                full_label or "Clic para ver la lista, escribí para filtrar"
+            )
 
     def _refresh_product_combo(self) -> None:
         address_id = self.destination_combo.currentData()

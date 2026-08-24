@@ -562,3 +562,36 @@ def test_composition_widget_fits_in_notebook_viewport(db):
         assert card.width() == card.height(), (
             f"Card {sequence} no es cuadrada ({card.width()}x{card.height()})"
         )
+
+
+def test_long_destination_respects_editor_width_and_keeps_full_label_in_tooltip(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QSizePolicy
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    destinations = _destinations(db)
+    destinations[0]["client_label"] = "HERMANOS S.R.L."
+    destinations[0]["address_label"] = (
+        "LOS HERMANOS S.R.L. - AV. 9 DE JULIO 1215, PUERTO RICO"
+    )
+    full_label = (
+        f"{destinations[0]['client_label']} · {destinations[0]['address_label']}"
+    )
+
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.resize(900, 650)
+    widget.show()
+    app.processEvents()
+
+    combo = widget.findChild(QComboBox, "palletDestinationInput")
+    combo.setCurrentIndex(combo.findData(destinations[0]["address_id"]))
+    app.processEvents()
+
+    assert combo.sizePolicy().horizontalPolicy() == QSizePolicy.Ignored
+    assert combo.width() <= widget.editor_panel.width()
+    assert combo.minimumSizeHint().width() < combo.fontMetrics().horizontalAdvance(
+        full_label
+    )
+    assert combo.toolTip() == full_label
+    assert combo.lineEdit().toolTip() == full_label

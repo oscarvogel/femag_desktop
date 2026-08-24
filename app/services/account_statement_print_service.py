@@ -23,6 +23,8 @@ MOVEMENT_TYPE_LABELS = {
     "manual_debit_reversal": "Reverso débito manual",
     "manual_credit": "Crédito manual",
     "manual_credit_reversal": "Reverso crédito manual",
+    "return_credit": "Nota de crédito por devolución",
+    "return_credit_reversal": "Reverso nota de crédito por devolución",
 }
 
 
@@ -125,7 +127,6 @@ def _movements_table(movements: list[ClientAccountMovement], balances: list[floa
             Paragraph(f"$ {movement.total_amount:,.2f}", styles["cell_right"]),
             Paragraph(f"$ {balance:,.2f}", styles["cell_right"]),
         ])
-    # Totals row
     total_balance = float(balances[-1]) if balances else 0.0
     rows.append([
         Paragraph("", styles["cell"]),

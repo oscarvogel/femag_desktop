@@ -27,17 +27,17 @@ def test_legacy_dbf_import_page_is_reachable_from_sidebar(db):
     nav = window.findChild(QListWidget, "sidebar")
     assert nav is not None
 
+    window._navigate_to_route("legacy_dbf_import")
+    app.processEvents()
+
     import_row = None
     for row in range(nav.count()):
         item = nav.item(row)
-        if item.text() == "Importación DBF":
+        if item.text().strip() == "Importación DBF":
             import_row = row
             assert item.data(Qt.UserRole) == "legacy_dbf_import"
             break
     assert import_row is not None
-
-    nav.setCurrentRow(import_row)
-    app.processEvents()
 
     assert window.stack.currentIndex() == window._route_indexes["legacy_dbf_import"]
     assert window.findChild(QLabel, "legacyDbfImportTitle") is not None

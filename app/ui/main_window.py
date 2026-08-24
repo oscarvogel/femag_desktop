@@ -25,10 +25,46 @@ class MainShellSpec:
     status_bar: ShellStatusBarSpec
 
 
+def _install_remittances_page() -> None:
+    """Registra Remitos en el shell sin envolver el ciclo completo de construcción.
+
+    ``FemagDesktopWindow._build`` concentra señales, navegación y creación de páginas.
+    Envolver ese método completo deja efectos globales sobre todos los tests/UI que
+    crean ventanas. Para #10 sólo extendemos el punto donde se registran las páginas
+    maestras, de modo que Remitos se agregue durante el flujo normal del shell.
+    """
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    if getattr(FemagDesktopWindow, "_remittances_page_installed", False):
+        return
+
+    original_add_master_pages = FemagDesktopWindow._add_master_pages
+
+    def _add_master_pages_with_remittances(window) -> None:
+        original_add_master_pages(window)
+        if "remittances" in window._route_indexes:
+            return
+        from app.ui.remittances import RemittanceSeriesPage, RemittancesPage
+
+        window._add_page(
+            "remittances",
+            RemittancesPage(current_user=window.shell.username, parent=window),
+        )
+        window._add_page(
+            "remittance_series",
+            RemittanceSeriesPage(current_user=window.shell.username, parent=window),
+        )
+
+    FemagDesktopWindow._add_master_pages = _add_master_pages_with_remittances
+    FemagDesktopWindow._remittances_page_installed = True
+
+
 class MainWindow:
     def __init__(self, user: User | None = None, *, demo_mode: bool = False):
         self.user = user
         self.demo_mode = demo_mode
+        _install_remittances_page()
         self.sidebar_tree: SidebarTreeSpec | None = build_sidebar_tree_spec(user) if user else None
         self.shell_spec = self._build_shell_spec()
 

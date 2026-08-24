@@ -20,6 +20,7 @@ def test_dashboard_buttons_are_connected(db):
     new_order_btn = window.findChild(QPushButton, "dashboardNuevaordendecarga")
     search_btn = window.findChild(QPushButton, "dashboardBuscarorden")
     new_client_btn = window.findChild(QPushButton, "dashboardNuevocliente")
+    remittance_btn = window.findChild(QPushButton, "dashboardRegistrarremito")
 
     assert new_order_btn is not None, "Falta boton 'Nueva orden de carga' en dashboard"
     assert new_order_btn.isEnabled()
@@ -27,6 +28,8 @@ def test_dashboard_buttons_are_connected(db):
     assert search_btn.isEnabled()
     assert new_client_btn is not None, "Falta boton 'Nuevo cliente' en dashboard"
     assert new_client_btn.isEnabled()
+    assert remittance_btn is not None, "Falta boton 'Registrar remito' en dashboard"
+    assert remittance_btn.isEnabled()
 
 
 def test_dashboard_new_load_order_navigates_and_opens_dialog(db):
@@ -129,6 +132,36 @@ def test_dashboard_new_client_navigates_and_opens_dialog(db):
     assert len(dialog_opened) == 1
 
 
+def test_dashboard_new_remittance_navigates_and_opens_dialog(db):
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QApplication, QDialog, QPushButton
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_new_remittance", password_hash="x", profile=profile)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+    dialog_opened = []
+
+    def on_dialog():
+        dialog = app.activeModalWidget()
+        if dialog and isinstance(dialog, QDialog):
+            dialog_opened.append(True)
+            dialog.reject()
+
+    QTimer.singleShot(200, on_dialog)
+    window.findChild(QPushButton, "dashboardRegistrarremito").click()
+    app.processEvents()
+
+    assert window._current_route == "remittances"
+    assert len(dialog_opened) == 1
+
+
 def test_disabled_dashboard_buttons_have_no_action(db):
     from PyQt5.QtWidgets import QApplication, QPushButton
 
@@ -147,7 +180,7 @@ def test_disabled_dashboard_buttons_have_no_action(db):
     f150_btn = window.findChild(QPushButton, "dashboardF150")
     assert remittance_btn is not None
     assert f150_btn is not None
-    assert not remittance_btn.isEnabled()
+    assert remittance_btn.isEnabled()
     assert not f150_btn.isEnabled()
 
     # Registrar pago y Cuenta corriente ahora navegan a pantallas reales (issue #144).
