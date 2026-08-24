@@ -204,8 +204,16 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
         titles = [item.title for item in principal.items]
         managerial = next(item for item in principal.items if item.title == "Dashboard Gerencial")
 
-        assert [child.title for child in managerial.children] == ["Resumen gerencial", "Ventas y despachos"]
-        assert [child.route_key for child in managerial.children] == ["managerial_dashboard", "managerial_sales_dispatch"]
+        assert [child.title for child in managerial.children] == [
+            "Resumen gerencial",
+            "Ventas y despachos",
+            "Cuenta corriente y deuda vencida",
+        ]
+        assert [child.route_key for child in managerial.children] == [
+            "managerial_dashboard",
+            "managerial_sales_dispatch",
+            "managerial_account_risk",
+        ]
         assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
         assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
     finally:
