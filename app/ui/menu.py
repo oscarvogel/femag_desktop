@@ -73,6 +73,9 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
     principal_items = [
         approved_item("Dashboard"),
     ]
+    managerial_dashboard = approved_item("Dashboard Gerencial")
+    if managerial_dashboard.action_key is not None:
+        principal_items.append(managerial_dashboard)
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
     if master_children:
