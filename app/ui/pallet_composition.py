@@ -69,6 +69,9 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             "color: #ffffff; background: transparent; border: 0; font-weight: 700;"
         )
         total_layout.addWidget(self.order_flow_summary_label)
+        self.order_flow_summary_label.setStyleSheet(
+            "color: #ffffff; background: transparent; border: 0; font-weight: 700; font-size: 11px;"
+        )
 
         self.capacity_summary_label = QLabel("")
         self.capacity_summary_label.setObjectName("palletCapacitySummary")
@@ -78,10 +81,12 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
         )
         total_layout.addWidget(self.capacity_summary_label)
+        total_frame = self.total_kg_label.parentWidget()
+        total_frame.setMaximumHeight(145)
 
         batch_frame = self.findChild(QFrame, "palletBatchActions")
         batch_layout = batch_frame.layout()
-        self.propose_distribution_button = QPushButton("Proponer distribucion automatica")
+        self.propose_distribution_button = QPushButton("Proponer distribucion")
         self.propose_distribution_button.setObjectName("proposePalletDistributionButton")
         self.propose_distribution_button.clicked.connect(self.propose_distribution)
         batch_layout.addWidget(self.propose_distribution_button, 3, 0, 1, 2)
@@ -98,13 +103,13 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.recalculate_all_button.clicked.connect(self.confirm_recalculate_all)
         batch_layout.addWidget(self.recalculate_all_button, 5, 0, 1, 2)
 
-        self.configure_pallet_capacity_button = QPushButton("Configurar maximo kg por pallet")
+        self.configure_pallet_capacity_button = QPushButton("Kg/pallet")
         self.configure_pallet_capacity_button.setObjectName("configurePalletMaxKgButton")
         self.configure_pallet_capacity_button.setProperty("secondary", True)
         self.configure_pallet_capacity_button.clicked.connect(self.configure_pallet_capacity)
         batch_layout.addWidget(self.configure_pallet_capacity_button, 6, 0, 1, 2)
 
-        self.configure_truck_capacity_button = QPushButton("Configurar capacidad del camion")
+        self.configure_truck_capacity_button = QPushButton("Cap. camion")
         self.configure_truck_capacity_button.setObjectName("configureTruckMaxKgButton")
         self.configure_truck_capacity_button.setProperty("secondary", True)
         self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)

@@ -13,36 +13,74 @@ def _compact_batch_actions(widget) -> None:
     if layout is None:
         return
 
-    secondary_buttons = (
+    label_item = layout.itemAtPosition(0, 0)
+    add_label = label_item.widget() if label_item is not None else None
+
+    while layout.count():
+        layout.takeAt(0)
+
+    if add_label is not None:
+        add_label.setText("Agregar:")
+
+    widget.propose_distribution_button.setText("Proponer distribucion")
+    widget.reorganize_pending_button.setText("Reorganizar")
+    widget.recalculate_all_button.setText("Recalcular")
+    widget.configure_pallet_capacity_button.setText("Kg/pallet")
+    widget.configure_truck_capacity_button.setText("Cap. camion")
+    widget.clear_assignments_button.setText("Quitar asignaciones")
+
+    buttons = (
+        widget.add_pallet_button,
+        widget.propose_distribution_button,
         widget.reorganize_pending_button,
         widget.recalculate_all_button,
         widget.configure_pallet_capacity_button,
         widget.configure_truck_capacity_button,
+        widget.clear_assignments_button,
     )
-    for button in (*secondary_buttons, widget.clear_assignments_button):
-        layout.removeWidget(button)
+    for button in buttons:
+        button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        button.setMinimumWidth(0)
+        button.setMaximumHeight(34)
 
-    widget.configure_pallet_capacity_button.setText("Configurar kg/pallet")
-    widget.configure_truck_capacity_button.setText("Capacidad camion")
+    widget.bulk_pallet_count_input.setMinimumWidth(44)
+    widget.bulk_pallet_count_input.setMaximumWidth(64)
+    widget.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    widget.clear_assignments_button.setToolTip(
+        "Quita todas las asignaciones de mercaderia de los pallets."
+    )
+    widget.clear_assignments_button.setStyleSheet(
+        "QPushButton { color: #9b2c2c; font-weight: 700; }"
+    )
 
-    for button in secondary_buttons:
-        button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setMaximumHeight(36)
+    layout.setHorizontalSpacing(6)
+    layout.setVerticalSpacing(0)
+    column = 0
+    if add_label is not None:
+        layout.addWidget(add_label, 0, column)
+        column += 1
+    layout.addWidget(widget.bulk_pallet_count_input, 0, column)
+    column += 1
+    layout.addWidget(widget.add_pallet_button, 0, column)
+    column += 1
+    layout.addWidget(widget.propose_distribution_button, 0, column)
+    column += 1
+    layout.addWidget(widget.reorganize_pending_button, 0, column)
+    column += 1
+    layout.addWidget(widget.recalculate_all_button, 0, column)
+    column += 1
+    layout.addWidget(widget.configure_pallet_capacity_button, 0, column)
+    column += 1
+    layout.addWidget(widget.configure_truck_capacity_button, 0, column)
+    column += 1
+    layout.addWidget(widget.clear_assignments_button, 0, column)
 
-    layout.setHorizontalSpacing(8)
-    layout.setVerticalSpacing(6)
-    layout.addWidget(widget.reorganize_pending_button, 4, 0)
-    layout.addWidget(widget.recalculate_all_button, 4, 1)
-    layout.addWidget(widget.configure_pallet_capacity_button, 5, 0)
-    layout.addWidget(widget.configure_truck_capacity_button, 5, 1)
-
-    # La accion destructiva queda separada de las acciones operativas frecuentes.
-    layout.setRowMinimumHeight(6, 8)
-    layout.addWidget(widget.clear_assignments_button, 7, 0, 1, 2)
+    for stretch_column in range(2, column + 1):
+        layout.setColumnStretch(stretch_column, 1)
 
 
 def install_compact_pallet_actions() -> None:
-    """Instala una extension UI acotada para el issue #300."""
+    """Instala una extension UI acotada para la barra de acciones de pallets."""
 
     from app.ui.pallet_composition import PalletCompositionWidget
 
