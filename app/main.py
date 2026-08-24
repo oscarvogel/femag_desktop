@@ -5,6 +5,7 @@ import sys
 from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
+from app.ui.managerial_account_risk_extension import install_managerial_account_risk_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
 from app.ui.product_code_extension import install_desktop_product_code_extension
@@ -48,6 +49,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         install_workspace_window_policy()
         install_managerial_dashboard_extension()
         install_managerial_sales_dispatch_extension()
+        install_managerial_account_risk_extension()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.
         raise RuntimeError(
