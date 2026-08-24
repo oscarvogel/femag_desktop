@@ -70,22 +70,36 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         if item.route_key != "placeholder" or item.action_key is not None
     ]
 
-    principal_items = [
-        approved_item("Dashboard"),
-    ]
+    principal_items = [approved_item("Dashboard")]
+
     managerial_dashboard = approved_item("Dashboard Gerencial")
     if managerial_dashboard.action_key is not None:
-        principal_items.append(managerial_dashboard)
+        principal_items.append(
+            MenuItemView(
+                title="Dashboard Gerencial",
+                children=[
+                    MenuItemView(
+                        title="Resumen gerencial",
+                        placeholder=False,
+                        action_key=managerial_dashboard.action_key,
+                        route_key="managerial_dashboard",
+                    ),
+                    MenuItemView(
+                        title="Ventas y despachos",
+                        placeholder=False,
+                        action_key=managerial_dashboard.action_key,
+                        route_key="managerial_sales_dispatch",
+                    ),
+                ],
+            )
+        )
+
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
     if master_children:
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
-    principal_items.extend(
-        [
-            approved_item("Reportes", route_key="placeholder"),
-            approved_item("Cuenta corriente", route_key="customer_ledger"),
-        ]
-    )
+
+    principal_items.append(approved_item("Cuenta corriente", route_key="customer_ledger"))
 
     system_children = [
         item
