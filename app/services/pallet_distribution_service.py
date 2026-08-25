@@ -105,8 +105,9 @@ class DistributionProposal:
 class PalletDistributionService:
     """Construye una propuesta determinista sin depender de PyQt ni de la base de datos.
 
-    La heuristica respeta cantidades y pallets fijados, y despues prioriza:
-    cliente/destino, producto y aprovechamiento de capacidad.
+    La heuristica respeta cantidades, pallets fijados y la regla operativa de
+    un unico cliente por pallet. Dentro de ese cliente prioriza destino,
+    producto y aprovechamiento de capacidad.
     """
 
     def propose(
@@ -141,6 +142,10 @@ class PalletDistributionService:
                 continue
             if fixed.total_kg > max_kg:
                 raise ValueError(f"El pallet fijado {sequence} supera el maximo configurado.")
+            if len({item.client_id for item in fixed.allocations}) > 1:
+                raise ValueError(
+                    f"El pallet fijado {sequence} contiene mercaderia de mas de un cliente."
+                )
             working[sequence] = list(fixed.allocations)
             if fixed.locked:
                 locked_sequences.add(sequence)
@@ -148,9 +153,9 @@ class PalletDistributionService:
         ordered_lines = sorted(
             remaining,
             key=lambda line: (
-                -line.kilos,
                 line.client_id,
                 line.destination_id,
+                -line.kilos,
                 line.product_id,
             ),
         )
@@ -210,15 +215,21 @@ class PalletDistributionService:
         requested: tuple[DistributionLine, ...],
         fixed_pallets: Iterable[FixedPallet],
     ) -> tuple[DistributionLine, ...]:
-        fixed_quantity: dict[tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.000"))
+        fixed_quantity: dict[tuple[int, int, int], Decimal] = defaultdict(
+            lambda: Decimal("0.000")
+        )
         for pallet in fixed_pallets:
             for allocation in pallet.allocations:
-                key = (allocation.destination_id, allocation.product_id)
+                key = (
+                    allocation.destination_id,
+                    allocation.client_id,
+                    allocation.product_id,
+                )
                 fixed_quantity[key] = _decimal(fixed_quantity[key] + allocation.quantity)
 
         remaining: list[DistributionLine] = []
         for line in requested:
-            key = (line.destination_id, line.product_id)
+            key = (line.destination_id, line.client_id, line.product_id)
             assigned = min(line.quantity, fixed_quantity[key])
             fixed_quantity[key] = _decimal(fixed_quantity[key] - assigned)
             quantity = _decimal(line.quantity - assigned)
@@ -252,6 +263,7 @@ class PalletDistributionService:
                 sequence
                 for sequence in working
                 if sequence not in locked_sequences
+                and self._pallet_accepts_client(working[sequence], line.client_id)
                 and self._available_kg(working[sequence], max_kg) >= line.unit_kg
             ]
             if not candidates:
@@ -292,6 +304,15 @@ class PalletDistributionService:
             remaining = _decimal(remaining - quantity)
         return []
 
+    def _pallet_accepts_client(
+        self,
+        allocations: list[DistributionAllocation],
+        client_id: int,
+    ) -> bool:
+        if not allocations:
+            return True
+        return all(item.client_id == client_id for item in allocations)
+
     def _available_kg(
         self,
         allocations: list[DistributionAllocation],
@@ -308,10 +329,15 @@ class PalletDistributionService:
         max_kg: Decimal,
     ) -> tuple[int, int, Decimal, int]:
         same_product = any(
-            item.destination_id == line.destination_id and item.product_id == line.product_id
+            item.destination_id == line.destination_id
+            and item.client_id == line.client_id
+            and item.product_id == line.product_id
             for item in allocations
         )
-        same_destination = any(item.destination_id == line.destination_id for item in allocations)
+        same_destination = any(
+            item.client_id == line.client_id and item.destination_id == line.destination_id
+            for item in allocations
+        )
         used = _decimal(max_kg - self._available_kg(allocations, max_kg))
         # max() prefiere: mismo producto, mismo destino, pallet mas utilizado y,
         # ante empate, menor cantidad de lineas para mantener la propuesta estable.
@@ -331,6 +357,7 @@ class PalletDistributionService:
         for index, existing in enumerate(allocations):
             if (
                 existing.destination_id == line.destination_id
+                and existing.client_id == line.client_id
                 and existing.product_id == line.product_id
             ):
                 allocations[index] = DistributionAllocation(
