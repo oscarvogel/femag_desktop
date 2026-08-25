@@ -60,7 +60,9 @@ def _weights():
 
 
 def test_proposal_is_preview_and_does_not_mutate_current_pallet_drafts():
-    pallets = _empty_pallets(2)
+    # Cliente A necesita dos pallets (2.500 kg) y Cliente B otro pallet
+    # independiente (200 kg), porque no se permite mezclar clientes.
+    pallets = _empty_pallets(3)
     original = [dict(pallet, allocations=list(pallet["allocations"])) for pallet in pallets]
 
     prepared = PalletPreparationPlanner().propose(
@@ -72,19 +74,22 @@ def test_proposal_is_preview_and_does_not_mutate_current_pallet_drafts():
 
     assert pallets == original
     assert prepared.is_complete is True
-    assert len(prepared.pallet_drafts) == 2
+    assert len(prepared.pallet_drafts) == 3
     assert sum(
         Decimal(str(allocation["quantity"])) * Decimal(str(allocation["peso_unitario_kg"]))
         for pallet in prepared.pallet_drafts
         for allocation in pallet["allocations"]
     ) == Decimal("2700.000")
+    assert all(
+        len({allocation["client_id"] for allocation in pallet["allocations"]}) <= 1
+        for pallet in prepared.pallet_drafts
+    )
     assert prepared.pending_rows == ()
 
 
 def test_locked_pallet_is_preserved_when_reorganizing_pending_load():
-    # La orden pesa 2.700 kg. Con un pallet fijado en 1.000 kg y maximo de
-    # 1.500 kg por pallet hacen falta al menos dos pallets libres para poder
-    # completar la redistribucion sin violar capacidad.
+    # La orden pesa 2.700 kg. Con un pallet fijado en 1.000 kg del Cliente A,
+    # queda un pallet para completar Cliente A y otro exclusivo para Cliente B.
     pallets = _empty_pallets(3)
     pallets[0]["allocations"] = [
         {
@@ -110,6 +115,10 @@ def test_locked_pallet_is_preserved_when_reorganizing_pending_load():
     assert pallet_1["locked"] is True
     assert pallet_1["allocations"] == pallets[0]["allocations"]
     assert pallet_2["allocations"]
+    assert all(
+        len({allocation["client_id"] for allocation in pallet["allocations"]}) <= 1
+        for pallet in prepared.pallet_drafts
+    )
     assert prepared.is_complete is True
 
 
@@ -148,7 +157,9 @@ def test_missing_product_weight_blocks_preview_instead_of_guessing():
 
 
 def test_preserve_unlocked_allocations_can_use_current_layout_as_fixed_base():
-    pallets = _empty_pallets(3)
+    # El pallet 1 conserva 500 kg de Cliente A. Se necesitan dos pallets mas
+    # para completar Cliente A y un cuarto pallet exclusivo para Cliente B.
+    pallets = _empty_pallets(4)
     pallets[0]["allocations"] = [
         {
             "client_id": 10,
@@ -170,4 +181,8 @@ def test_preserve_unlocked_allocations_can_use_current_layout_as_fixed_base():
 
     pallet_1 = next(pallet for pallet in prepared.pallet_drafts if pallet["sequence"] == 1)
     assert pallet_1["allocations"][0]["quantity"] == 20
+    assert all(
+        len({allocation["client_id"] for allocation in pallet["allocations"]}) <= 1
+        for pallet in prepared.pallet_drafts
+    )
     assert prepared.is_complete is True
