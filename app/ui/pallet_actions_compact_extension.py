@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QFrame, QSizePolicy
 
 
@@ -43,9 +44,12 @@ def _compact_batch_actions(widget) -> None:
         button.setMinimumWidth(0)
         button.setMaximumHeight(34)
 
-    widget.bulk_pallet_count_input.setMinimumWidth(44)
-    widget.bulk_pallet_count_input.setMaximumWidth(64)
+    # El selector de cantidad es un dato operativo: no debe comprimirse cuando
+    # la fila inferior necesita ganar espacio para los botones.
+    widget.bulk_pallet_count_input.setMinimumWidth(80)
+    widget.bulk_pallet_count_input.setMaximumWidth(80)
     widget.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    widget.bulk_pallet_count_input.setAlignment(Qt.AlignCenter)
     widget.clear_assignments_button.setToolTip(
         "Quita todas las asignaciones de mercaderia de los pallets."
     )
