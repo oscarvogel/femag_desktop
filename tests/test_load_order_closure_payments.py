@@ -182,33 +182,31 @@ def test_close_without_payment_requires_and_persists_reason(db):
     assert service.payment_status(closure) == service.PAYMENT_STATUS_UNPAID
 
 
-def test_multi_client_status_is_derived_per_client_and_overpayment_rolls_back(db):
-    from app.models.load_orders import LoadOrder, LoadOrderClosure
-    from app.models.payments import ClientPayment
-    from app.services.load_order_closure_service import LoadOrderClosureError, LoadOrderClosureService
+def test_multi_client_status_is_derived_per_client_and_overpayment_is_allowed_as_credit(db):
+    from app.models.load_orders import LoadOrder
+    from app.services.ledger_query_service import client_balance
+    from app.services.load_order_closure_service import LoadOrderClosureService
 
     order, clients, totals = _issued_order(multi_client=True)
     client_a, client_b = clients
     service = LoadOrderClosureService(current_user="caja_220")
 
-    with pytest.raises(LoadOrderClosureError, match="superan"):
-        service.close_order(
-            order,
-            payments=[{"client": client_a, "amount": totals[client_a.id] + 1}],
-        )
-    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_ISSUED
-    assert LoadOrderClosure.select().count() == 0
-    assert ClientPayment.select().count() == 0
-
+    # Overpayment must not block: excess stays as saldo a favor (credit).
     closure = service.close_order(
         order,
-        payments=[{"client": client_a, "amount": totals[client_a.id]}],
+        payments=[{"client": client_a, "amount": totals[client_a.id] + 100}],
     )
     summary = {row["client"].id: row for row in service.payment_summary(closure)}
 
+    assert LoadOrder.get_by_id(order.id).status == LoadOrder.STATUS_CLOSED
     assert summary[client_a.id]["status"] == service.PAYMENT_STATUS_PAID
+    assert summary[client_a.id]["paid"] == totals[client_a.id] + 100
+    assert summary[client_a.id]["balance"] == approx(-100)
+    assert summary[client_a.id]["credit"] == approx(100)
     assert summary[client_b.id]["status"] == service.PAYMENT_STATUS_UNPAID
     assert service.payment_status(closure) == service.PAYMENT_STATUS_PARTIAL
+    # Overpayment leaves credit in ledger (negative balance).
+    assert client_balance(client_a) == approx(-100)
 
 
 def test_active_closure_payments_block_reopening_until_annulled(db):
