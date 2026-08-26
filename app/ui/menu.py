@@ -107,6 +107,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
 
     principal_items.append(approved_item("Cuenta corriente", route_key="customer_ledger"))
+    principal_items.append(approved_item("Avisos", route_key="avisos"))
 
     system_children = [
         item

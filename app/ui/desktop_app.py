@@ -89,6 +89,7 @@ from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
+from app.ui.aviso_center import AvisoCenterPage
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -327,6 +328,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
+        self._add_page("avisos", AvisoCenterPage(user=self.user, on_navigate=self._navigate_to_route, parent=self))
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
