@@ -20,8 +20,13 @@ class AvisoService:
     def get_for_user(self, user: User) -> list[AvisoView]:
         if user is None or not user.active:
             return []
-        # TODO tipos se añaden en Task 2; infra retorna []
-        return self._filter_leidos(user, [])
+        avisos: list[AvisoView] = []
+        if self._can_see(user, ["Secretaría", "Administración", "Administrador"]):
+            avisos += self._orden_sin_cierre()
+            avisos += self._deuda_vencida()
+        if self._can_see(user, ["Administración", "Administrador"]):
+            avisos += self._producto_revision()
+        return self._filter_leidos(user, avisos)
 
     def count_unread(self, user: User) -> int:
         return len(self.get_for_user(user))
@@ -44,3 +49,76 @@ class AvisoService:
                 continue
             filtered.append(av)
         return filtered
+
+    def _can_see(self, user: User, allowed_profiles: list[str]) -> bool:
+        try:
+            return user.profile.name in allowed_profiles
+        except Exception:
+            return False
+
+    def _orden_sin_cierre(self) -> list[AvisoView]:
+        from app.models.load_orders import LoadOrder
+
+        out: list[AvisoView] = []
+        for o in LoadOrder.select().where(LoadOrder.status == LoadOrder.STATUS_ISSUED).order_by(LoadOrder.id.desc()).limit(20):
+            # resolve client name via destinations if legacy client is None
+            client_name = ""
+            try:
+                dest = o.destinations.first()
+                if dest and dest.client:
+                    client_name = dest.client.name
+                elif getattr(o, "client", None) and getattr(o.client, "name", None):
+                    client_name = o.client.name
+            except Exception:
+                client_name = ""
+            out.append(
+                AvisoView(
+                    titulo=f"OC-{o.order_number:06d} sin cerrar",
+                    descripcion=f"Cliente {client_name}".strip() if client_name else "Sin cliente",
+                    tipo="orden_sin_cierre",
+                    prioridad="alta",
+                    route_key="load_orders",
+                    referencia_id=o.id,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        return out
+
+    def _deuda_vencida(self) -> list[AvisoView]:
+        from app.models.masters import Client
+        from app.services.ledger_query_service import client_balance
+
+        out: list[AvisoView] = []
+        for c in Client.select().where(Client.active == True).limit(50):  # noqa: E712
+            bal = client_balance(c)
+            if bal > 0:
+                out.append(
+                    AvisoView(
+                        titulo=f"Deuda {c.name}",
+                        descripcion=f"Saldo ${bal:.2f}",
+                        tipo="deuda_vencida",
+                        prioridad="media",
+                        route_key="clientes",
+                        referencia_id=c.id,
+                        created_at=datetime.utcnow(),
+                    )
+                )
+        return out
+
+    def _producto_revision(self) -> list[AvisoView]:
+        from app.models.masters import Product
+
+        out: list[AvisoView] = []
+        for p in Product.select().where((Product.review_required == True) | (Product.peso_unitario_kg == 0)).limit(20):  # noqa: E712
+            out.append(
+                AvisoView(
+                    titulo=p.name,
+                    descripcion="Revisión pendiente",
+                    tipo="producto_revision",
+                    prioridad="baja",
+                    route_key="products",
+                    referencia_id=p.id,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        return out
