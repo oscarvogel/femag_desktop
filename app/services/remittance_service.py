@@ -263,6 +263,7 @@ class RemittanceService:
         remittance_date: date | None = None,
         carrier: Carrier | None = None,
         truck: Truck | None = None,
+        trailer_domain: str | None = None,
         driver: Driver | None = None,
         physical_point_of_sale: str | None = None,
         physical_number: str | None = None,
@@ -302,6 +303,7 @@ class RemittanceService:
                 carrier_name=carrier.name if carrier else None,
                 carrier_cuit=carrier.cuit if carrier else None,
                 truck_domain=truck.domain if truck else None,
+                trailer_domain=trailer_domain or (truck.trailer_domain if truck else None),
                 driver_name=driver.name if driver else None,
                 driver_document=driver.document if driver else None,
                 observations=observations,
@@ -355,6 +357,7 @@ class RemittanceService:
             remittance_date=remittance_date,
             carrier=order.carrier,
             truck=order.truck,
+            trailer_domain=order.trailer_domain,
             driver=order.driver,
             physical_point_of_sale=physical_point_of_sale,
             physical_number=physical_number,
@@ -404,7 +407,7 @@ class RemittanceService:
                 setattr(remittance, field, changes[field])
         for relation, snapshot_fields in (
             ("carrier", ("carrier_name", "carrier_cuit")),
-            ("truck", ("truck_domain",)),
+            ("truck", ("truck_domain", "trailer_domain")),
             ("driver", ("driver_name", "driver_document")),
         ):
             if relation not in changes:
@@ -416,6 +419,7 @@ class RemittanceService:
                 remittance.carrier_cuit = value.cuit if value else None
             elif relation == "truck":
                 remittance.truck_domain = value.domain if value else None
+                remittance.trailer_domain = value.trailer_domain if value else None
             elif relation == "driver":
                 remittance.driver_name = value.name if value else None
                 remittance.driver_document = value.document if value else None
@@ -508,6 +512,8 @@ class RemittanceService:
             "series_id": remittance.series_id,
             "client": remittance.client_name,
             "address": remittance.delivery_address_text,
+            "truck_domain": remittance.truck_domain,
+            "trailer_domain": remittance.trailer_domain,
             "source_order_id": remittance.source_order_id,
             "items": [
                 {

@@ -226,6 +226,41 @@ def test_calibration_pdf_is_generated(db, tmp_path):
     assert output.stat().st_size > 0
 
 
+def test_print_fields_move_up_five_points_except_date_and_include_both_domains(db):
+    from app.services.remittance_print_service import MM, RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+    data = _master_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
+    remittance = RemittanceService(current_user="ui_print_alignment").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+        items=[{"product": data["product"], "quantity": 760}],
+    )
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_print_alignment")
+
+    printer._draw_variable_fields(pdf, remittance, list(remittance.items))
+
+    calls_by_value = {value: (x, y) for x, y, value in pdf.calls}
+    assert calls_by_value[remittance.date.strftime("%d/%m/%Y")][1] == printer.template.date_y * MM
+    assert calls_by_value[remittance.client_name][1] == printer.template.client_y * MM + 5
+    assert calls_by_value["760"][1] == printer.template.first_detail_y * MM + 5
+    assert calls_by_value["AB123CD / AC456EF"][1] == printer.template.truck_y * MM + 5
+
+
 def test_preview_pdf_is_generated_for_draft_and_is_audited(db, tmp_path):
     from app.models.audit import AuditLog
     from app.services.remittance_print_service import RemittancePrintService

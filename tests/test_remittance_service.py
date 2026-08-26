@@ -6,6 +6,8 @@ def test_create_manual_assigns_internal_number_and_snapshot(db):
     from tests.conftest import _master_data
 
     data = _master_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
     service = RemittanceService(current_user="admin")
 
     remittance = service.create_manual(
@@ -22,6 +24,7 @@ def test_create_manual_assigns_internal_number_and_snapshot(db):
     assert remittance.client_name == "Cliente FEMAG"
     assert remittance.delivery_city == "Posadas"
     assert remittance.truck_domain == "AB123CD"
+    assert remittance.trailer_domain == "AC456EF"
     assert remittance.physical_number is None
     assert [(item.printed_description, float(item.quantity)) for item in remittance.items] == [
         ("BOL FECULA 2° CALIDAD", 760.0)
@@ -181,10 +184,13 @@ def test_create_from_order_copies_exactly_one_destination_without_mutating_order
     from tests.conftest import _multi_client_data
 
     data = _multi_client_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
     order = LoadOrderService(current_user="admin").create_order(
         carrier=data["carrier"],
         driver=data["driver"],
         truck=data["truck"],
+        trailer_domain="AC456EF",
         destinations=[
             {
                 "client": data["client"],
@@ -216,10 +222,36 @@ def test_create_from_order_copies_exactly_one_destination_without_mutating_order
     assert remittance.carrier_id == order.carrier_id
     assert remittance.driver_id == order.driver_id
     assert remittance.truck_id == order.truck_id
+    assert remittance.trailer_domain == "AC456EF"
     assert remittance.document_reference == f"OC {order.order_number}"
     assert len(list(remittance.items)) == 1
     assert remittance.items[0].product_id == data["product"].id
     assert order.status == original_status
+
+
+def test_update_draft_refreshes_both_vehicle_domain_snapshots(db):
+    from app.models.masters import Truck
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    replacement = Truck.create(
+        domain="CHASIS02",
+        trailer_domain="ACOPLADO02",
+        carrier=data["carrier"],
+    )
+    service = RemittanceService(current_user="admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        truck=data["truck"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+
+    updated = service.update_draft(remittance, truck=replacement)
+
+    assert updated.truck_domain == "CHASIS02"
+    assert updated.trailer_domain == "ACOPLADO02"
 
 
 def test_annul_requires_reason_and_records_state(db):
