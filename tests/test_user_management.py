@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 
@@ -131,6 +133,54 @@ def test_initial_admin_cannot_be_created_twice_and_malformed_hash_is_rejected(db
 
     user = auth.authenticate("admin", "incorrecta")
     assert user is None
+
+
+def test_login_and_admin_authorization_ignore_username_and_password_case(db):
+    from app.services.auth_service import AuthService
+
+    _seed_profiles()
+    auth = AuthService()
+    admin = auth.create_initial_admin("AdminOperativo", "ClaveSegura")
+
+    assert auth.authenticate("adminoperativo", "clavesegura") == admin
+    assert auth.authenticate("ADMINOPERATIVO", "CLAVESEGURA") == admin
+    assert auth.authorize_administrator("aDmInOpErAtIvO", "cLaVeSeGuRa") == admin
+    assert auth.authenticate("ADMINOPERATIVO", "otra-clave") is None
+
+
+def test_usernames_cannot_be_duplicated_only_by_case(db):
+    from app.services.auth_service import AuthService
+
+    _seed_profiles()
+    auth = AuthService()
+    auth.create_user("Operador", "clave", "Secretaria")
+
+    with pytest.raises(ValueError, match="Ya existe"):
+        auth.create_user("OPERADOR", "otra", "Secretaria")
+
+
+def test_legacy_password_hash_is_upgraded_after_exact_login(db):
+    from app.models.security import User, UserProfile
+    from app.services.auth_service import AuthService
+
+    _seed_profiles()
+    salt = bytes.fromhex("00112233445566778899aabbccddeeff")
+    digest = hashlib.pbkdf2_hmac("sha256", "ClaveAnterior".encode("utf-8"), salt, 120_000)
+    legacy_hash = f"{salt.hex()}:{digest.hex()}"
+    user = User.create(
+        username="UsuarioLegacy",
+        password_hash=legacy_hash,
+        profile=UserProfile.get(UserProfile.name == "Administrador"),
+        active=True,
+    )
+    auth = AuthService()
+
+    assert auth.authenticate("usuariolegacy", "claveanterior") is None
+    assert auth.authenticate("USUARIOLEGACY", "ClaveAnterior") == user
+
+    user = User.get_by_id(user.id)
+    assert user.password_hash.startswith("ci$")
+    assert auth.authenticate("usuariolegacy", "CLAVEANTERIOR") == user
 
 
 def test_user_management_page_exposes_users_and_permission_matrix(db):

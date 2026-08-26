@@ -9,21 +9,41 @@ from app.services.audit_service import AuditService
 
 
 class AuthService:
+    CASE_INSENSITIVE_HASH_PREFIX = "ci$"
+
     def __init__(self, audit_service: AuditService | None = None):
         self.audit_service = audit_service or AuditService()
 
     def _hash_password(self, password: str, salt: bytes | None = None) -> str:
         salt = salt or os.urandom(16)
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
-        return f"{salt.hex()}:{digest.hex()}"
+        normalized_password = password.casefold()
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", normalized_password.encode("utf-8"), salt, 120_000
+        )
+        return f"{self.CASE_INSENSITIVE_HASH_PREFIX}{salt.hex()}:{digest.hex()}"
 
     def _verify_password(self, password: str, stored_hash: str) -> bool:
         try:
-            salt_hex, digest_hex = stored_hash.split(":", 1)
-            expected = self._hash_password(password, bytes.fromhex(salt_hex)).split(":", 1)[1]
+            case_insensitive = stored_hash.startswith(self.CASE_INSENSITIVE_HASH_PREFIX)
+            encoded_hash = (
+                stored_hash.removeprefix(self.CASE_INSENSITIVE_HASH_PREFIX)
+                if case_insensitive
+                else stored_hash
+            )
+            salt_hex, digest_hex = encoded_hash.split(":", 1)
+            candidate = password.casefold() if case_insensitive else password
+            expected = hashlib.pbkdf2_hmac(
+                "sha256", candidate.encode("utf-8"), bytes.fromhex(salt_hex), 120_000
+            ).hex()
         except (AttributeError, TypeError, ValueError):
             return False
         return hmac.compare_digest(expected, digest_hex)
+
+    def _upgrade_legacy_password_hash(self, user: User, password: str) -> None:
+        if user.password_hash.startswith(self.CASE_INSENSITIVE_HASH_PREFIX):
+            return
+        user.password_hash = self._hash_password(password)
+        user.save(only=[User.password_hash])
 
     @staticmethod
     def validate_password(password: str, confirmation: str | None = None) -> str:
@@ -41,6 +61,34 @@ class AuthService:
         if any(character.isspace() for character in username):
             raise ValueError("El usuario no puede contener espacios.")
         return username
+
+    @staticmethod
+    def _find_user_case_insensitive(
+        username: str,
+        *,
+        active_only: bool = False,
+    ) -> User | None:
+        normalized = (username or "").strip().casefold()
+        if not normalized:
+            return None
+        query = User.select()
+        if active_only:
+            query = query.where(User.active == True)  # noqa: E712
+        matches = [user for user in query if user.username.casefold() == normalized]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _username_exists_case_insensitive(
+        username: str,
+        *,
+        exclude_user_id: int | None = None,
+    ) -> bool:
+        normalized = username.casefold()
+        return any(
+            user.username.casefold() == normalized
+            for user in User.select()
+            if exclude_user_id is None or user.id != exclude_user_id
+        )
 
     @staticmethod
     def _profile(profile_name: str) -> UserProfile:
@@ -71,6 +119,8 @@ class AuthService:
         self.validate_password(password)
         profile = self._profile(profile_name)
         actor_name = actor.username if isinstance(actor, User) else actor
+        if self._username_exists_case_insensitive(username):
+            raise ValueError("Ya existe un usuario con ese nombre.")
         try:
             user = User.create(
                 username=username,
@@ -140,8 +190,7 @@ class AuthService:
             and user.profile.name.strip().lower() != profile.name.strip().lower()
         ):
             raise ValueError("No puede cambiar el perfil de la sesión actual.")
-        duplicate = User.get_or_none((User.username == username) & (User.id != user.id))
-        if duplicate is not None:
+        if self._username_exists_case_insensitive(username, exclude_user_id=user.id):
             raise ValueError("Ya existe un usuario con ese nombre.")
         old_value = {
             "username": user.username,
@@ -242,15 +291,17 @@ class AuthService:
 
     def authenticate(self, username: str, password: str) -> User | None:
         username = (username or "").strip()
-        user = User.get_or_none(User.username == username, User.active == True)  # noqa: E712
+        user = self._find_user_case_insensitive(username, active_only=True)
         if user and self._verify_password(password, user.password_hash):
-            self.audit_service.record(user=username, module="Sistema", action="login exitoso")
+            self._upgrade_legacy_password_hash(user, password)
+            self.audit_service.record(user=user.username, module="Sistema", action="login exitoso")
             return user
         self.audit_service.record(user=username, module="Sistema", action="login fallido")
         return None
 
     def authorize_administrator(self, username: str, password: str) -> User | None:
-        user = User.get_or_none(User.username == username, User.active == True)  # noqa: E712
+        username = (username or "").strip()
+        user = self._find_user_case_insensitive(username, active_only=True)
         valid_password = False
         if user is not None:
             try:
@@ -262,8 +313,10 @@ class AuthService:
             and user.profile.name.strip().lower() == "administrador"
         )
         authorized = user if valid_password and is_administrator else None
+        if authorized is not None:
+            self._upgrade_legacy_password_hash(authorized, password)
         self.audit_service.record(
-            user=username or None,
+            user=authorized.username if authorized is not None else username or None,
             module="Sistema",
             action=(
                 "autorizar administrador"
