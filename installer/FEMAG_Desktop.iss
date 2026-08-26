@@ -1,4 +1,4 @@
-#define MyAppName "FEMAG Desktop"
+#define MyAppName "FEMAG Desktop Produccion"
 #define MyAppPublisher "Vogel Consultoria"
 #ifndef MyAppVersion
   #define MyAppVersion "0000.00.00.00.00.00"
@@ -20,7 +20,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 SetupLogging=yes
-UninstallDisplayName=FEMAG Desktop
+UninstallDisplayName={#MyAppName}
 Uninstallable=yes
 ArchitecturesAllowed=x64compatible
 SetupIconFile=..\app\ui\assets\branding\femag.ico
