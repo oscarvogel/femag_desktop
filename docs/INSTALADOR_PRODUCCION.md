@@ -2,6 +2,8 @@
 
 El instalador `FEMAG_Desktop_Produccion_Setup.exe` contiene la aplicacion y su runtime. El puesto no necesita Git, Python ni acceso a Internet.
 
+El asistente de instalacion y la entrada de Windows en Aplicaciones instaladas muestran el nombre `FEMAG Desktop Produccion`. La carpeta, el ejecutable y los accesos directos conservan `FEMAG Desktop` para actualizar instalaciones existentes sin crear rutas paralelas.
+
 ## Primera apertura
 
 La primera vez, FEMAG completa automaticamente `almanet-server`, puerto `3306` y base `femag_desktop`; el operador solamente ingresa usuario y contrasena MySQL. Antes de guardar prueba la conexion y valida que el esquema sea compatible. Si faltan tablas, ofrece prepararlas solamente después de una confirmacion explicita y con una credencial administrativa. Los arranques normales no crean ni modifican tablas.
