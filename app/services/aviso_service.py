@@ -41,6 +41,19 @@ class AvisoService:
         for aviso in self.get_for_user(user):
             self.mark_read(user, aviso.tipo, aviso.referencia_id)
 
+    def reactivate_all(self, user: User) -> int:
+        """Borra las marcas de lectura del usuario para que los avisos persistentes vuelvan a aparecer.
+
+        No toca la causa: si el aviso ya no aplica (ej. OC cerrada) sigue oculto por el filtro.
+        Solo limpia leido_at/oculto_hasta para que las causas activas reaparezcan.
+        """
+        from app.models.notifications import AvisoLectura
+        return (
+            AvisoLectura.update(leido_at=None, oculto_hasta=None)
+            .where(AvisoLectura.user == user)
+            .execute()
+        )
+
     def _filter_leidos(self, user: User, avisos: list[AvisoView]) -> list[AvisoView]:
         filtered = []
         for av in avisos:
