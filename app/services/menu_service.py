@@ -17,6 +17,7 @@ REAL_MODULES = {
     "Clientes": "clients",
     "Domicilios": "addresses",
     "Productos": "products",
+    "Precios por lista": "product_price_bulk",
     "Tipos de IVA": "vat_types",
     "Choferes": "drivers",
     "Transportistas": "carriers",

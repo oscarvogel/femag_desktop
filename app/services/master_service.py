@@ -261,6 +261,61 @@ class MasterService:
     def is_driver_valid_for_truck(self, driver: Driver, truck: Truck) -> bool:
         return self.is_driver_valid_for_carrier(driver, truck.carrier)
 
+    @staticmethod
+    def _validate_non_negative_price(value: object, *, field_label: str) -> float:
+        try:
+            parsed = float(str(value).strip().replace(",", ".")) if str(value).strip() else 0.0
+        except (TypeError, ValueError):
+            raise ValueError(f"{field_label} debe ser un número válido.")
+        if parsed < 0:
+            raise ValueError(f"{field_label} no puede ser negativo.")
+        return parsed
+
+    def bulk_update_product_prices(
+        self,
+        updates: list[dict],
+    ) -> int:
+        """Persist price-list changes for many products at once.
+
+        Each update dict must contain ``product_id`` and any of
+        ``precio_lista_1``..``precio_lista_4``. Missing lists keep current value.
+        Validates numeric and non-negative before saving. Returns count of
+        updated products.
+        """
+        if not updates:
+            return 0
+        database = Product._meta.database
+        updated = 0
+        with database.atomic():
+            for payload in updates:
+                product_id = payload.get("product_id") or payload.get("id")
+                if product_id is None:
+                    raise ValueError("Cada actualización debe incluir product_id.")
+                product = Product.get_by_id(int(product_id))
+                for index in (1, 2, 3, 4):
+                    field = f"precio_lista_{index}"
+                    if field in payload:
+                        value = self._validate_non_negative_price(
+                            payload[field], field_label=f"Lista {index}"
+                        )
+                        setattr(product, field, value)
+                product.precio_neto_base = float(product.precio_lista_1 or 0.0)
+                product.save()
+                self.audit_service.record(
+                    user=self.current_user,
+                    module="Maestros",
+                    action="modificar",
+                    record_ref=f"Product:{product.id}",
+                    new_value={
+                        "precio_lista_1": product.precio_lista_1,
+                        "precio_lista_2": product.precio_lista_2,
+                        "precio_lista_3": product.precio_lista_3,
+                        "precio_lista_4": product.precio_lista_4,
+                    },
+                )
+                updated += 1
+        return updated
+
     def create_pallet_type(self, type: str, measure: str, weight: float) -> PalletType:
         row = PalletType.create(type=type, measure=measure, weight=weight)
         self._record("PalletType", row, {"type": type, "measure": measure, "weight": weight})

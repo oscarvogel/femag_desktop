@@ -94,6 +94,7 @@ from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
 from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
 from app.ui.pallet_composition import PalletCompositionWidget
+from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 
 
@@ -350,6 +351,14 @@ class FemagDesktopWindow(QMainWindow):
                         parent=self,
                     ),
                 )
+        self._add_page(
+            "product_price_bulk",
+            build_product_price_bulk_page(
+                user=self.user,
+                current_user=self.shell.username,
+                parent=self,
+            ),
+        )
 
     def _topbar(self) -> QWidget:
         bar = QFrame()
