@@ -13,7 +13,8 @@ DEPLOY = ROOT / "DEPLOY.md"
 def test_production_installer_has_no_database_credentials() -> None:
     content = ISS.read_text(encoding="utf-8")
 
-    assert '#define MyAppName "FEMAG Desktop"' in content
+    assert '#define MyAppName "FEMAG Desktop Produccion"' in content
+    assert "UninstallDisplayName={#MyAppName}" in content
     assert "FEMAG_Desktop_Produccion_Setup" in content
     assert "DefaultDirName={localappdata}\\Programs\\FEMAG Desktop" in content
     for secret_name in ("DB_PASSWORD", "DB_USER", "DB_HOST", "real_mysql_password"):
