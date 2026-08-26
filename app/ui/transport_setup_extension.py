@@ -244,7 +244,7 @@ class TransportSetupDialog(QDialog):
         truck_id = combo_current_data(self.truck_combo)
         is_new = truck_id is None
         self.truck_domain_input.setEnabled(is_new)
-        self.trailer_domain_input.setEnabled(is_new)
+        self.trailer_domain_input.setEnabled(True)
         if is_new:
             self.truck_domain_input.clear()
             self.trailer_domain_input.clear()
@@ -396,9 +396,10 @@ class TransportSetupDialog(QDialog):
                     )
                 else:
                     truck = Truck.get_by_id(truck_id)
+                    truck.trailer_domain = trailer_domain
                     if truck.carrier_id != carrier.id:
                         truck.carrier = carrier
-                        truck.save()
+                    truck.save()
 
                 if driver_id is None:
                     driver = service.create_driver(

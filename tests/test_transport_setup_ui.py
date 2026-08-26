@@ -66,6 +66,58 @@ def test_guided_transport_setup_selects_existing_carrier_truck_and_driver(db):
     assert driver.usual_truck == truck
 
 
+def test_guided_transport_setup_edits_existing_trailer_domain(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit, QPushButton
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.ui.transport_setup_extension import TransportSetupDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte acoplado 352")
+    truck = Truck.create(
+        domain="TR352AA",
+        trailer_domain="AC352AA",
+        carrier=carrier,
+    )
+    driver = Driver.create(
+        name="Chofer acoplado 352",
+        carrier=carrier,
+        usual_truck=truck,
+    )
+
+    dialog = TransportSetupDialog(
+        current_user="issue352",
+        initial_carrier_id=carrier.id,
+        initial_truck_id=truck.id,
+        initial_driver_id=driver.id,
+    )
+    tractor_input = dialog.findChild(QLineEdit, "transportSetupTruckDomainInput")
+    trailer_input = dialog.findChild(QLineEdit, "transportSetupTrailerDomainInput")
+
+    assert tractor_input.isEnabled() is False
+    assert trailer_input.isEnabled() is True
+
+    trailer_input.setText("ac 352 zz")
+    dialog.findChild(QPushButton, "saveTransportSetupButton").click()
+    app.processEvents()
+
+    assert dialog.result() == dialog.Accepted
+    assert Truck.get_by_id(truck.id).trailer_domain == "AC352ZZ"
+
+    clear_dialog = TransportSetupDialog(
+        current_user="issue352",
+        initial_carrier_id=carrier.id,
+        initial_truck_id=truck.id,
+        initial_driver_id=driver.id,
+    )
+    clear_dialog.findChild(QLineEdit, "transportSetupTrailerDomainInput").clear()
+    clear_dialog.findChild(QPushButton, "saveTransportSetupButton").click()
+    app.processEvents()
+
+    assert clear_dialog.result() == clear_dialog.Accepted
+    assert Truck.get_by_id(truck.id).trailer_domain is None
+
+
 def test_guided_transport_setup_warns_and_reassigns_existing_relations(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QLabel, QPushButton
 
