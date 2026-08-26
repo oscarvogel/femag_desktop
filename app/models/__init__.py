@@ -27,6 +27,7 @@ from app.models.load_orders import (
     LoadOrderStatusHistory,
 )
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
+from app.models.f150 import F150Batch, F150BatchRemittance
 from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
 
@@ -63,6 +64,8 @@ ALL_MODELS = [
     RemittanceSeries,
     Remittance,
     RemittanceItem,
+    F150Batch,
+    F150BatchRemittance,
     AppParameter,
     NumberSequence,
     BackupLog,
