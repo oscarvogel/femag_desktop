@@ -105,6 +105,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.title for child in masters.children] == [
         "Clientes",
         "Productos",
+        "Precios por lista",
         "Tipos de IVA",
         "Transportistas",
         "Choferes",
@@ -113,6 +114,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.route_key for child in masters.children] == [
         "clients",
         "products",
+        "product_price_bulk",
         "vat_types",
         "carriers",
         "drivers",
@@ -215,7 +217,8 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "managerial_account_risk",
         ]
         assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
-        assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
+        assert titles.index("Avisos") == titles.index("Cuenta corriente") + 1
+        assert titles.index("Sistema") == titles.index("Avisos") + 1
     finally:
         set_managerial_dashboard_menu_enabled(False)
 
