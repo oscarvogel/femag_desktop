@@ -1,3 +1,87 @@
+import subprocess
+import sys
+
+
+def test_menu_filters_items_by_permission(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_menu, build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    viewer = AuthService().create_user("consulta", "clave", "Solo consulta")
+
+    menu = build_menu(viewer)
+
+    assert "Sistema" not in [section.title for section in menu if section.items]
+    assert any(item.title == "Clientes" for section in menu for item in section.items)
+    assert "Configuración" not in [
+        item.title for section in build_sidebar_tree_spec(viewer).sections for item in section.items
+    ]
+
+
+def test_dashboard_counts_and_future_placeholder(db):
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.dashboard import DashboardService, future_module_message
+
+    Client.create(name="Cliente", cuit="30222222229", iva_condition="RI")
+    Product.create(name="Fecula", unit="kg")
+    client = Client.create(name="Cliente orden", cuit="30333333339", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12",
+    )
+    product = Product.create(name="Almidon", unit="kg")
+    carrier = Carrier.create(name="Transporte Norte")
+    driver = Driver.create(name="Juan Perez", carrier=carrier)
+    truck = Truck.create(domain="AB123CD", carrier=carrier)
+    LoadOrderService(current_user="admin").create_order(
+        client=client,
+        delivery_address=address,
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        products=[{"product": product, "quantity": 100}],
+        pallets=[],
+    )
+
+    summary = DashboardService().summary()
+
+    assert summary["clientes"] == 2
+    assert summary["productos"] == 2
+    assert summary["ordenes_hoy"] == 1
+    assert summary["ordenes_pendientes"] == 1
+    assert summary["choferes_bloqueados"] == 1
+    assert summary["acceso_rapido_nueva_orden"] == "Nueva orden de carga"
+    assert future_module_message() == "Funcionalidad prevista para una próxima entrega."
+
+
+def test_menu_marks_operational_modules_as_real(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_menu
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("secretaria", "clave", "Secretaria")
+
+    load_order_item = next(
+        item
+        for section in build_menu(user)
+        for item in section.items
+        if item.title == "Órdenes de carga"
+    )
+    remittance_item = next(
+        item for section in build_menu(user) for item in section.items if item.title == "Remitos"
+    )
+    summary_item = next(
+        item
+        for section in build_menu(user)
+        for item in section.items
+        if item.title == "Hoja resumen / sobre de carga"
+    )
 
     assert load_order_item.placeholder is False
     assert remittance_item.placeholder is False
@@ -21,7 +105,6 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.title for child in masters.children] == [
         "Clientes",
         "Productos",
-        "Precios por lista",
         "Tipos de IVA",
         "Transportistas",
         "Choferes",
@@ -30,7 +113,6 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.route_key for child in masters.children] == [
         "clients",
         "products",
-        "product_price_bulk",
         "vat_types",
         "carriers",
         "drivers",
@@ -133,8 +215,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "managerial_account_risk",
         ]
         assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
-        assert titles.index("Avisos") == titles.index("Cuenta corriente") + 1
-        assert titles.index("Sistema") == titles.index("Avisos") + 1
+        assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
     finally:
         set_managerial_dashboard_menu_enabled(False)
 
@@ -146,3 +227,179 @@ def test_app_smoke_command_runs():
         capture_output=True,
         check=False,
     )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "FEMAG smoke OK" in completed.stdout
+
+
+def test_global_styles_include_polished_combo_controls():
+    from app.ui.desktop_app import STYLES
+
+    assert "QComboBox" in STYLES
+    assert "QComboBox::drop-down" in STYLES
+    assert "QComboBox::drop-down:hover" in STYLES
+    assert "chevron-down.svg" in STYLES
+    assert "QComboBox QAbstractItemView" in STYLES
+    assert "QDateEdit" in STYLES
+
+
+def test_global_styles_include_polished_form_controls():
+    from app.ui.desktop_app import STYLES
+
+    assert "QLineEdit" in STYLES
+    assert "QTextEdit" in STYLES
+    assert "QPlainTextEdit" in STYLES
+    assert "QSpinBox" in STYLES
+    assert "QDoubleSpinBox" in STYLES
+    assert "QSpinBox::up-button" in STYLES
+    assert "QDoubleSpinBox::down-button" in STYLES
+
+
+def test_app_ui_flag_runs_ui_launcher(monkeypatch):
+    from app import main as app_main
+
+    calls = []
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        calls.append(demo_mode)
+        return 0
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--ui"]) == 0
+    assert calls == [False]
+
+
+def test_app_demo_ui_flag_runs_ui_launcher_with_demo_data(monkeypatch):
+    from app import main as app_main
+
+    calls = []
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        calls.append(demo_mode)
+        return 0
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--demo-ui"]) == 0
+    assert calls == [True]
+
+
+def test_app_ui_flag_reports_launch_error(monkeypatch, capsys):
+    from app import main as app_main
+
+    def fake_run_ui(*, demo_mode: bool = False) -> int:
+        raise RuntimeError("PyQt5 no esta instalado")
+
+    monkeypatch.setattr(app_main, "run_ui", fake_run_ui)
+
+    assert app_main.main(["--ui"]) == 1
+    captured = capsys.readouterr()
+    assert "No se pudo abrir FEMAG Desktop UI" in captured.err
+    assert "PyQt5 no esta instalado" in captured.err
+
+
+def test_runtime_ui_validates_schema_without_evolving_it(monkeypatch):
+    from app.ui import desktop_app
+
+    calls = []
+
+    class RuntimeDatabase:
+        def connect(self, *, reuse_if_open):
+            calls.append(("connect", reuse_if_open))
+
+    database = RuntimeDatabase()
+    monkeypatch.setattr(desktop_app, "initialize_runtime_database", lambda: database)
+    monkeypatch.setattr(
+        desktop_app,
+        "validate_runtime_schema",
+        lambda target: calls.append(("validate", target)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        desktop_app,
+        "ensure_runtime_schema",
+        lambda _target: (_ for _ in ()).throw(AssertionError("production startup executed DDL")),
+    )
+
+    prepared = desktop_app._prepare_database(demo_mode=False)
+
+    assert prepared is database
+    assert calls == [("connect", True), ("validate", database)]
+
+
+def test_demo_ui_keeps_automatic_schema_preparation(monkeypatch):
+    from app.ui import desktop_app
+
+    calls = []
+
+    class DemoDatabase:
+        def connect(self, *, reuse_if_open):
+            calls.append(("connect", reuse_if_open))
+
+    database = DemoDatabase()
+    monkeypatch.setattr(desktop_app, "initialize_demo_database", lambda: database)
+    monkeypatch.setattr(
+        desktop_app,
+        "ensure_runtime_schema",
+        lambda target: calls.append(("ensure", target)),
+    )
+
+    prepared = desktop_app._prepare_database(demo_mode=True)
+
+    assert prepared is database
+    assert calls == [("connect", True), ("ensure", database)]
+
+
+def test_runtime_ui_reports_connection_failure_instead_of_falling_back(monkeypatch):
+    import pytest
+
+    from app.ui import desktop_app
+
+    def fail_initialization():
+        raise OSError("secret internal connection detail")
+
+    monkeypatch.setattr(desktop_app, "initialize_runtime_database", fail_initialization)
+
+    with pytest.raises(RuntimeError, match="No se pudo conectar a la base de datos") as exc_info:
+        desktop_app._prepare_database(demo_mode=False)
+
+    assert "secret internal connection detail" not in str(exc_info.value)
+
+
+def test_runtime_ui_shows_startup_error_before_login(monkeypatch):
+    from app.ui import desktop_app
+
+    messages = []
+
+    class FakeApplication:
+        @staticmethod
+        def instance():
+            return None
+
+        def __init__(self, _arguments):
+            pass
+
+        def setWindowIcon(self, _icon):
+            pass
+
+    monkeypatch.setattr(desktop_app, "QApplication", FakeApplication)
+    monkeypatch.setattr(desktop_app, "femag_icon", lambda: object())
+    monkeypatch.setattr(
+        desktop_app,
+        "_prepare_database",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("Esquema incompatible")),
+    )
+    monkeypatch.setattr(
+        desktop_app.QMessageBox,
+        "critical",
+        lambda parent, title, message: messages.append((parent, title, message)),
+    )
+    monkeypatch.setattr(
+        desktop_app,
+        "LoginWindow",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("login should not open")),
+    )
+
+    assert desktop_app.run_desktop_app(demo_mode=False) == 1
+    assert messages == [(None, "FEMAG Desktop - Base de datos", "Esquema incompatible")]
