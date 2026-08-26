@@ -48,6 +48,7 @@ class RemittancePrintTemplate:
     driver_document_y: float = 42
     offset_x: float = 0
     offset_y: float = 0
+    content_shift_up_points: float = 5
 
     def calibrated(self, *, offset_x: float = 0, offset_y: float = 0):
         return replace(self, offset_x=offset_x, offset_y=offset_y)
@@ -106,8 +107,8 @@ class RemittancePrintService:
 
         pdf.setLineWidth(0.4)
         pdf.rect(15 * MM, 188 * MM, 180 * MM, 78 * MM)
-        pdf.rect(15 * MM, 62 * MM, 180 * MM, 120 * MM)
-        pdf.rect(15 * MM, 30 * MM, 180 * MM, 25 * MM)
+        pdf.rect(15 * MM, 62 * MM, 180 * MM, 123 * MM)
+        pdf.rect(15 * MM, 30 * MM, 180 * MM, 30 * MM)
         pdf.setFont("Helvetica", 6)
         pdf.drawString(17 * MM, 263 * MM, "CLIENTE / DESTINO")
         pdf.drawString(17 * MM, 179 * MM, "DETALLE")
@@ -147,7 +148,13 @@ class RemittancePrintService:
         return items
 
     def _draw_variable_fields(self, pdf, remittance: Remittance, items) -> None:
-        self._text(pdf, self.template.date_x, self.template.date_y, remittance.date.strftime("%d/%m/%Y"))
+        self._text(
+            pdf,
+            self.template.date_x,
+            self.template.date_y,
+            remittance.date.strftime("%d/%m/%Y"),
+            shift_up=False,
+        )
         self._text(pdf, self.template.client_x, self.template.client_y, remittance.client_name)
         self._text(pdf, self.template.address_x, self.template.address_y, remittance.delivery_address_text)
         self._text(pdf, self.template.city_x, self.template.city_y, remittance.delivery_city or "")
@@ -164,7 +171,12 @@ class RemittancePrintService:
 
         self._text(pdf, self.template.carrier_x, self.template.carrier_y, remittance.carrier_name or "")
         self._text(pdf, self.template.carrier_cuit_x, self.template.carrier_cuit_y, remittance.carrier_cuit or "")
-        self._text(pdf, self.template.truck_x, self.template.truck_y, remittance.truck_domain or "")
+        self._text(
+            pdf,
+            self.template.truck_x,
+            self.template.truck_y,
+            self._vehicle_domains(remittance),
+        )
         self._text(pdf, self.template.driver_x, self.template.driver_y, remittance.driver_name or "")
         self._text(pdf, self.template.driver_document_x, self.template.driver_document_y, remittance.driver_document or "")
 
@@ -181,13 +193,32 @@ class RemittancePrintService:
                 "output": str(output),
                 "offset_x_mm": self.template.offset_x,
                 "offset_y_mm": self.template.offset_y,
+                "content_shift_up_points": self.template.content_shift_up_points,
             },
         )
 
-    def _text(self, pdf, x_mm: float, y_mm_from_bottom: float, value: str) -> None:
+    def _text(
+        self,
+        pdf,
+        x_mm: float,
+        y_mm_from_bottom: float,
+        value: str,
+        *,
+        shift_up: bool = True,
+    ) -> None:
         x = (x_mm + self.template.offset_x) * MM
         y = (y_mm_from_bottom + self.template.offset_y) * MM
+        if shift_up:
+            y += self.template.content_shift_up_points
         pdf.drawString(x, y, str(value))
+
+    @staticmethod
+    def _vehicle_domains(remittance: Remittance) -> str:
+        return " / ".join(
+            value
+            for value in (remittance.truck_domain, remittance.trailer_domain)
+            if value
+        )
 
     @staticmethod
     def _quantity_text(quantity) -> str:

@@ -58,6 +58,7 @@ class Remittance(BaseModel):
     carrier_name = CharField(null=True)
     carrier_cuit = CharField(null=True)
     truck_domain = CharField(null=True)
+    trailer_domain = CharField(null=True)
     driver_name = CharField(null=True)
     driver_document = CharField(null=True)
 

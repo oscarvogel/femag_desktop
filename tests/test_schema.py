@@ -283,6 +283,17 @@ def test_driver_schema_allows_null_carrier_and_cuit(db):
     assert columns["cuit"].null is True
 
 
+def test_ensure_runtime_schema_adds_trailer_snapshot_to_legacy_remittance(db):
+    from app.config.schema import ensure_runtime_schema
+
+    db.execute_sql("ALTER TABLE remittance DROP COLUMN trailer_domain")
+
+    ensure_runtime_schema(db)
+
+    columns = {column.name: column for column in db.get_columns("remittance")}
+    assert columns["trailer_domain"].null is True
+
+
 def test_payment_schema_includes_annulment_tracking_columns(db):
     columns = {column.name for column in db.get_columns("clientpayment")}
 
