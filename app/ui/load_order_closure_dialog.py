@@ -279,10 +279,17 @@ class LoadOrderClosureDialog(QDialog):
     def _refresh_summary(self) -> None:
         total = sum(float(line.total) for line in self.order.products)
         paid = sum(payment["amount"] for payment in self._payments)
-        self.summary_label.setText(
-            f"Total orden: $ {total:,.2f} | Pagos: $ {paid:,.2f} | "
-            f"Saldo estimado: $ {max(total - paid, 0):,.2f}"
-        )
+        balance = round(total - paid, 2)
+        if balance < -0.009:
+            self.summary_label.setText(
+                f"Total orden: $ {total:,.2f} | Pagos: $ {paid:,.2f} | "
+                f"Saldo a favor: $ {abs(balance):,.2f} (excede total, queda en cuenta corriente)"
+            )
+        else:
+            self.summary_label.setText(
+                f"Total orden: $ {total:,.2f} | Pagos: $ {paid:,.2f} | "
+                f"Saldo estimado: $ {max(balance, 0):,.2f}"
+            )
 
     def _refresh_return_summary(self, *_args) -> None:
         total_credit = 0.0
@@ -299,6 +306,19 @@ class LoadOrderClosureDialog(QDialog):
             f"Devoluciones: {returned_lines} renglón(es) | Monto estimado a acreditar: $ {total_credit:,.2f}"
         )
 
+    def _overpaid_clients(self) -> list[str]:
+        totals = self.service._order_totals_by_client(self.order)
+        paid_by_client: dict[int, float] = {cid: 0.0 for cid in totals}
+        name_by_id = {item["client"].id: item["client"].name for item in self._payments}
+        for item in self._payments:
+            cid = item["client"].id
+            paid_by_client[cid] = round(paid_by_client.get(cid, 0.0) + float(item["amount"]), 2)
+        return [
+            name_by_id.get(cid) or f"cliente {cid}"
+            for cid, total in totals.items()
+            if paid_by_client.get(cid, 0.0) > total + 0.009
+        ]
+
     def _on_accept(self) -> None:
         returns = self.pending_returns()
         if any(not item["reason"] for item in returns):
@@ -308,6 +328,14 @@ class LoadOrderClosureDialog(QDialog):
                 "Debe indicar el motivo de cada devolución registrada.",
             )
             return
+        overpaid = self._overpaid_clients()
+        if overpaid:
+            QMessageBox.information(
+                self,
+                "Cierre de entrega",
+                f"Los pagos de {', '.join(overpaid)} superan el total de la orden. "
+                f"El excedente quedará como saldo a favor en cuenta corriente.",
+            )
         try:
             self._closure = self.service.close_order(
                 self.order,

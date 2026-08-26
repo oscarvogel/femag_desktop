@@ -200,19 +200,23 @@ class LoadOrderClosureService:
         summary = []
         for client_id, total in totals.items():
             paid = paid_by_client.get(client_id, 0.0)
-            balance = max(round(total - paid, 2), 0.0)
+            # Allow overpayment: balance can be negative (saldo a favor), not capped at 0.
+            balance = round(total - paid, 2)
             if paid <= 0:
                 status = self.PAYMENT_STATUS_UNPAID
             elif balance <= 0:
                 status = self.PAYMENT_STATUS_PAID
             else:
                 status = self.PAYMENT_STATUS_PARTIAL
+            # Expose credit explicitly for callers/UI.
+            credit = round(max(paid - total, 0.0), 2)
             summary.append(
                 {
                     "client": Client.get_by_id(client_id),
                     "total": total,
                     "paid": paid,
                     "balance": balance,
+                    "credit": credit,
                     "status": status,
                 }
             )
@@ -253,7 +257,6 @@ class LoadOrderClosureService:
 
     def _normalize_payment_specs(self, order: LoadOrder, payments: list[dict]) -> list[dict]:
         totals = self._order_totals_by_client(order)
-        paid_by_client = {client_id: 0.0 for client_id in totals}
         normalized = []
         for spec in payments:
             client = spec.get("client")
@@ -262,11 +265,8 @@ class LoadOrderClosureService:
             amount = round(float(spec.get("amount") or 0), 2)
             if amount <= 0:
                 raise LoadOrderClosureError("El monto de cada pago debe ser mayor a cero.")
-            paid_by_client[client.id] = round(paid_by_client[client.id] + amount, 2)
-            if paid_by_client[client.id] > totals[client.id] + 0.009:
-                raise LoadOrderClosureError(
-                    f"Los pagos de {client.name} superan el total de la orden."
-                )
+            # Overpayment is allowed: excess becomes saldo a favor (credit),
+            # no longer blocked here. UI will warn but closure proceeds.
             normalized.append(
                 {
                     "client": client,
