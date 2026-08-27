@@ -6,13 +6,15 @@ EXTENSION = ROOT / "app" / "ui" / "application_lifecycle_extension.py"
 MAIN = ROOT / "app" / "main.py"
 
 
-def test_login_does_not_quit_qapplication_before_main_window() -> None:
+def test_login_keeps_qapplication_alive_until_main_window_closes() -> None:
     content = EXTENSION.read_text(encoding="utf-8")
 
     assert "app.setQuitOnLastWindowClosed(False)" in content
-    assert "app.setQuitOnLastWindowClosed(True)" in content
+    assert "app.setQuitOnLastWindowClosed(True)" not in content
+    assert "app.quit()" in content
     assert "original_login_init" in content
     assert "original_main_init" in content
+    assert "original_close_event" in content
 
 
 def test_application_lifecycle_extension_is_installed() -> None:
