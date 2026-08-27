@@ -19,6 +19,7 @@ from app.config.schema import ensure_runtime_schema
 from app.config.secure_credentials import (
     RuntimeConnection,
     SecureConfigurationError,
+    has_runtime_configuration,
     load_runtime_connection,
     save_runtime_connection,
 )
@@ -180,15 +181,15 @@ def prepare_runtime_schema(connection: RuntimeConnection) -> None:
 
 
 def ensure_runtime_configuration(*, force: bool = False, parent=None) -> bool:
+    # Una actualización del programa no debe volver a pedir la conexión si ya
+    # existe la configuración segura del puesto. La validación operativa de
+    # MySQL se realiza luego al abrir la aplicación; este diálogo queda
+    # reservado para la primera configuración o para --configure explícito.
+    if not force and has_runtime_configuration():
+        return True
+
     current = None
-    if not force:
-        try:
-            current = load_runtime_connection()
-            test_runtime_connection(current)
-            return True
-        except (RuntimeError, SecureConfigurationError):
-            pass
-    else:
+    if force:
         try:
             current = load_runtime_connection()
         except SecureConfigurationError:
