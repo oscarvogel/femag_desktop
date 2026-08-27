@@ -1,3 +1,4 @@
+import secrets
 from datetime import date
 from decimal import Decimal
 
@@ -15,6 +16,11 @@ from peewee import (
 
 from app.models.base import BaseModel, utc_now
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
+
+
+def generate_load_order_qr_token() -> str:
+    """Generate an opaque token suitable for identifying a load order from a QR."""
+    return secrets.token_urlsafe(24)
 
 
 class LoadOrder(BaseModel):
@@ -37,6 +43,7 @@ class LoadOrder(BaseModel):
     trailer_domain = CharField(null=True)
     status = CharField(default=STATUS_PENDING)
     observations = TextField(null=True)
+    qr_token = CharField(max_length=64, null=True, default=generate_load_order_qr_token)
     created_by = CharField(null=True)
     updated_by = CharField(null=True)
 
@@ -51,6 +58,17 @@ class LoadOrder(BaseModel):
     @property
     def is_unissued(self) -> bool:
         return self.status not in (self.STATUS_ISSUED, *self.FINAL_STATUSES)
+
+    def ensure_qr_token(self) -> str:
+        """Persist a token for historical orders created before QR support existed."""
+        if not self.qr_token:
+            self.qr_token = generate_load_order_qr_token()
+            self.save(only=[LoadOrder.qr_token])
+        return self.qr_token
+
+    def qr_payload(self) -> str:
+        """Versioned payload that a future webapp can resolve without exposing order data."""
+        return f"FEMAG:LOAD_ORDER:{self.ensure_qr_token()}"
 
 
 class LoadOrderDestination(BaseModel):
