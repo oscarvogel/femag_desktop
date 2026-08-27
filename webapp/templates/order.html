@@ -19,7 +19,10 @@
         <strong>{{ line.product.name }}</strong>
         <p class="muted">Cantidad: {{ line.quantity }} {{ line.unit }}</p>
         <label for="lote_{{ line.id }}">Lote</label>
-        <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar o escanear lote">
+        <div class="lot-row">
+          <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar lote">
+          <button class="scan-lot-button" type="button" data-target="lote_{{ line.id }}" aria-label="Escanear lote de {{ line.product.name }}">Escanear</button>
+        </div>
         <label for="fecha_{{ line.id }}">Fecha de elaboración</label>
         <input id="fecha_{{ line.id }}" name="fecha_{{ line.id }}" type="date" value="{{ line.fecha_elaboracion.isoformat() if line.fecha_elaboracion else '' }}">
       </div>
@@ -32,4 +35,109 @@
 </form>
 <div style="height:12px"></div>
 <a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>
+
+<div id="lot-scanner" class="scanner-panel" hidden>
+  <div class="scanner-card">
+    <h2>Escanear lote</h2>
+    <p class="muted">Apuntá la cámara al código QR o código de barras del lote.</p>
+    <video id="lot-scanner-video" playsinline muted></video>
+    <p id="lot-scanner-status" class="muted">Preparando cámara…</p>
+    <button id="lot-scanner-close" type="button">Cancelar</button>
+  </div>
+</div>
+
+<style>
+  .lot-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+  .lot-row input { min-width: 0; }
+  .scan-lot-button { width: auto; min-height: 46px; padding: 10px 14px; white-space: nowrap; }
+  .scanner-panel { position: fixed; inset: 0; z-index: 1000; background: rgba(12, 22, 32, .82); padding: 18px; overflow: auto; }
+  .scanner-card { max-width: 560px; margin: 4vh auto; background: white; border-radius: 14px; padding: 16px; }
+  #lot-scanner-video { display: block; width: 100%; min-height: 240px; max-height: 55vh; object-fit: cover; border-radius: 10px; background: #111; margin: 12px 0; }
+  @media (max-width: 430px) {
+    .lot-row { grid-template-columns: 1fr; }
+    .scan-lot-button { width: 100%; }
+  }
+</style>
+
+<script>
+(() => {
+  const panel = document.getElementById('lot-scanner');
+  const video = document.getElementById('lot-scanner-video');
+  const status = document.getElementById('lot-scanner-status');
+  const closeButton = document.getElementById('lot-scanner-close');
+  let stream = null;
+  let scanning = false;
+  let targetInput = null;
+
+  function stopScanner() {
+    scanning = false;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+    panel.hidden = true;
+    targetInput = null;
+  }
+
+  async function startScanner(inputId) {
+    targetInput = document.getElementById(inputId);
+    if (!targetInput) return;
+
+    panel.hidden = false;
+    status.textContent = 'Solicitando acceso a la cámara…';
+
+    if (!window.isSecureContext) {
+      status.textContent = 'La cámara requiere HTTPS (o localhost). Podés ingresar el lote manualmente.';
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = 'Este navegador no permite acceder a la cámara.';
+      return;
+    }
+    if (!('BarcodeDetector' in window)) {
+      status.textContent = 'Este navegador no soporta lectura automática de códigos. Podés ingresar el lote manualmente.';
+      return;
+    }
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      const detector = new BarcodeDetector();
+      scanning = true;
+      status.textContent = 'Buscando código…';
+
+      const detectLoop = async () => {
+        if (!scanning) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length && codes[0].rawValue) {
+            targetInput.value = codes[0].rawValue.trim();
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            stopScanner();
+            targetInput.focus();
+            return;
+          }
+        } catch (error) {
+          status.textContent = 'No se pudo leer el código. Volvé a apuntar la cámara.';
+        }
+        if (scanning) requestAnimationFrame(detectLoop);
+      };
+      requestAnimationFrame(detectLoop);
+    } catch (error) {
+      status.textContent = 'No se pudo abrir la cámara. Revisá los permisos del navegador.';
+    }
+  }
+
+  document.querySelectorAll('.scan-lot-button').forEach(button => {
+    button.addEventListener('click', () => startScanner(button.dataset.target));
+  });
+  closeButton.addEventListener('click', stopScanner);
+  panel.addEventListener('click', event => {
+    if (event.target === panel) stopScanner();
+  });
+  window.addEventListener('pagehide', stopScanner);
+})();
+</script>
 {% endblock %}
