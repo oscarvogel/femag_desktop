@@ -6,7 +6,7 @@ from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
 from app.services.client_credit_service import ClientCreditService
-from app.services.rowspan_consolidated_load_order_print_service import ConsolidatedLoadOrderPrintService
+from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
 
