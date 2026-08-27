@@ -42,6 +42,13 @@ def test_production_bundle_uses_production_entrypoint() -> None:
     assert "FEMAG_Desktop.iss" in build
 
 
+def test_production_bundle_includes_reportlab_barcode_submodules() -> None:
+    spec = SPEC.read_text(encoding="utf-8")
+
+    assert 'collect_submodules("reportlab.graphics.barcode")' in spec
+    assert 'collect_data_files("reportlab")' in spec
+
+
 def test_secure_first_run_is_documented() -> None:
     content = DOC.read_text(encoding="utf-8")
 
