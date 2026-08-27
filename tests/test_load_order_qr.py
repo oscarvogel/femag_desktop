@@ -40,17 +40,26 @@ def test_historical_order_without_token_is_backfilled_on_use(db):
     assert persisted.qr_token
 
 
-def test_printed_dispatch_order_contains_qr_flowable(db):
+def test_operational_print_service_builds_qr_from_opaque_token(db):
     from reportlab.graphics.shapes import Drawing
 
-    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 
     order = _order(1)
-    service = LoadOrderPrintService(current_user="admin")
+    service = ConsolidatedLoadOrderPrintService(current_user="admin")
 
     qr = service._qr_drawing(order)
 
     assert isinstance(qr, Drawing)
     assert qr.width > 0
     assert qr.height > 0
-    assert order.qr_token in service._qr_payload(order)
+    assert service._qr_payload(order) == f"FEMAG:LOAD_ORDER:{order.qr_token}"
+
+
+def test_operation_service_uses_qr_print_service(db, tmp_path):
+    from app.services.load_order_operation_service import LoadOrderOperationService
+    from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
+
+    service = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
+
+    assert isinstance(service.prints, ConsolidatedLoadOrderPrintService)
