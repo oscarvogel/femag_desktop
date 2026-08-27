@@ -1,0 +1,1 @@
+authenticated login must proceed to main window
