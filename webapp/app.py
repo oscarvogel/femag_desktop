@@ -8,6 +8,7 @@ from webapp.order_service import (
     OrderNotFoundError,
     get_order_by_token,
     normalize_qr_token,
+    order_line_context,
     order_lines,
     update_order_line,
 )
@@ -65,6 +66,11 @@ def create_app() -> Flask:
                 flash(str(exc), "error")
                 lines = order_lines(order)
 
-        return render_template("order.html", order=order, lines=lines)
+        return render_template(
+            "order.html",
+            order=order,
+            lines=lines,
+            line_context=order_line_context(order, lines),
+        )
 
     return app
