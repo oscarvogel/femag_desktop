@@ -73,8 +73,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.VOGEL_RELEASES_TOKEN }}
         run: |
-          gh release view latest --repo oscarvogel/vogel-releases 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          $previousPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'SilentlyContinue'
+          gh release view latest --repo oscarvogel/vogel-releases *> $null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $previousPreference
+          if (-not $releaseExists) {
             gh release create latest --repo oscarvogel/vogel-releases --title 'Vogel Releases - Latest' --notes 'Últimos instaladores publicados.'
           }
 
