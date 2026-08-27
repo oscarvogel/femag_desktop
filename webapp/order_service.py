@@ -7,6 +7,7 @@ from peewee import DoesNotExist
 from app.models.load_orders import (
     LoadOrder,
     LoadOrderLooseAllocation,
+    LoadOrderPallet,
     LoadOrderPalletAllocation,
     LoadOrderProduct,
 )
@@ -61,10 +62,10 @@ def order_line_context(order: LoadOrder, lines: list[LoadOrderProduct]) -> dict[
     contexts: dict[int, dict[str, object]] = {}
 
     pallet_allocations = list(
-        LoadOrderPalletAllocation.select()
-        .join(LoadOrderPalletAllocation.pallet)
-        .where(LoadOrderPalletAllocation.pallet.order == order)
-        .order_by(LoadOrderPalletAllocation.pallet.sequence)
+        LoadOrderPalletAllocation.select(LoadOrderPalletAllocation, LoadOrderPallet)
+        .join(LoadOrderPallet)
+        .where(LoadOrderPallet.order == order)
+        .order_by(LoadOrderPallet.sequence)
     )
     loose_allocations = list(
         LoadOrderLooseAllocation.select().where(LoadOrderLooseAllocation.order == order)
