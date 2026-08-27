@@ -15,9 +15,23 @@
     <h2>Productos</h2>
     {% if lines %}
       {% for line in lines %}
+      {% set ctx = line_context.get(line.id, {}) %}
       <div class="line">
         <strong>{{ line.product.name }}</strong>
         <p class="muted">Cantidad: {{ line.quantity }} {{ line.unit }}</p>
+        <div class="dispatch-context">
+          <div><span>Cliente</span><strong>{{ ctx.get('client', '-') }}</strong></div>
+          <div><span>Lugar de entrega</span><strong>{{ ctx.get('delivery', '-') }}</strong></div>
+          <div><span>Pallet</span><strong>
+            {% if ctx.get('pallets') %}
+              {{ ctx.get('pallets') | join(', ') }}
+            {% elif ctx.get('is_loose') %}
+              Mercadería suelta
+            {% else %}
+              Sin pallet asignado
+            {% endif %}
+          </strong></div>
+        </div>
         <label for="lote_{{ line.id }}">Lote</label>
         <div class="lot-row">
           <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar lote">
@@ -47,6 +61,8 @@
 </div>
 
 <style>
+  .dispatch-context { background: #f5f8fb; border: 1px solid #dbe3ea; border-radius: 10px; padding: 10px 12px; margin: 10px 0 12px; display: grid; gap: 8px; }
+  .dispatch-context div span { display: block; color: #687481; font-size: .78rem; text-transform: uppercase; }
   .lot-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
   .lot-row input { min-width: 0; }
   .scan-lot-button { width: auto; min-height: 46px; padding: 10px 14px; white-space: nowrap; }
@@ -71,10 +87,7 @@
 
   function stopScanner() {
     scanning = false;
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
-    }
+    if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
     video.srcObject = null;
     panel.hidden = true;
     targetInput = null;
@@ -83,23 +96,11 @@
   async function startScanner(inputId) {
     targetInput = document.getElementById(inputId);
     if (!targetInput) return;
-
     panel.hidden = false;
     status.textContent = 'Solicitando acceso a la cámara…';
-
-    if (!window.isSecureContext) {
-      status.textContent = 'La cámara requiere HTTPS (o localhost). Podés ingresar el lote manualmente.';
-      return;
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      status.textContent = 'Este navegador no permite acceder a la cámara.';
-      return;
-    }
-    if (!('BarcodeDetector' in window)) {
-      status.textContent = 'Este navegador no soporta lectura automática de códigos. Podés ingresar el lote manualmente.';
-      return;
-    }
-
+    if (!window.isSecureContext) { status.textContent = 'La cámara requiere HTTPS (o localhost). Podés ingresar el lote manualmente.'; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = 'Este navegador no permite acceder a la cámara.'; return; }
+    if (!('BarcodeDetector' in window)) { status.textContent = 'Este navegador no soporta lectura automática de códigos. Podés ingresar el lote manualmente.'; return; }
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       video.srcObject = stream;
@@ -107,7 +108,6 @@
       const detector = new BarcodeDetector();
       scanning = true;
       status.textContent = 'Buscando código…';
-
       const detectLoop = async () => {
         if (!scanning) return;
         try {
@@ -119,24 +119,16 @@
             targetInput.focus();
             return;
           }
-        } catch (error) {
-          status.textContent = 'No se pudo leer el código. Volvé a apuntar la cámara.';
-        }
+        } catch (error) { status.textContent = 'No se pudo leer el código. Volvé a apuntar la cámara.'; }
         if (scanning) requestAnimationFrame(detectLoop);
       };
       requestAnimationFrame(detectLoop);
-    } catch (error) {
-      status.textContent = 'No se pudo abrir la cámara. Revisá los permisos del navegador.';
-    }
+    } catch (error) { status.textContent = 'No se pudo abrir la cámara. Revisá los permisos del navegador.'; }
   }
 
-  document.querySelectorAll('.scan-lot-button').forEach(button => {
-    button.addEventListener('click', () => startScanner(button.dataset.target));
-  });
+  document.querySelectorAll('.scan-lot-button').forEach(button => button.addEventListener('click', () => startScanner(button.dataset.target)));
   closeButton.addEventListener('click', stopScanner);
-  panel.addEventListener('click', event => {
-    if (event.target === panel) stopScanner();
-  });
+  panel.addEventListener('click', event => { if (event.target === panel) stopScanner(); });
   window.addEventListener('pagehide', stopScanner);
 })();
 </script>
