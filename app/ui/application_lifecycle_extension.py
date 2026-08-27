@@ -2,24 +2,23 @@ from __future__ import annotations
 
 import logging
 
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QDialog
 
 
 logger = logging.getLogger("femag.lifecycle")
 
 
 def install_application_lifecycle_extension() -> None:
-    """Keep QApplication alive across login/main-window transitions.
+    """Keep QApplication alive and trust a successfully authenticated login.
 
-    The login runs in its own modal event loop before the application's main
-    event loop starts. Qt may queue an automatic quit when the login becomes
-    the last visible window. Re-enabling quitOnLastWindowClosed before
-    QApplication.exec_() lets that queued quit fire immediately, producing the
-    observed clean exit with code 0.
+    Production logs showed the login dialog being displayed and FEMAG then
+    returning code 0 without ever constructing the main window. The desktop
+    loop historically depends on the QDialog return code, but authentication
+    already stores the authoritative result in ``authenticated_user``.
 
-    FEMAG therefore keeps Qt's implicit last-window shutdown disabled for the
-    whole session and quits the event loop explicitly when the main window is
-    actually closed. This also preserves the logout loop used by desktop_app.
+    If authentication succeeded, force an Accepted result even if Qt unwinds
+    the modal dialog with another code. Closing/cancelling the login without an
+    authenticated user still returns the original dialog result and exits.
     """
     from app.ui.login_window import LoginWindow
     from app.ui.desktop_app import FemagDesktopWindow
@@ -28,6 +27,7 @@ def install_application_lifecycle_extension() -> None:
         return
 
     original_login_init = LoginWindow.__init__
+    original_login_show = LoginWindow.show
     original_main_init = FemagDesktopWindow.__init__
     original_close_event = FemagDesktopWindow.closeEvent
 
@@ -40,6 +40,17 @@ def install_application_lifecycle_extension() -> None:
         _keep_application_alive()
         logger.info("Mostrando login con quitOnLastWindowClosed=False")
         original_login_init(self, *args, **kwargs)
+
+    def login_show(self):
+        result = original_login_show(self)
+        if self.authenticated_user is not None:
+            logger.info(
+                "Login autenticado; resultado Qt=%s. Continuando con ventana principal",
+                result,
+            )
+            return QDialog.Accepted
+        logger.info("Login finalizado sin usuario autenticado; resultado Qt=%s", result)
+        return result
 
     def main_init(self, *args, **kwargs):
         _keep_application_alive()
@@ -55,6 +66,7 @@ def install_application_lifecycle_extension() -> None:
                 app.quit()
 
     LoginWindow.__init__ = login_init
+    LoginWindow.show = login_show
     FemagDesktopWindow.__init__ = main_init
     FemagDesktopWindow.closeEvent = close_event
     LoginWindow._femag_lifecycle_patch = True
