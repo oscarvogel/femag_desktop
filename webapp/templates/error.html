@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Orden no encontrada · FEMAG{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>No se pudo abrir la orden</h1>
+  <p>{{ message }}</p>
+  <div style="height:12px"></div>
+  <a class="button" href="{{ url_for('home') }}">Volver</a>
+</div>
+{% endblock %}
