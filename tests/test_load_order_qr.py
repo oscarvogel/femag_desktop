@@ -1,10 +1,10 @@
 from conftest import _master_data
 
 
-def _order(number=1, *, qr_token=None):
+def _order(number=1, *, qr_token=None, data=None):
     from app.models.load_orders import LoadOrder
 
-    data = _master_data()
+    data = data or _master_data()
     values = {
         "order_number": number,
         "client": data["client"],
@@ -19,8 +19,9 @@ def _order(number=1, *, qr_token=None):
 
 
 def test_new_load_order_gets_opaque_qr_token(db):
-    first = _order(1)
-    second = _order(2)
+    data = _master_data()
+    first = _order(1, data=data)
+    second = _order(2, data=data)
 
     assert first.qr_token
     assert second.qr_token
