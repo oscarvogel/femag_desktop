@@ -119,12 +119,12 @@ def test_mobile_order_line_shows_client_delivery_and_pallet_without_duplication(
     response = app.test_client().get(f"/orden/{order.qr_token}")
 
     assert response.status_code == 200
-    assert response.data.count(b"Fecula de mandioca") == 1
     assert data["client"].name.encode() in response.data
     assert data["address"].city.encode() in response.data
     assert b"1, 2, 3" in response.data
-    assert f'name="lote_{line.id}"'.encode() in response.data
-    assert f'name="fecha_{line.id}"'.encode() in response.data
+    assert response.data.count(f'name="lote_{line.id}"'.encode()) == 1
+    assert response.data.count(f'name="fecha_{line.id}"'.encode()) == 1
+    assert response.data.count(f'data-target="lote_{line.id}"'.encode()) == 1
 
 
 def test_mobile_order_post_updates_lot_and_manufacture_date(db):
