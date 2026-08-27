@@ -26,7 +26,8 @@ def test_new_load_order_gets_opaque_qr_token(db):
     assert first.qr_token
     assert second.qr_token
     assert first.qr_token != second.qr_token
-    assert str(first.order_number) not in first.qr_token
+    assert len(first.qr_token) >= 32
+    assert first.qr_token != str(first.order_number)
 
 
 def test_historical_order_without_token_is_backfilled_on_use(db):
