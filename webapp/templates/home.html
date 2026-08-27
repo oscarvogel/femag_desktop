@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Buscar orden · FEMAG{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Buscar orden de despacho</h1>
+  <p class="muted">Pegá el contenido leído del QR de la orden. Acepta el formato actual <strong>FEMAG:LOAD_ORDER:&lt;token&gt;</strong> o solamente el token.</p>
+  <form method="post">
+    <label for="qr">QR / identificador</label>
+    <input id="qr" name="qr" autocomplete="off" autofocus required placeholder="FEMAG:LOAD_ORDER:...">
+    <div style="height:12px"></div>
+    <button type="submit">Abrir orden</button>
+  </form>
+</div>
+{% endblock %}
