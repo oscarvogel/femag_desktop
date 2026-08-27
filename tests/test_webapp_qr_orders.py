@@ -34,6 +34,19 @@ def test_qr_payload_and_raw_token_resolve_same_order(db):
     assert get_order_by_token(order.qr_token).id == order.id
 
 
+def test_home_offers_camera_qr_scanner(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get("/")
+
+    assert response.status_code == 200
+    assert b"Escanear QR" in response.data
+    assert b"BarcodeDetector" in response.data
+    assert b"getUserMedia" in response.data
+    assert b"qr_code" in response.data
+
+
 def test_mobile_order_page_shows_order_and_product(db):
     order, _ = _order_with_line()
     app = create_app()
