@@ -5,6 +5,7 @@ La webapp vive en `webapp/` y comparte los modelos Peewee y la configuración de
 ## Objetivo inicial
 
 - abrir una orden por su `qr_token`;
+- escanear el QR desde la cámara del celular;
 - mostrar sus productos desde un celular;
 - cargar o corregir `lote` y `fecha_elaboracion` por línea;
 - persistir esos datos en la misma base utilizada por Desktop.
@@ -60,13 +61,23 @@ El QR impreso actualmente contiene:
 FEMAG:LOAD_ORDER:<token>
 ```
 
-La portada de la webapp acepta ese texto completo o solamente `<token>`. Además, la orden puede abrirse directamente con:
+La portada incluye **Escanear QR**. En un navegador compatible abre la cámara trasera, detecta el QR, copia automáticamente el valor leído y abre la orden. También se mantiene el ingreso manual como fallback.
+
+La orden puede abrirse directamente con:
 
 ```text
 http://IP_DEL_SERVIDOR:8000/orden/<token>
 ```
 
 Cuando se defina el hostname/IP estable del servidor, un cambio posterior podrá imprimir directamente esa URL en el QR sin modificar el modelo ni regenerar los tokens existentes.
+
+## Cámara y HTTPS
+
+El acceso a cámara desde JavaScript requiere un contexto seguro en los navegadores modernos. En la misma PC `http://localhost:8000` normalmente funciona, pero desde un celular accediendo a `http://192.168.x.x:8000` el navegador puede bloquear la cámara por no usar HTTPS.
+
+Por ese motivo, para el despliegue interno definitivo se recomienda publicar la webapp con HTTPS en un hostname estable (por ejemplo `https://femag.local/`) mediante un proxy/servidor web interno. El ingreso manual del QR sigue disponible aunque la cámara esté bloqueada.
+
+El lector usa la API nativa `BarcodeDetector` cuando está disponible; Chrome/Edge actuales son el objetivo inicial. Si el navegador no la soporta, la pantalla informa el motivo y mantiene el ingreso manual.
 
 ## Despliegue futuro en otro servidor
 
