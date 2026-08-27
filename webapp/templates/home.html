@@ -3,12 +3,105 @@
 {% block content %}
 <div class="card">
   <h1>Buscar orden de despacho</h1>
-  <p class="muted">Pegá el contenido leído del QR de la orden. Acepta el formato actual <strong>FEMAG:LOAD_ORDER:&lt;token&gt;</strong> o solamente el token.</p>
-  <form method="post">
+  <p class="muted">Escaneá el QR con la cámara o pegá el contenido leído. Acepta <strong>FEMAG:LOAD_ORDER:&lt;token&gt;</strong> o solamente el token.</p>
+
+  <button id="scanButton" type="button">Escanear QR</button>
+  <div id="scanner" hidden style="margin-top:14px">
+    <video id="scannerVideo" playsinline muted style="width:100%;max-height:420px;border-radius:12px;background:#111"></video>
+    <p id="scannerStatus" class="muted" aria-live="polite">Apuntá la cámara al QR de la orden.</p>
+    <button id="stopScanButton" type="button" class="secondary">Cancelar escaneo</button>
+  </div>
+
+  <div style="height:18px"></div>
+  <form method="post" id="qrForm">
     <label for="qr">QR / identificador</label>
     <input id="qr" name="qr" autocomplete="off" autofocus required placeholder="FEMAG:LOAD_ORDER:...">
     <div style="height:12px"></div>
     <button type="submit">Abrir orden</button>
   </form>
 </div>
+
+<script>
+(() => {
+  const scanButton = document.getElementById('scanButton');
+  const stopButton = document.getElementById('stopScanButton');
+  const scanner = document.getElementById('scanner');
+  const video = document.getElementById('scannerVideo');
+  const status = document.getElementById('scannerStatus');
+  const input = document.getElementById('qr');
+  const form = document.getElementById('qrForm');
+  let stream = null;
+  let detector = null;
+  let scanning = false;
+
+  function stopScanner() {
+    scanning = false;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+    scanner.hidden = true;
+  }
+
+  async function scanFrame() {
+    if (!scanning || !detector) return;
+    try {
+      const codes = await detector.detect(video);
+      if (codes.length) {
+        const value = (codes[0].rawValue || '').trim();
+        if (value) {
+          input.value = value;
+          status.textContent = 'QR detectado. Abriendo orden…';
+          stopScanner();
+          form.requestSubmit();
+          return;
+        }
+      }
+    } catch (error) {
+      status.textContent = 'No se pudo leer este cuadro. Volvé a apuntar al QR.';
+    }
+    requestAnimationFrame(scanFrame);
+  }
+
+  scanButton.addEventListener('click', async () => {
+    if (!window.isSecureContext) {
+      status.textContent = 'El navegador exige HTTPS para usar la cámara desde otro dispositivo. Podés pegar el QR manualmente.';
+      scanner.hidden = false;
+      return;
+    }
+    if (!('BarcodeDetector' in window)) {
+      status.textContent = 'Este navegador no soporta lectura QR directa. Usá Chrome/Edge actualizado o pegá el código manualmente.';
+      scanner.hidden = false;
+      return;
+    }
+    try {
+      const supported = await BarcodeDetector.getSupportedFormats();
+      if (!supported.includes('qr_code')) {
+        status.textContent = 'El navegador no admite QR. Pegá el contenido manualmente.';
+        scanner.hidden = false;
+        return;
+      }
+      detector = new BarcodeDetector({ formats: ['qr_code'] });
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      video.srcObject = stream;
+      scanner.hidden = false;
+      status.textContent = 'Apuntá la cámara al QR de la orden.';
+      await video.play();
+      scanning = true;
+      requestAnimationFrame(scanFrame);
+    } catch (error) {
+      stopScanner();
+      scanner.hidden = false;
+      status.textContent = 'No se pudo abrir la cámara. Revisá el permiso del navegador o pegá el QR manualmente.';
+    }
+  });
+
+  stopButton.addEventListener('click', stopScanner);
+  window.addEventListener('pagehide', stopScanner);
+})();
+</script>
 {% endblock %}
