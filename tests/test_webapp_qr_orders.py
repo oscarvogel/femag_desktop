@@ -48,7 +48,7 @@ def test_home_offers_camera_qr_scanner(db):
 
 
 def test_mobile_order_page_shows_order_and_product(db):
-    order, _ = _order_with_line()
+    order, line = _order_with_line()
     app = create_app()
     app.config.update(TESTING=True)
 
@@ -57,6 +57,12 @@ def test_mobile_order_page_shows_order_and_product(db):
     assert response.status_code == 200
     assert b"Orden #91001" in response.data
     assert b"Fecula de mandioca" in response.data
+    assert b"Escanear" in response.data
+    assert f'data-target="lote_{line.id}"'.encode() in response.data
+    assert b"BarcodeDetector" in response.data
+    assert b"getUserMedia" in response.data
+    assert b"Ingresar lote" in response.data
+    assert b"Ingresar o escanear lote" not in response.data
 
 
 def test_mobile_order_post_updates_lot_and_manufacture_date(db):
