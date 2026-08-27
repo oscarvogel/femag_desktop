@@ -2,7 +2,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 hiddenimports = collect_submodules("pyqt5libs")
+hiddenimports += collect_submodules("reportlab.graphics.barcode")
 datas = collect_data_files("pyqt5libs")
+datas += collect_data_files("reportlab")
 datas += [("../app/ui/assets/branding", "app/ui/assets/branding")]
 
 
