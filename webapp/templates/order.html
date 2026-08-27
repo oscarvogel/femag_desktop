@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Orden {{ order.order_number }} · FEMAG{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Orden #{{ order.order_number }}</h1>
+  <div class="summary">
+    <div><span>Fecha</span>{{ order.date.strftime('%d/%m/%Y') if order.date else '-' }}</div>
+    <div><span>Estado</span>{{ order.status }}</div>
+    <div><span>Cliente</span>{{ order.client.name if order.client else '-' }}</div>
+    <div><span>Camión</span>{{ order.truck.domain if order.truck else '-' }}</div>
+  </div>
+</div>
+<form method="post">
+  <div class="card">
+    <h2>Productos</h2>
+    {% if lines %}
+      {% for line in lines %}
+      <div class="line">
+        <strong>{{ line.product.name }}</strong>
+        <p class="muted">Cantidad: {{ line.quantity }} {{ line.unit }}</p>
+        <label for="lote_{{ line.id }}">Lote</label>
+        <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar o escanear lote">
+        <label for="fecha_{{ line.id }}">Fecha de elaboración</label>
+        <input id="fecha_{{ line.id }}" name="fecha_{{ line.id }}" type="date" value="{{ line.fecha_elaboracion.isoformat() if line.fecha_elaboracion else '' }}">
+      </div>
+      {% endfor %}
+    {% else %}
+      <p>La orden no tiene productos cargados.</p>
+    {% endif %}
+  </div>
+  {% if lines %}<button type="submit">Guardar lote y fecha</button>{% endif %}
+</form>
+<div style="height:12px"></div>
+<a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>
+{% endblock %}
