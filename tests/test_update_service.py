@@ -43,6 +43,19 @@ def test_fetch_update_info_returns_only_newer_valid_manifest():
     assert info.notes == "Nueva versión"
 
 
+def test_fetch_update_info_accepts_utf8_bom_manifest():
+    payload = b"\xef\xbb\xbf" + json.dumps({
+        "version": "2026.08.28.11.00.00",
+        "download_url": "https://example.invalid/FEMAG_Desktop_Produccion_Setup.exe",
+        "sha256": "c" * 64,
+    }).encode("utf-8")
+
+    info = fetch_update_info("2026.08.28.10.00.00", opener=_opener_for(payload))
+
+    assert info is not None
+    assert info.version == "2026.08.28.11.00.00"
+
+
 def test_fetch_update_info_ignores_same_or_older_version():
     payload = json.dumps({
         "version": "2026.08.27.10.00.00",

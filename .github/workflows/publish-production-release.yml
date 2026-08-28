@@ -109,7 +109,9 @@ jobs:
             sha256 = $env:SHA256
             notes = $env:RELEASE_NOTES
           }
-          $payload | ConvertTo-Json | Set-Content -Encoding UTF8 "$manifestDir\latest.json"
+          $json = $payload | ConvertTo-Json
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText("$manifestDir\latest.json", $json, $utf8NoBom)
           Set-Location vogel-releases
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
