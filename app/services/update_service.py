@@ -49,7 +49,9 @@ def fetch_update_info(
         headers={"User-Agent": "FEMAG-Desktop-Updater/1"},
     )
     with open_url(request, timeout=timeout) as response:  # type: ignore[misc]
-        payload = json.loads(response.read().decode("utf-8"))
+        # utf-8-sig acepta manifests con o sin BOM. Windows PowerShell 5.1 puede
+        # escribir UTF-8 con BOM, por lo que el cliente debe ser tolerante.
+        payload = json.loads(response.read().decode("utf-8-sig"))
 
     candidate = UpdateInfo(
         version=str(payload.get("version", "")).strip(),
