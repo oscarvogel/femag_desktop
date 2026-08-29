@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 
 from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
 
-from app.build_version import BUILD_VERSION
+from app.build_info import APP_ID, BUILD_VERSION
 from app.services.update_service import UpdateInfo, download_installer, fetch_update_info
+
+
+logger = logging.getLogger("femag.updater")
 
 
 class _Signals(QObject):
@@ -25,6 +29,7 @@ class _CheckWorker(QRunnable):
         try:
             info = fetch_update_info(BUILD_VERSION)
         except Exception:
+            logger.exception("No se pudo consultar el manifest de actualizacion")
             return
         if info is not None:
             self.signals.update_found.emit(info)
@@ -40,6 +45,7 @@ class _DownloadWorker(QRunnable):
         try:
             path = download_installer(self.info)
         except Exception as exc:
+            logger.exception("No se pudo descargar/validar la actualizacion")
             self.signals.failed.emit(str(exc))
             return
         self.signals.downloaded.emit(str(path))
@@ -77,8 +83,10 @@ def _show_update_dialog(window, info: UpdateInfo) -> None:
         try:
             subprocess.Popen([path], close_fds=True)
         except OSError as exc:
+            logger.exception("No se pudo ejecutar el instalador descargado")
             QMessageBox.warning(window, "Actualización FEMAG", f"No se pudo abrir el instalador:\n{exc}")
             return
+        logger.info("Instalador de FEMAG %s lanzado; cerrando aplicacion", info.version)
         window.close()
 
     worker.signals.downloaded.connect(_launch)
@@ -88,6 +96,8 @@ def _show_update_dialog(window, info: UpdateInfo) -> None:
 
 def install_update_extension() -> None:
     if os.getenv("FEMAG_DISABLE_UPDATE_CHECK") == "1":
+        return
+    if APP_ID != "femag":
         return
 
     from app.ui.desktop_app import FemagDesktopWindow
