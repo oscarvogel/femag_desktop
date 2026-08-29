@@ -98,8 +98,9 @@ jobs:
         env:
           FEMAG_DISABLE_UPDATE_CHECK: "1"
         run: |
-          & ".\dist\FEMAG Desktop\FEMAG Desktop.exe" --smoke
-          if ($LASTEXITCODE -ne 0) { throw "Frozen smoke failed with exit code $LASTEXITCODE" }
+          $process = Start-Process -FilePath ".\dist\FEMAG Desktop\FEMAG Desktop.exe" -ArgumentList "--smoke" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Frozen smoke failed with exit code $($process.ExitCode)" }
+          Write-Host "Frozen FEMAG smoke OK (exit code 0)"
 
       - name: Verify required frozen resources
         shell: powershell
