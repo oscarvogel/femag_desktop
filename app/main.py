@@ -34,6 +34,20 @@ def smoke_check() -> str:
     return "FEMAG smoke OK"
 
 
+def production_health_check() -> int:
+    from app.services.production_health import run_production_health_check
+
+    result = run_production_health_check()
+    if result.ok:
+        print(f"FEMAG production health OK: {', '.join(result.checks)}")
+        return 0
+    print(
+        f"FEMAG production health FAILED after [{', '.join(result.checks)}]: {result.error}",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
     if configure:
         os.environ["FEMAG_SECURE_CONFIG"] = "1"
@@ -64,6 +78,11 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="femag-desktop")
     parser.add_argument("--smoke", action="store_true", help="Validate imports/config without opening UI")
+    parser.add_argument(
+        "--production-health-check",
+        action="store_true",
+        help="Run non-destructive production readiness checks and exit",
+    )
     parser.add_argument("--ui", action="store_true", help="Open FEMAG Desktop UI for workstation validation")
     parser.add_argument("--demo-ui", action="store_true", help="Open FEMAG Desktop UI with local demo data")
     parser.add_argument(
@@ -75,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.smoke:
         print(smoke_check())
         return 0
+    if args.production_health_check:
+        return production_health_check()
     if args.ui or args.demo_ui or args.configure:
         try:
             options = {"configure": True} if args.configure else {}
