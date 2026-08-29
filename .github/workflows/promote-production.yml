@@ -1,0 +1,222 @@
+name: Promote FEMAG production
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation to execute'
+        required: true
+        default: promote_candidate
+        type: choice
+        options:
+          - promote_candidate
+          - rollback_previous
+      expected_version:
+        description: 'Exact candidate version shown by pilot (required for promotion)'
+        required: false
+        type: string
+      expected_sha256:
+        description: 'Exact candidate SHA256 shown by pilot (required for promotion)'
+        required: false
+        type: string
+      confirmation:
+        description: 'Type PROMOTE or ROLLBACK'
+        required: true
+        type: string
+
+concurrency:
+  group: femag-production-promotion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote-or-rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_REPO: oscarvogel/vogel-releases
+      INSTALLER_NAME: FEMAG_Desktop_Produccion_Setup.exe
+      CANDIDATE_TAG: femag-candidate
+      LATEST_TAG: latest
+      PREVIOUS_TAG: femag-previous
+
+    steps:
+      - name: Validate authorization inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ inputs.operation }}' == 'promote_candidate' ]]; then
+            [[ '${{ inputs.confirmation }}' == 'PROMOTE' ]] || { echo 'confirmation must be PROMOTE'; exit 1; }
+            [[ '${{ inputs.expected_version }}' =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$ ]] || { echo 'expected_version invalid'; exit 1; }
+            [[ '${{ inputs.expected_sha256 }}' =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'expected_sha256 invalid'; exit 1; }
+          else
+            [[ '${{ inputs.confirmation }}' == 'ROLLBACK' ]] || { echo 'confirmation must be ROLLBACK'; exit 1; }
+          fi
+
+      - name: Validate release token
+        shell: bash
+        env:
+          VOGEL_RELEASES_TOKEN: ${{ secrets.VOGEL_RELEASES_TOKEN }}
+        run: |
+          [[ -n "$VOGEL_RELEASES_TOKEN" ]] || { echo 'Falta VOGEL_RELEASES_TOKEN'; exit 1; }
+
+      - name: Checkout shared release repository
+        uses: actions/checkout@v4
+        with:
+          repository: oscarvogel/vogel-releases
+          token: ${{ secrets.VOGEL_RELEASES_TOKEN }}
+          path: vogel-releases
+
+      - name: Promote exact candidate or rollback previous
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VOGEL_RELEASES_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          APPROVED_BY: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appDir = Join-Path $PWD 'vogel-releases/apps/femag'
+          New-Item -ItemType Directory -Force $appDir | Out-Null
+          $candidatePath = Join-Path $appDir 'candidate.json'
+          $latestPath = Join-Path $appDir 'latest.json'
+          $previousPath = Join-Path $appDir 'previous.json'
+          $historyPath = Join-Path $appDir 'history.jsonl'
+          $temp = Join-Path $env:RUNNER_TEMP 'femag-promotion'
+          Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $temp | Out-Null
+
+          function Read-Manifest([string]$path) {
+            if (-not (Test-Path $path)) { return $null }
+            return Get-Content -Raw $path | ConvertFrom-Json
+          }
+          function Assert-Manifest($manifest, [string]$name) {
+            if ($null -eq $manifest) { throw "$name manifest no existe" }
+            if ($manifest.schema_version -ne 1 -or $manifest.app_id -ne 'femag') { throw "$name manifest invalido" }
+            if ($manifest.version -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$') { throw "$name version invalida" }
+            if ($manifest.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "$name SHA256 invalido" }
+          }
+          function Download-And-Verify([string]$tag, $manifest, [string]$folder) {
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            gh release download $tag --repo $env:RELEASE_REPO --pattern $env:INSTALLER_NAME --dir $folder --clobber
+            $path = Join-Path $folder $env:INSTALLER_NAME
+            if (-not (Test-Path $path)) { throw "No se descargo asset $tag/$env:INSTALLER_NAME" }
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne ([string]$manifest.sha256).ToLowerInvariant()) { throw "SHA256 del asset $tag no coincide con manifest" }
+            return $path
+          }
+          function Ensure-Release([string]$tag, [string]$title) {
+            gh release view $tag --repo $env:RELEASE_REPO *> $null
+            if ($LASTEXITCODE -ne 0) {
+              gh release create $tag --repo $env:RELEASE_REPO --title $title --notes 'Managed by FEMAG release promotion workflow.'
+            }
+          }
+          function Write-Manifest([string]$path, $manifest) {
+            $json = $manifest | ConvertTo-Json -Depth 10
+            [System.IO.File]::WriteAllText($path, $json + "`n", [System.Text.UTF8Encoding]::new($false))
+          }
+          function Add-History([string]$operation, $manifest) {
+            $entry = [ordered]@{
+              operation = $operation
+              at = (Get-Date).ToUniversalTime().ToString('o')
+              actor = $env:APPROVED_BY
+              run_id = $env:RUN_ID
+              version = [string]$manifest.version
+              sha256 = ([string]$manifest.sha256).ToLowerInvariant()
+            }
+            Add-Content -Path $historyPath -Value ($entry | ConvertTo-Json -Compress) -Encoding utf8
+          }
+
+          $latest = Read-Manifest $latestPath
+          if ($null -ne $latest) { Assert-Manifest $latest 'latest' }
+
+          if ($env:OPERATION -eq 'promote_candidate') {
+            $candidate = Read-Manifest $candidatePath
+            Assert-Manifest $candidate 'candidate'
+            if ([string]$candidate.channel -ne 'candidate') { throw 'candidate manifest no declara channel=candidate' }
+            if ([string]$candidate.version -ne $env:EXPECTED_VERSION) { throw 'La version candidate cambio desde la validacion del piloto' }
+            if (([string]$candidate.sha256).ToLowerInvariant() -ne $env:EXPECTED_SHA256.ToLowerInvariant()) { throw 'El SHA256 candidate cambio desde la validacion del piloto' }
+
+            if ($null -ne $latest -and [string]$latest.version -eq [string]$candidate.version -and ([string]$latest.sha256).ToLowerInvariant() -eq ([string]$candidate.sha256).ToLowerInvariant()) {
+              Write-Host 'Candidate ya esta promovido exactamente. Operacion idempotente: no hay cambios.'
+              exit 0
+            }
+
+            $candidateAsset = Download-And-Verify $env:CANDIDATE_TAG $candidate (Join-Path $temp 'candidate')
+            Ensure-Release $env:LATEST_TAG 'Vogel Releases - Latest'
+            Ensure-Release $env:PREVIOUS_TAG 'FEMAG previous production'
+
+            if ($null -ne $latest) {
+              $latestAsset = Download-And-Verify $env:LATEST_TAG $latest (Join-Path $temp 'latest')
+              gh release upload $env:PREVIOUS_TAG $latestAsset --repo $env:RELEASE_REPO --clobber
+              $previous = [ordered]@{}
+              $latest.psobject.Properties | ForEach-Object { $previous[$_.Name] = $_.Value }
+              $previous['channel'] = 'previous'
+              $previous['download_url'] = "https://github.com/$env:RELEASE_REPO/releases/download/$env:PREVIOUS_TAG/$env:INSTALLER_NAME"
+              $previous['archived_at'] = (Get-Date).ToUniversalTime().ToString('o')
+              Write-Manifest $previousPath $previous
+            }
+
+            gh release upload $env:LATEST_TAG $candidateAsset --repo $env:RELEASE_REPO --clobber
+            $promoted = [ordered]@{}
+            $candidate.psobject.Properties | ForEach-Object { $promoted[$_.Name] = $_.Value }
+            $promoted['channel'] = 'latest'
+            $promoted['download_url'] = "https://github.com/$env:RELEASE_REPO/releases/download/$env:LATEST_TAG/$env:INSTALLER_NAME"
+            $promoted['approved_at'] = (Get-Date).ToUniversalTime().ToString('o')
+            $promoted['approved_by'] = $env:APPROVED_BY
+            $promoted['approval_run_id'] = $env:RUN_ID
+            Write-Manifest $latestPath $promoted
+            Add-History 'promote_candidate' $promoted
+          }
+          else {
+            $previous = Read-Manifest $previousPath
+            Assert-Manifest $previous 'previous'
+            if ($null -eq $latest) { throw 'No existe latest para intercambiar con previous' }
+            $previousAsset = Download-And-Verify $env:PREVIOUS_TAG $previous (Join-Path $temp 'previous')
+            $latestAsset = Download-And-Verify $env:LATEST_TAG $latest (Join-Path $temp 'latest')
+
+            gh release upload $env:LATEST_TAG $previousAsset --repo $env:RELEASE_REPO --clobber
+            gh release upload $env:PREVIOUS_TAG $latestAsset --repo $env:RELEASE_REPO --clobber
+
+            $newLatest = [ordered]@{}
+            $previous.psobject.Properties | ForEach-Object { $newLatest[$_.Name] = $_.Value }
+            $newLatest['channel'] = 'latest'
+            $newLatest['download_url'] = "https://github.com/$env:RELEASE_REPO/releases/download/$env:LATEST_TAG/$env:INSTALLER_NAME"
+            $newLatest['approved_at'] = (Get-Date).ToUniversalTime().ToString('o')
+            $newLatest['approved_by'] = $env:APPROVED_BY
+            $newLatest['approval_run_id'] = $env:RUN_ID
+
+            $newPrevious = [ordered]@{}
+            $latest.psobject.Properties | ForEach-Object { $newPrevious[$_.Name] = $_.Value }
+            $newPrevious['channel'] = 'previous'
+            $newPrevious['download_url'] = "https://github.com/$env:RELEASE_REPO/releases/download/$env:PREVIOUS_TAG/$env:INSTALLER_NAME"
+            $newPrevious['archived_at'] = (Get-Date).ToUniversalTime().ToString('o')
+
+            Write-Manifest $latestPath $newLatest
+            Write-Manifest $previousPath $newPrevious
+            Add-History 'rollback_previous' $newLatest
+          }
+
+          Set-Location vogel-releases
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- apps/femag/latest.json apps/femag/previous.json apps/femag/history.jsonl
+          $allowed = @('apps/femag/latest.json', 'apps/femag/previous.json', 'apps/femag/history.jsonl')
+          $unexpected = git diff --cached --name-only | Where-Object { $_ -notin $allowed }
+          if ($unexpected) { throw "Promocion intento modificar archivos inesperados: $unexpected" }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "release(femag): $env:OPERATION by $env:APPROVED_BY"
+            git push
+          }
+
+      - name: Promotion summary
+        shell: bash
+        run: |
+          echo "Operation: ${{ inputs.operation }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Run: ${{ github.run_id }}"
