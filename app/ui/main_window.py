@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.build_version import BUILD_VERSION
 from app.models.security import User
 from app.services.menu_service import PLACEHOLDER_MESSAGE
 from app.ui.dashboard import DashboardService, DashboardViewSpec
@@ -89,5 +90,5 @@ class MainWindow:
             connection_state="Modo demo" if self.demo_mode else "Base local conectada",
             sidebar=self.sidebar_tree,
             dashboard=dashboard,
-            status_bar=ShellStatusBarSpec(version="v0.1", state="Listo", last_backup=str(last_backup)),
+            status_bar=ShellStatusBarSpec(version=BUILD_VERSION, state="Listo", last_backup=str(last_backup)),
         )
