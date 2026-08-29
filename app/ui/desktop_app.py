@@ -5,7 +5,7 @@ from pathlib import Path
 import webbrowser
 
 from peewee import InterfaceError, OperationalError
-from PyQt5.QtCore import QDate, QEvent, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, pyqtSignal
+from PyQt5.QtCore import QDate, QEvent, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -87,6 +87,9 @@ from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.services.aviso_service import AvisoService
+from app.ui.aviso_dropdown import AvisoDropdown
+from app.ui.aviso_center import AvisoCenterPage
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -325,6 +328,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
+        self._add_page("avisos", AvisoCenterPage(user=self.user, on_navigate=self._navigate_to_route, parent=self))
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
@@ -383,6 +387,14 @@ class FemagDesktopWindow(QMainWindow):
         logout = QPushButton("Cerrar sesión")
         for button in (notifications, help_button, settings, change_password, logout):
             button.setObjectName("topbarIconButton")
+        notifications.setObjectName("avisoButton")
+        help_button.setObjectName("helpButton")
+        self.aviso_service = AvisoService()
+        self.aviso_dropdown = AvisoDropdown(user=self.user, on_navigate=self._navigate_to_route, parent=self)
+        self.notifications = notifications
+        notifications.clicked.connect(self._toggle_avisos)
+        help_button.clicked.connect(lambda: QMessageBox.information(self, "Ayuda", future_module_message()))
+        QTimer.singleShot(60000, lambda: self.notifications.setText(f"Avisos ({self.aviso_service.count_unread(self.user)})" if self.aviso_service.count_unread(self.user) else "Avisos"))
         change_password.clicked.connect(self._open_change_password)
         can_configure = PermissionService.is_administrator(self.user)
         settings.setEnabled(can_configure)
@@ -405,6 +417,17 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(logout)
         layout.addWidget(user)
         return bar
+
+    def _toggle_avisos(self):
+        if self.aviso_dropdown.isVisible():
+            self.aviso_dropdown.hide()
+        else:
+            self.aviso_dropdown.refresh()
+            pos = self.notifications.mapToGlobal(self.notifications.rect().bottomLeft())
+            self.aviso_dropdown.move(pos)
+            self.aviso_dropdown.show()
+            n = self.aviso_service.count_unread(self.user)
+            self.notifications.setText(f"Avisos ({n})" if n else "Avisos")
 
     def _open_change_password(self) -> None:
         dialog = ChangePasswordDialog(title="Cambiar mi contraseña", parent=self)

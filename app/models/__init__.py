@@ -27,6 +27,7 @@ from app.models.load_orders import (
     LoadOrderStatusHistory,
 )
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
+from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
 
 
@@ -65,4 +66,5 @@ ALL_MODELS = [
     AppParameter,
     NumberSequence,
     BackupLog,
+    AvisoLectura,
 ]
