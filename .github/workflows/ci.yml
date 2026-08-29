@@ -56,3 +56,86 @@ jobs:
 
       - name: Run smoke check
         run: python -m app.main --smoke
+
+  frozen-windows:
+    name: Windows frozen EXE and installer smoke
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+          python -m pip install -r requirements-web.txt
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+
+      - name: Run tests on Windows
+        shell: powershell
+        run: python -m pytest -q
+
+      - name: Build production installer
+        shell: powershell
+        run: |
+          $python = (Get-Command python).Source
+          .\scripts\build_production_installer.ps1 -SkipInstallDependencies -PythonPath $python
+
+      - name: Smoke frozen executable
+        shell: powershell
+        env:
+          FEMAG_DISABLE_UPDATE_CHECK: "1"
+        run: |
+          & ".\dist\FEMAG Desktop\FEMAG Desktop.exe" --smoke
+          if ($LASTEXITCODE -ne 0) { throw "Frozen smoke failed with exit code $LASTEXITCODE" }
+
+      - name: Verify required frozen resources
+        shell: powershell
+        run: |
+          $dist = Resolve-Path ".\dist\FEMAG Desktop"
+          $exe = Join-Path $dist "FEMAG Desktop.exe"
+          $installer = ".\installer\output\FEMAG_Desktop_Produccion_Setup.exe"
+          if (-not (Test-Path $exe)) { throw "Missing frozen FEMAG Desktop.exe" }
+          if (-not (Test-Path $installer)) { throw "Missing production installer" }
+
+          $qtPlugins = Get-ChildItem $dist -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'platforms|PyQt5|Qt5' }
+          if (-not $qtPlugins) { throw "PyQt5/Qt runtime resources were not packaged" }
+
+          $fonts = Get-ChildItem $dist -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -match '^\.(ttf|otf)$' -or $_.FullName -match '[\\/]fonts[\\/]' }
+          if (-not $fonts) { throw "No font resources were packaged; QFontDatabase regression risk" }
+
+      - name: Reject config and secret material from artifacts
+        shell: powershell
+        run: |
+          $roots = @(".\dist\FEMAG Desktop", ".\installer\output")
+          $forbiddenNames = @('.env', 'sistema.ini', 'sistema-fg.ini', 'connection.json', 'connection.credential')
+          foreach ($root in $roots) {
+            Get-ChildItem $root -Recurse -File | ForEach-Object {
+              if ($forbiddenNames -contains $_.Name.ToLowerInvariant()) {
+                throw "Forbidden configuration file packaged: $($_.FullName)"
+              }
+            }
+          }
+
+      - name: Upload E2E installer artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FEMAG_Produccion_PR-${{ github.event.pull_request.number }}
+          path: installer/output/FEMAG_Desktop_Produccion_Setup.exe
+          if-no-files-found: error
+          retention-days: 7
