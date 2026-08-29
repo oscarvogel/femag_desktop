@@ -24,6 +24,15 @@ def configure_production_runtime() -> Path:
     return runtime_dir
 
 
+def _configure_smoke_runtime(runtime_dir: Path) -> None:
+    """Use non-secret local settings so the frozen EXE can be smoke-tested in CI."""
+    os.environ["FEMAG_SECURE_CONFIG"] = "0"
+    os.environ["FEMAG_DEMO"] = "1"
+    os.environ["FEMAG_DB_ENGINE"] = "sqlite"
+    os.environ["FEMAG_SQLITE_PATH"] = str(runtime_dir / "ci-smoke.sqlite3")
+    os.environ["FEMAG_DISABLE_UPDATE_CHECK"] = "1"
+
+
 def _bootstrap_logging(runtime_dir: Path) -> Path:
     log_path = runtime_dir / "logs" / "startup.log"
     logging.basicConfig(
@@ -50,6 +59,8 @@ def _show_fatal_error(log_path: Path, exc: BaseException) -> None:
 
 def run() -> int:
     runtime_dir = configure_production_runtime()
+    if "--smoke" in sys.argv[1:]:
+        _configure_smoke_runtime(runtime_dir)
     log_path = _bootstrap_logging(runtime_dir)
     logger = logging.getLogger("femag.startup")
     logger.info("Inicio FEMAG Desktop")

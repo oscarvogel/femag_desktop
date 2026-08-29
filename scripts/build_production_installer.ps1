@@ -11,6 +11,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = if ($PythonPath) { $PythonPath } else { Join-Path $RepoRoot ".venv\Scripts\python.exe" }
 $BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
 $BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
+$BuildInfoFile = Join-Path $RepoRoot "app\build_info.py"
 $InstallerOutputDir = Join-Path $RepoRoot "installer\output"
 $IsccCandidates = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
@@ -28,7 +29,13 @@ if (-not $Iscc) {
 
 Push-Location $RepoRoot
 try {
-    Set-Content -LiteralPath $BuildVersionFile -Value "BUILD_VERSION = `"$BuildVersion`"" -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($BuildVersionFile, "BUILD_VERSION = `"$BuildVersion`"`n", $utf8NoBom)
+    [System.IO.File]::WriteAllText(
+        $BuildInfoFile,
+        "APP_ID = `"femag`"`nBUILD_VERSION = `"$BuildVersion`"`n",
+        $utf8NoBom
+    )
 
     if (-not $SkipInstallDependencies) {
         & $Python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
