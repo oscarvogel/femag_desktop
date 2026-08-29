@@ -4,7 +4,19 @@ import json
 
 import pytest
 
-from app.services.update_service import UpdateInfo, download_installer, fetch_update_info, is_newer_version
+from app.services.update_service import (
+    CANDIDATE_CHANNEL,
+    CANDIDATE_MANIFEST_URL,
+    LATEST_CHANNEL,
+    LATEST_MANIFEST_URL,
+    UpdateInfo,
+    candidate_receipt_matches,
+    download_installer,
+    fetch_update_info,
+    get_update_channel,
+    is_newer_version,
+    manifest_url_for_channel,
+)
 
 
 class _Response(io.BytesIO):
@@ -43,11 +55,42 @@ def test_version_comparison_supports_timestamp_builds():
     assert not is_newer_version("2026.08.27.09.10.11", "invalid")
 
 
+def test_default_channel_is_latest_and_candidate_is_explicit(monkeypatch):
+    monkeypatch.delenv("FEMAG_UPDATE_CHANNEL", raising=False)
+    assert get_update_channel() == LATEST_CHANNEL
+    assert manifest_url_for_channel() == LATEST_MANIFEST_URL
+    monkeypatch.setenv("FEMAG_UPDATE_CHANNEL", "candidate")
+    assert get_update_channel() == CANDIDATE_CHANNEL
+    assert manifest_url_for_channel() == CANDIDATE_MANIFEST_URL
+
+
+def test_unknown_channel_falls_back_to_latest(monkeypatch):
+    monkeypatch.setenv("FEMAG_UPDATE_CHANNEL", "anything-else")
+    assert get_update_channel() == LATEST_CHANNEL
+    assert manifest_url_for_channel() == LATEST_MANIFEST_URL
+
+
 def test_fetch_update_info_returns_newer_valid_manifest():
     info = fetch_update_info("2026.08.27.10.00.00", opener=_opener_for(_manifest()))
     assert info is not None
     assert info.version == "2026.08.28.10.00.00"
     assert info.notes == "Nueva versión"
+    assert info.channel == LATEST_CHANNEL
+
+
+def test_fetch_candidate_requires_candidate_identity_when_explicit():
+    info = fetch_update_info(
+        "2026.08.27.10.00.00",
+        channel=CANDIDATE_CHANNEL,
+        opener=_opener_for(_manifest(channel="candidate")),
+    )
+    assert info is not None
+    assert info.channel == CANDIDATE_CHANNEL
+    assert fetch_update_info(
+        "2026.08.27.10.00.00",
+        channel=CANDIDATE_CHANNEL,
+        opener=_opener_for(_manifest(channel="latest")),
+    ) is None
 
 
 def test_fetch_update_info_ignores_same_or_older_version():
@@ -80,7 +123,8 @@ def test_fetch_update_info_rejects_utf8_bom_manifest():
         fetch_update_info("2026.08.27.10.00.00", opener=_opener_for(b"\xef\xbb\xbf" + _manifest()))
 
 
-def test_download_installer_validates_sha256_and_uses_atomic_target(tmp_path):
+def test_download_installer_validates_sha256_and_uses_atomic_target(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
     body = b"fake-inno-installer"
     info = UpdateInfo(
         version="2026.08.28.10.00.00",
@@ -93,7 +137,24 @@ def test_download_installer_validates_sha256_and_uses_atomic_target(tmp_path):
     assert not (tmp_path / "FEMAG_Desktop_Produccion_Setup.exe.part").exists()
 
 
-def test_download_installer_rejects_bad_sha256_and_cleans_part(tmp_path):
+def test_candidate_download_persists_exact_version_sha_receipt(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
+    body = b"candidate-installer"
+    sha = hashlib.sha256(body).hexdigest()
+    info = UpdateInfo(
+        version="2026.08.28.10.00.00",
+        download_url="https://example.invalid/setup.exe",
+        sha256=sha,
+        channel=CANDIDATE_CHANNEL,
+    )
+    download_installer(info, destination_dir=tmp_path / "download", opener=_opener_for(body))
+    assert candidate_receipt_matches(version=info.version, sha256=sha)
+    assert not candidate_receipt_matches(version="2026.08.28.10.00.01", sha256=sha)
+    assert not candidate_receipt_matches(version=info.version, sha256="0" * 64)
+
+
+def test_download_installer_rejects_bad_sha256_and_cleans_part(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
     info = UpdateInfo(
         version="2026.08.28.10.00.00",
         download_url="https://example.invalid/setup.exe",
