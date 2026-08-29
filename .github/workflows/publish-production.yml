@@ -1,4 +1,4 @@
-name: Publish FEMAG production
+name: Publish FEMAG candidate
 
 on:
   push:
@@ -6,13 +6,21 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: femag-candidate-publish
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  build-and-publish:
+  build-validate-publish-candidate:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      RELEASE_REPO: oscarvogel/vogel-releases
+      RELEASE_TAG: femag-candidate
+      INSTALLER_NAME: FEMAG_Desktop_Produccion_Setup.exe
 
     steps:
       - name: Checkout FEMAG
@@ -38,6 +46,10 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: python -m pytest -q
+
+      - name: Compile Python sources
+        shell: pwsh
+        run: python -m compileall app
 
       - name: Validate release token
         shell: pwsh
@@ -69,10 +81,23 @@ jobs:
           & '.\dist\FEMAG Desktop\FEMAG Desktop.exe' --smoke
           if ($LASTEXITCODE -ne 0) { throw 'El EXE congelado no paso el smoke test' }
 
+      - name: Frozen production health check
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          FEMAG_HEALTH_CHECK_CI: '1'
+          FEMAG_HEALTH_CHECK_SKIP_SCHEMA: '1'
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'femag-health-runtime'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          $env:LOCALAPPDATA = $runtime
+          & '.\dist\FEMAG Desktop\FEMAG Desktop.exe' --production-health-check
+          if ($LASTEXITCODE -ne 0) { throw 'El EXE congelado no paso production-health-check' }
+
       - name: Configuration and secret safety check
         shell: pwsh
         run: |
-          $forbidden = @('*.ini', '.env', '*.env', '*secret*', '*credential*')
+          $forbidden = @('*.ini', '.env', '*.env', '*secret*', '*credential*', '*.pem', '*.key')
           $roots = @('dist\FEMAG Desktop', 'installer\output')
           foreach ($root in $roots) {
             foreach ($pattern in $forbidden) {
@@ -84,6 +109,37 @@ jobs:
             }
           }
           if (Test-Path '.env') { throw 'Existe .env en el workspace de publicacion' }
+
+      - name: Clean install and upgrade validation
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          FEMAG_HEALTH_CHECK_CI: '1'
+          FEMAG_HEALTH_CHECK_SKIP_SCHEMA: '1'
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'femag-clean-install'
+          $localAppData = Join-Path $env:RUNNER_TEMP 'femag-clean-localappdata'
+          New-Item -ItemType Directory -Force $localAppData | Out-Null
+          $env:LOCALAPPDATA = $localAppData
+          $runtime = Join-Path $localAppData 'FEMAG Desktop'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          $marker = Join-Path $runtime 'installer-preserve.marker'
+          Set-Content -Path $marker -Value 'preserve-me' -NoNewline
+
+          $installer = Resolve-Path 'installer\output\FEMAG_Desktop_Produccion_Setup.exe'
+          $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot")
+          $process = Start-Process -FilePath $installer -ArgumentList $installArgs -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Falló instalación limpia: $($process.ExitCode)" }
+          $installedExe = Join-Path $installRoot 'FEMAG Desktop.exe'
+          if (-not (Test-Path $installedExe)) { throw 'No se encontró el ejecutable instalado' }
+          if ((Get-Content -Raw $marker) -ne 'preserve-me') { throw 'El instalador alteró el área runtime/config local' }
+
+          & $installedExe --production-health-check
+          if ($LASTEXITCODE -ne 0) { throw 'La instalación real no pasó production-health-check' }
+
+          $process2 = Start-Process -FilePath $installer -ArgumentList $installArgs -PassThru -Wait
+          if ($process2.ExitCode -ne 0) { throw "Falló reinstalación/upgrade: $($process2.ExitCode)" }
+          if ((Get-Content -Raw $marker) -ne 'preserve-me') { throw 'El upgrade alteró el área runtime/config local' }
 
       - name: Calculate SHA256
         id: hash
@@ -101,57 +157,48 @@ jobs:
           token: ${{ secrets.VOGEL_RELEASES_TOKEN }}
           path: vogel-releases
 
-      - name: Ensure permanent latest release exists
+      - name: Publish exact validated build as candidate
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.VOGEL_RELEASES_TOKEN }}
-        run: |
-          gh release view latest --repo oscarvogel/vogel-releases *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create latest --repo oscarvogel/vogel-releases --title 'Vogel Releases - Latest' --notes 'Últimos instaladores publicados.'
-          }
-
-      - name: Replace FEMAG installer asset
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.VOGEL_RELEASES_TOKEN }}
-        run: |
-          gh release upload latest installer\output\FEMAG_Desktop_Produccion_Setup.exe --clobber --repo oscarvogel/vogel-releases
-
-      - name: Update only FEMAG manifest
-        shell: pwsh
-        env:
           VERSION: ${{ steps.build.outputs.version }}
           SHA256: ${{ steps.hash.outputs.sha256 }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
+          gh release view $env:RELEASE_TAG --repo $env:RELEASE_REPO *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --repo $env:RELEASE_REPO --title 'FEMAG candidate' --notes 'Validated FEMAG candidate. Do not distribute as production.'
+          }
+          gh release upload $env:RELEASE_TAG "installer\output\$env:INSTALLER_NAME" --repo $env:RELEASE_REPO --clobber
+
           $manifestDir = 'vogel-releases\apps\femag'
           New-Item -ItemType Directory -Force $manifestDir | Out-Null
           $payload = [ordered]@{
             schema_version = 1
             app_id = 'femag'
+            channel = 'candidate'
             version = $env:VERSION
             published_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            validated_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            source_sha = $env:SOURCE_SHA
             mandatory = $false
-            download_url = 'https://github.com/oscarvogel/vogel-releases/releases/download/latest/FEMAG_Desktop_Produccion_Setup.exe'
+            download_url = "https://github.com/$env:RELEASE_REPO/releases/download/$env:RELEASE_TAG/$env:INSTALLER_NAME"
             sha256 = $env:SHA256
-            notes = 'Nueva versión de FEMAG disponible.'
+            notes = "Candidate FEMAG $env:VERSION validado automáticamente."
           }
           $json = $payload | ConvertTo-Json
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          $manifestPath = Join-Path $manifestDir 'latest.json'
+          $manifestPath = Join-Path $manifestDir 'candidate.json'
           [System.IO.File]::WriteAllText($manifestPath, $json, $utf8NoBom)
-          $bytes = [System.IO.File]::ReadAllBytes($manifestPath)
-          if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            throw 'latest.json fue escrito con BOM'
-          }
+
           Set-Location vogel-releases
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- apps/femag/latest.json
-          $unexpected = git diff --cached --name-only | Where-Object { $_ -ne 'apps/femag/latest.json' }
-          if ($unexpected) { throw "Se intentan publicar archivos ajenos a FEMAG: $unexpected" }
+          git add -- apps/femag/candidate.json
+          $unexpected = git diff --cached --name-only | Where-Object { $_ -ne 'apps/femag/candidate.json' }
+          if ($unexpected) { throw "Candidate intentó modificar archivos inesperados: $unexpected" }
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "release(femag): $env:VERSION"
+            git commit -m "release(femag): candidate $env:VERSION"
             git push
           }
