@@ -11,10 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from app.build_info import APP_ID
-
 
 MANIFEST_URL = "https://raw.githubusercontent.com/oscarvogel/vogel-releases/main/apps/femag/latest.json"
+EXPECTED_APP_ID = "femag"
 DEFAULT_TIMEOUT_SECONDS = 6
 INSTALLER_FILENAME = "FEMAG_Desktop_Produccion_Setup.exe"
 VERSION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$")
@@ -70,7 +69,7 @@ def fetch_update_info(
 
     if payload.get("schema_version") != 1:
         return None
-    if str(payload.get("app_id", "")).strip() != APP_ID:
+    if str(payload.get("app_id", "")).strip() != EXPECTED_APP_ID:
         return None
 
     candidate = UpdateInfo(
