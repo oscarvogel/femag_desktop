@@ -78,8 +78,9 @@ jobs:
           $runtime = Join-Path $env:RUNNER_TEMP 'femag-smoke-runtime'
           New-Item -ItemType Directory -Force $runtime | Out-Null
           $env:LOCALAPPDATA = $runtime
-          & '.\dist\FEMAG Desktop\FEMAG Desktop.exe' --smoke
-          if ($LASTEXITCODE -ne 0) { throw 'El EXE congelado no paso el smoke test' }
+          $exe = Resolve-Path '.\dist\FEMAG Desktop\FEMAG Desktop.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke' -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "El EXE congelado no paso el smoke test: $($process.ExitCode)" }
 
       - name: Frozen production health check
         shell: pwsh
@@ -91,8 +92,9 @@ jobs:
           $runtime = Join-Path $env:RUNNER_TEMP 'femag-health-runtime'
           New-Item -ItemType Directory -Force $runtime | Out-Null
           $env:LOCALAPPDATA = $runtime
-          & '.\dist\FEMAG Desktop\FEMAG Desktop.exe' --production-health-check
-          if ($LASTEXITCODE -ne 0) { throw 'El EXE congelado no paso production-health-check' }
+          $exe = Resolve-Path '.\dist\FEMAG Desktop\FEMAG Desktop.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--production-health-check' -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "El EXE congelado no paso production-health-check: $($process.ExitCode)" }
 
       - name: Configuration and secret safety check
         shell: pwsh
@@ -134,8 +136,8 @@ jobs:
           if (-not (Test-Path $installedExe)) { throw 'No se encontró el ejecutable instalado' }
           if ((Get-Content -Raw $marker) -ne 'preserve-me') { throw 'El instalador alteró el área runtime/config local' }
 
-          & $installedExe --production-health-check
-          if ($LASTEXITCODE -ne 0) { throw 'La instalación real no pasó production-health-check' }
+          $healthProcess = Start-Process -FilePath $installedExe -ArgumentList '--production-health-check' -PassThru -Wait
+          if ($healthProcess.ExitCode -ne 0) { throw "La instalación real no pasó production-health-check: $($healthProcess.ExitCode)" }
 
           $process2 = Start-Process -FilePath $installer -ArgumentList $installArgs -PassThru -Wait
           if ($process2.ExitCode -ne 0) { throw "Falló reinstalación/upgrade: $($process2.ExitCode)" }
