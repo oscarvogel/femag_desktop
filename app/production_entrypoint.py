@@ -59,7 +59,10 @@ def _show_fatal_error(log_path: Path, exc: BaseException) -> None:
 
 def run() -> int:
     runtime_dir = configure_production_runtime()
-    if "--smoke" in sys.argv[1:]:
+    args = sys.argv[1:]
+    if "--smoke" in args or (
+        "--production-health-check" in args and os.getenv("FEMAG_HEALTH_CHECK_CI") == "1"
+    ):
         _configure_smoke_runtime(runtime_dir)
     log_path = _bootstrap_logging(runtime_dir)
     logger = logging.getLogger("femag.startup")
@@ -69,7 +72,7 @@ def run() -> int:
         # PyInstaller/dependencias debe quedar registrado en startup.log.
         from app.main import main
 
-        args = sys.argv[1:] or ["--ui"]
+        args = args or ["--ui"]
         result = main(args)
         logger.info("FEMAG finalizado con código %s", result)
         return result

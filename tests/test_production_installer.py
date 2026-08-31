@@ -37,7 +37,8 @@ def test_production_bundle_uses_production_entrypoint() -> None:
     assert '"../app/production_entrypoint.py"' in spec
     assert 'name="FEMAG Desktop"' in spec
     assert 'os.environ["FEMAG_SECURE_CONFIG"] = "1"' in entrypoint
-    assert 'args = sys.argv[1:] or ["--ui"]' in entrypoint
+    assert "args = sys.argv[1:]" in entrypoint
+    assert 'args = args or ["--ui"]' in entrypoint
     assert "FEMAG_Desktop.spec" in build
     assert "FEMAG_Desktop.iss" in build
 
