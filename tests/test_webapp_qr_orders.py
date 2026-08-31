@@ -1,8 +1,16 @@
 from datetime import date
+from decimal import Decimal
 
 from conftest import _master_data
 
-from app.models.load_orders import LoadOrder, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
+from app.models.masters import PalletType
 from webapp import create_app
 from webapp.order_service import get_order_by_token, normalize_qr_token
 
@@ -63,6 +71,60 @@ def test_mobile_order_page_shows_order_and_product(db):
     assert b"getUserMedia" in response.data
     assert b"Ingresar lote" in response.data
     assert b"Ingresar o escanear lote" not in response.data
+
+
+def test_mobile_order_line_shows_client_delivery_and_pallet_without_duplication(db):
+    data = _master_data()
+    order = LoadOrder.create(
+        order_number=91002,
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+    )
+    destination = LoadOrderDestination.create(
+        order=order,
+        client=data["client"],
+        delivery_address=data["address"],
+        sequence=1,
+    )
+    line = LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=180,
+        unit="bolsa",
+    )
+    pallet_type = PalletType.create(type="TEST WEB", measure="", weight=0)
+    for sequence in (1, 2, 3):
+        pallet = LoadOrderPallet.create(
+            order=order,
+            pallet_type=pallet_type,
+            sequence=sequence,
+            measure="",
+            weight=0,
+            quantity=1,
+        )
+        LoadOrderPalletAllocation.create(
+            pallet=pallet,
+            destination=destination,
+            product=data["product"],
+            quantity=Decimal("60"),
+            peso_unitario_kg=Decimal("25"),
+        )
+
+    app = create_app()
+    app.config.update(TESTING=True)
+    response = app.test_client().get(f"/orden/{order.qr_token}")
+
+    assert response.status_code == 200
+    assert data["client"].name.encode() in response.data
+    assert data["address"].city.encode() in response.data
+    assert b"1, 2, 3" in response.data
+    assert response.data.count(f'name="lote_{line.id}"'.encode()) == 1
+    assert response.data.count(f'name="fecha_{line.id}"'.encode()) == 1
+    assert response.data.count(f'data-target="lote_{line.id}"'.encode()) == 1
 
 
 def test_mobile_order_post_updates_lot_and_manufacture_date(db):

@@ -4,7 +4,13 @@ from datetime import date
 
 from peewee import DoesNotExist
 
-from app.models.load_orders import LoadOrder, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 
 QR_PREFIX = "FEMAG:LOAD_ORDER:"
 
@@ -42,6 +48,60 @@ def order_lines(order: LoadOrder) -> list[LoadOrderProduct]:
         .where(LoadOrderProduct.order == order)
         .order_by(LoadOrderProduct.id)
     )
+
+
+def _delivery_label(address) -> str:
+    if address is None:
+        return "-"
+    parts = [address.address, address.city, address.province]
+    return " · ".join(part for part in parts if part) or "-"
+
+
+def order_line_context(order: LoadOrder, lines: list[LoadOrderProduct]) -> dict[int, dict[str, object]]:
+    """Build operator-facing client/destination/pallet context for each order line."""
+    contexts: dict[int, dict[str, object]] = {}
+
+    pallet_allocations = list(
+        LoadOrderPalletAllocation.select(LoadOrderPalletAllocation, LoadOrderPallet)
+        .join(LoadOrderPallet)
+        .where(LoadOrderPallet.order == order)
+        .order_by(LoadOrderPallet.sequence)
+    )
+    loose_allocations = list(
+        LoadOrderLooseAllocation.select().where(LoadOrderLooseAllocation.order == order)
+    )
+
+    for line in lines:
+        destination = line.destination
+        client = destination.client if destination is not None else order.client
+        delivery_address = (
+            destination.delivery_address if destination is not None else order.delivery_address
+        )
+
+        pallets: list[int] = []
+        if destination is not None:
+            pallets = [
+                allocation.pallet.sequence
+                for allocation in pallet_allocations
+                if allocation.destination_id == destination.id
+                and allocation.product_id == line.product_id
+            ]
+            is_loose = any(
+                allocation.destination_id == destination.id
+                and allocation.product_id == line.product_id
+                for allocation in loose_allocations
+            )
+        else:
+            is_loose = False
+
+        contexts[line.id] = {
+            "client": client.name if client is not None else "-",
+            "delivery": _delivery_label(delivery_address),
+            "pallets": pallets,
+            "is_loose": is_loose,
+        }
+
+    return contexts
 
 
 def parse_optional_date(value: str | None) -> date | None:

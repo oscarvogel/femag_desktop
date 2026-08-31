@@ -1,0 +1,1 @@
+Referencia: orden real de despacho con columnas destino/presentación, cantidad, pallet, detalle, número de lote y fecha de elaboración.
