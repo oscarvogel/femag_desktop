@@ -1,3 +1,4 @@
+import os
 import socket
 
 from peewee import DatabaseProxy, MySQLDatabase, SqliteDatabase
@@ -6,6 +7,28 @@ from app.config.settings import Settings, load_settings
 
 
 database_proxy = DatabaseProxy()
+
+
+class FemagMySQLDatabase(MySQLDatabase):
+    """MySQL con preparación idempotente del esquema al abrir la aplicación.
+
+    `ensure_runtime_schema()` usa CREATE TABLE safe / ALTER sólo para faltantes, por
+    lo que una versión nueva puede incorporar tablas/columnas sin intervención en
+    cada puesto. Puede desactivarse con FEMAG_AUTO_MIGRATE_SCHEMA=0 si se necesita
+    una ventana de mantenimiento administrada.
+    """
+
+    def connect(self, *args, **kwargs):
+        result = super().connect(*args, **kwargs)
+        if (
+            os.getenv("FEMAG_AUTO_MIGRATE_SCHEMA", "1") != "0"
+            and not getattr(self, "_femag_schema_prepared", False)
+        ):
+            from app.config.schema import ensure_runtime_schema
+
+            ensure_runtime_schema(self)
+            self._femag_schema_prepared = True
+        return result
 
 
 def resolve_mysql_host_ipv4(host: str) -> str:
@@ -18,7 +41,7 @@ def resolve_mysql_host_ipv4(host: str) -> str:
 
 def build_mysql_database(settings: Settings | None = None) -> MySQLDatabase:
     settings = settings or load_settings()
-    return MySQLDatabase(
+    return FemagMySQLDatabase(
         settings.db_name,
         host=resolve_mysql_host_ipv4(settings.db_host),
         port=settings.db_port,
