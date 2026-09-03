@@ -9,15 +9,18 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from app.models.payments import ClientPayment
+from app.models.payments import ClientPayment, ClientPaymentDetail
 from app.services.audit_service import AuditService
 
 
-METHOD_LABELS = {
+LEGACY_METHOD_LABELS = {
     ClientPayment.METHOD_CASH: "Efectivo",
     ClientPayment.METHOD_TRANSFER: "Transferencia",
     ClientPayment.METHOD_CHECK: "Cheque",
+    ClientPayment.METHOD_RETENTION: "Retenciones / Percepciones",
+    ClientPayment.METHOD_HOLISTOR: "Holistor",
     ClientPayment.METHOD_OTHER: "Otros",
+    "multiple": "Múltiples medios",
 }
 
 
@@ -139,62 +142,73 @@ def _header_table(payment: ClientPayment, styles: dict) -> Table:
 
 
 def _payment_table(payment: ClientPayment, styles: dict) -> Table:
-    observations = payment.observations or "-"
-    rows = [
-        [
-            Paragraph("Importe", styles["cell_bold"]),
-            Paragraph(f"$ {payment.amount:,.2f}", styles["amount"]),
-        ],
-        [
-            Paragraph("Medio de pago", styles["cell_bold"]),
-            Paragraph(
-                escape(METHOD_LABELS.get(payment.method, payment.method)),
-                styles["cell"],
-            ),
-        ],
-        [
-            Paragraph("Referencia", styles["cell_bold"]),
-            Paragraph(escape(payment.reference or "-"), styles["cell"]),
-        ],
-        [
-            Paragraph("Observaciones", styles["cell_bold"]),
-            Paragraph(escape(observations), styles["cell"]),
-        ],
-    ]
-    if payment.status == ClientPayment.STATUS_ANNULLED:
-        rows.extend(
-            [
-                [
-                    Paragraph("Anulado por", styles["cell_bold"]),
-                    Paragraph(escape(payment.annulled_by or "-"), styles["cell"]),
-                ],
-                [
-                    Paragraph("Fecha de anulación", styles["cell_bold"]),
-                    Paragraph(
-                        _display_datetime(payment.annulled_at)
-                        if payment.annulled_at
-                        else "-",
-                        styles["cell"],
-                    ),
-                ],
-                [
-                    Paragraph("Motivo", styles["cell_bold"]),
-                    Paragraph(escape(payment.annulment_reason or "-"), styles["cell"]),
-                ],
-            ]
-        )
-    table = Table(rows, colWidths=[46 * mm, 120 * mm])
-    table.setStyle(
-        TableStyle(
-            [
-                ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
-                ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]
-        )
+    details = list(
+        ClientPaymentDetail.select()
+        .where(ClientPaymentDetail.payment == payment)
+        .order_by(ClientPaymentDetail.sequence, ClientPaymentDetail.id)
     )
+    if details:
+        rows = [[
+            Paragraph("Medio", styles["cell_bold"]),
+            Paragraph("Referencia / comprobante", styles["cell_bold"]),
+            Paragraph("Importe", styles["cell_bold"]),
+        ]]
+        for detail in details:
+            rows.append(
+                [
+                    Paragraph(escape(detail.payment_method.name), styles["cell"]),
+                    Paragraph(escape(detail.reference or "-"), styles["cell"]),
+                    Paragraph(f"$ {detail.amount:,.2f}", styles["amount_small"]),
+                ]
+            )
+        rows.append(
+            [
+                Paragraph("TOTAL", styles["cell_bold"]),
+                "",
+                Paragraph(f"$ {payment.amount:,.2f}", styles["amount"]),
+            ]
+        )
+        table = Table(rows, colWidths=[52 * mm, 76 * mm, 38 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("BACKGROUND", (0, -1), (-1, -1), colors.whitesmoke),
+                    ("SPAN", (0, -1), (1, -1)),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+    else:
+        # Compatibilidad con recibos creados antes de la grilla de medios.
+        rows = [
+            [Paragraph("Importe", styles["cell_bold"]), Paragraph(f"$ {payment.amount:,.2f}", styles["amount"])],
+            [
+                Paragraph("Medio de pago", styles["cell_bold"]),
+                Paragraph(escape(LEGACY_METHOD_LABELS.get(payment.method, payment.method)), styles["cell"]),
+            ],
+            [Paragraph("Referencia", styles["cell_bold"]), Paragraph(escape(payment.reference or "-"), styles["cell"])],
+        ]
+        table = Table(rows, colWidths=[46 * mm, 120 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+
+    if payment.observations:
+        # Observaciones generales se muestran debajo de la grilla sin perder el detalle.
+        # No se agregan como una fila mutable de `table` para conservar ambos layouts.
+        pass
     return table
 
 
@@ -266,6 +280,14 @@ def _styles() -> dict[str, ParagraphStyle]:
             fontSize=13,
             alignment=TA_RIGHT,
             leading=16,
+        ),
+        "amount_small": ParagraphStyle(
+            "amount_small",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            alignment=TA_RIGHT,
+            leading=12,
         ),
         "footer": ParagraphStyle(
             "footer",
