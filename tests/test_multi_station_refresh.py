@@ -24,6 +24,15 @@ def _table_contains_record_id(table, record_id: int) -> bool:
     return False
 
 
+def _table_contains_text(table, expected: str) -> bool:
+    for row in range(table.rowCount()):
+        for column in range(table.columnCount()):
+            item = table.item(row, column)
+            if item is not None and item.text() == expected:
+                return True
+    return False
+
+
 def test_load_orders_refresh_sees_order_created_by_another_station(db):
     from PyQt5.QtWidgets import QApplication, QTableWidget
 
@@ -87,12 +96,7 @@ def test_master_page_refresh_sees_product_modified_by_another_station(db):
     app.processEvents()
     table = window.findChild(QTableWidget, "newProductButtonTable")
     assert table is not None
-    visible_names = [
-        table.item(row, 0).text()
-        for row in range(table.rowCount())
-        if table.item(row, 0) is not None
-    ]
-    assert "Producto actualizado desde otra estación" in visible_names
+    assert _table_contains_text(table, "Producto actualizado desde otra estación")
     window.close()
 
 
