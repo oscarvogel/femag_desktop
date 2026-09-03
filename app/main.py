@@ -8,6 +8,7 @@ from app.ui.desktop_app import run_desktop_app
 from app.ui.managerial_account_risk_extension import install_managerial_account_risk_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
+from app.ui.multi_station_refresh_extension import install_multi_station_refresh_extension
 from app.ui.product_code_extension import install_desktop_product_code_extension
 from app.ui.update_extension import install_update_extension
 from app.ui.application_lifecycle_extension import install_application_lifecycle_extension
@@ -16,6 +17,7 @@ from app.ui.application_lifecycle_extension import install_application_lifecycle
 install_desktop_product_code_extension()
 install_update_extension()
 install_application_lifecycle_extension()
+install_multi_station_refresh_extension()
 
 
 def smoke_check() -> str:
