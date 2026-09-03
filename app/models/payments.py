@@ -7,6 +7,7 @@ from peewee import (
     DateTimeField,
     FloatField,
     ForeignKeyField,
+    IntegerField,
     TextField,
 )
 
@@ -19,7 +20,7 @@ class PaymentMethod(BaseModel):
     code = CharField(unique=True)
     name = CharField()
     active = BooleanField(default=True)
-    sort_order = FloatField(default=0)
+    sort_order = IntegerField(default=0)
 
 
 class ClientPayment(BaseModel):
@@ -66,7 +67,7 @@ class ClientPaymentDetail(BaseModel):
     amount = FloatField()
     reference = CharField(null=True)
     observations = TextField(null=True)
-    sequence = FloatField(default=1)
+    sequence = IntegerField(default=1)
 
     class Meta:
         indexes = ((('payment', 'sequence'), True),)
