@@ -161,6 +161,7 @@ def _payment_table(payment: ClientPayment, styles: dict) -> Table:
                     Paragraph(f"$ {detail.amount:,.2f}", styles["amount_small"]),
                 ]
             )
+        total_row = len(rows)
         rows.append(
             [
                 Paragraph("TOTAL", styles["cell_bold"]),
@@ -168,47 +169,84 @@ def _payment_table(payment: ClientPayment, styles: dict) -> Table:
                 Paragraph(f"$ {payment.amount:,.2f}", styles["amount"]),
             ]
         )
+        spans = [("SPAN", (0, total_row), (1, total_row))]
+        if payment.observations:
+            row = len(rows)
+            rows.append(
+                [
+                    Paragraph("Observaciones", styles["cell_bold"]),
+                    Paragraph(escape(payment.observations), styles["cell"]),
+                    "",
+                ]
+            )
+            spans.append(("SPAN", (1, row), (2, row)))
+        if payment.status == ClientPayment.STATUS_ANNULLED:
+            for label, value in (
+                ("Anulado por", payment.annulled_by or "-"),
+                (
+                    "Fecha de anulación",
+                    _display_datetime(payment.annulled_at) if payment.annulled_at else "-",
+                ),
+                ("Motivo", payment.annulment_reason or "-"),
+            ):
+                row = len(rows)
+                rows.append(
+                    [
+                        Paragraph(label, styles["cell_bold"]),
+                        Paragraph(escape(str(value)), styles["cell"]),
+                        "",
+                    ]
+                )
+                spans.append(("SPAN", (1, row), (2, row)))
         table = Table(rows, colWidths=[52 * mm, 76 * mm, 38 * mm])
         table.setStyle(
             TableStyle(
                 [
                     ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
                     ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("BACKGROUND", (0, -1), (-1, -1), colors.whitesmoke),
-                    ("SPAN", (0, -1), (1, -1)),
+                    ("BACKGROUND", (0, total_row), (-1, total_row), colors.whitesmoke),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("TOPPADDING", (0, 0), (-1, -1), 6),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    *spans,
                 ]
             )
         )
-    else:
-        # Compatibilidad con recibos creados antes de la grilla de medios.
-        rows = [
-            [Paragraph("Importe", styles["cell_bold"]), Paragraph(f"$ {payment.amount:,.2f}", styles["amount"])],
-            [
-                Paragraph("Medio de pago", styles["cell_bold"]),
-                Paragraph(escape(LEGACY_METHOD_LABELS.get(payment.method, payment.method)), styles["cell"]),
-            ],
-            [Paragraph("Referencia", styles["cell_bold"]), Paragraph(escape(payment.reference or "-"), styles["cell"])],
-        ]
-        table = Table(rows, colWidths=[46 * mm, 120 * mm])
-        table.setStyle(
-            TableStyle(
-                [
-                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
-                    ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ]
-            )
-        )
+        return table
 
-    if payment.observations:
-        # Observaciones generales se muestran debajo de la grilla sin perder el detalle.
-        # No se agregan como una fila mutable de `table` para conservar ambos layouts.
-        pass
+    # Compatibilidad con recibos creados antes de la grilla de medios.
+    rows = [
+        [Paragraph("Importe", styles["cell_bold"]), Paragraph(f"$ {payment.amount:,.2f}", styles["amount"])],
+        [
+            Paragraph("Medio de pago", styles["cell_bold"]),
+            Paragraph(escape(LEGACY_METHOD_LABELS.get(payment.method, payment.method)), styles["cell"]),
+        ],
+        [Paragraph("Referencia", styles["cell_bold"]), Paragraph(escape(payment.reference or "-"), styles["cell"])],
+        [Paragraph("Observaciones", styles["cell_bold"]), Paragraph(escape(payment.observations or "-"), styles["cell"])],
+    ]
+    if payment.status == ClientPayment.STATUS_ANNULLED:
+        rows.extend(
+            [
+                [Paragraph("Anulado por", styles["cell_bold"]), Paragraph(escape(payment.annulled_by or "-"), styles["cell"])],
+                [
+                    Paragraph("Fecha de anulación", styles["cell_bold"]),
+                    Paragraph(_display_datetime(payment.annulled_at) if payment.annulled_at else "-", styles["cell"]),
+                ],
+                [Paragraph("Motivo", styles["cell_bold"]), Paragraph(escape(payment.annulment_reason or "-"), styles["cell"])],
+            ]
+        )
+    table = Table(rows, colWidths=[46 * mm, 120 * mm])
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
+                ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
     return table
 
 
