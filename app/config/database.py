@@ -25,8 +25,10 @@ class FemagMySQLDatabase(MySQLDatabase):
             and not getattr(self, "_femag_schema_prepared", False)
         ):
             from app.config.schema import ensure_runtime_schema
+            from app.services.client_payment_service import ClientPaymentService
 
             ensure_runtime_schema(self)
+            ClientPaymentService.ensure_default_payment_methods()
             self._femag_schema_prepared = True
         return result
 
