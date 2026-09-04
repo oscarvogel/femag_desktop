@@ -259,6 +259,8 @@ class DailyCollectionsReportService:
         if movement.movement_date is not None:
             return movement.movement_date
         if movement.payment_id and movement.payment is not None:
+            if movement.is_reversal and movement.payment.annulled_at is not None:
+                return movement.payment.annulled_at.date()
             return movement.payment.payment_date
         if movement.load_order_id and movement.load_order is not None:
             return movement.load_order.date
