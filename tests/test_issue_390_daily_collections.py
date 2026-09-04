@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
@@ -152,3 +152,48 @@ def test_annulled_receipt_is_visible_but_excluded_from_effective_collected_total
     assert [row["movement_type"] for row in reversals.movement_rows] == [
         ClientAccountMovement.TYPE_PAYMENT_REVERSAL
     ]
+
+
+def test_reversals_only_uses_annulment_date_not_original_payment_date(db):
+    client = _client()
+    payment = ClientPaymentService(current_user="admin").register_payment(
+        client=client,
+        amount=150,
+        payment_date=date(2026, 8, 15),
+        method="efectivo",
+    )
+    payment.status = ClientPayment.STATUS_ANNULLED
+    payment.annulled_at = datetime(2026, 9, 4, 14, 30, 0)
+    payment.save()
+    original = ClientAccountMovement.get(
+        (ClientAccountMovement.payment == payment)
+        & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT)
+    )
+    ClientAccountMovement.create(
+        client=client,
+        payment=payment,
+        movement_type=ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
+        amount=150,
+        net_amount=150,
+        total_amount=150,
+        currency="ARS",
+        movement_date=date(2026, 9, 4),
+        description="Anulación de pago anterior",
+        source_ref=f"ClientPayment:{payment.id}:annulment:date390",
+        is_reversal=True,
+        reverses=original,
+        created_by="admin",
+    )
+
+    result = DailyCollectionsReportService().report(
+        DailyCollectionsFilters(
+            date(2026, 9, 4),
+            date(2026, 9, 4),
+            reversals_only=True,
+        )
+    )
+
+    assert len(result.collection_rows) == 1
+    assert result.collection_rows[0]["date"] == date(2026, 9, 4)
+    assert result.collection_rows[0]["payment_date"] == date(2026, 8, 15)
+    assert result.totals.collected == 0
