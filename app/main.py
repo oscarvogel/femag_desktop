@@ -5,6 +5,7 @@ import sys
 from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
+from app.ui.daily_collections_extension import install_daily_collections_extension
 from app.ui.managerial_account_risk_extension import install_managerial_account_risk_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
@@ -70,6 +71,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         install_managerial_dashboard_extension()
         install_managerial_sales_dispatch_extension()
         install_managerial_account_risk_extension()
+        install_daily_collections_extension()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.
         raise RuntimeError(
