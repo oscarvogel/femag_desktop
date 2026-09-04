@@ -8,6 +8,7 @@ from typing import Iterable
 from app.models.load_orders import (
     LoadOrder,
     LoadOrderLooseAllocation,
+    LoadOrderPallet,
     LoadOrderPalletAllocation,
     LoadOrderProduct,
 )
