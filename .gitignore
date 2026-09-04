@@ -19,3 +19,5 @@ dist/
 # Demo/validation databases (see AGENTS.md areas protegidas: datos demo)
 femag_*.sqlite3
 femag_*.sqlite3-journal
+# Generated print and validation evidence
+docs/prints/
