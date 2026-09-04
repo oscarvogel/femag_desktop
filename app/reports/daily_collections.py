@@ -225,19 +225,30 @@ class DailyCollectionsReportService:
         }
         balance_by_key: dict[tuple[int, str], float] = defaultdict(float)
         result: dict[int, float] = {}
-        all_movements = ClientAccountMovement.select().order_by(
-            ClientAccountMovement.client,
-            ClientAccountMovement.currency,
-            ClientAccountMovement.movement_date,
-            ClientAccountMovement.id,
+        all_movements = [
+            movement
+            for movement in ClientAccountMovement.select()
+            if (movement.client_id, movement.currency) in client_currency
+        ]
+        dated_movements = [
+            (self._movement_effective_date(movement), movement)
+            for movement in all_movements
+        ]
+        dated_movements = [
+            (effective_date, movement)
+            for effective_date, movement in dated_movements
+            if effective_date is not None and effective_date <= as_of
+        ]
+        dated_movements.sort(
+            key=lambda pair: (
+                pair[1].client_id,
+                pair[1].currency,
+                pair[0],
+                pair[1].id,
+            )
         )
-        for movement in all_movements:
+        for _effective_date, movement in dated_movements:
             key = (movement.client_id, movement.currency)
-            if key not in client_currency:
-                continue
-            effective_date = self._movement_effective_date(movement)
-            if effective_date is None or effective_date > as_of:
-                continue
             balance_by_key[key] += float(movement.total_amount or 0)
             if movement.id in wanted_ids:
                 result[movement.id] = round(balance_by_key[key], 2)
