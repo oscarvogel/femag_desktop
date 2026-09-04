@@ -73,14 +73,12 @@ class DailyCollectionsReportService:
         )
 
     def _collection_rows(self, filters: DailyCollectionsFilters) -> list[dict]:
-        query = (
-            ClientPayment.select()
-            .where(
+        query = ClientPayment.select().order_by(ClientPayment.payment_date, ClientPayment.id)
+        if not filters.reversals_only:
+            query = query.where(
                 ClientPayment.payment_date >= filters.start,
                 ClientPayment.payment_date <= filters.end,
             )
-            .order_by(ClientPayment.payment_date, ClientPayment.id)
-        )
         if filters.client_id is not None:
             query = query.where(ClientPayment.client == filters.client_id)
         if filters.created_by:
@@ -88,8 +86,12 @@ class DailyCollectionsReportService:
 
         rows: list[dict] = []
         for payment in query:
-            if filters.reversals_only and payment.status != ClientPayment.STATUS_ANNULLED:
-                continue
+            if filters.reversals_only:
+                if payment.status != ClientPayment.STATUS_ANNULLED or payment.annulled_at is None:
+                    continue
+                annulled_date = payment.annulled_at.date()
+                if annulled_date < filters.start or annulled_date > filters.end:
+                    continue
             order = payment.closure.order if payment.closure_id else None
             carrier = order.carrier if order is not None and order.carrier_id else None
             details = list(
@@ -113,6 +115,11 @@ class DailyCollectionsReportService:
                             detail_observations=detail.observations,
                             order=order,
                             carrier=carrier,
+                            report_date=(
+                                payment.annulled_at.date()
+                                if filters.reversals_only and payment.annulled_at is not None
+                                else payment.payment_date
+                            ),
                         )
                     )
             else:
@@ -129,6 +136,11 @@ class DailyCollectionsReportService:
                         detail_observations=None,
                         order=order,
                         carrier=carrier,
+                        report_date=(
+                            payment.annulled_at.date()
+                            if filters.reversals_only and payment.annulled_at is not None
+                            else payment.payment_date
+                        ),
                     )
                 )
         return rows
@@ -144,10 +156,12 @@ class DailyCollectionsReportService:
         detail_observations: str | None,
         order,
         carrier,
+        report_date: date,
     ) -> dict:
         return {
             "payment_id": payment.id,
-            "date": payment.payment_date,
+            "date": report_date,
+            "payment_date": payment.payment_date,
             "receipt_number": payment.receipt_number,
             "client_id": payment.client_id,
             "client_name": payment.client.name,
