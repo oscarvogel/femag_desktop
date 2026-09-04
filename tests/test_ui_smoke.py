@@ -216,6 +216,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "managerial_dashboard",
             "managerial_sales_dispatch",
             "managerial_account_risk",
+            "daily_collections",
         ]
         assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
         assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
