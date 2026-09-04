@@ -128,9 +128,12 @@ class DailyCollectionsDialog(QDialog):
         clear.clicked.connect(self.clear_filters)
         ledger = QPushButton("Abrir cuenta corriente del cliente")
         ledger.clicked.connect(self.open_selected_client_ledger)
+        open_order = QPushButton("Ver orden relacionada")
+        open_order.clicked.connect(self.open_selected_order)
         actions.addWidget(consult)
         actions.addWidget(clear)
         actions.addWidget(ledger)
+        actions.addWidget(open_order)
         actions.addStretch(1)
         root.addLayout(actions)
 
@@ -306,6 +309,8 @@ class DailyCollectionsDialog(QDialog):
                     item = QTableWidgetItem(str(value or ""))
                 if column == 2:
                     item.setData(Qt.UserRole, int(row["client_id"]))
+                if column == 6 and row["order_number"] is not None:
+                    item.setData(Qt.UserRole, int(row["order_number"]))
                 table.setItem(row_index, column, item)
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
@@ -338,6 +343,8 @@ class DailyCollectionsDialog(QDialog):
                     item = QTableWidgetItem(str(value or ""))
                 if column == 1:
                     item.setData(Qt.UserRole, int(row["client_id"]))
+                if column == 9 and row["order_number"] is not None:
+                    item.setData(Qt.UserRole, int(row["order_number"]))
                 table.setItem(row_index, column, item)
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
@@ -352,6 +359,46 @@ class DailyCollectionsDialog(QDialog):
         if item is None or item.data(Qt.UserRole) is None:
             return None
         return int(item.data(Qt.UserRole))
+
+    def selected_order_number(self) -> int | None:
+        table = self.collections_table if self.tabs.currentIndex() == 0 else self.movements_table
+        order_column = 6 if self.tabs.currentIndex() == 0 else 9
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, order_column)
+        if item is None or item.data(Qt.UserRole) is None:
+            return None
+        return int(item.data(Qt.UserRole))
+
+    def open_selected_order(self) -> None:
+        order_number = self.selected_order_number()
+        if order_number is None:
+            QMessageBox.information(
+                self, "Cobranzas y movimientos", "La fila seleccionada no tiene una orden relacionada."
+            )
+            return
+        parent = self.parent()
+        navigate = getattr(parent, "_navigate_to_route", None)
+        if navigate is None:
+            QMessageBox.warning(
+                self, "Cobranzas y movimientos", "No se pudo abrir Órdenes de carga desde esta ventana."
+            )
+            return
+        self.accept()
+        navigate("load_orders")
+        page = getattr(parent, "stack", None)
+        page = page.currentWidget() if page is not None else None
+        if page is None:
+            return
+        search_input = page.findChild(QLineEdit, "loadOrderSearchInput")
+        search_button = page.findChild(QPushButton, "searchLoadOrderButton")
+        if search_input is not None:
+            search_input.setText(str(order_number))
+            if search_button is not None:
+                search_button.click()
+            else:
+                search_input.returnPressed.emit()
 
     def open_selected_client_ledger(self) -> None:
         client_id = self.selected_client_id()
