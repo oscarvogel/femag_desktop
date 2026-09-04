@@ -1,5 +1,5 @@
 from app.models.audit import AuditLog
-from app.models.payments import ClientPayment
+from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
 from app.models.accounting import ClientAccountMovement
 from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
 from app.models.masters import (
@@ -38,7 +38,9 @@ ALL_MODELS = [
     Permission,
     AuditLog,
     ClientAccountMovement,
+    PaymentMethod,
     ClientPayment,
+    ClientPaymentDetail,
     ImportBatch,
     Client,
     ClientEmail,
