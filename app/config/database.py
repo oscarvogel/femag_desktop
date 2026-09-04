@@ -28,6 +28,34 @@ def build_mysql_database(settings: Settings | None = None) -> MySQLDatabase:
     )
 
 
+def ensure_mysql_database_exists(settings: Settings | None = None) -> None:
+    """Crea la base MySQL si no existe (permite primer inicio sin DB)."""
+    settings = settings or load_settings()
+    if settings.db_engine != "mysql":
+        return
+    # Conexión sin base para poder ejecutar CREATE DATABASE
+    import pymysql
+
+    host = resolve_mysql_host_ipv4(settings.db_host)
+    conn = pymysql.connect(
+        host=host,
+        port=settings.db_port,
+        user=settings.db_user,
+        password=settings.db_password,
+        charset="utf8mb4",
+        autocommit=True,
+    )
+    try:
+        db_name = settings.db_name.strip().replace("`", "``")
+        with conn.cursor() as cur:
+            cur.execute(
+                f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+            )
+    finally:
+        conn.close()
+
+
 def build_sqlite_database(settings: Settings | None = None) -> SqliteDatabase:
     settings = settings or load_settings()
     sqlite_path = settings.sqlite_path

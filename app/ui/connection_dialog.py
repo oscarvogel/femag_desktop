@@ -13,7 +13,11 @@ from PyQt5.QtWidgets import (
 )
 
 from app.build_version import BUILD_VERSION
-from app.config.database import build_mysql_database, initialize_runtime_database
+from app.config.database import (
+    build_mysql_database,
+    ensure_mysql_database_exists,
+    initialize_runtime_database,
+)
 from app.config.schema import SchemaValidationError, validate_runtime_schema
 from app.config.schema import ensure_runtime_schema
 from app.config.secure_credentials import (
@@ -40,6 +44,7 @@ class ConnectionDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"FEMAG Desktop {BUILD_VERSION} - Conexion MySQL")
         self.setMinimumWidth(470)
+        self._current = current
 
         self.host = QLineEdit(current.host if current else DEFAULT_MYSQL_HOST)
         self.port = QSpinBox()
@@ -49,6 +54,8 @@ class ConnectionDialog(QDialog):
         self.user = QLineEdit(current.user if current else "")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        if current is not None:
+            self.password.setPlaceholderText("Dejar vacio para mantener la clave guardada")
 
         intro = QLabel(
             "Configure una sola vez el acceso operativo a MySQL. La contrasena se cifra "
@@ -73,12 +80,15 @@ class ConnectionDialog(QDialog):
         layout.addWidget(self.buttons)
 
     def connection(self) -> RuntimeConnection:
+        password = self.password.text()
+        if not password and self._current is not None:
+            password = self._current.password
         return RuntimeConnection(
             host=self.host.text(),
             port=self.port.value(),
             database=self.database.text(),
             user=self.user.text(),
-            password=self.password.text(),
+            password=password,
         )
 
     def _test_and_save(self) -> None:
@@ -146,6 +156,11 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
         ) from exc
     except (OperationalError, InterfaceError) as exc:
         code, message = _mysql_error_detail(exc)
+        if str(code) == "1049":
+            raise RuntimeSchemaPreparationRequired(
+                f"La base de datos '{connection.database}' no existe. "
+                "Se creara y se generaran todas las tablas con el usuario administrador."
+            ) from exc
         raise RuntimeError(
             f"MySQL rechazo la conexion ({code}): {message}"
         ) from exc
@@ -166,11 +181,26 @@ def _mysql_error_detail(exc: Exception) -> tuple[str, str]:
 
 
 def prepare_runtime_schema(connection: RuntimeConnection) -> None:
-    database = initialize_runtime_database(_settings_for_connection(connection))
+    settings = _settings_for_connection(connection)
+    # Si la base no existe (error 1049), crearla antes de conectar con peewee.
+    try:
+        ensure_mysql_database_exists(settings)
+    except Exception as exc:
+        raise RuntimeError(
+            f"No se pudo crear la base de datos '{settings.db_name}' ({type(exc).__name__}): {exc}"
+        ) from exc
+    database = initialize_runtime_database(settings)
     try:
         database.connect(reuse_if_open=True)
         ensure_runtime_schema(database)
         validate_runtime_schema(database)
+        # Asegura perfiles/permisos base para el primer admin (bootstrap login)
+        try:
+            from app.services.permission_service import PermissionService
+
+            PermissionService().seed_defaults()
+        except Exception:
+            pass
     except Exception as exc:
         raise RuntimeError(
             f"No se pudo crear o actualizar la estructura ({type(exc).__name__}): {exc}"
