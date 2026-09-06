@@ -23,8 +23,13 @@ def install_pending_orders_aging_extension() -> None:
         if route != "pending_orders_aging":
             _ORIGINAL_NAVIGATE(self, row)
             return
-        if not PermissionService().can_view_managerial_dashboard(self.user):
-            QMessageBox.warning(self, "Órdenes pendientes", "El usuario actual no tiene permiso gerencial para ver este informe.")
+        user = self.user
+        if (
+            user is None
+            or not user.active
+            or not PermissionService().has_permission(user, "Inicio", "ver", "Pendientes")
+        ):
+            QMessageBox.warning(self, "Órdenes pendientes", "El usuario actual no tiene permiso para ver las órdenes pendientes.")
             return
         PendingOrdersAgingDialog(self).exec_()
 

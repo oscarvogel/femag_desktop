@@ -211,15 +211,18 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Ventas y despachos",
             "Cuenta corriente y deuda vencida",
             "Cobranzas y movimientos",
-            "Órdenes pendientes",
         ]
         assert [child.route_key for child in managerial.children] == [
             "managerial_dashboard",
             "managerial_sales_dispatch",
             "managerial_account_risk",
             "daily_collections",
-            "pending_orders_aging",
         ]
+        informes = next(item for item in principal.items if item.title == "Informes")
+        pending = next(item for item in informes.children if item.title == "Órdenes pendientes")
+        assert pending.placeholder is False
+        assert pending.route_key == "pending_orders_aging"
+        assert titles.index("Informes") == titles.index("Operaciones") + 1
         assert titles.index("Cuenta corriente") == titles.index("Maestros") + 1
         assert titles.index("Sistema") == titles.index("Cuenta corriente") + 1
     finally:
