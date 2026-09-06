@@ -9,6 +9,7 @@ from app.ui.daily_collections_extension import install_daily_collections_extensi
 from app.ui.daily_operations_extension import install_daily_operations_extension
 from app.ui.lot_traceability_extension import install_lot_traceability_extension
 from app.ui.pending_orders_aging_extension import install_pending_orders_aging_extension
+from app.ui.returns_report_extension import install_returns_report_extension
 from app.ui.managerial_account_risk_extension import install_managerial_account_risk_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
@@ -78,6 +79,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         install_daily_operations_extension()
         install_lot_traceability_extension()
         install_pending_orders_aging_extension()
+        install_returns_report_extension()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.
         raise RuntimeError(
