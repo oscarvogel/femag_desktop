@@ -222,10 +222,12 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
         assert [child.title for child in informes.children] == [
             "Informe operativo diario",
             "Órdenes pendientes",
+            "Trazabilidad por lote",
         ]
         assert [child.route_key for child in informes.children] == [
             "daily_operations",
             "pending_orders_aging",
+            "lot_traceability",
         ]
         pending = next(item for item in informes.children if item.title == "Órdenes pendientes")
         assert pending.placeholder is False
