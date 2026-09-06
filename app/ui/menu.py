@@ -57,6 +57,14 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         if item.route_key != "placeholder" or item.action_key is not None
     ]
 
+    informes_children = [
+        item
+        for item in (
+            approved_item("Órdenes pendientes", "Pendientes", route_key="pending_orders_aging"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
     master_children = [
         item
         for item in (
@@ -109,6 +117,8 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
 
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
+    if informes_children:
+        principal_items.append(MenuItemView(title="Informes", children=informes_children))
     if master_children:
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
 
