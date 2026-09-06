@@ -60,6 +60,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
     informes_children = [
         item
         for item in (
+            approved_item("Informe operativo diario", "Pendientes", route_key="daily_operations"),
             approved_item("Órdenes pendientes", "Pendientes", route_key="pending_orders_aging"),
         )
         if item.route_key != "placeholder" or item.action_key is not None
