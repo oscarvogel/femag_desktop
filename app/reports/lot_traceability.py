@@ -299,4 +299,3 @@ class LotTraceabilityService:
             first_dispatch=min(dates) if dates else None,
             last_dispatch=max(dates) if dates else None,
         )
-
