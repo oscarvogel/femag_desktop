@@ -444,4 +444,3 @@ class ClientHistoryDialog(QDialog):
             ],
         )
         self.tabs.addTab(table, f"Lotes ({len(trace.rows)})")
-
