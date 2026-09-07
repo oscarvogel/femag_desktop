@@ -56,6 +56,7 @@ class RemittanceDialog(QDialog):
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
         self.client_combo = QComboBox()
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         self.address_combo = QComboBox()
         self.carrier_combo = QComboBox()
         self.carrier_combo.setObjectName("remittanceCarrierInput")
