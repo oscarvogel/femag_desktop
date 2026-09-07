@@ -114,6 +114,12 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
                         action_key=managerial_dashboard.action_key,
                         route_key="daily_collections",
                     ),
+                    MenuItemView(
+                        title="Clientes",
+                        placeholder=False,
+                        action_key=managerial_dashboard.action_key,
+                        route_key="managerial_clients",
+                    ),
                 ],
             )
         )
