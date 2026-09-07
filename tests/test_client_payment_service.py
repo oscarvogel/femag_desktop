@@ -4,7 +4,7 @@ import pytest
 from pytest import approx
 
 from app.models.accounting import ClientAccountMovement
-from app.models.payments import ClientPayment
+from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
 from app.services.client_payment_service import ClientPaymentError, ClientPaymentService
 
 
@@ -39,6 +39,56 @@ def test_register_payment_creates_payment_and_credit_movement(db):
     assert m.payment == payment
     assert m.load_order is None
     assert "REC-00000001" in m.description
+    detail = ClientPaymentDetail.get(ClientPaymentDetail.payment == payment)
+    assert detail.amount == approx(1234.5)
+    assert detail.payment_method.code == ClientPayment.METHOD_CASH
+
+
+def test_compound_payment_creates_one_receipt_one_ledger_movement_and_details(db):
+    client = _make_client()
+    service = ClientPaymentService(current_user="admin")
+
+    payment = service.register_compound_payment(
+        client=client,
+        payment_date=date(2026, 9, 3),
+        details=[
+            {"method": "efectivo", "amount": 500000},
+            {"method": "transferencia", "amount": 1200000, "reference": "TRX-12345"},
+            {"method": "cheque", "amount": 800000, "reference": "CH-84752"},
+            {"method": "retenciones_percepciones", "amount": 120000, "reference": "IIBB 09/2026"},
+            {"method": "holistor", "amount": 300000, "reference": "HOL-1234"},
+        ],
+    )
+
+    assert payment.amount == approx(2920000)
+    assert payment.method == "multiple"
+    assert payment.reference is None
+    details = list(
+        ClientPaymentDetail.select()
+        .where(ClientPaymentDetail.payment == payment)
+        .order_by(ClientPaymentDetail.sequence)
+    )
+    assert len(details) == 5
+    assert [row.payment_method.code for row in details] == [
+        "efectivo",
+        "transferencia",
+        "cheque",
+        "retenciones_percepciones",
+        "holistor",
+    ]
+    assert sum(row.amount for row in details) == approx(2920000)
+
+    movements = list(ClientAccountMovement.select())
+    assert len(movements) == 1
+    assert movements[0].total_amount == approx(-2920000)
+    assert "5 medios" in movements[0].description
+
+
+def test_default_payment_methods_include_retenciones_and_holistor(db):
+    ClientPaymentService.ensure_default_payment_methods()
+    methods = {row.code: row.name for row in PaymentMethod.select()}
+    assert methods["retenciones_percepciones"] == "Retenciones / Percepciones"
+    assert methods["holistor"] == "Holistor"
 
 
 def test_receipt_number_is_correlative(db):

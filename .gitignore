@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.venv_broken/
 venv/
 .env
 backups/
@@ -19,3 +20,5 @@ dist/
 # Demo/validation databases (see AGENTS.md areas protegidas: datos demo)
 femag_*.sqlite3
 femag_*.sqlite3-journal
+# Generated print and validation evidence
+docs/prints/

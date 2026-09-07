@@ -57,6 +57,17 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         if item.route_key != "placeholder" or item.action_key is not None
     ]
 
+    informes_children = [
+        item
+        for item in (
+            approved_item("Informe operativo diario", "Pendientes", route_key="daily_operations"),
+            approved_item("Órdenes pendientes", "Pendientes", route_key="pending_orders_aging"),
+            approved_item("Trazabilidad por lote", "Pendientes", route_key="lot_traceability"),
+            approved_item("Devoluciones y reclamos", "Pendientes", route_key="returns_report"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
     master_children = [
         item
         for item in (
@@ -97,12 +108,26 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
                         action_key=managerial_dashboard.action_key,
                         route_key="managerial_account_risk",
                     ),
+                    MenuItemView(
+                        title="Cobranzas y movimientos",
+                        placeholder=False,
+                        action_key=managerial_dashboard.action_key,
+                        route_key="daily_collections",
+                    ),
+                    MenuItemView(
+                        title="Clientes",
+                        placeholder=False,
+                        action_key=managerial_dashboard.action_key,
+                        route_key="managerial_clients",
+                    ),
                 ],
             )
         )
 
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
+    if informes_children:
+        principal_items.append(MenuItemView(title="Informes", children=informes_children))
     if master_children:
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
 
