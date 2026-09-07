@@ -365,3 +365,28 @@ def test_sidebar_opens_real_remittances_page(db):
 
     assert window._current_route == "remittances"
     assert isinstance(window.stack.currentWidget(), RemittancesPage)
+
+
+def test_manual_dialog_transport_combos_have_autocomplete(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittance_transport_autocomplete")
+    app.processEvents()
+
+    for object_name in (
+        "remittanceCarrierInput",
+        "remittanceTruckInput",
+        "remittanceDriverInput",
+    ):
+        combo = dialog.findChild(QComboBox, object_name)
+        assert combo is not None
+        assert combo.isEditable()
+        assert combo.completer() is not None
+        assert combo.completer().filterMode() == Qt.MatchContains
+        assert combo.completer().caseSensitivity() == Qt.CaseInsensitive
