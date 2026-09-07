@@ -211,14 +211,12 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Ventas y despachos",
             "Cuenta corriente y deuda vencida",
             "Cobranzas y movimientos",
-            "Clientes",
         ]
         assert [child.route_key for child in managerial.children] == [
             "managerial_dashboard",
             "managerial_sales_dispatch",
             "managerial_account_risk",
             "daily_collections",
-            "managerial_clients",
         ]
         informes = next(item for item in principal.items if item.title == "Informes")
         assert [child.title for child in informes.children] == [
