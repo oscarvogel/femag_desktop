@@ -409,3 +409,23 @@ def test_manual_dialog_client_has_autocomplete(db):
     assert combo.completer() is not None
     assert combo.completer().filterMode() == Qt.MatchContains
     assert combo.completer().caseSensitivity() == Qt.CaseInsensitive
+
+
+def test_manual_dialog_product_rows_have_autocomplete(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittance_product_autocomplete")
+    app.processEvents()
+
+    combo = dialog.items.cellWidget(0, 0)
+    assert isinstance(combo, QComboBox)
+    assert combo.isEditable()
+    assert combo.completer() is not None
+    assert combo.completer().filterMode() == Qt.MatchContains
+    assert combo.completer().caseSensitivity() == Qt.CaseInsensitive
