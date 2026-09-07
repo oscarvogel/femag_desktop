@@ -192,6 +192,7 @@ class RemittanceDialog(QDialog):
         row = self.items.rowCount()
         self.items.insertRow(row)
         combo = QComboBox()
+        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
         for product in Product.select().where(Product.active == True).order_by(Product.name):  # noqa: E712
             combo.addItem(product.name, product.id)
         if product_id:
