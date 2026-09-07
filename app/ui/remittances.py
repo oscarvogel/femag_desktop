@@ -33,6 +33,7 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.remittances import Remittance, RemittanceSeries
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
+from app.ui.combo_autocomplete import enable_combo_autocomplete
 
 
 REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
@@ -62,6 +63,12 @@ class RemittanceDialog(QDialog):
         self.truck_combo.setObjectName("remittanceTruckInput")
         self.driver_combo = QComboBox()
         self.driver_combo.setObjectName("remittanceDriverInput")
+        for combo, placeholder in (
+            (self.carrier_combo, "Buscar transportista..."),
+            (self.truck_combo, "Buscar camión..."),
+            (self.driver_combo, "Buscar chofer..."),
+        ):
+            enable_combo_autocomplete(combo, placeholder=placeholder)
         self.series_combo = QComboBox()
         self.series_combo.setObjectName("remittanceSeriesInput")
         self.number_preview = QLineEdit()
