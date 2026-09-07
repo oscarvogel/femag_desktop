@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -150,6 +151,22 @@ class F150BatchService:
                 output.unlink()
             raise
 
+    @staticmethod
+    def _format_cuit(value: str) -> str:
+        """Normaliza un CUIT al formato XX-XXXXXXXX-X del sistema anterior."""
+        digits = re.sub(r"\D", "", value or "")
+        if len(digits) == 11:
+            return f"{digits[:2]}-{digits[2:10]}-{digits[10]}"
+        return (value or "").strip()
+
+    @staticmethod
+    def _driver_document_number(cuit: str, document: str) -> str:
+        """Deriva el DNI del CUIT como el VFP (Substr(cuit, 4, 8))."""
+        digits = re.sub(r"\D", "", cuit or "")
+        if len(digits) == 11:
+            return digits[2:10]
+        return re.sub(r"\D", "", document or "")
+
     def _to_document(self, remittance: Remittance) -> F150Remittance:
         issues = self.validation_issues(remittance)
         if issues:
@@ -191,13 +208,13 @@ class F150BatchService:
             number=remittance.physical_number,
             origin=origin,
             destination=F150Party(
-                cuit=remittance.client_cuit or "",
+                cuit=self._format_cuit(remittance.client_cuit or ""),
                 name=remittance.client_name,
                 address=remittance.delivery_address_text,
                 location=destination,
             ),
             carrier=F150Carrier(
-                cuit=remittance.carrier_cuit or carrier.cuit or "",
+                cuit=self._format_cuit(remittance.carrier_cuit or carrier.cuit or ""),
                 name=remittance.carrier_name or carrier.name,
             ),
             vehicle=F150Vehicle(
@@ -205,9 +222,12 @@ class F150BatchService:
                 trailer_plate=truck.trailer_domain or "",
             ),
             driver=F150Driver(
-                cuit=driver.cuit or "",
+                cuit=self._format_cuit(driver.cuit or ""),
                 name=remittance.driver_name or driver.name,
-                document_number=remittance.driver_document or driver.document or "",
+                document_number=self._driver_document_number(
+                    driver.cuit or "",
+                    remittance.driver_document or driver.document or "",
+                ),
             ),
             items=tuple(items),
             observations=remittance.observations or "",
@@ -228,7 +248,10 @@ class F150BatchService:
             issues.append("falta camion")
         if remittance.driver_id is None:
             issues.append("falta chofer")
-        elif not (remittance.driver.cuit or remittance.driver_document):
+        elif not F150BatchService._driver_document_number(
+            remittance.driver.cuit or "",
+            remittance.driver_document or remittance.driver.document or "",
+        ):
             issues.append("falta CUIT o documento del chofer")
         if not remittance.items.exists():
             issues.append("no tiene detalle")
