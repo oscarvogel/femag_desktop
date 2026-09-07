@@ -284,7 +284,59 @@ class F150BatchService:
             issues.append("no tiene detalle")
         if F150BatchService.is_included(remittance):
             issues.append("ya fue incluido en un lote F150")
+        origin = F150BatchService._origin_location()
+        if not origin.locality_code.strip():
+            issues.append("falta origen DGR (parámetro f150.origin)")
+        address = remittance.delivery_address
+        issues.extend(
+            F150BatchService._locality_issues(
+                address.locality if address else None, section="destino"
+            )
+        )
+        carrier = remittance.carrier
+        if carrier is not None:
+            if not (carrier.tipo or "").strip():
+                issues.append("transportista: falta tipo")
+            if not (carrier.codigo or "").strip():
+                issues.append("transportista: falta código")
+            issues.extend(
+                F150BatchService._locality_issues(carrier.locality, section="transportista")
+            )
+        truck = remittance.truck
+        if truck is not None:
+            if not (truck.chassis_type or "").strip():
+                issues.append("camión: falta tipo de chasis")
+            if truck.trailer_domain and not (truck.trailer_type or "").strip():
+                issues.append("camión: falta tipo de acoplado")
+        driver = remittance.driver
+        if driver is not None:
+            issues.extend(
+                F150BatchService._locality_issues(driver.locality, section="chofer")
+            )
+        for row in remittance.items:
+            product = row.product
+            if not all([product.rh1, product.rh2, product.rh3, product.rh4]):
+                issues.append(f"detalle: {product.name} sin rubros DGR")
+            if not (product.unidad_dgr or "").strip():
+                issues.append(f"detalle: {product.name} sin unidad DGR")
         return issues
+
+    @staticmethod
+    def _locality_issues(locality, *, section: str) -> list[str]:
+        if locality is None:
+            return [f"{section}: falta localidad DGR"]
+        missing = []
+        if locality.dgr_code is None:
+            missing.append("localidad")
+        if locality.department_code is None:
+            missing.append("departamento")
+        if locality.province_code is None:
+            missing.append("provincia")
+        if locality.country is None:
+            missing.append("país")
+        if missing:
+            return [f"{section}: faltan códigos DGR ({', '.join(missing)})"]
+        return []
 
     @staticmethod
     def _identity(remittance: Remittance) -> str:
