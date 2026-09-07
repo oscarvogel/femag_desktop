@@ -56,6 +56,7 @@ class RemittanceDialog(QDialog):
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
         self.client_combo = QComboBox()
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         self.address_combo = QComboBox()
         self.carrier_combo = QComboBox()
         self.carrier_combo.setObjectName("remittanceCarrierInput")
@@ -191,6 +192,7 @@ class RemittanceDialog(QDialog):
         row = self.items.rowCount()
         self.items.insertRow(row)
         combo = QComboBox()
+        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
         for product in Product.select().where(Product.active == True).order_by(Product.name):  # noqa: E712
             combo.addItem(product.name, product.id)
         if product_id:
