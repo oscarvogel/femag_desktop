@@ -81,13 +81,12 @@ python scripts/run_backup.py --user admin
 ### Backup diario MySQL separado por base
 
 Para generar un dump independiente por cada base de usuario visible para la
-credencial MySQL guardada en FEMAG, instalar MySQL Client (para disponer de
-`mysqldump.exe`) y ejecutar una vez, desde la raiz del repositorio:
+credencial MySQL guardada en FEMAG, ejecutar una vez desde la raiz del
+repositorio:
 
 ```powershell
 .\scripts\install_daily_mysql_backups.ps1 `
-  -PythonPath C:\ruta\python.exe `
-  -MysqldumpPath C:\ruta\mysqldump.exe
+  -PythonPath C:\ruta\python.exe
 ```
 
 El instalador registra la tarea `FEMAG - Backup MySQL diario` todos los dias a
@@ -97,6 +96,15 @@ un `manifest.json` con el resultado. Para una ejecucion manual:
 
 ```powershell
 python scripts/backup_mysql_databases.py
+```
+
+El modo predeterminado usa `mysqldump.exe` cuando esta instalado y, si no, un
+exportador implementado con Python/PyMySQL. Ambos producen un archivo por base;
+el exportador Python incluye estructura, datos, vistas, triggers, rutinas y
+eventos. Para forzar este ultimo modo:
+
+```powershell
+python scripts/backup_mysql_databases.py --dump-engine python
 ```
 
 Por defecto se excluyen las bases internas `mysql`, `sys`,

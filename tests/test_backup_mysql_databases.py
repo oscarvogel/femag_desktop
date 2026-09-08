@@ -84,6 +84,28 @@ def test_create_backup_writes_one_dump_and_manifest_per_database(monkeypatch, tm
     assert [entry["database"] for entry in manifest["databases"]] == ["femag", "reportes diarios"]
 
 
+def test_create_backup_uses_python_exporter_when_mysqldump_is_not_available(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_python_dump(connection, database, destination, *, mysqldump_path):
+        calls.append((database, mysqldump_path))
+        destination.write_text("python dump", encoding="utf-8")
+        return backup_mysql_databases.DatabaseDump(database, str(destination), "success")
+
+    monkeypatch.setattr(backup_mysql_databases.shutil, "which", lambda _path: None)
+    monkeypatch.setattr(backup_mysql_databases, "dump_database_with_python", fake_python_dump)
+
+    _, results = backup_mysql_databases.create_backup(
+        backup_mysql_databases.RuntimeConnection("server", 3306, "femag", "user", "secret"),
+        tmp_path,
+        databases=["femag"],
+        now=datetime(2026, 9, 8, 12, 1, tzinfo=timezone.utc),
+    )
+
+    assert calls == [("femag", "mysqldump")]
+    assert results[0].status == "success"
+
+
 def test_dump_database_keeps_failed_dump_out_of_backup_directory(monkeypatch, tmp_path):
     class Completed:
         returncode = 1

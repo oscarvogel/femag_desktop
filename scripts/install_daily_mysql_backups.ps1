@@ -2,6 +2,8 @@
 param(
     [string]$PythonPath = "python",
     [string]$MysqldumpPath = "mysqldump",
+    [ValidateSet("auto", "mysqldump", "python")]
+    [string]$DumpEngine = "auto",
     [string]$BackupDirectory = (Join-Path $env:LOCALAPPDATA "FEMAG Desktop\backups\mysql"),
     [string]$TaskName = "FEMAG - Backup MySQL diario",
     [switch]$Force
@@ -16,15 +18,12 @@ if (-not (Test-Path -LiteralPath $backupScript -PathType Leaf)) {
 if (-not (Get-Command $PythonPath -ErrorAction SilentlyContinue)) {
     throw "No se encontro Python en '$PythonPath'. Indique -PythonPath con la ruta a python.exe."
 }
-if (-not (Get-Command $MysqldumpPath -ErrorAction SilentlyContinue)) {
-    throw "No se encontro mysqldump en '$MysqldumpPath'. Instale MySQL Client o indique -MysqldumpPath."
-}
 if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -not $Force) {
     throw "La tarea '$TaskName' ya existe. Use -Force para actualizarla."
 }
 
-$arguments = '"{0}" --backup-dir "{1}" --mysqldump "{2}"' -f `
-    $backupScript, $BackupDirectory, $MysqldumpPath
+$arguments = '"{0}" --backup-dir "{1}" --dump-engine "{2}" --mysqldump "{3}"' -f `
+    $backupScript, $BackupDirectory, $DumpEngine, $MysqldumpPath
 $action = New-ScheduledTaskAction -Execute $PythonPath -Argument $arguments -WorkingDirectory $projectRoot
 $trigger = New-ScheduledTaskTrigger -Daily -At 12:00PM
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
