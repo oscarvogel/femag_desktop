@@ -72,8 +72,44 @@ La ventana debe mostrarse con el titulo `FEMAG Desktop`, que permite identificar
 ## Backups
 
 Configurar `BACKUP_DIR` y, si corresponde, `BACKUP_EXTRA_DIR`.
-Programar en Windows Task Scheduler:
+El backup manual de la base configurada se ejecuta con:
 
 ```bash
 python scripts/run_backup.py --user admin
 ```
+
+### Backup diario MySQL separado por base
+
+Para generar un dump independiente por cada base de usuario visible para la
+credencial MySQL guardada en FEMAG, instalar MySQL Client (para disponer de
+`mysqldump.exe`) y ejecutar una vez, desde la raiz del repositorio:
+
+```powershell
+.\scripts\install_daily_mysql_backups.ps1 `
+  -PythonPath C:\ruta\python.exe `
+  -MysqldumpPath C:\ruta\mysqldump.exe
+```
+
+El instalador registra la tarea `FEMAG - Backup MySQL diario` todos los dias a
+las 12:00. Cada ejecucion crea una carpeta fechada en
+`%LOCALAPPDATA%\FEMAG Desktop\backups\mysql`, con un archivo `.sql` por base y
+un `manifest.json` con el resultado. Para una ejecucion manual:
+
+```powershell
+python scripts/backup_mysql_databases.py
+```
+
+Por defecto se excluyen las bases internas `mysql`, `sys`,
+`information_schema` y `performance_schema`. Si la cuenta no tiene permiso
+`SHOW DATABASES`, indicar expresamente las bases autorizadas:
+
+```powershell
+python scripts/backup_mysql_databases.py --database femag_desktop --database otra_base
+```
+
+La tarea se ejecuta como el usuario Windows actual, en modo interactivo, porque
+la contrasena esta protegida con DPAPI para ese usuario. Por lo tanto debe tener
+la sesion iniciada a las 12:00. Para ejecutarla aunque nadie haya iniciado
+sesion, el administrador debe configurar una cuenta de servicio y un mecanismo
+de secretos apto para esa cuenta; no copiar la contrasena a argumentos, scripts
+ni archivos `.env`.
