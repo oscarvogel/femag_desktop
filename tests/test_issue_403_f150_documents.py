@@ -3,7 +3,9 @@ from decimal import Decimal
 
 import pytest
 
+from app.models.dgr import DgrCountry, DgrLocality
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.f150_encoder import F150ValidationError
 from app.services.remittance_service import RemittanceService
@@ -26,19 +28,31 @@ def test_driver_document_derives_from_cuit_like_vfp():
 
 
 def _issued_remittance(*, driver_cuit="20123456789", driver_document="12345678"):
+    country = DgrCountry.create(legacy_id=200, name="ARGENTINA", abbr="ARG")
+    locality = DgrLocality.create(
+        code="0061", name="PUERTO RICO", dgr_id=61, dgr_code=61,
+        department_code=10, province_code=14, country=country,
+    )
+    AppParameter.create(key="f150.origin", value='{"locality_code": "0002"}')
     client = Client.create(name="Cliente 403", cuit="30712345678", iva_condition="RI")
     address = ClientAddress.create(
         client=client, address_type="entrega", province="Misiones",
-        city="Posadas", address="Ruta 12 km 8",
+        city="Posadas", address="Ruta 12 km 8", locality=locality,
     )
-    carrier = Carrier.create(name="Transporte 403", cuit="30777777770")
-    truck = Truck.create(domain="AB123CD", carrier=carrier)
+    carrier = Carrier.create(
+        name="Transporte 403", cuit="30777777770", codigo="0001",
+        tipo="DIR", locality=locality,
+    )
+    truck = Truck.create(
+        domain="AB123CD", carrier=carrier, chassis_type="1", trailer_type="1",
+    )
     driver = Driver.create(
         name="Chofer 403", carrier=carrier, usual_truck=truck,
-        cuit=driver_cuit, document=driver_document,
+        cuit=driver_cuit, document=driver_document, locality=locality,
     )
     product = Product.create(
         codigo="ALM", name="Almidon 403", unit="KG", precio_neto_base=12.5,
+        rh1="2", rh2="2", rh3="19", rh4="0", unidad_dgr="KG",
     )
     service = RemittanceService("admin")
     remittance = service.create_manual(

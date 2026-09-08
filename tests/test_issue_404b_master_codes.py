@@ -5,6 +5,7 @@ from app.importers.dgr_reference import DgrReferenceImporter
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.dgr import DgrLocality
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.remittance_service import RemittanceService
 
@@ -72,6 +73,7 @@ def test_master_import_captures_f150_codes(db):
 
 def _coded_setup():
     DgrReferenceImporter().import_rows(DGR_ROWS)
+    AppParameter.create(key="f150.origin", value='{"locality_code": "2426"}')
     locality = DgrLocality.get(DgrLocality.code == "2457")
     client = Client.create(name="Cliente 404b", cuit="30-63634545-4", iva_condition="RI")
     address = ClientAddress.create(
