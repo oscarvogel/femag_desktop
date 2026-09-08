@@ -10,6 +10,7 @@ from typing import Any
 from peewee import fn
 
 from app.models.base import utc_now
+from app.models.dgr import DgrLocality
 from app.models.masters import Carrier, Client, Driver, Product, TipoIVA, Truck
 from app.models.system import ImportBatch
 from app.services.client_service import ClientService
@@ -104,6 +105,7 @@ class LegacyDbfMasterImporter:
             city=city,
             address=address,
             observations=observations,
+            locality=self._find_locality(row),
         )
 
     def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
@@ -113,6 +115,9 @@ class LegacyDbfMasterImporter:
             "name": name,
             "cuit": self._clean_cuit(self._value(row, "CUIT", "CUITTRA")) or None,
             "phone": self._value(row, "TELEFONO", "TEL", "PHONE"),
+            "codigo": source_id,
+            "tipo": self._value(row, "TIPO", "TIPOTRANSP") or None,
+            "locality": self._find_locality(row),
         }
         return ImportOutcome(self._upsert(Carrier, {"name": name}, values, source_system, source_id, batch))
 
@@ -148,6 +153,7 @@ class LegacyDbfMasterImporter:
             "cuit": self._clean_cuit(self._value(row, "CUIT", "CUITCHOFER")) or None,
             "document": self._value(row, "DNI", "DOCUMENTO", "DOC"),
             "phone": self._value(row, "TELEFONO", "TEL", "PHONE"),
+            "locality": self._find_locality(row),
         }
         action = self._upsert(Driver, {"name": name}, values, source_system, source_id, batch)
         related_actions = (("trucks", truck_action),) if truck_action is not None else ()
@@ -183,6 +189,11 @@ class LegacyDbfMasterImporter:
             "name": name,
             "unit": {"K": "kg", "U": "unidad"}.get(legacy_unit.upper(), legacy_unit),
             "tipo_iva": exempt_vat,
+            "rh1": self._value(row, "RH1") or None,
+            "rh2": self._value(row, "RH2") or None,
+            "rh3": self._value(row, "RH3") or None,
+            "rh4": self._value(row, "RH4") or None,
+            "unidad_dgr": self._value(row, "UNIDADDGR") or None,
         }
         if existing is None or existing.classification_source != "manual":
             values.update(product_kind=inference.product_kind, classification_source="inferido")
@@ -254,6 +265,8 @@ class LegacyDbfMasterImporter:
                 domain=domain,
                 trailer_domain=trailer_domain,
                 carrier=carrier,
+                chassis_type=self._value(row, "TIPOPATE", "TIPOPATENTE") or None,
+                trailer_type=self._value(row, "TIPOPATEAC", "TIPOPATENTEAC") or None,
                 source_system=source_system,
                 source_id=f"driver:{driver_source_id}",
                 imported_at=now,
@@ -275,8 +288,20 @@ class LegacyDbfMasterImporter:
         if truck.source_system == source_system and truck.source_id == f"driver:{driver_source_id}":
             truck.updated_from_source_at = now
             truck.last_import_batch = batch
+        chassis_type = self._value(row, "TIPOPATE", "TIPOPATENTE")
+        if chassis_type and not truck.chassis_type:
+            truck.chassis_type = chassis_type
+        trailer_type = self._value(row, "TIPOPATEAC", "TIPOPATENTEAC")
+        if trailer_type and not truck.trailer_type:
+            truck.trailer_type = trailer_type
         truck.save()
         return truck, "updated", tuple(warnings)
+
+    def _find_locality(self, row: dict[str, Any]) -> DgrLocality | None:
+        code = self._value(row, "LOCALIDAD", "C_LOCAL", "CODLOC")
+        if not code:
+            return None
+        return DgrLocality.select().where(DgrLocality.code == code).first()
 
     def _find_carrier_by_source_id(self, source_system: str, source_id: str) -> Carrier | None:
         if not source_id:

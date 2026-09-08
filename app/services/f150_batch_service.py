@@ -167,6 +167,26 @@ class F150BatchService:
             return digits[2:10]
         return re.sub(r"\D", "", document or "")
 
+    @staticmethod
+    def _dgr_location(locality, *, city_fallback: str = "") -> F150Location:
+        """Ubicación F150 desde una localidad DGR (vacía si no hay códigos)."""
+        if locality is None:
+            return F150Location(locality_name=city_fallback)
+        return F150Location(
+            locality_code=locality.dgr_code_4,
+            locality_name=city_fallback or locality.name,
+            department_code=locality.department_code_4,
+            province_code=locality.province_code_2,
+            country_code=F150BatchService._country_abbr(locality),
+            country_name=locality.country.name if locality.country else "",
+        )
+
+    @staticmethod
+    def _country_abbr(locality) -> str:
+        if locality is None or locality.country is None:
+            return ""
+        return locality.country.abbr or ""
+
     def _to_document(self, remittance: Remittance) -> F150Remittance:
         issues = self.validation_issues(remittance)
         if issues:
@@ -177,11 +197,9 @@ class F150BatchService:
         carrier = remittance.carrier
         truck = remittance.truck
         driver = remittance.driver
-        destination = F150Location(
-            locality_name=remittance.delivery_city or address.city or "",
-            province_code="",
-            country_code="",
-            country_name="",
+        destination = self._dgr_location(
+            address.locality if address else None,
+            city_fallback=remittance.delivery_city or (address.city if address else "") or "",
         )
         origin = self._origin_location()
         items = []
@@ -191,12 +209,12 @@ class F150BatchService:
             quantity = Decimal(row.quantity)
             items.append(
                 F150Item(
-                    category_1="",
-                    category_2="",
-                    category_3="",
-                    category_4="",
+                    category_1=product.rh1 or "",
+                    category_2=product.rh2 or "",
+                    category_3=product.rh3 or "",
+                    category_4=product.rh4 or "",
                     item_code=(product.codigo or product.name).strip(),
-                    unit=row.unit,
+                    unit=product.unidad_dgr or row.unit,
                     quantity=quantity,
                     unit_price=unit_price,
                     total=quantity * unit_price,
@@ -216,10 +234,18 @@ class F150BatchService:
             carrier=F150Carrier(
                 cuit=self._format_cuit(remittance.carrier_cuit or carrier.cuit or ""),
                 name=remittance.carrier_name or carrier.name,
+                carrier_type=carrier.tipo or "",
+                code=carrier.codigo or "",
+                location=self._dgr_location(carrier.locality),
             ),
             vehicle=F150Vehicle(
                 chassis_plate=remittance.truck_domain or truck.domain,
                 trailer_plate=truck.trailer_domain or "",
+                chassis_type=truck.chassis_type or "",
+                trailer_type=truck.trailer_type or "",
+                plate_country_code=self._country_abbr(
+                    driver.locality if driver else None
+                ),
             ),
             driver=F150Driver(
                 cuit=self._format_cuit(driver.cuit or ""),
@@ -228,6 +254,7 @@ class F150BatchService:
                     driver.cuit or "",
                     remittance.driver_document or driver.document or "",
                 ),
+                location=self._dgr_location(driver.locality),
             ),
             items=tuple(items),
             observations=remittance.observations or "",

@@ -1,3 +1,4 @@
+from app.models.dgr import DgrLocality
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_FISCAL,
@@ -191,6 +192,7 @@ class ClientService:
         city: str,
         address: str,
         observations: str | None,
+        locality: DgrLocality | None = None,
     ) -> ClientAddress | None:
         consolidated = ClientService.consolidate_identical_fiscal_delivery(client)
         if consolidated is not None:
@@ -209,6 +211,7 @@ class ClientService:
             province=province,
             city=city,
             address=address,
+            locality=locality,
             is_primary=True,
             observations=observations,
         )
