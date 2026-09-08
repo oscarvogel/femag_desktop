@@ -31,7 +31,6 @@ class F150Location:
     province_code: str = ""
     country_code: str = ""
     country_name: str = ""
-    postal_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -193,16 +192,15 @@ class F150Encoder:
             destination.name,
             destination.address,
             destination.door_number,
-            dest_location.postal_code,
-            dest_location.department_name,
             dest_location.department_code,
-            dest_location.locality_name,
+            dest_location.department_name,
             dest_location.locality_code,
+            dest_location.locality_name,
             dest_location.province_code,
             dest_location.country_code,
             dest_location.country_name,
         )
-        return self._join(prefix, fields)
+        return self._join(prefix, fields, trailing_at=False)
 
     def _detail_lines(self, header_number: int, remittance: F150Remittance) -> list[str]:
         prefix = self._prefix("D", header_number, remittance.document_date)
@@ -236,9 +234,10 @@ class F150Encoder:
         return value.strftime("%d-%m-%Y")
 
     @staticmethod
-    def _join(prefix: str, fields: tuple[str, ...]) -> str:
+    def _join(prefix: str, fields: tuple[str, ...], *, trailing_at: bool = True) -> str:
         clean = [F150Encoder._clean(field) for field in fields]
-        return prefix + "@" + "@".join(clean) + "@"
+        body = prefix + "@" + "@".join(clean)
+        return body + "@" if trailing_at else body
 
     @staticmethod
     def _clean(value: object) -> str:
