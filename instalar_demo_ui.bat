@@ -37,7 +37,7 @@ echo ============================================================
 echo.
 
 REM Politica de ejecucion: Bypass solo para este proceso (no toca el host)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -InstallDir "%SCRIPT_DIR%" %*
 
 set "EXITCODE=%ERRORLEVEL%"
 
