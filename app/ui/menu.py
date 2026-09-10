@@ -64,6 +64,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             approved_item("Órdenes pendientes", "Pendientes", route_key="pending_orders_aging"),
             approved_item("Trazabilidad por lote", "Pendientes", route_key="lot_traceability"),
             approved_item("Devoluciones y reclamos", "Pendientes", route_key="returns_report"),
+            approved_item("Vencimientos de cobranzas", "Pendientes", route_key="collection_due_report"),
         )
         if item.route_key != "placeholder" or item.action_key is not None
     ]

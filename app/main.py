@@ -6,6 +6,7 @@ from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
 from app.ui.daily_collections_extension import install_daily_collections_extension
+from app.ui.collection_due_report_extension import install_collection_due_report_extension
 from app.ui.daily_operations_extension import install_daily_operations_extension
 from app.ui.lot_traceability_extension import install_lot_traceability_extension
 from app.ui.pending_orders_aging_extension import install_pending_orders_aging_extension
@@ -78,6 +79,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         install_managerial_account_risk_extension()
         install_managerial_clients_extension()
         install_daily_collections_extension()
+        install_collection_due_report_extension()
         install_daily_operations_extension()
         install_lot_traceability_extension()
         install_pending_orders_aging_extension()
