@@ -18,13 +18,15 @@ def test_whatsapp_handler_generates_pdf_and_queues_gateway_send(monkeypatch, tmp
         phone=lambda: "+54 9 376 4123456",
         caption=lambda: "Extracto FEMAG",
     )
-    fake_worker = SimpleNamespace(
-        signals=SimpleNamespace(
-            succeeded=SimpleNamespace(connect=lambda _cb: None),
-            failed=SimpleNamespace(connect=lambda _cb: None),
-            finished=SimpleNamespace(connect=lambda _cb: None),
-        )
-    )
+    class FakeWorker:
+        def __init__(self):
+            self.signals = SimpleNamespace(
+                succeeded=SimpleNamespace(connect=lambda _cb: None),
+                failed=SimpleNamespace(connect=lambda _cb: None),
+                finished=SimpleNamespace(connect=lambda _cb: None),
+            )
+
+    fake_worker = FakeWorker()
     fake_window = SimpleNamespace(
         _print_output_dir=tmp_path,
         user=SimpleNamespace(id=1),
