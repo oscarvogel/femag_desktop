@@ -36,8 +36,13 @@ echo  Repo: %SCRIPT_DIR%
 echo ============================================================
 echo.
 
+REM Detectar rama actual del clone para poder validar ramas feature.
+set "CURRENT_BRANCH="
+for /f "delims=" %%B in ('git -C "%SCRIPT_DIR%" branch --show-current 2^>nul') do set "CURRENT_BRANCH=%%B"
+if not defined CURRENT_BRANCH set "CURRENT_BRANCH=main"
+
 REM Politica de ejecucion: Bypass solo para este proceso (no toca el host)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -InstallDir "%SCRIPT_DIR%" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" -InstallDir "%SCRIPT_DIR%" -Branch "%CURRENT_BRANCH%" %*
 
 set "EXITCODE=%ERRORLEVEL%"
 
