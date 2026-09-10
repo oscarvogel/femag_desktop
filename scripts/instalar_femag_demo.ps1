@@ -3,7 +3,7 @@ param(
     [string]$InstallDir = "",
     [string]$InstallRoot = "$env:USERPROFILE\FEMAG",
     [string]$RepoUrl = "https://github.com/oscarvogel/femag_desktop.git",
-    [string]$Branch = "main",
+    [string]$Branch = "",
     [switch]$Reset,
     [switch]$SkipWinget,
     [switch]$SkipInstall,
@@ -113,6 +113,24 @@ function Remove-RepoArtifacts {
 }
 
 $PipNetworkOptions = @("--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org")
+
+# Si se ejecuta desde un clone existente y no se indicó -Branch,
+# usar la rama Git actual. Sólo caer a main para una instalación nueva.
+if (-not $Branch) {
+    if ($InstallDir -and (Test-Path (Join-Path $InstallDir ".git"))) {
+        try {
+            $DetectedBranch = (git -C $InstallDir branch --show-current 2>$null).Trim()
+            if ($DetectedBranch) {
+                $Branch = $DetectedBranch
+            }
+        } catch {
+            # Se resuelve a main debajo si Git no puede detectar la rama.
+        }
+    }
+    if (-not $Branch) {
+        $Branch = "main"
+    }
+}
 
 Write-Host ""
 Write-Host "FEMAG Desktop - instalador demo Orden de carga" -ForegroundColor Green
