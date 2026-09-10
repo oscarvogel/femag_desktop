@@ -80,6 +80,7 @@ from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
+from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
@@ -99,6 +100,7 @@ from app.ui.master_abm import build_client_abm_page, build_master_abm_page, mast
 from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
+from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -701,24 +703,85 @@ class FemagDesktopWindow(QMainWindow):
     def _share_account_statement_whatsapp(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
+
+        dialog = WhatsAppSendDialog(
+            client_name=client.name,
+            phone=getattr(client, "phone", "") or "",
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
         try:
-            whatsapp_url = account_statement_share_service.build_whatsapp_url(
-                client.name, client.phone
-            )
+            service = WhatsAppEnvioService()
             pdf_path = account_statement_print_service.export_account_statement(
                 client, self._print_output_dir
             )
-            if not webbrowser.open(whatsapp_url):
-                raise RuntimeError("No se pudo abrir WhatsApp en este equipo.")
+            envio = service.create_attempt(
+                tipo_documento="extracto_cuenta",
+                documento_id=str(client.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "WhatsApp", str(exc))
             return
-        QMessageBox.information(
-            self,
-            "WhatsApp",
-            "Se abrio el chat del cliente. Adjunte manualmente este PDF:\n"
-            f"{pdf_path}",
+
+        page = self.stack.currentWidget()
+        button = (
+            page.whatsapp_statement_button
+            if isinstance(page, CustomerLedgerPage)
+            else None
         )
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("Enviando...")
+
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers = getattr(self, "_account_statement_whatsapp_workers", set())
+        self._account_statement_whatsapp_workers = workers
+        workers.add(worker)
+
+        def _success(result) -> None:
+            labels = {
+                "queued": "encolado",
+                "processing": "procesando",
+                "accepted": "aceptado por WhatsApp",
+                "delivered": "entregado",
+                "read": "leído",
+                "failed": "fallido",
+            }
+            status = labels.get(result.estado, result.estado)
+            QMessageBox.information(
+                self,
+                "WhatsApp",
+                f"PDF enviado al gateway. Estado: {status}.\n"
+                f"Message ID: {result.message_id or '-'}",
+            )
+
+        def _failed(message: str) -> None:
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"No se pudo completar el envío: {message}",
+            )
+
+        def _finished() -> None:
+            workers.discard(worker)
+            if button is not None:
+                button.setText("Enviar por WhatsApp")
+                button.setEnabled(True)
+
+        worker.signals.succeeded.connect(_success)
+        worker.signals.failed.connect(_failed)
+        worker.signals.finished.connect(_finished)
+        QThreadPool.globalInstance().start(worker)
 
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
