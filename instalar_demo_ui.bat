@@ -17,7 +17,7 @@ setlocal
 
 REM Resolver el directorio del repo (donde esta este .bat)
 set "SCRIPT_DIR=%~dp0"
-if "%SCRIPT_DIR:~-1%"=="\\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
 REM Pasar todos los argumentos del .bat al .ps1
 set "PS_SCRIPT=%SCRIPT_DIR%\scripts\instalar_femag_demo.ps1"
