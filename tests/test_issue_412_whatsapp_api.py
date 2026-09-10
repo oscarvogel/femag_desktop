@@ -5,12 +5,36 @@ from pathlib import Path
 import pytest
 
 
-def test_whatsapp_config_requires_external_secret(monkeypatch):
+def test_whatsapp_config_reads_single_local_env(monkeypatch, tmp_path):
+    from app.services.whatsapp_api_client import WhatsAppApiClient
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WHATSAPP_ENABLED=true\n"
+        "WHATSAPP_API_URL=https://gateway.example\n"
+        "WHATSAPP_API_KEY=secret-local-only\n"
+        "WHATSAPP_INSTANCE_ID=default\n"
+        "WHATSAPP_API_TIMEOUT=21\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(env_file))
+
+    client = WhatsAppApiClient()
+
+    assert client.config.base_url == "https://gateway.example"
+    assert client.config.api_key == "secret-local-only"
+    assert client.config.instance_id == "default"
+    assert client.config.timeout_seconds == 21
+
+
+def test_whatsapp_is_disabled_by_default(monkeypatch, tmp_path):
     from app.services.whatsapp_api_client import WhatsAppApiClient, WhatsAppApiError
 
-    monkeypatch.delenv("WHATSAPP_API_URL", raising=False)
-    monkeypatch.delenv("WHATSAPP_API_KEY", raising=False)
-    with pytest.raises(WhatsAppApiError, match="WHATSAPP_API_URL"):
+    env_file = tmp_path / ".env"
+    env_file.write_text("WHATSAPP_ENABLED=false\n", encoding="utf-8")
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(env_file))
+
+    with pytest.raises(WhatsAppApiError, match="deshabilitado"):
         WhatsAppApiClient()
 
 
