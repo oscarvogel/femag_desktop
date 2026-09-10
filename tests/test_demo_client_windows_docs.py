@@ -13,9 +13,10 @@ def test_windows_demo_installer_script_documents_required_flow():
     assert '$RepoDir = if ($InstallDir)' in script
     assert "codex/issue-73-load-order-integral-demo" not in script
     assert "requirements.txt" in script
-    assert "FEMAG_DB_ENGINE=sqlite" in script
-    assert "FEMAG_SQLITE_PATH=femag_demo.sqlite3" in script
-    assert "FEMAG_DEMO=1" in script
+    assert '"FEMAG_DB_ENGINE" = "sqlite"' in script
+    assert '"FEMAG_SQLITE_PATH" = "femag_demo.sqlite3"' in script
+    assert '"FEMAG_DEMO" = "1"' in script
+    assert "preservamos WHATSAPP_*" in script
     assert "backups\\issue_73_integral_demo.sqlite3" not in script
     assert "scripts\\init_db.py" in script
     assert "scripts\\issue_73_integral_demo.py" in script
