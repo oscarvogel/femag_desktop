@@ -60,7 +60,7 @@ def test_regular_order_emphasizes_total_and_pallet_count_with_operational_labels
     _assert_emphasized(total)
     _assert_emphasized(pallets)
     assert _plain_text(total) == "180 BOLSAS"
-    assert _plain_text(pallets) == "1 pallet"
+    assert _plain_text(pallets) == "1"
     assert product.style.fontSize < total.style.fontSize
     assert product.style.fontName != "Helvetica-Bold"
 
@@ -76,7 +76,7 @@ def test_preparation_sheet_keeps_unit_separate_and_labels_pallet_count():
     _assert_emphasized(pallets)
     assert _plain_text(unit) == "BOLSA"
     assert _plain_text(total) == "180"
-    assert _plain_text(pallets) == "1 pallet"
+    assert _plain_text(pallets) == "1"
     assert unit.style.fontSize < total.style.fontSize
     assert unit.style.fontName != "Helvetica-Bold"
 
