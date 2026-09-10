@@ -2,43 +2,82 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-def test_whatsapp_handler_generates_pdf_and_opens_chat(monkeypatch, tmp_path):
+def test_whatsapp_handler_generates_pdf_and_queues_gateway_send(monkeypatch, tmp_path):
+    from PyQt5.QtWidgets import QDialog
     from app.ui.desktop_app import FemagDesktopWindow
 
-    client = SimpleNamespace(name="Cliente Uno", phone="0376 15 4123456")
+    client = SimpleNamespace(id=9, name="Cliente Uno", phone="0376 15 4123456")
     pdf_path = tmp_path / "extracto.pdf"
-    opened = []
-    messages = []
-    fake_window = SimpleNamespace()
+    created = []
+    started = []
+    fake_service = SimpleNamespace(
+        create_attempt=lambda **kwargs: created.append(kwargs) or SimpleNamespace(id=77)
+    )
+    fake_dialog = SimpleNamespace(
+        exec_=lambda: QDialog.Accepted,
+        phone=lambda: "+54 9 376 4123456",
+        caption=lambda: "Extracto FEMAG",
+    )
+    class FakeWorker:
+        def __init__(self):
+            self.signals = SimpleNamespace(
+                succeeded=SimpleNamespace(connect=lambda _cb: None),
+                failed=SimpleNamespace(connect=lambda _cb: None),
+                finished=SimpleNamespace(connect=lambda _cb: None),
+            )
+
+    fake_worker = FakeWorker()
+    fake_window = SimpleNamespace(
+        _print_output_dir=tmp_path,
+        user=SimpleNamespace(id=1),
+        stack=SimpleNamespace(currentWidget=lambda: None),
+    )
+
+    monkeypatch.setattr("app.ui.desktop_app.WhatsAppSendDialog", lambda **_kwargs: fake_dialog)
+    monkeypatch.setattr("app.ui.desktop_app.WhatsAppEnvioService", lambda: fake_service)
     monkeypatch.setattr(
         "app.ui.desktop_app.account_statement_print_service.export_account_statement",
         lambda selected, output: pdf_path,
     )
+    monkeypatch.setattr("app.ui.desktop_app.WhatsAppSendWorker", lambda **_kwargs: fake_worker)
     monkeypatch.setattr(
-        "app.ui.desktop_app.account_statement_share_service.build_whatsapp_url",
-        lambda name, phone: "https://wa.me/5493764123456?text=extracto",
-    )
-    monkeypatch.setattr(
-        "app.ui.desktop_app.webbrowser.open",
-        lambda url: opened.append(url) or True,
-    )
-    monkeypatch.setattr(
-        "app.ui.desktop_app.QMessageBox.information",
-        lambda *_args: messages.append(_args[-1]),
+        "app.ui.desktop_app.QThreadPool.globalInstance",
+        lambda: SimpleNamespace(start=lambda worker: started.append(worker)),
     )
 
     FemagDesktopWindow._share_account_statement_whatsapp(fake_window, client)
 
-    assert opened == ["https://wa.me/5493764123456?text=extracto"]
-    assert str(pdf_path) in messages[-1]
+    assert len(created) == 1
+    assert created[0]["tipo_documento"] == "extracto_cuenta"
+    assert created[0]["documento_id"] == "9"
+    assert created[0]["destinatario"] == "+54 9 376 4123456"
+    assert created[0]["caption"] == "Extracto FEMAG"
+    assert created[0]["pdf_path"] == pdf_path
+    assert started == [fake_worker]
 
 
-def test_whatsapp_handler_reports_missing_phone(monkeypatch, tmp_path):
+def test_whatsapp_handler_reports_configuration_error(monkeypatch, tmp_path):
+    from PyQt5.QtWidgets import QDialog
     from app.ui.desktop_app import FemagDesktopWindow
 
     warnings = []
-    fake_window = SimpleNamespace()
-    client = SimpleNamespace(name="Cliente Uno", phone=None)
+    fake_window = SimpleNamespace(
+        _print_output_dir=tmp_path,
+        user=SimpleNamespace(id=1),
+        stack=SimpleNamespace(currentWidget=lambda: None),
+    )
+    client = SimpleNamespace(id=9, name="Cliente Uno", phone=None)
+    fake_dialog = SimpleNamespace(
+        exec_=lambda: QDialog.Accepted,
+        phone=lambda: "+54 9 376 4123456",
+        caption=lambda: "Extracto FEMAG",
+    )
+
+    monkeypatch.setattr("app.ui.desktop_app.WhatsAppSendDialog", lambda **_kwargs: fake_dialog)
+    monkeypatch.setattr(
+        "app.ui.desktop_app.WhatsAppEnvioService",
+        lambda: (_ for _ in ()).throw(RuntimeError("Falta configurar WHATSAPP_API_KEY.")),
+    )
     monkeypatch.setattr(
         "app.ui.desktop_app.QMessageBox.warning",
         lambda *_args: warnings.append(_args[-1]),
@@ -46,7 +85,7 @@ def test_whatsapp_handler_reports_missing_phone(monkeypatch, tmp_path):
 
     FemagDesktopWindow._share_account_statement_whatsapp(fake_window, client)
 
-    assert "telefono" in warnings[-1].lower()
+    assert warnings == ["Falta configurar WHATSAPP_API_KEY."]
 
 
 def test_email_handler_confirms_and_sends_pdf(monkeypatch, tmp_path):

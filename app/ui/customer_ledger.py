@@ -210,7 +210,7 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_button.clicked.connect(self._on_print_statement)
         header_row.addWidget(self.print_statement_button)
 
-        self.whatsapp_statement_button = QPushButton("Abrir WhatsApp")
+        self.whatsapp_statement_button = QPushButton("Enviar por WhatsApp")
         self.whatsapp_statement_button.setObjectName("customerLedgerWhatsAppStatementButton")
         self.whatsapp_statement_button.setEnabled(False)
         self.whatsapp_statement_button.clicked.connect(self._on_whatsapp_statement)

@@ -22,6 +22,11 @@ class Settings:
     backup_dir: Path
     backup_extra_dir: Path | None
     log_level: str
+    whatsapp_enabled: bool = False
+    whatsapp_api_url: str = ""
+    whatsapp_api_key: str = ""
+    whatsapp_instance_id: str = "default"
+    whatsapp_api_timeout: float = 15.0
 
 
 def _optional_path(value: str | None) -> Path | None:
@@ -40,7 +45,9 @@ def load_settings() -> Settings:
         secure_connection = load_runtime_connection()
 
     env_file = os.getenv("FEMAG_ENV_FILE", ".env")
-    if load_dotenv and secure_connection is None:
+    # El .env local es la fuente unica para configuracion no sensible al modo de DB,
+    # incluido WhatsApp. Las credenciales DB seguras siguen teniendo prioridad.
+    if load_dotenv:
         load_dotenv(env_file, override=True)
 
     demo = False if secure_connection else _flag_enabled(os.getenv("FEMAG_DEMO"))
@@ -65,4 +72,9 @@ def load_settings() -> Settings:
         backup_dir=Path(os.getenv("BACKUP_DIR", "backups")),
         backup_extra_dir=_optional_path(os.getenv("BACKUP_EXTRA_DIR")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        whatsapp_enabled=_flag_enabled(os.getenv("WHATSAPP_ENABLED", "false")),
+        whatsapp_api_url=os.getenv("WHATSAPP_API_URL", "").strip().rstrip("/"),
+        whatsapp_api_key=os.getenv("WHATSAPP_API_KEY", "").strip(),
+        whatsapp_instance_id=os.getenv("WHATSAPP_INSTANCE_ID", "default").strip(),
+        whatsapp_api_timeout=float(os.getenv("WHATSAPP_API_TIMEOUT", "15")),
     )
