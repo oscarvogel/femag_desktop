@@ -226,12 +226,14 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Órdenes pendientes",
             "Trazabilidad por lote",
             "Devoluciones y reclamos",
+            "Vencimientos de cobranzas",
         ]
         assert [child.route_key for child in informes.children] == [
             "daily_operations",
             "pending_orders_aging",
             "lot_traceability",
             "returns_report",
+            "collection_due_report",
         ]
         pending = next(item for item in informes.children if item.title == "Órdenes pendientes")
         assert pending.placeholder is False
