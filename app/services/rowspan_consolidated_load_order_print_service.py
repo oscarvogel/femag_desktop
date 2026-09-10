@@ -36,6 +36,17 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         except (InvalidOperation, TypeError, ValueError):
             return False
 
+    @staticmethod
+    def _pallet_label(value: object) -> str:
+        text = str(value or "-").strip()
+        if text == "-":
+            return "-"
+        try:
+            count = int(text)
+        except ValueError:
+            return text
+        return f"{count} pallet" if count == 1 else f"{count} pallets"
+
     def _quantity_with_unit(self, quantity: object, unit: object) -> str:
         quantity_text = _quantity(quantity)
         unit_text = str(unit or "").strip().upper()
@@ -57,24 +68,12 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
 
         return f"{quantity_text} {label}"
 
-    @staticmethod
-    def _pallet_label(value: object) -> str:
-        text = str(value or "").strip()
-        if not text or text == "-":
-            return "-"
-        try:
-            count = Decimal(text)
-        except InvalidOperation:
-            return text
-        noun = "pallet" if count == Decimal("1") else "pallets"
-        return f"{text} {noun}"
-
     def _pallet_signature(self, block: dict[str, object], consolidated_row: dict[str, object]) -> tuple[int, ...]:
         """Devuelve los pallets físicos asociados a la fila consolidada.
 
         La unidad no forma parte de la identidad operativa de la asignación. Puede venir
         vacía en datos históricos o diferir en snapshots, por lo que usarla para reconstruir
-        la relación producto/pallet puede hacer desaparecer un conteo válido.
+        la relación producto/pallet puede hacer desaparecer una asignación válida.
         """
         target_product = str(consolidated_row.get("product", ""))
         target_lote = self._optional_operational_value(consolidated_row.get("lote"))
@@ -92,7 +91,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                     break
         return tuple(sorted(set(sequences)))
 
-    def _pallet_count_spans(
+    def _pallet_spans(
         self,
         block: dict[str, object],
         consolidated: list[dict[str, object]],
@@ -100,11 +99,18 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         first_table_row: int,
         pallet_column: int,
     ) -> tuple[list[tuple], list[str]]:
+        """Muestra identificadores de pallets físicos y agrupa filas que comparten los mismos.
+
+        Antes se mostraba la cantidad de pallets por producto. Esa representación era
+        ambigua: si dos productos compartían un pallet, por ejemplo ``2 pallets`` y
+        ``1 pallet``, visualmente parecía que había tres pallets aunque físicamente fueran
+        solo dos. Los identificadores reales (``1–2`` y ``2``) preservan la relación real.
+        """
         signatures = [self._pallet_signature(block, row) for row in consolidated]
         display_values = [
-            str(len(signature)) if signature else (
-                str(row.get("pallet_count")) if row.get("pallet_count") else "-"
-            )
+            self._compact_ranges(list(signature))
+            if signature
+            else str(row.get("pallets") or "-")
             for signature, row in zip(signatures, consolidated)
         ]
         spans: list[tuple] = []
@@ -134,7 +140,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         header = [
             self._p("Producto / detalle", bold=True),
             self._p("Cantidad total", bold=True),
-            self._p("Cant. pallets", bold=True),
+            self._p("Pallet/s", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
@@ -152,7 +158,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         consolidated = block.get("consolidated_rows") or self._consolidate_rows(block)
         span_commands: list[tuple] = []
         if consolidated:
-            span_commands, pallet_values = self._pallet_count_spans(
+            span_commands, pallet_values = self._pallet_spans(
                 block,
                 consolidated,
                 first_table_row=2,
@@ -163,7 +169,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                     [
                         self._p(row["product"]),
                         self._center_p(self._quantity_with_unit(row["quantity"], row.get("unit"))),
-                        self._center_p(self._pallet_label(pallet_values[index])) if pallet_values[index] else "",
+                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
@@ -196,7 +202,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
             self._p("Producto / detalle", bold=True),
             self._p("Unidad", bold=True),
             self._p("Cantidad total", bold=True),
-            self._p("Cant. pallets", bold=True),
+            self._p("Pallet/s", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
@@ -215,7 +221,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         consolidated = block.get("consolidated_rows") or self._consolidate_rows(block)
         span_commands: list[tuple] = []
         if consolidated:
-            span_commands, pallet_values = self._pallet_count_spans(
+            span_commands, pallet_values = self._pallet_spans(
                 block,
                 consolidated,
                 first_table_row=2,
@@ -227,7 +233,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                         self._p(row["product"]),
                         self._p(row.get("unit") or "-"),
                         self._center_p(_quantity(row["quantity"])),
-                        self._center_p(self._pallet_label(pallet_values[index])) if pallet_values[index] else "",
+                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
                         self._p(row["lote"]) if row["lote"] else "",
                         self._p(row["elab"]) if row["elab"] else "",
                     ]
