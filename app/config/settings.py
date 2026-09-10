@@ -22,11 +22,11 @@ class Settings:
     backup_dir: Path
     backup_extra_dir: Path | None
     log_level: str
-    whatsapp_enabled: bool
-    whatsapp_api_url: str
-    whatsapp_api_key: str
-    whatsapp_instance_id: str
-    whatsapp_api_timeout: float
+    whatsapp_enabled: bool = False
+    whatsapp_api_url: str = ""
+    whatsapp_api_key: str = ""
+    whatsapp_instance_id: str = "default"
+    whatsapp_api_timeout: float = 15.0
 
 
 def _optional_path(value: str | None) -> Path | None:
