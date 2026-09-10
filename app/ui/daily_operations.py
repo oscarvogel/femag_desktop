@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client
 from app.reports.daily_operations import DailyOperationsFilters, DailyOperationsService
+from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 
 
 class DailyOperationsDialog(QDialog):
@@ -151,6 +152,9 @@ class DailyOperationsDialog(QDialog):
         self.carrier_combo.addItem("Todos", None)
         for carrier in Carrier.select().order_by(Carrier.name):
             self.carrier_combo.addItem(carrier.name, carrier.id)
+        enable_combo_autocomplete(self.status_combo, placeholder="Buscar estado...")
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
+        enable_combo_autocomplete(self.carrier_combo, placeholder="Buscar transportista...")
 
     @staticmethod
     def _to_qdate(value: date) -> QDate:
@@ -186,9 +190,9 @@ class DailyOperationsDialog(QDialog):
         return DailyOperationsFilters(
             start=self._py_date(self.date_from),
             end=self._py_date(self.date_to),
-            status=self.status_combo.currentData(),
-            client_id=self.client_combo.currentData(),
-            carrier_id=self.carrier_combo.currentData(),
+            status=combo_current_data(self.status_combo),
+            client_id=combo_current_data(self.client_combo),
+            carrier_id=combo_current_data(self.carrier_combo),
         )
 
     def refresh(self):
