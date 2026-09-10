@@ -166,11 +166,32 @@ try {
         Write-Step "Configurando base SQLite local de demo"
         $DemoDatabasePath = "femag_demo.sqlite3"
         $EnvFile = Join-Path $RepoDir ".env"
-        [System.IO.File]::WriteAllLines($EnvFile, @(
-            "FEMAG_DB_ENGINE=sqlite",
-            "FEMAG_SQLITE_PATH=femag_demo.sqlite3",
-            "FEMAG_DEMO=1"
-        ), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+
+        # El .env local es la fuente unica de configuracion. Para el demo
+        # actualizamos solo las claves de base/demo y preservamos WHATSAPP_*,
+        # SMTP y cualquier otra configuracion local existente.
+        $EnvLines = @()
+        if (Test-Path $EnvFile) {
+            $EnvLines = @(Get-Content -Path $EnvFile -Encoding UTF8)
+        }
+
+        $DemoValues = [ordered]@{
+            "FEMAG_DB_ENGINE" = "sqlite"
+            "FEMAG_SQLITE_PATH" = "femag_demo.sqlite3"
+            "FEMAG_DEMO" = "1"
+        }
+
+        foreach ($Key in $DemoValues.Keys) {
+            $Pattern = "^" + [regex]::Escape($Key) + "="
+            $EnvLines = @($EnvLines | Where-Object { $_ -notmatch $Pattern })
+            $EnvLines += "$Key=$($DemoValues[$Key])"
+        }
+
+        [System.IO.File]::WriteAllLines(
+            $EnvFile,
+            $EnvLines,
+            (New-Object System.Text.UTF8Encoding -ArgumentList $false)
+        )
         $env:FEMAG_ENV_FILE = $EnvFile
 
         if (Test-Path "scripts\init_db.py") {
