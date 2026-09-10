@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from app.config.settings import load_settings
 
 
 TERMINAL_STATUSES = {"delivered", "read", "failed"}
@@ -26,16 +27,14 @@ class WhatsAppApiConfig:
     enabled: bool = True
 
     @classmethod
-    def from_env(cls) -> "WhatsAppApiConfig":
-        enabled = str(os.getenv("WHATSAPP_ENABLED", "true")).strip().lower() in {
-            "1", "true", "yes", "si", "sí", "on"
-        }
+    def from_settings(cls) -> "WhatsAppApiConfig":
+        settings = load_settings()
         return cls(
-            base_url=os.getenv("WHATSAPP_API_URL", "").strip().rstrip("/"),
-            api_key=os.getenv("WHATSAPP_API_KEY", "").strip(),
-            instance_id=os.getenv("WHATSAPP_INSTANCE_ID", "default").strip(),
-            timeout_seconds=float(os.getenv("WHATSAPP_API_TIMEOUT", "15")),
-            enabled=enabled,
+            base_url=settings.whatsapp_api_url,
+            api_key=settings.whatsapp_api_key,
+            instance_id=settings.whatsapp_instance_id,
+            timeout_seconds=settings.whatsapp_api_timeout,
+            enabled=settings.whatsapp_enabled,
         )
 
     def validate(self) -> None:
@@ -51,7 +50,7 @@ class WhatsAppApiConfig:
 
 class WhatsAppApiClient:
     def __init__(self, config: WhatsAppApiConfig | None = None):
-        self.config = config or WhatsAppApiConfig.from_env()
+        self.config = config or WhatsAppApiConfig.from_settings()
         self.config.validate()
 
     def _headers(self) -> dict[str, str]:
