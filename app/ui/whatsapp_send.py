@@ -94,10 +94,11 @@ class WhatsAppWorkerSignals(QObject):
 
 
 class WhatsAppSendWorker(QRunnable):
-    def __init__(self, *, envio_id: int, pdf_path: Path):
+    def __init__(self, *, envio_id: int, pdf_path: Path, service: WhatsAppEnvioService | None = None):
         super().__init__()
         self.envio_id = envio_id
         self.pdf_path = Path(pdf_path)
+        self.service = service or WhatsAppEnvioService()
         self.signals = WhatsAppWorkerSignals()
 
     def run(self) -> None:
@@ -105,7 +106,7 @@ class WhatsAppSendWorker(QRunnable):
 
         try:
             envio = WhatsAppEnvio.get_by_id(self.envio_id)
-            result = WhatsAppEnvioService().send_pdf(envio=envio, pdf_path=self.pdf_path)
+            result = self.service.send_pdf(envio=envio, pdf_path=self.pdf_path)
         except Exception as exc:
             self.signals.failed.emit(str(exc))
         else:
