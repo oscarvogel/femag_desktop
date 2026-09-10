@@ -36,6 +36,17 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         except (InvalidOperation, TypeError, ValueError):
             return False
 
+    @staticmethod
+    def _pallet_label(value: object) -> str:
+        text = str(value or "-").strip()
+        if text == "-":
+            return "-"
+        try:
+            count = int(text)
+        except ValueError:
+            return text
+        return f"{count} pallet" if count == 1 else f"{count} pallets"
+
     def _quantity_with_unit(self, quantity: object, unit: object) -> str:
         quantity_text = _quantity(quantity)
         unit_text = str(unit or "").strip().upper()
