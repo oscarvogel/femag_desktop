@@ -29,6 +29,7 @@ from app.models.load_orders import (
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
+from app.models.whatsapp import WhatsAppEnvio
 
 
 ALL_MODELS = [
@@ -69,4 +70,5 @@ ALL_MODELS = [
     NumberSequence,
     BackupLog,
     AvisoLectura,
+    WhatsAppEnvio,
 ]
