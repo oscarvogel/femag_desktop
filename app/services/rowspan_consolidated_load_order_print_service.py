@@ -99,18 +99,17 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         first_table_row: int,
         pallet_column: int,
     ) -> tuple[list[tuple], list[str]]:
-        """Muestra identificadores de pallets físicos y agrupa filas que comparten los mismos.
+        """Muestra la cantidad de pallets físicos asociados a cada fila consolidada.
 
-        Antes se mostraba la cantidad de pallets por producto. Esa representación era
-        ambigua: si dos productos compartían un pallet, por ejemplo ``2 pallets`` y
-        ``1 pallet``, visualmente parecía que había tres pallets aunque físicamente fueran
-        solo dos. Los identificadores reales (``1–2`` y ``2``) preservan la relación real.
+        El conteo se basa en los pallets reales distintos de la asignación. Se conserva
+        el rowspan cuando varias filas comparten exactamente el mismo conjunto físico,
+        evitando repetir visualmente el mismo dato.
         """
         signatures = [self._pallet_signature(block, row) for row in consolidated]
         display_values = [
-            self._compact_ranges(list(signature))
+            self._pallet_label(len(signature))
             if signature
-            else str(row.get("pallets") or "-")
+            else self._pallet_label(row.get("pallet_count") or "-")
             for signature, row in zip(signatures, consolidated)
         ]
         spans: list[tuple] = []
@@ -140,7 +139,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         header = [
             self._p("Producto / detalle", bold=True),
             self._p("Cantidad total", bold=True),
-            self._p("Pallet/s", bold=True),
+            self._p("Cant. pallets", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
