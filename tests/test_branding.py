@@ -7,6 +7,7 @@ ASSET_NAMES = (
     "femag-logo-source.png",
     "femag-logo-ui.png",
     "femag-logo-compact.png",
+    "login-operacion-background.png",
     "femag.ico",
 )
 
@@ -56,7 +57,7 @@ def test_login_displays_accessible_brand_logo():
     window.close()
 
 
-def test_login_branding_does_not_overlap_title_or_subtitle():
+def test_login_branding_and_form_content_use_separate_columns():
     from PyQt5.QtWidgets import QApplication, QDialog, QLabel
 
     from app.ui.login_window import LoginWindow
@@ -69,11 +70,13 @@ def test_login_branding_does_not_overlap_title_or_subtitle():
     title = window.findChild(QLabel, "loginTitle")
     subtitle = window.findChild(QLabel, "loginSubtitle")
 
-    assert logo.geometry().bottom() < title.geometry().top(), (
-        logo.geometry().getRect(),
+    logo_right = logo.mapTo(window, logo.rect().bottomRight()).x()
+    title_left = title.mapTo(window, title.rect().topLeft()).x()
+    assert logo_right < title_left, (logo_right, title_left)
+    assert title.geometry().bottom() < subtitle.geometry().top(), (
         title.geometry().getRect(),
+        subtitle.geometry().getRect(),
     )
-    assert title.geometry().bottom() < subtitle.geometry().top()
     assert window.height() >= window.minimumSizeHint().height()
     window.close()
 
