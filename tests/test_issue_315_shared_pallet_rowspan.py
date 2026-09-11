@@ -45,9 +45,9 @@ def test_regular_detail_places_total_before_pallets_and_rowspans_shared_pallet()
     table = service._destination_table(_shared_pallet_block())
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[0] == ["Producto / detalle", "Cantidad total", "Pallet/s", "Lote", "Elab."]
+    assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
     assert rows[2][1] == "30 BOLSAS"
-    assert rows[2][2] == "1"
+    assert rows[2][2] == "1 pallet"
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert rows[5][2] == ""
@@ -65,12 +65,12 @@ def test_preparation_sheet_places_total_before_pallets_and_rowspans_shared_palle
         "Producto / detalle",
         "Unidad",
         "Cantidad total",
-        "Pallet/s",
+        "Cant. pallets",
         "Lote",
         "Elab.",
     ]
     assert rows[2][2] == "30"
-    assert rows[2][3] == "1"
+    assert rows[2][3] == "1 pallet"
     assert rows[3][3] == ""
     assert rows[4][3] == ""
     assert rows[5][3] == ""
@@ -103,9 +103,9 @@ def test_pallet_display_falls_back_to_consolidated_value_when_signature_is_unava
     prep_table = service._preparation_destination_table(block)
 
     assert _plain_text(table._cellvalues[2][1]) == "480 BOLSAS"
-    assert _plain_text(table._cellvalues[2][2]) == "1-8"
+    assert _plain_text(table._cellvalues[2][2]) == "8 pallets"
     assert _plain_text(prep_table._cellvalues[2][2]) == "480"
-    assert _plain_text(prep_table._cellvalues[2][3]) == "1-8"
+    assert _plain_text(prep_table._cellvalues[2][3]) == "8 pallets"
 
 
 def test_issue_413_shared_physical_pallet_is_not_double_counted_visually():
@@ -153,9 +153,62 @@ def test_issue_413_shared_physical_pallet_is_not_double_counted_visually():
     table = service._destination_table(block)
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[0] == ["Producto / detalle", "Cantidad total", "Pallet/s", "Lote", "Elab."]
+    assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
     assert rows[2][1] == "90 UNIDADES"
-    assert rows[2][2] == "1–2"
+    assert rows[2][2] == "2 pallets"
     assert rows[3][1] == "75 UNIDADES"
-    assert rows[3][2] == "2"
+    assert rows[3][2] == "1 pallet"
     assert ("SPAN", (2, 2), (2, 3)) not in table._spanCmds
+
+
+def test_issue_417_prints_pallet_counts_not_physical_ranges():
+    service = _service()
+    block = {
+        "destination": "SUAREZ DAGOBERTO - QUILMES OESTE",
+        "pallet_blocks": [
+            *[
+                {
+                    "label": str(sequence),
+                    "rows": [
+                        {
+                            "product": "BOLSAS DE FECULA NATIVA",
+                            "unit": "UNIDAD",
+                            "quantity": 60,
+                            "lote": "",
+                            "elab": "",
+                        }
+                    ],
+                }
+                for sequence in range(1, 18)
+            ],
+            *[
+                {
+                    "label": str(sequence),
+                    "rows": [
+                        {
+                            "product": "PACK 10 UNID. FECULA X 1 KG",
+                            "unit": "UNIDAD",
+                            "quantity": 100,
+                            "lote": "",
+                            "elab": "",
+                        }
+                    ],
+                }
+                for sequence in range(18, 20)
+            ],
+        ],
+        "loose_block": None,
+        "unassigned_block": None,
+    }
+    block["consolidated_rows"] = service._consolidate_rows(block)
+
+    table = service._destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
+    assert rows[2][1] == "1020 UNIDADES"
+    assert rows[2][2] == "17 pallets"
+    assert rows[3][1] == "200 UNIDADES"
+    assert rows[3][2] == "2 pallets"
+    assert "1–17" not in rows[2][2]
+    assert "18–19" not in rows[3][2]
