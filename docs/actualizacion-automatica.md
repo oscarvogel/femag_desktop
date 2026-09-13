@@ -21,6 +21,8 @@ La configuración productiva NO forma parte del instalador. Vive fuera de `{app}
 
 Los archivos `connection.json` y `connection.credential` son datos locales del puesto. La credencial está protegida con Windows DPAPI/CurrentUser.
 
+La configuración de WhatsApp sigue la misma regla: `whatsapp.json` contiene únicamente URL, instancia, timeout y estado; `whatsapp.credential` contiene la API key cifrada con DPAPI/CurrentUser. Ninguna actualización puede reemplazar estos archivos ni incluirlos dentro del instalador.
+
 Regla de release: nunca copiar, empaquetar, reemplazar, borrar ni modificar INI, `.env`, credenciales o secretos. Una actualización debe dejar la configuración byte-a-byte intacta.
 
 ## Build
