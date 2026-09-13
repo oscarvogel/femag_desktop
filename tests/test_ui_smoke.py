@@ -191,6 +191,22 @@ def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
     assert config.route_key == "remittance_series"
 
 
+def test_admin_sidebar_exposes_whatsapp_configuration(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_whatsapp_menu", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    system = next(item for item in principal.items if item.title == "Sistema")
+    whatsapp = next(item for item in system.children if item.title == "WhatsApp")
+
+    assert whatsapp.placeholder is False
+    assert whatsapp.route_key == "whatsapp_configuration"
+
+
 def test_sidebar_places_customer_ledger_after_managerial_block(db):
     from app.services.auth_service import AuthService
     from app.services.menu_service import set_managerial_dashboard_menu_enabled

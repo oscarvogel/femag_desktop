@@ -43,6 +43,14 @@ El arranque productivo solo conecta y valida tablas y columnas requeridas. No cr
 
 El modo DEMO conserva su inicializacion automatica de SQLite y permanece aislado del flujo productivo.
 
+## Configuración de WhatsApp por puesto
+
+En una instalación productiva, un administrador ingresa por **Sistema → WhatsApp** y configura la URL del gateway, la instancia compartida, el tiempo de espera y la API key. La API key no se guarda en `.env`: FEMAG la cifra mediante Windows DPAPI para el usuario Windows actual y la conserva junto con los metadatos locales en `%LOCALAPPDATA%\FEMAG Desktop`.
+
+La clave nunca vuelve a mostrarse. Para rotarla, se abre la misma pantalla y se ingresa la nueva clave; dejar ese campo vacío conserva la existente. La acción queda registrada en la auditoría sin incluir el secreto. Todos los puestos pueden usar la misma instancia, por ejemplo `default`, pero cada usuario Windows debe configurar su propia credencial protegida.
+
+Mientras un puesto no tenga configuración segura de WhatsApp, FEMAG conserva compatibilidad con las variables `WHATSAPP_*` de `.env`; no se recomienda ese mecanismo para producción porque expone la API key en texto plano.
+
 Las primeras pruebas MySQL deben realizarse sobre una base descartable y vacia. Nunca usar la base productiva para validar cambios de esquema.
 
 ## Validacion

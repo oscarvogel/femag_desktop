@@ -28,6 +28,20 @@ class WhatsAppApiConfig:
 
     @classmethod
     def from_settings(cls) -> "WhatsAppApiConfig":
+        from app.config.secure_credentials import (
+            has_runtime_whatsapp_configuration,
+            load_runtime_whatsapp_configuration,
+        )
+
+        if has_runtime_whatsapp_configuration():
+            runtime_configuration = load_runtime_whatsapp_configuration()
+            return cls(
+                base_url=runtime_configuration.api_url,
+                api_key=runtime_configuration.api_key,
+                instance_id=runtime_configuration.instance_id,
+                timeout_seconds=runtime_configuration.timeout_seconds,
+                enabled=runtime_configuration.enabled,
+            )
         settings = load_settings()
         return cls(
             base_url=settings.whatsapp_api_url,
