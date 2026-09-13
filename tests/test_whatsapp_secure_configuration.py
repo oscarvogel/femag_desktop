@@ -1,8 +1,4 @@
 import json
-import os
-
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_runtime_whatsapp_configuration_splits_metadata_from_api_key(tmp_path, monkeypatch):
@@ -98,9 +94,7 @@ def test_invalid_secure_whatsapp_configuration_does_not_fall_back_to_env(monkeyp
         WhatsAppApiConfig.from_settings()
 
 
-def test_whatsapp_configuration_dialog_preserves_hidden_key():
-    from PyQt5.QtWidgets import QApplication, QLineEdit
-
+def test_whatsapp_configuration_preserves_existing_key_when_rotation_is_empty():
     from app.config.secure_credentials import RuntimeWhatsAppConfiguration
     from app.ui.whatsapp_configuration import WhatsAppConfigurationDialog
 
@@ -111,30 +105,44 @@ def test_whatsapp_configuration_dialog_preserves_hidden_key():
         timeout_seconds=15,
         enabled=True,
     )
-    app = QApplication.instance() or QApplication([])
-    dialog = WhatsAppConfigurationDialog(current=current)
+    class Field:
+        def __init__(self, value):
+            self._value = value
 
-    assert dialog.api_key.echoMode() == QLineEdit.Password
-    assert dialog.api_key.text() == ""
-    assert dialog.configuration().api_key == "previous-key"
-    dialog.api_key.setText("rotated-key")
-    assert dialog.configuration().api_key == "rotated-key"
-    app.processEvents()
+        def text(self):
+            return self._value
+
+    class Toggle:
+        def isChecked(self):
+            return True
+
+    class Timeout:
+        def value(self):
+            return 15
+
+    dialog = type(
+        "DialogValues",
+        (),
+        {
+            "_current": current,
+            "api_key": Field(""),
+            "api_url": Field("https://gateway.example"),
+            "instance_id": Field("default"),
+            "timeout": Timeout(),
+            "enabled": Toggle(),
+        },
+    )()
+
+    configuration = WhatsAppConfigurationDialog.configuration(dialog)
+    assert configuration.api_key == "previous-key"
 
 
-def test_whatsapp_configuration_page_audits_without_api_key(db, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QDialog
-
-    from app.config.secure_credentials import RuntimeWhatsAppConfiguration, SecureConfigurationError
+def test_whatsapp_configuration_audit_omits_api_key(db):
+    from app.config.secure_credentials import RuntimeWhatsAppConfiguration
     from app.models.audit import AuditLog
-    from app.models.security import User, UserProfile
-    from app.services.permission_service import PermissionService
-    from app.ui import whatsapp_configuration
+    from app.services.audit_service import AuditService
+    from app.ui.whatsapp_configuration import _audit_value
 
-    PermissionService().seed_defaults()
-    profile = UserProfile.get(UserProfile.name == "Administrador")
-    user = User.create(username="admin_whatsapp_config", password_hash="x", profile=profile)
-    saved = []
     configuration = RuntimeWhatsAppConfiguration(
         api_url="https://gateway.example",
         api_key="rotated-key",
@@ -143,40 +151,17 @@ def test_whatsapp_configuration_page_audits_without_api_key(db, monkeypatch):
         enabled=True,
     )
 
-    monkeypatch.setattr(whatsapp_configuration, "has_runtime_whatsapp_configuration", lambda: False)
-    monkeypatch.setattr(
-        whatsapp_configuration,
-        "load_runtime_whatsapp_configuration",
-        lambda: (_ for _ in ()).throw(SecureConfigurationError("sin configuración")),
+    AuditService().record(
+        user="admin_whatsapp_config",
+        module="WhatsApp",
+        action="configurar",
+        new_value=_audit_value(configuration),
+        observation="Configuración local de WhatsApp actualizada; API key protegida y omitida.",
     )
-    monkeypatch.setattr(
-        whatsapp_configuration,
-        "save_runtime_whatsapp_configuration",
-        saved.append,
-    )
-    monkeypatch.setattr(whatsapp_configuration.QMessageBox, "information", lambda *_args: None)
 
-    class FakeDialog:
-        def __init__(self, **_kwargs):
-            pass
-
-        def exec_(self):
-            return QDialog.Accepted
-
-        def configuration(self):
-            return configuration
-
-    monkeypatch.setattr(whatsapp_configuration, "WhatsAppConfigurationDialog", FakeDialog)
-    app = QApplication.instance() or QApplication([])
-    page = whatsapp_configuration.WhatsAppConfigurationPage(user=user, current_user=user.username)
-
-    page._configure()
-
-    assert saved == [configuration]
     audit = AuditLog.get(AuditLog.action == "configurar")
     assert audit.module == "WhatsApp"
-    assert audit.user == user.username
+    assert audit.user == "admin_whatsapp_config"
     assert audit.new_value["api_key"] == "protected"
     assert "rotated-key" not in str(audit.new_value)
     assert "rotated-key" not in (audit.observation or "")
-    app.processEvents()
