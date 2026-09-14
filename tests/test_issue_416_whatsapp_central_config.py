@@ -119,3 +119,65 @@ def test_user_without_instance_is_rejected_when_there_is_no_legacy_instance(db):
             pdf_path=__import__("pathlib").Path("orden-622.pdf"),
             usuario=user,
         )
+
+
+
+def test_send_text_uses_selected_instance(monkeypatch):
+    import io
+    import json
+
+    from app.services.whatsapp_api_client import WhatsAppApiClient, WhatsAppApiConfig
+
+    captured = {}
+
+    class FakeResponse:
+        status = 202
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {"success": True, "data": {"messageId": "test-123", "status": "queued"}}
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.whatsapp_api_client.urlopen", fake_urlopen)
+
+    client = WhatsAppApiClient(
+        WhatsAppApiConfig(
+            base_url="https://gateway.example",
+            api_key="secret-key",
+            timeout_seconds=17,
+            enabled=True,
+        )
+    )
+    result = client.send_text(
+        phone="5493764123456",
+        message="Prueba FEMAG",
+        instance_id="femag_oscar",
+        external_ref="femag:test:1",
+        actor_id="1",
+        actor_name="Oscar",
+    )
+
+    assert captured["url"] == (
+        "https://gateway.example/api/v1/instances/femag_oscar/messages"
+    )
+    assert captured["body"]["phone"] == "5493764123456"
+    assert captured["body"]["message"] == "Prueba FEMAG"
+    assert captured["body"]["externalRef"] == "femag:test:1"
+    assert captured["body"]["actorId"] == "1"
+    assert captured["body"]["actorName"] == "Oscar"
+    assert captured["body"]["sourceApp"] == "femag_desktop"
+    assert captured["timeout"] == 17
+    assert result == {"messageId": "test-123", "status": "queued"}
