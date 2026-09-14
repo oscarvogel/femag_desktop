@@ -30,6 +30,18 @@ class WhatsAppEnvioService:
     def __init__(self, client: WhatsAppApiClient | None = None):
         self.client = client or WhatsAppApiClient()
 
+    def _resolve_instance_for_user(self, usuario) -> str:
+        user_instance = (getattr(usuario, "whatsapp_instance_id", None) or "").strip()
+        if user_instance:
+            return user_instance
+        legacy_instance = (getattr(getattr(self.client, "config", None), "instance_id", None) or "").strip()
+        if legacy_instance:
+            return legacy_instance
+        raise ValueError(
+            "El usuario no tiene una instancia de WhatsApp asociada. "
+            "Configúrela desde Sistema > WhatsApp."
+        )
+
     def create_attempt(
         self,
         *,
@@ -41,10 +53,12 @@ class WhatsAppEnvioService:
         usuario=None,
     ) -> WhatsAppEnvio:
         phone = normalize_phone(destinatario)
+        instance_id = self._resolve_instance_for_user(usuario)
         envio = WhatsAppEnvio.create(
             tipo_documento=tipo_documento,
             documento_id=str(documento_id),
             destinatario=phone,
+            instance_id=instance_id,
             external_ref=f"pending:{tipo_documento}:{documento_id}:{time.time_ns()}",
             caption=caption or None,
             nombre_archivo=Path(pdf_path).name,
@@ -76,13 +90,17 @@ class WhatsAppEnvioService:
         poll_interval: float = 1.0,
     ) -> WhatsAppEnvio:
         try:
+            if not envio.instance_id:
+                raise ValueError("El envío no tiene una instancia de WhatsApp registrada.")
             data = self.client.upload_document(
                 phone=envio.destinatario,
                 file_path=Path(pdf_path),
                 caption=envio.caption,
                 external_ref=envio.external_ref,
                 actor_id=str(envio.usuario_id) if envio.usuario_id else None,
-                actor_name=getattr(envio.usuario, "display_name", None) or getattr(envio.usuario, "username", None),
+                actor_name=getattr(envio.usuario, "display_name", None)
+                or getattr(envio.usuario, "username", None),
+                instance_id=envio.instance_id,
             )
             envio.message_id = data.get("messageId")
             envio.estado = data.get("status") or "queued"
@@ -92,7 +110,10 @@ class WhatsAppEnvioService:
                 raise RuntimeError("El gateway no devolvió messageId.")
 
             for _ in range(max(0, poll_attempts)):
-                status = self.client.get_message(envio.message_id)
+                status = self.client.get_message(
+                    envio.message_id,
+                    instance_id=envio.instance_id,
+                )
                 self._apply_status(envio, status)
                 if envio.estado in TERMINAL_STATUSES:
                     break
@@ -110,7 +131,15 @@ class WhatsAppEnvioService:
     def refresh_status(self, envio: WhatsAppEnvio) -> WhatsAppEnvio:
         if not envio.message_id:
             return envio
-        return self._apply_status(envio, self.client.get_message(envio.message_id))
+        if not envio.instance_id:
+            raise ValueError("El envío no tiene una instancia de WhatsApp registrada.")
+        return self._apply_status(
+            envio,
+            self.client.get_message(
+                envio.message_id,
+                instance_id=envio.instance_id,
+            ),
+        )
 
     @staticmethod
     def history(tipo_documento: str, documento_id: str):
