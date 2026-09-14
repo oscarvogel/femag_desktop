@@ -28,6 +28,7 @@ from app.models.security import User
 from app.services.audit_service import AuditService
 from app.services.permission_service import PermissionService
 from app.services.whatsapp_api_client import WhatsAppApiClient, WhatsAppApiConfig, WhatsAppApiError
+from app.services.whatsapp_envio_service import normalize_phone
 from app.services.whatsapp_configuration_service import (
     CentralConfigurationError,
     WhatsAppCentralConfiguration,
@@ -98,6 +99,73 @@ class WhatsAppConfigurationDialog(QDialog):
         self.accept()
 
 
+class WhatsAppTestMessageDialog(QDialog):
+    def __init__(self, *, instances: list[dict], current_user, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Probar envío por WhatsApp")
+        self.setObjectName("whatsappTestMessageDialog")
+        self.setMinimumWidth(500)
+        self.current_user = current_user
+
+        intro = QLabel(
+            "Envía un mensaje de texto real usando la instancia seleccionada. "
+            "Sirve para validar la API key, la instancia y el número destinatario."
+        )
+        intro.setWordWrap(True)
+
+        self.instance = QComboBox()
+        self.instance.setObjectName("whatsappTestInstanceCombo")
+        for item in instances:
+            instance_id = str(item.get("id") or "").strip()
+            if not instance_id:
+                continue
+            status = str(item.get("status") or "").strip()
+            label = f"{instance_id} ({status})" if status else instance_id
+            self.instance.addItem(label, instance_id)
+
+        self.phone = QLineEdit()
+        self.phone.setObjectName("whatsappTestPhoneInput")
+        self.phone.setPlaceholderText("Ej.: +54 9 376 4123456")
+        self.message = QLineEdit("Prueba de WhatsApp enviada desde FEMAG Desktop.")
+        self.message.setObjectName("whatsappTestMessageInput")
+
+        form = QFormLayout()
+        form.addRow("Instancia:", self.instance)
+        form.addRow("Número:", self.phone)
+        form.addRow("Mensaje:", self.message)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        buttons.button(QDialogButtonBox.Ok).setText("Enviar prueba")
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(intro)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def _validate(self) -> None:
+        if self.instance.currentData() is None:
+            QMessageBox.warning(self, "Prueba WhatsApp", "Seleccione una instancia.")
+            return
+        try:
+            normalize_phone(self.phone.text())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Prueba WhatsApp", str(exc))
+            return
+        if not self.message.text().strip():
+            QMessageBox.warning(self, "Prueba WhatsApp", "Ingrese un mensaje.")
+            return
+        self.accept()
+
+    def values(self) -> dict:
+        return {
+            "instance_id": self.instance.currentData(),
+            "phone": normalize_phone(self.phone.text()),
+            "message": self.message.text().strip(),
+        }
+
+
 class WhatsAppConfigurationPage(QWidget):
     def __init__(self, *, user, current_user: str, parent=None):
         super().__init__(parent)
@@ -122,6 +190,9 @@ class WhatsAppConfigurationPage(QWidget):
         self.refresh_instances_button = QPushButton("Cargar instancias disponibles")
         self.refresh_instances_button.setObjectName("refreshWhatsAppInstancesButton")
         self.refresh_instances_button.clicked.connect(self._load_instances)
+        self.test_message_button = QPushButton("Enviar mensaje de prueba")
+        self.test_message_button.setObjectName("testWhatsAppMessageButton")
+        self.test_message_button.clicked.connect(self._send_test_message)
 
         card = QFrame()
         card.setObjectName("whatsappConfigurationCard")
@@ -130,6 +201,7 @@ class WhatsAppConfigurationPage(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.configure_button)
         buttons.addWidget(self.refresh_instances_button)
+        buttons.addWidget(self.test_message_button)
         buttons.addStretch(1)
         card_layout.addLayout(buttons)
 
@@ -176,6 +248,7 @@ class WhatsAppConfigurationPage(QWidget):
         for button in (
             self.configure_button,
             self.refresh_instances_button,
+            self.test_message_button,
             self.save_users_button,
         ):
             button.setEnabled(allowed)
@@ -277,6 +350,67 @@ class WhatsAppConfigurationPage(QWidget):
             self,
             "Instancias WhatsApp",
             f"Se cargaron {len(self._instances)} instancia(s) autorizada(s).",
+        )
+
+    def _send_test_message(self) -> None:
+        if not self._allowed():
+            QMessageBox.warning(self, "Prueba WhatsApp", "No tiene permiso para esta acción.")
+            return
+        if not self._instances:
+            self._load_instances()
+            if not self._instances:
+                return
+        try:
+            configuration = self._current_configuration()
+            if configuration is None:
+                raise WhatsAppApiError("Primero guarde la configuración central de WhatsApp.")
+            dialog = WhatsAppTestMessageDialog(
+                instances=self._instances,
+                current_user=self.user,
+                parent=self,
+            )
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            values = dialog.values()
+            client = WhatsAppApiClient(
+                WhatsAppApiConfig(
+                    base_url=configuration.api_url,
+                    api_key=configuration.api_key,
+                    timeout_seconds=configuration.timeout_seconds,
+                    enabled=configuration.enabled,
+                )
+            )
+            data = client.send_text(
+                phone=values["phone"],
+                message=values["message"],
+                instance_id=values["instance_id"],
+                external_ref=f"femag:test:{self.user.id}",
+                actor_id=str(self.user.id),
+                actor_name=self.user.display_name or self.user.username,
+            )
+        except (CentralConfigurationError, WhatsAppApiError, ValueError) as exc:
+            QMessageBox.critical(self, "Prueba WhatsApp", str(exc))
+            return
+
+        AuditService().record(
+            user=self.current_user,
+            module="WhatsApp",
+            action="mensaje de prueba",
+            record_ref=f"instance:{values['instance_id']}",
+            new_value={
+                "instance_id": values["instance_id"],
+                "phone": values["phone"],
+                "message_id": data.get("messageId"),
+                "status": data.get("status"),
+            },
+            observation="Mensaje de prueba enviado desde la configuración de WhatsApp.",
+        )
+        QMessageBox.information(
+            self,
+            "Prueba WhatsApp",
+            "Mensaje aceptado por el gateway. "
+            f"Estado: {data.get('status') or 'queued'}. "
+            f"ID: {data.get('messageId') or 'sin id'}.",
         )
 
     def _refresh_users_table(self) -> None:
