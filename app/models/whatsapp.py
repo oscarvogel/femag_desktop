@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from peewee import CharField, DateTimeField, ForeignKeyField, IntegerField, TextField
+from peewee import CharField, DateTimeField, ForeignKeyField, TextField
 
 from app.models.base import BaseModel
 from app.models.security import User
@@ -12,6 +12,7 @@ class WhatsAppEnvio(BaseModel):
     tipo_documento = CharField(max_length=80)
     documento_id = CharField(max_length=120)
     destinatario = CharField(max_length=40)
+    instance_id = CharField(max_length=120, null=True, index=True)
     external_ref = CharField(max_length=300, unique=True)
     message_id = CharField(max_length=120, null=True, index=True)
     provider_message_id = CharField(max_length=180, null=True)
