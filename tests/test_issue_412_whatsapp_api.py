@@ -52,11 +52,13 @@ def test_whatsapp_envio_persists_message_and_tracking(db, tmp_path):
     class FakeClient:
         def upload_document(self, **kwargs):
             assert kwargs["external_ref"].startswith("femag:extracto_cuenta:")
+            assert kwargs["instance_id"] == "femag-wa-user"
             assert Path(kwargs["file_path"]).read_bytes() == b"%PDF-test"
             return {"messageId": "msg-123", "status": "queued"}
 
-        def get_message(self, message_id):
+        def get_message(self, message_id, *, instance_id=None):
             assert message_id == "msg-123"
+            assert instance_id == "femag-wa-user"
             return {
                 "status": "read",
                 "providerMessageId": "prov-456",
@@ -66,7 +68,12 @@ def test_whatsapp_envio_persists_message_and_tracking(db, tmp_path):
             }
 
     profile = UserProfile.create(name="Administrador whatsapp")
-    user = User.create(username="wa-user", password_hash="x", profile=profile)
+    user = User.create(
+        username="wa-user",
+        password_hash="x",
+        profile=profile,
+        whatsapp_instance_id="femag-wa-user",
+    )
     pdf = tmp_path / "extracto.pdf"
     pdf.write_bytes(b"%PDF-test")
     service = WhatsAppEnvioService(client=FakeClient())
@@ -82,6 +89,7 @@ def test_whatsapp_envio_persists_message_and_tracking(db, tmp_path):
     result = service.send_pdf(envio=envio, pdf_path=pdf, poll_attempts=1, poll_interval=0)
 
     assert result.message_id == "msg-123"
+    assert result.instance_id == "femag-wa-user"
     assert result.provider_message_id == "prov-456"
     assert result.estado == "read"
     assert result.read_at is not None
