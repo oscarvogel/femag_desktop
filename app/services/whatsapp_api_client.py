@@ -8,6 +8,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from peewee import DatabaseError
+
 from app.config.settings import load_settings
 
 
@@ -32,7 +34,10 @@ class WhatsAppApiConfig:
         from app.services.whatsapp_configuration_service import WhatsAppCentralConfigurationService
 
         if database_proxy.obj is not None:
-            central = WhatsAppCentralConfigurationService.load()
+            try:
+                central = WhatsAppCentralConfigurationService.load()
+            except DatabaseError:
+                central = None
             if central is not None:
                 return cls(
                     base_url=central.api_url,
