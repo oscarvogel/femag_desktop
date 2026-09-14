@@ -145,6 +145,49 @@ class WhatsAppApiClient:
         resolved = self._resolve_instance(instance_id)
         return dict(self._get(f"/api/v1/instances/{resolved}/status") or {})
 
+    def send_text(
+        self,
+        *,
+        phone: str,
+        message: str,
+        instance_id: str | None = None,
+        external_ref: str | None = None,
+        actor_id: str | None = None,
+        actor_name: str | None = None,
+    ) -> dict:
+        resolved_instance = self._resolve_instance(instance_id)
+        payload = {
+            "phone": phone,
+            "message": message,
+            "sourceApp": "femag_desktop",
+        }
+        if external_ref:
+            payload["externalRef"] = external_ref
+        if actor_id:
+            payload["actorId"] = actor_id
+        if actor_name:
+            payload["actorName"] = actor_name
+        body = json.dumps(payload).encode("utf-8")
+        headers = self._headers()
+        headers["Content-Type"] = "application/json"
+        request = Request(
+            f"{self.config.base_url}/api/v1/instances/{resolved_instance}/messages",
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.config.timeout_seconds) as response:
+                if response.status != 202:
+                    raise WhatsAppApiError(
+                        f"El gateway respondió HTTP {response.status}; se esperaba 202."
+                    )
+                return dict(self._response_data(response) or {})
+        except HTTPError as exc:
+            raise self._http_error(exc) from exc
+        except URLError as exc:
+            raise WhatsAppApiError("No se pudo conectar con el gateway de WhatsApp.") from exc
+
     def upload_document(
         self,
         *,
