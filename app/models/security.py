@@ -14,6 +14,7 @@ class User(BaseModel):
     password_hash = CharField()
     profile = ForeignKeyField(UserProfile, backref="users")
     active = BooleanField(default=True)
+    whatsapp_instance_id = CharField(null=True)
 
 
 class MenuItem(BaseModel):
