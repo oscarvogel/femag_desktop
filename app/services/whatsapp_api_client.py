@@ -22,12 +22,28 @@ class WhatsAppApiError(RuntimeError):
 class WhatsAppApiConfig:
     base_url: str
     api_key: str
-    instance_id: str
+    instance_id: str | None = None
     timeout_seconds: float = 15.0
     enabled: bool = True
 
     @classmethod
     def from_settings(cls) -> "WhatsAppApiConfig":
+        from app.config.database import database_proxy
+        from app.services.whatsapp_configuration_service import WhatsAppCentralConfigurationService
+
+        if database_proxy.obj is not None:
+            central = WhatsAppCentralConfigurationService.load()
+            if central is not None:
+                return cls(
+                    base_url=central.api_url,
+                    api_key=central.api_key,
+                    instance_id=None,
+                    timeout_seconds=central.timeout_seconds,
+                    enabled=central.enabled,
+                )
+
+        # Compatibilidad transitoria con instalaciones que aún conservan
+        # configuración local previa al issue #416.
         from app.config.secure_credentials import (
             has_runtime_whatsapp_configuration,
             load_runtime_whatsapp_configuration,
@@ -42,11 +58,12 @@ class WhatsAppApiConfig:
                 timeout_seconds=runtime_configuration.timeout_seconds,
                 enabled=runtime_configuration.enabled,
             )
+
         settings = load_settings()
         return cls(
             base_url=settings.whatsapp_api_url,
             api_key=settings.whatsapp_api_key,
-            instance_id=settings.whatsapp_instance_id,
+            instance_id=settings.whatsapp_instance_id or None,
             timeout_seconds=settings.whatsapp_api_timeout,
             enabled=settings.whatsapp_enabled,
         )
@@ -55,11 +72,9 @@ class WhatsAppApiConfig:
         if not self.enabled:
             raise WhatsAppApiError("El envío por WhatsApp está deshabilitado en esta instalación.")
         if not self.base_url:
-            raise WhatsAppApiError("Falta configurar WHATSAPP_API_URL.")
+            raise WhatsAppApiError("Falta configurar la URL de WhatsApp.")
         if not self.api_key:
-            raise WhatsAppApiError("Falta configurar WHATSAPP_API_KEY.")
-        if not self.instance_id:
-            raise WhatsAppApiError("Falta configurar WHATSAPP_INSTANCE_ID.")
+            raise WhatsAppApiError("Falta configurar la API key de WhatsApp.")
 
 
 class WhatsAppApiClient:
@@ -74,8 +89,16 @@ class WhatsAppApiClient:
             "User-Agent": "FEMAG-Desktop/whatsapp",
         }
 
+    def _resolve_instance(self, instance_id: str | None) -> str:
+        resolved = (instance_id or self.config.instance_id or "").strip()
+        if not resolved:
+            raise WhatsAppApiError(
+                "El usuario no tiene una instancia de WhatsApp asociada."
+            )
+        return resolved
+
     @staticmethod
-    def _response_data(response) -> dict:
+    def _response_data(response):
         raw = response.read().decode("utf-8")
         try:
             payload = json.loads(raw)
@@ -83,7 +106,7 @@ class WhatsAppApiClient:
             raise WhatsAppApiError("El gateway devolvió una respuesta inválida.") from exc
         if not payload.get("success"):
             raise WhatsAppApiError(payload.get("error") or payload.get("message") or "Error del gateway.")
-        return payload.get("data") or {}
+        return payload.get("data")
 
     @staticmethod
     def _http_error(exc: HTTPError) -> WhatsAppApiError:
@@ -95,6 +118,28 @@ class WhatsAppApiClient:
             message = None
         return WhatsAppApiError(message or f"El gateway respondió HTTP {exc.code}.")
 
+    def _get(self, path: str):
+        request = Request(
+            f"{self.config.base_url}{path}",
+            headers=self._headers(),
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=self.config.timeout_seconds) as response:
+                return self._response_data(response)
+        except HTTPError as exc:
+            raise self._http_error(exc) from exc
+        except URLError as exc:
+            raise WhatsAppApiError("No se pudo conectar con el gateway de WhatsApp.") from exc
+
+    def list_instances(self) -> list[dict]:
+        data = self._get("/api/v1/instances")
+        return list(data or [])
+
+    def get_instance_status(self, instance_id: str) -> dict:
+        resolved = self._resolve_instance(instance_id)
+        return dict(self._get(f"/api/v1/instances/{resolved}/status") or {})
+
     def upload_document(
         self,
         *,
@@ -104,10 +149,12 @@ class WhatsAppApiClient:
         external_ref: str,
         actor_id: str | None = None,
         actor_name: str | None = None,
+        instance_id: str | None = None,
     ) -> dict:
         file_path = Path(file_path)
         if not file_path.is_file():
             raise WhatsAppApiError(f"No existe el archivo a enviar: {file_path}")
+        resolved_instance = self._resolve_instance(instance_id)
 
         boundary = f"----FEMAG{uuid.uuid4().hex}"
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/pdf"
@@ -145,7 +192,7 @@ class WhatsAppApiClient:
         body = b"".join(chunks)
         url = (
             f"{self.config.base_url}/api/v1/instances/"
-            f"{self.config.instance_id}/media/upload"
+            f"{resolved_instance}/media/upload"
         )
         headers = self._headers()
         headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
@@ -155,22 +202,15 @@ class WhatsAppApiClient:
             with urlopen(request, timeout=self.config.timeout_seconds) as response:
                 if response.status != 202:
                     raise WhatsAppApiError(f"El gateway respondió HTTP {response.status}; se esperaba 202.")
-                return self._response_data(response)
+                return dict(self._response_data(response) or {})
         except HTTPError as exc:
             raise self._http_error(exc) from exc
         except URLError as exc:
             raise WhatsAppApiError("No se pudo conectar con el gateway de WhatsApp.") from exc
 
-    def get_message(self, message_id: str) -> dict:
-        url = (
-            f"{self.config.base_url}/api/v1/instances/"
-            f"{self.config.instance_id}/messages/{message_id}"
+    def get_message(self, message_id: str, *, instance_id: str | None = None) -> dict:
+        resolved_instance = self._resolve_instance(instance_id)
+        data = self._get(
+            f"/api/v1/instances/{resolved_instance}/messages/{message_id}"
         )
-        request = Request(url, headers=self._headers(), method="GET")
-        try:
-            with urlopen(request, timeout=self.config.timeout_seconds) as response:
-                return self._response_data(response)
-        except HTTPError as exc:
-            raise self._http_error(exc) from exc
-        except URLError as exc:
-            raise WhatsAppApiError("No se pudo consultar el estado del mensaje.") from exc
+        return dict(data or {})
