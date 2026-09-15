@@ -73,9 +73,9 @@ def test_period_status_counts_and_pending_section(db):
     assert result.totals.annulled == 1
     assert result.totals.open_orders == 2
     assert {row["order_number"] for row in result.pending_rows} == {3871, 3872}
-    # La anulada no contamina el despachado efectivo.
-    assert result.totals.dispatched_orders == 1
-    assert result.totals.dispatched_total == 12100.0
+    # El informe incluye pendientes, emitidas y cerradas; la anulada no contamina los totales.
+    assert result.totals.dispatched_orders == 3
+    assert result.totals.dispatched_total == 36300.0
 
 
 def test_dispatch_rows_carry_navigation_data_and_clients_served(db):
