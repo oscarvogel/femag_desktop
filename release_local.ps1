@@ -57,6 +57,11 @@ try {
     $sourceSha = (git rev-parse HEAD).Trim()
     Write-Host "SOURCE_SHA: $sourceSha"
 
+    # Los tests deben correr sobre la identidad de desarrollo versionada,
+    # aunque haya restos locales de una compilacion anterior.
+    git restore --source=HEAD -- app/build_info.py app/build_version.py
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo restaurar la identidad de desarrollo antes de los tests." }
+
     Write-Host ""
     Write-Host "[1/7] Tests..." -ForegroundColor Yellow
     & $Python -m pytest -q
@@ -183,8 +188,9 @@ try {
     Write-Host "Source  : $sourceSha"
     Write-Host ""
     Write-Host "Para promoverlo a produccion: .\release.ps1 production" -ForegroundColor Cyan
-    # Los builds actualizan estos archivos de version; no deben quedar como cambios locales.
-    git restore -- app/build_info.py app/build_version.py 2>$null
+} finally {
+    # El build modifica identidad/version; siempre volver a lo versionado antes de restaurar el trabajo local.
+    git restore --source=HEAD -- app/build_info.py app/build_version.py 2>$null
 
     if ($stashCreated) {
         Write-Host ""
@@ -194,6 +200,6 @@ try {
             Write-Warning "No se pudieron restaurar automaticamente todos los cambios locales. Revise: git stash list"
         }
     }
-} finally {
+
     Pop-Location
 }
