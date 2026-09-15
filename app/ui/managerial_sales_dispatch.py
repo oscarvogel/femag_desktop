@@ -78,7 +78,7 @@ class ManagerialSalesDispatchDialog(QDialog):
         title = QLabel("Ventas y despachos")
         title.setStyleSheet("font-size: 22px; font-weight: 700;")
         subtitle = QLabel(
-            "Detalle auditable de los despachos valorizados. Por defecto muestra órdenes Cerradas, igual que el Dashboard Gerencial."
+            "Detalle auditable de ventas y despachos. Por defecto muestra órdenes vigentes: Pendiente, Emitida y Cerrada."
         )
         subtitle.setStyleSheet("color: #64748b;")
         heading.addWidget(title)
@@ -174,7 +174,7 @@ class ManagerialSalesDispatchDialog(QDialog):
         self._fill_combo(self.carrier_combo, "Todos", Carrier.select().order_by(Carrier.name), lambda item: item.name)
 
         self.status_combo.clear()
-        self.status_combo.addItem("Despachos efectivos (Cerrada)", None)
+        self.status_combo.addItem("Órdenes vigentes (Pendiente + Emitida + Cerrada)", None)
         self.status_combo.addItem("Todos los estados", "__all__")
         for status in (
             LoadOrder.STATUS_PENDING,
