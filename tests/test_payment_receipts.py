@@ -124,12 +124,12 @@ def test_annul_payment_requires_permission_and_creates_accounting_reversal(db):
         amount=500,
     )
     admin_service = ClientPaymentService(current_user=admin.username)
-    admin_service.annul_payment(
+    admin_annulled = admin_service.annul_payment(
         admin_payment,
         authorized_by=admin,
         reason="Prueba administrador",
     )
-    assert admin_payment.status == ClientPayment.STATUS_ANNULLED
+    assert admin_annulled.status == ClientPayment.STATUS_ANNULLED
 
 
 def test_annul_payment_rejects_different_session_user(db):
