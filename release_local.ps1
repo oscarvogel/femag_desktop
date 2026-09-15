@@ -137,49 +137,36 @@ try {
     gh release upload $ReleaseTag $Installer --repo $ReleaseRepo --clobber
     if ($LASTEXITCODE -ne 0) { throw "No se pudo subir el instalador candidate." }
 
-    $temp = Join-Path $env:TEMP ("vogel-releases-femag-" + [guid]::NewGuid().ToString("N"))
-    try {
-        gh repo clone $ReleaseRepo $temp -- --depth 1
-        if ($LASTEXITCODE -ne 0) { throw "No se pudo clonar vogel-releases." }
-
-        $manifestDir = Join-Path $temp "apps\femag"
-        New-Item -ItemType Directory -Force $manifestDir | Out-Null
-        $payload = [ordered]@{
-            schema_version = 1
-            app_id = "femag"
-            channel = "candidate"
-            version = $version
-            published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            validated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            source_sha = $sourceSha
-            mandatory = $false
-            download_url = "https://github.com/$ReleaseRepo/releases/download/$ReleaseTag/$InstallerName"
-            sha256 = $sha256
-            notes = "Candidate FEMAG $version validado localmente."
-        }
-        $json = $payload | ConvertTo-Json
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        $manifestPath = Join-Path $manifestDir "candidate.json"
-        [System.IO.File]::WriteAllText($manifestPath, $json, $utf8NoBom)
-
-        Push-Location $temp
-        try {
-            git config user.name "oscarvogel-local-release"
-            git config user.email "release@vogelconsultoria.com.ar"
-            git add -- apps/femag/candidate.json
-            git diff --cached --quiet
-            if ($LASTEXITCODE -ne 0) {
-                git commit -m "release(femag): candidate $version"
-                if ($LASTEXITCODE -ne 0) { throw "No se pudo crear commit en vogel-releases." }
-                git push
-                if ($LASTEXITCODE -ne 0) { throw "No se pudo publicar candidate.json." }
-            }
-        } finally {
-            Pop-Location
-        }
-    } finally {
-        Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
+    $payload = [ordered]@{
+        schema_version = 1
+        app_id = "femag"
+        channel = "candidate"
+        version = $version
+        published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        validated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        source_sha = $sourceSha
+        mandatory = $false
+        download_url = "https://github.com/$ReleaseRepo/releases/download/$ReleaseTag/$InstallerName"
+        sha256 = $sha256
+        notes = "Candidate FEMAG $version validado localmente."
     }
+    $json = $payload | ConvertTo-Json
+    $encodedManifest = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+    $manifestApi = "repos/$ReleaseRepo/contents/apps/femag/candidate.json"
+    $manifestSha = gh api $manifestApi --jq ".sha" 2>$null
+    $manifestArgs = @(
+        "api",
+        "--method", "PUT",
+        $manifestApi,
+        "-f", "message=release(femag): candidate $version",
+        "-f", "content=$encodedManifest",
+        "-f", "branch=main"
+    )
+    if ($manifestSha) {
+        $manifestArgs += @("-f", "sha=$($manifestSha.Trim())")
+    }
+    & gh @manifestArgs
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo publicar candidate.json mediante la API de GitHub." }
 
     Write-Host ""
     Write-Host "CANDIDATE LOCAL PUBLICADO CORRECTAMENTE." -ForegroundColor Green
@@ -189,16 +176,20 @@ try {
     Write-Host ""
     Write-Host "Para promoverlo a produccion: .\release.ps1 production" -ForegroundColor Cyan
 } finally {
-    # El build modifica identidad/version; siempre volver a lo versionado antes de restaurar el trabajo local.
-    git restore --source=HEAD -- app/build_info.py app/build_version.py 2>$null
-
+    # Todo cambio que aparecio despues del stash pertenece a tests/build/release.
+    # Limpiar antes de restaurar evita conflictos con archivos generados.
     if ($stashCreated) {
+        git reset --hard HEAD *> $null
+        git clean -fd *> $null
+
         Write-Host ""
         Write-Host "Restaurando cambios locales previos..." -ForegroundColor Yellow
         git stash pop
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "No se pudieron restaurar automaticamente todos los cambios locales. Revise: git stash list"
+            Write-Warning "No se pudieron restaurar automaticamente todos los cambios locales. El stash se conserva."
         }
+    } else {
+        git restore --source=HEAD -- app/build_info.py app/build_version.py 2>$null
     }
 
     Pop-Location
