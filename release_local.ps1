@@ -39,9 +39,13 @@ try {
         throw "La publicacion local debe ejecutarse desde main. Rama actual: $branch"
     }
 
+    $stashCreated = $false
     $dirty = git status --porcelain
     if ($dirty) {
-        throw "Hay cambios locales sin commit. Deje el repositorio limpio antes de publicar."
+        Write-Host "Guardando temporalmente cambios locales..." -ForegroundColor Yellow
+        git stash push -u -m "femag-release-local-auto"
+        if ($LASTEXITCODE -ne 0) { throw "No se pudieron guardar temporalmente los cambios locales." }
+        $stashCreated = $true
     }
 
     Write-Host ""
@@ -179,6 +183,17 @@ try {
     Write-Host "Source  : $sourceSha"
     Write-Host ""
     Write-Host "Para promoverlo a produccion: .\release.ps1 production" -ForegroundColor Cyan
+    # Los builds actualizan estos archivos de version; no deben quedar como cambios locales.
+    git restore -- app/build_info.py app/build_version.py 2>$null
+
+    if ($stashCreated) {
+        Write-Host ""
+        Write-Host "Restaurando cambios locales previos..." -ForegroundColor Yellow
+        git stash pop
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "No se pudieron restaurar automaticamente todos los cambios locales. Revise: git stash list"
+        }
+    }
 } finally {
     Pop-Location
 }
