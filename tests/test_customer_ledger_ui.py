@@ -188,14 +188,14 @@ def test_customer_ledger_prints_and_annuls_selected_payment(db):
     printed = []
 
     def annul(selected):
-        payment_service.annul_payment(
+        ClientPaymentService(current_user=admin.username).annul_payment(
             selected,
             authorized_by=admin,
             reason="Duplicado",
         )
 
     page = CustomerLedgerPage(
-        current_user="caja",
+        current_user=admin.username,
         print_receipt_callback=printed.append,
         annul_payment_callback=annul,
         can_annul_payments=True,
