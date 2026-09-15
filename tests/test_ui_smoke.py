@@ -101,7 +101,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     masters = next(item for item in principal.items if item.title == "Maestros")
 
     assert [child.title for child in operations.children] == ["Órdenes de carga", "Remitos", "F150"]
-    assert [child.route_key for child in operations.children] == ["load_orders", "remittances", "placeholder"]
+    assert [child.route_key for child in operations.children] == ["load_orders", "remittances", "f150"]
     assert [child.title for child in masters.children] == [
         "Clientes",
         "Productos",

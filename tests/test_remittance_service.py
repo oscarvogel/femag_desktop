@@ -274,3 +274,31 @@ def test_annul_requires_reason_and_records_state(db):
     assert annulled.status == Remittance.STATUS_ANNULLED
     assert annulled.annulment_reason == "Formulario dañado"
     assert annulled.annulled_by == "admin"
+
+
+def test_issue_requires_transport_data_needed_by_f150(db):
+    import pytest
+
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    service = RemittanceService("admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+
+    with pytest.raises(ValueError, match="transportista"):
+        service.issue(remittance)
+
+    remittance = service.update_draft(
+        remittance,
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+    )
+    emitted = service.issue(remittance)
+
+    assert emitted.status == emitted.STATUS_ISSUED

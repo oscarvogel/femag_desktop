@@ -3,6 +3,7 @@ from decimal import Decimal
 from peewee import BooleanField, CharField, DateTimeField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
+from app.models.dgr import DgrLocality
 from app.models.system import ImportBatch
 
 
@@ -100,6 +101,7 @@ class ClientAddress(BaseModel):
     province = CharField()
     city = CharField()
     address = CharField()
+    locality = ForeignKeyField(DgrLocality, backref="addresses", null=True)
     is_primary = BooleanField(default=False)
     observations = TextField(null=True)
     active = BooleanField(default=True)
@@ -110,6 +112,11 @@ class Product(BaseModel):
     codigo = CharField(null=True)
     name = CharField(unique=True)
     unit = CharField()
+    rh1 = CharField(null=True)
+    rh2 = CharField(null=True)
+    rh3 = CharField(null=True)
+    rh4 = CharField(null=True)
+    unidad_dgr = CharField(null=True)
     peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
     product_kind = CharField(null=True, default=PRODUCT_KIND_PRODUCT)
     classification_source = CharField(null=True)
@@ -133,6 +140,9 @@ class Carrier(BaseModel):
     name = CharField(unique=True)
     cuit = CharField(null=True)
     phone = CharField(null=True)
+    codigo = CharField(null=True)
+    tipo = CharField(null=True)
+    locality = ForeignKeyField(DgrLocality, backref="carriers", null=True)
     active = BooleanField(default=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
@@ -145,6 +155,8 @@ class Truck(BaseModel):
     domain = CharField(unique=True)
     trailer_domain = CharField(null=True)
     carrier = ForeignKeyField(Carrier, backref="trucks", null=True)
+    chassis_type = CharField(null=True)
+    trailer_type = CharField(null=True)
     max_load_kg = DecimalField(max_digits=12, decimal_places=3, null=True)
     active = BooleanField(default=True)
     source_system = CharField(null=True)
@@ -161,6 +173,7 @@ class Driver(BaseModel):
     cuit = CharField(null=True)
     document = CharField(null=True)
     phone = CharField(null=True)
+    locality = ForeignKeyField(DgrLocality, backref="drivers", null=True)
     active = BooleanField(default=True)
     available = BooleanField(default=True)
     source_system = CharField(null=True)
