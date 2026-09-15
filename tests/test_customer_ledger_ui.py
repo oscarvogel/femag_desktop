@@ -170,8 +170,10 @@ def test_customer_ledger_prints_and_annuls_selected_payment(db):
     from app.services.auth_service import AuthService
     from app.services.client_payment_service import ClientPaymentService
     from app.services.ledger_query_service import client_balance
+    from app.services.permission_service import PermissionService
     from app.ui.customer_ledger import CustomerLedgerPage
 
+    PermissionService().seed_defaults()
     app = QApplication.instance() or QApplication([])
     client = Client.create(
         name="Cliente Acciones Pago",
