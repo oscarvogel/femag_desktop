@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -82,7 +83,6 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
-from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
@@ -891,24 +891,53 @@ class FemagDesktopWindow(QMainWindow):
         _open_print_output(pdf_path)
 
     def _annul_payment(self, payment: ClientPayment) -> None:
-        dialog = AdminAuthorizationDialog(parent=self)
-        if dialog.exec_() != QDialog.Accepted:
+        if not _can_annul_payments(self.user):
+            QMessageBox.warning(
+                self,
+                "Anular recibo",
+                "Su usuario no tiene permiso para anular recibos.",
+            )
             return
-        authorized_user = dialog.authorized_user()
-        if authorized_user is None:
+
+        reason, accepted = QInputDialog.getText(
+            self,
+            "Anular recibo",
+            f"Motivo de anulación del recibo {payment.receipt_number}:",
+        )
+        if not accepted:
             return
+        reason = reason.strip()
+        if not reason:
+            QMessageBox.warning(
+                self,
+                "Anular recibo",
+                "Debe indicar el motivo de la anulación.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Anular recibo",
+            f"¿Confirma la anulación del recibo {payment.receipt_number}?\n"
+            "Se generará un contra-asiento y el recibo original quedará auditado.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
         try:
-            ClientPaymentService(current_user=self.shell.username).annul_payment(
+            ClientPaymentService(current_user=self.user.username).annul_payment(
                 payment,
-                authorized_by=authorized_user,
-                reason=dialog.reason(),
+                authorized_by=self.user,
+                reason=reason,
             )
         except Exception as exc:
-            QMessageBox.warning(self, "Anular pago", str(exc))
+            QMessageBox.warning(self, "Anular recibo", str(exc))
             return
         QMessageBox.information(
             self,
-            "Anular pago",
+            "Anular recibo",
             f"El recibo {payment.receipt_number} fue anulado y revertido.",
         )
 
