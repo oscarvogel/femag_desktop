@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import QDialog, QMainWindow
 _WORKSPACE_DIALOG_TITLES = (
     "preparación de pallets",
     "preparacion de pallets",
+    "detalle de pallets",
     "orden de carga",
 )
 _installed = False
