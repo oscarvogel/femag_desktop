@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+from app.models.load_orders import LoadOrder
 from app.reports.managerial_sales_dispatch import (
     ManagerialSalesDispatchService,
     SalesDispatchFilters,
@@ -71,6 +72,8 @@ class OperationalProductSalesService:
             }
         )
         for row in detail.rows:
+            if row["status"] == LoadOrder.STATUS_ANNULLED:
+                continue
             bucket = buckets[int(row["product_id"])]
             bucket["product_name"] = row["product_name"] or ""
             bucket["quantity"] += float(row["quantity"] or 0)
