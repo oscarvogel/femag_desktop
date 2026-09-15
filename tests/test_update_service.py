@@ -137,6 +137,35 @@ def test_download_installer_validates_sha256_and_uses_atomic_target(tmp_path, mo
     assert not (tmp_path / "FEMAG_Desktop_Produccion_Setup.exe.part").exists()
 
 
+def test_download_installer_reports_progress(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
+    body = b"x" * (1024 * 1024 + 17)
+    info = UpdateInfo(
+        version="2026.08.28.10.00.00",
+        download_url="https://example.invalid/setup.exe",
+        sha256=hashlib.sha256(body).hexdigest(),
+    )
+    progress = []
+
+    class _ProgressResponse(_Response):
+        def getheader(self, name):
+            return str(len(body)) if name.lower() == "content-length" else None
+
+    def opener(_request, timeout=None):
+        return _ProgressResponse(body)
+
+    download_installer(
+        info,
+        destination_dir=tmp_path,
+        opener=opener,
+        progress_callback=lambda downloaded, total: progress.append((downloaded, total)),
+    )
+
+    assert progress[0] == (0, len(body))
+    assert progress[-1] == (len(body), len(body))
+    assert len(progress) >= 3
+
+
 def test_candidate_download_persists_exact_version_sha_receipt(tmp_path, monkeypatch):
     monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
     body = b"candidate-installer"

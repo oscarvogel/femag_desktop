@@ -179,6 +179,7 @@ def download_installer(
     destination_dir: Path | None = None,
     timeout: int = 60,
     opener: Callable[..., object] | None = None,
+    progress_callback: Callable[[int, int | None], None] | None = None,
 ) -> Path:
     if not _is_https(update.download_url):
         raise ValueError("El instalador debe descargarse mediante HTTPS.")
@@ -199,12 +200,38 @@ def download_installer(
     digest = hashlib.sha256()
     try:
         with open_url(request, timeout=timeout) as response, partial.open("wb") as handle:  # type: ignore[misc]
+            total_bytes: int | None = None
+            getheader = getattr(response, "getheader", None)
+            if callable(getheader):
+                try:
+                    raw_length = getheader("Content-Length")
+                    if raw_length:
+                        total_bytes = int(raw_length)
+                except (TypeError, ValueError):
+                    total_bytes = None
+            if total_bytes is None:
+                headers = getattr(response, "headers", None)
+                if headers is not None:
+                    try:
+                        raw_length = headers.get("Content-Length")
+                        if raw_length:
+                            total_bytes = int(raw_length)
+                    except (AttributeError, TypeError, ValueError):
+                        total_bytes = None
+
+            downloaded_bytes = 0
+            if progress_callback is not None:
+                progress_callback(downloaded_bytes, total_bytes)
+
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
                 handle.write(chunk)
                 digest.update(chunk)
+                downloaded_bytes += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(downloaded_bytes, total_bytes)
 
         actual = digest.hexdigest().lower()
         if actual != update.sha256.lower():
