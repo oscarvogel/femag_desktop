@@ -68,7 +68,7 @@ def canonical_profile_name(name: str) -> str:
     return _CANONICAL_PROFILE_BY_KEY.get(_profile_key(normalized), normalized)
 
 
-SENSITIVE_ACTIONS = {"anular remito", "modificar pago", "anular pago", "cambiar saldo inicial"}
+SENSITIVE_ACTIONS = {"anular remito", "modificar pago", "cambiar saldo inicial"}
 
 
 @dataclass(frozen=True)
