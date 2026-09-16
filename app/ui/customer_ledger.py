@@ -233,7 +233,62 @@ class CustomerLedgerPage(QWidget):
         self.more_actions_button.setText("Acciones  ▾")
         self.more_actions_button.setToolTip("Imprimir, compartir o actuar sobre el movimiento seleccionado")
         self.more_actions_button.setPopupMode(QToolButton.InstantPopup)
+        self.more_actions_button.setStyleSheet("""
+            QToolButton {
+                background-color: #ffffff;
+                color: #0b6fdc;
+                border: 1px solid #0b6fdc;
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-weight: 600;
+            }
+            QToolButton:hover {
+                background-color: #eef5ff;
+            }
+            QToolButton:pressed,
+            QToolButton::menu-button:pressed {
+                background-color: #dcecff;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
+        """)
         self.more_actions_menu = QMenu(self.more_actions_button)
+        self.more_actions_menu.setObjectName("customerLedgerMoreActionsMenu")
+        self.more_actions_menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                color: #1f2937;
+                border: 1px solid #cfd8e3;
+                padding: 6px 0;
+            }
+            QMenu::item {
+                background-color: transparent;
+                color: #1f2937;
+                padding: 7px 22px;
+                margin: 1px 4px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #e8f1ff;
+                color: #0b6fdc;
+            }
+            QMenu::item:disabled {
+                color: #9aa4b2;
+                background-color: transparent;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #e5e7eb;
+                margin: 6px 10px;
+            }
+            QMenu::section {
+                color: #64748b;
+                background-color: #f8fafc;
+                padding: 6px 18px 4px 18px;
+                font-weight: 600;
+            }
+        """)
 
         self.more_actions_menu.addSection("Extracto")
         self.print_statement_action = self.more_actions_menu.addAction("Imprimir")
