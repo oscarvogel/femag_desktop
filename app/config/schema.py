@@ -127,6 +127,7 @@ def ensure_runtime_schema(database) -> None:
         _backfill_product_classification(database)
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
+        _repair_payment_movement_amounts(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
@@ -288,6 +289,80 @@ def _normalize_legacy_pallet_rows(database) -> None:
                 row.save()
 
 
+MONEY_FLOAT_COLUMNS = {
+    "clientpayment": {"amount"},
+    "clientpaymentdetail": {"amount"},
+    "clientaccountmovement": {
+        "amount",
+        "net_amount",
+        "discount_amount",
+        "vat_amount",
+        "total_amount",
+    },
+}
+
+
+def _mysql_money_column_needs_fractional_fix(
+    database, table_name: str, column_name: str, existing_column
+) -> bool:
+    if database.__class__.__name__ != "MySQLDatabase":
+        return False
+    if column_name not in MONEY_FLOAT_COLUMNS.get(table_name, set()):
+        return False
+
+    data_type = str(getattr(existing_column, "data_type", "") or "").strip().lower()
+    if not data_type:
+        return False
+    if any(token in data_type for token in ("double", "float", "real")):
+        return False
+    if data_type.startswith("decimal") or data_type.startswith("numeric"):
+        import re
+
+        match = re.search(r"\((\d+)\s*,\s*(\d+)\)", data_type)
+        # Si el driver no informa escala, no tocamos una columna DECIMAL sana.
+        return bool(match and int(match.group(2)) == 0)
+    return any(
+        token in data_type
+        for token in ("int", "bigint", "smallint", "mediumint", "tinyint")
+    )
+
+
+def _repair_payment_movement_amounts(database) -> None:
+    """Repara movimientos de pagos legacy redondeados usando el recibo como fuente."""
+    from app.models.accounting import ClientAccountMovement
+    from app.models.payments import ClientPayment
+
+    query = (
+        ClientAccountMovement.select(ClientAccountMovement, ClientPayment)
+        .join(ClientPayment)
+        .where(
+            ClientAccountMovement.movement_type.in_(
+                (
+                    ClientAccountMovement.TYPE_PAYMENT,
+                    ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
+                )
+            )
+        )
+    )
+    with database.atomic():
+        for movement in query:
+            expected = (
+                -float(movement.payment.amount)
+                if movement.movement_type == ClientAccountMovement.TYPE_PAYMENT
+                else float(movement.payment.amount)
+            )
+            if abs(float(movement.total_amount or 0) - expected) < 0.005:
+                continue
+            movement.amount = expected
+            movement.net_amount = expected
+            movement.total_amount = expected
+            movement.save(only=[
+                ClientAccountMovement.amount,
+                ClientAccountMovement.net_amount,
+                ClientAccountMovement.total_amount,
+            ])
+
+
 def _ensure_model_columns(database, model) -> None:
     table_name = model._meta.table_name
     existing_columns = {column.name: column for column in database.get_columns(table_name)}
@@ -305,6 +380,15 @@ def _ensure_model_columns(database, model) -> None:
             continue
         if not field.null and existing_column.null:
             _backfill_column_default(database, table_name, column_name, field)
+        if _mysql_money_column_needs_fractional_fix(
+            database, table_name, column_name, existing_column
+        ):
+            null_sql = "NULL" if field.null else "NOT NULL"
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"MODIFY COLUMN `{_escape_identifier(column_name)}` DOUBLE {null_sql}"
+            )
+            continue
         if field.null and existing_column.null is False:
             if _supports_modify_column(database):
                 database.execute_sql(

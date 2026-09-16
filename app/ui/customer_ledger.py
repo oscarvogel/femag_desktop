@@ -176,13 +176,16 @@ class CustomerLedgerPage(QWidget):
         header_row = QHBoxLayout()
         self.detail_header = QLabel("Seleccione un cliente de la izquierda.")
         self.detail_header.setObjectName("customerLedgerDetailHeader")
+        self.detail_header.setWordWrap(True)
         header_row.addWidget(self.detail_header, 1)
+        layout.addLayout(header_row)
 
+        primary_actions = QHBoxLayout()
         self.register_payment_button = QPushButton("Registrar pago")
         self.register_payment_button.setObjectName("customerLedgerRegisterPaymentButton")
         self.register_payment_button.setEnabled(False)
         self.register_payment_button.clicked.connect(self._on_register_payment)
-        header_row.addWidget(self.register_payment_button)
+        primary_actions.addWidget(self.register_payment_button)
 
         self.register_manual_debit_button = QPushButton("Registrar débito")
         self.register_manual_debit_button.setObjectName("customerLedgerRegisterManualDebitButton")
@@ -190,7 +193,7 @@ class CustomerLedgerPage(QWidget):
             self.register_manual_debit_callback is not None
         )
         self.register_manual_debit_button.clicked.connect(self._on_register_manual_debit)
-        header_row.addWidget(self.register_manual_debit_button)
+        primary_actions.addWidget(self.register_manual_debit_button)
 
         self.register_manual_credit_button = QPushButton("Registrar crédito")
         self.register_manual_credit_button.setObjectName(
@@ -202,29 +205,32 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_credit_button.clicked.connect(
             self._on_register_manual_credit
         )
-        header_row.addWidget(self.register_manual_credit_button)
+        primary_actions.addWidget(self.register_manual_credit_button)
+        primary_actions.addStretch(1)
+        layout.addLayout(primary_actions)
 
+        statement_actions = QHBoxLayout()
         self.print_statement_button = QPushButton("Imprimir extracto")
         self.print_statement_button.setObjectName("customerLedgerPrintStatementButton")
         self.print_statement_button.setEnabled(False)
         self.print_statement_button.clicked.connect(self._on_print_statement)
-        header_row.addWidget(self.print_statement_button)
+        statement_actions.addWidget(self.print_statement_button)
 
         self.whatsapp_statement_button = QPushButton("Enviar por WhatsApp")
         self.whatsapp_statement_button.setObjectName("customerLedgerWhatsAppStatementButton")
         self.whatsapp_statement_button.setEnabled(False)
         self.whatsapp_statement_button.clicked.connect(self._on_whatsapp_statement)
-        header_row.addWidget(self.whatsapp_statement_button)
+        statement_actions.addWidget(self.whatsapp_statement_button)
 
         self.email_statement_button = QPushButton("Enviar por correo")
         self.email_statement_button.setObjectName("customerLedgerEmailStatementButton")
         self.email_statement_button.setEnabled(False)
         self.email_statement_button.clicked.connect(self._on_email_statement)
-        header_row.addWidget(self.email_statement_button)
-        layout.addLayout(header_row)
+        statement_actions.addWidget(self.email_statement_button)
+        statement_actions.addStretch(1)
+        layout.addLayout(statement_actions)
 
         payment_actions = QHBoxLayout()
-        payment_actions.addStretch(1)
         self.print_receipt_button = QPushButton("Imprimir recibo")
         self.print_receipt_button.setObjectName("customerLedgerPrintReceiptButton")
         self.print_receipt_button.setEnabled(False)
@@ -255,6 +261,7 @@ class CustomerLedgerPage(QWidget):
             self._on_reverse_manual_credit
         )
         payment_actions.addWidget(self.reverse_manual_credit_button)
+        payment_actions.addStretch(1)
         layout.addLayout(payment_actions)
 
         # Highlighted balance card
