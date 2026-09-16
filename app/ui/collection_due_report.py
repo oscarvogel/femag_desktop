@@ -195,6 +195,27 @@ class CollectionDueReportDialog(QDialog):
         self.table.resizeColumnsToContents()
         self.table.setSortingEnabled(True)
 
+    def apply_dashboard_preset(self, preset: str | None) -> None:
+        """Aplica filtros consistentes con las tarjetas del dashboard operativo."""
+        today = date.today()
+        self.client_combo.setCurrentIndex(0)
+        if preset == "overdue":
+            self._set_range(date(2000, 1, 1), today - timedelta(days=1))
+            self.status_combo.setCurrentIndex(self.status_combo.findData("Vencido"))
+        elif preset == "today":
+            self._set_range(today, today)
+            self.status_combo.setCurrentIndex(self.status_combo.findData("Vence hoy"))
+        elif preset == "next_7":
+            self._set_range(today + timedelta(days=1), today + timedelta(days=7))
+            self.status_combo.setCurrentIndex(0)
+        elif preset == "next_30":
+            self._set_range(today + timedelta(days=1), today + timedelta(days=30))
+            self.status_combo.setCurrentIndex(0)
+        else:
+            self._set_default_dates()
+            self.status_combo.setCurrentIndex(0)
+        self.refresh()
+
     def clear_filters(self) -> None:
         self.client_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)

@@ -83,6 +83,7 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
@@ -650,6 +651,24 @@ class FemagDesktopWindow(QMainWindow):
     def _handle_dashboard_register_payment(self) -> None:
         self._open_payment_dialog(preset_client=None)
 
+    def _handle_dashboard_due_report(self, preset: str | None = None) -> None:
+        if (
+            self.user is None
+            or not self.user.active
+            or not PermissionService().has_permission(
+                self.user, "Inicio", "ver", "Pendientes"
+            )
+        ):
+            QMessageBox.warning(
+                self,
+                "Vencimientos de cobranzas",
+                "El usuario actual no tiene permiso para ver este informe.",
+            )
+            return
+        dialog = CollectionDueReportDialog(self)
+        dialog.apply_dashboard_preset(preset)
+        dialog.exec_()
+
     def _on_global_search(self, search_input: QLineEdit) -> None:
         query = search_input.text().strip()
         if not query:
@@ -995,9 +1014,12 @@ class FemagDesktopWindow(QMainWindow):
             page.refresh()
 
     def _dashboard_page(self) -> QWidget:
-        spec = DashboardService().view_spec(demo_mode=True)
+        demo_mode = self.shell.connection_state == "Modo demo"
+        spec = DashboardService().view_spec(demo_mode=demo_mode)
         page = _page(spec.title, "Vista general de actividad y accesos frecuentes")
+        page.setObjectName("dashboardPage")
         layout = page.layout()
+
         actions = QHBoxLayout()
         for action in spec.quick_actions:
             button = QPushButton(action.title)
@@ -1019,15 +1041,173 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_register_payment)
             actions.addWidget(button)
         layout.addLayout(actions)
+
         cards = QGridLayout()
         for index, (title, value) in enumerate(spec.summary_cards.items()):
             cards.addWidget(_card(title, str(value)), index // 3, index % 3)
         layout.addLayout(cards)
-        layout.addWidget(QLabel("Pendientes y alertas"))
-        for alert in spec.alerts:
-            layout.addWidget(QLabel(f"• {alert}"))
+
+        collection_title = QLabel("Cobranzas y cuentas corrientes")
+        collection_title.setObjectName("dashboardCollectionsTitle")
+        collection_title.setStyleSheet("font-size:16px;font-weight:700;margin-top:8px;")
+        layout.addWidget(collection_title)
+
+        collection_cards = QGridLayout()
+        preset_by_title = {
+            "Presupuestos vencidos": "overdue",
+            "Vence hoy": "today",
+            "Próximos 7 días": "next_7",
+            "Próximos 30 días": "next_30",
+        }
+
+        def _money(value: float) -> str:
+            return f"$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        for index, card in enumerate(spec.collection_cards):
+            button = QPushButton(
+                f"{card.title}\n{_money(card.amount)}\n{card.count} "
+                f"{'cliente' if card.title == 'Saldo deudor clientes' and card.count == 1 else ('clientes' if card.title == 'Saldo deudor clientes' else ('presupuesto' if card.count == 1 else 'presupuestos'))}"
+            )
+            button.setObjectName(
+                {
+                    "Presupuestos vencidos": "dashboardOverdueBudgetsCard",
+                    "Vence hoy": "dashboardDueTodayCard",
+                    "Próximos 7 días": "dashboardNext7Card",
+                    "Próximos 30 días": "dashboardNext30Card",
+                    "Saldo deudor clientes": "dashboardDebtorBalanceCard",
+                }[card.title]
+            )
+            button.setMinimumHeight(82)
+            button.setCursor(Qt.PointingHandCursor)
+            card_styles = {
+                "Presupuestos vencidos": ("#fff1f2", "#be123c", "#fecdd3"),
+                "Vence hoy": ("#fff7ed", "#c2410c", "#fed7aa"),
+                "Próximos 7 días": ("#fffbeb", "#a16207", "#fde68a"),
+                "Próximos 30 días": ("#eff6ff", "#1d4ed8", "#bfdbfe"),
+                "Saldo deudor clientes": ("#f8fafc", "#0f172a", "#cbd5e1"),
+            }
+            background, foreground, border = card_styles[card.title]
+            button.setStyleSheet(
+                "QPushButton{"
+                f"color:{foreground};background:{background};border:1px solid {border};"
+                "text-align:left;padding:10px 12px;font-weight:700;border-radius:8px;"
+                "}"
+                "QPushButton:hover{border:1px solid #64748b;background:#ffffff;}"
+            )
+            if card.route_key == "customer_ledger":
+                button.clicked.connect(self._handle_dashboard_open_customer_ledger)
+            else:
+                preset = preset_by_title.get(card.title)
+                button.clicked.connect(
+                    lambda _checked=False, selected=preset: self._handle_dashboard_due_report(selected)
+                )
+            collection_cards.addWidget(button, index // 5, index % 5)
+        layout.addLayout(collection_cards)
+
+        details = QHBoxLayout()
+        details.setSpacing(12)
+
+        def _build_due_panel(title: str, rows, *, overdue: bool) -> QFrame:
+            panel = QFrame()
+            panel.setObjectName(
+                "dashboardOverduePanel" if overdue else "dashboardUpcomingPanel"
+            )
+            panel.setStyleSheet(
+                "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;}"
+            )
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(10, 10, 10, 10)
+            panel_layout.setSpacing(6)
+            heading = QLabel(title)
+            heading.setStyleSheet("font-weight:700;font-size:14px;border:none;")
+            panel_layout.addWidget(heading)
+
+            table = QTableWidget(0, 5)
+            table.setObjectName(
+                "dashboardOverdueTable" if overdue else "dashboardUpcomingTable"
+            )
+            table.setHorizontalHeaderLabels(
+                ["Cliente", "Presupuesto", "Vencimiento", "Días", "Importe"]
+            )
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.setSelectionBehavior(QTableWidget.SelectRows)
+            table.setAlternatingRowColors(True)
+            table.setShowGrid(False)
+            table.verticalHeader().setDefaultSectionSize(30)
+            table.setMinimumHeight(210)
+            table.setMaximumHeight(230)
+            table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                order_number = row.get("order_number")
+                order_text = (
+                    f"OC-{order_number:06d}" if order_number is not None else "-"
+                )
+                delta = int(row.get("delta_days") or 0)
+                days_text = (
+                    f"{abs(delta)} vencido(s)"
+                    if delta < 0
+                    else ("Hoy" if delta == 0 else f"{delta} día(s)")
+                )
+                values = (
+                    row.get("client_name") or "-",
+                    order_text,
+                    row["due_date"].strftime("%d/%m/%Y"),
+                    days_text,
+                    _money(float(row.get("total_amount") or 0)),
+                )
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if col == 4:
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    table.setItem(row_index, col, item)
+            header = table.horizontalHeader()
+            header.setSectionResizeMode(0, QHeaderView.Stretch)
+            for col in (1, 2, 3, 4):
+                header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+            panel_layout.addWidget(table)
+
+            if not rows:
+                empty = QLabel(
+                    "No hay presupuestos vencidos."
+                    if overdue
+                    else "No hay vencimientos próximos."
+                )
+                empty.setStyleSheet("color:#64748b;border:none;")
+                panel_layout.addWidget(empty)
+
+            open_report = QPushButton("Ver todos los vencimientos")
+            open_report.setObjectName(
+                "dashboardOpenOverdueReportButton"
+                if overdue
+                else "dashboardOpenUpcomingReportButton"
+            )
+            open_report.clicked.connect(
+                lambda _checked=False, selected=("overdue" if overdue else None):
+                    self._handle_dashboard_due_report(selected)
+            )
+            panel_layout.addWidget(open_report)
+            return panel
+
+        details.addWidget(
+            _build_due_panel("Presupuestos vencidos", spec.overdue_rows, overdue=True),
+            1,
+        )
+        details.addWidget(
+            _build_due_panel("Próximos vencimientos", spec.upcoming_rows, overdue=False),
+            1,
+        )
+        layout.addLayout(details)
+
         layout.addStretch(1)
-        return page
+
+        scroll = QScrollArea()
+        scroll.setObjectName("dashboardScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
 
     def _table_page(self, title: str, columns: list[str], rows: list[list[str]]) -> QWidget:
         page = _page(title, "Listado maestro de consulta rápida")
