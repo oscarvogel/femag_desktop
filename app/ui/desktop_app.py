@@ -231,6 +231,7 @@ def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
+    app.setStyleSheet(STYLES + glass_v2_stylesheet())
     try:
         database = _prepare_database(demo_mode=demo_mode)
     except RuntimeError as exc:
