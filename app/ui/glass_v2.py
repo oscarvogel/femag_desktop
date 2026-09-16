@@ -519,26 +519,26 @@ def glass_v2_stylesheet() -> str:
     QStackedWidget#mainStack QDateEdit,
     QStackedWidget#mainStack QSpinBox,
     QStackedWidget#mainStack QDoubleSpinBox,
-    QStackedWidget#mainStack QTextEdit {
+    QStackedWidget#mainStack QTextEdit {{
         min-height: 36px;
         border-radius: 10px;
         border: 1px solid #cbd9e8;
         background-color: rgba(255,255,255,225);
         color: #294b70;
         padding: 0 10px;
-    }
+    }}
 
     QStackedWidget#mainStack QLineEdit:focus,
     QStackedWidget#mainStack QComboBox:focus,
     QStackedWidget#mainStack QDateEdit:focus,
     QStackedWidget#mainStack QSpinBox:focus,
     QStackedWidget#mainStack QDoubleSpinBox:focus,
-    QStackedWidget#mainStack QTextEdit:focus {
+    QStackedWidget#mainStack QTextEdit:focus {{
         border: 1px solid #78a5da;
         background-color: rgba(255,255,255,248);
-    }
+    }}
 
-    QStackedWidget#mainStack QTableWidget {
+    QStackedWidget#mainStack QTableWidget {{
         background-color: rgba(255,255,255,205);
         alternate-background-color: rgba(246,249,253,205);
         border: 1px solid rgba(204,216,230,190);
@@ -547,39 +547,39 @@ def glass_v2_stylesheet() -> str:
         color: #294b70;
         selection-background-color: #e1eefc;
         selection-color: #14365e;
-    }
+    }}
 
-    QStackedWidget#mainStack QHeaderView::section {
+    QStackedWidget#mainStack QHeaderView::section {{
         background-color: rgba(236,243,251,230);
         color: #4c6687;
         border: none;
         border-bottom: 1px solid #d9e3ef;
         padding: 8px 7px;
         font-weight: 700;
-    }
+    }}
 
-    QStackedWidget#mainStack QTabWidget::pane {
+    QStackedWidget#mainStack QTabWidget::pane {{
         border: 1px solid rgba(207,220,233,205);
         border-radius: 12px;
         background-color: rgba(255,255,255,175);
         top: -1px;
-    }
+    }}
 
-    QStackedWidget#mainStack QTabBar::tab {
+    QStackedWidget#mainStack QTabBar::tab {{
         background-color: rgba(255,255,255,155);
         color: #496582;
         border: 1px solid rgba(207,220,233,190);
         padding: 8px 14px;
         min-width: 110px;
-    }
+    }}
 
-    QStackedWidget#mainStack QTabBar::tab:selected {
+    QStackedWidget#mainStack QTabBar::tab:selected {{
         background-color: rgba(255,255,255,235);
         color: #0b63c7;
         font-weight: 700;
-    }
+    }}
 
-    QStackedWidget#mainStack QGroupBox {
+    QStackedWidget#mainStack QGroupBox {{
         background-color: rgba(255,255,255,165);
         border: 1px solid rgba(205,218,232,190);
         border-radius: 14px;
@@ -587,55 +587,55 @@ def glass_v2_stylesheet() -> str:
         padding-top: 10px;
         color: #31557e;
         font-weight: 600;
-    }
+    }}
 
-    QStackedWidget#mainStack QGroupBox::title {
+    QStackedWidget#mainStack QGroupBox::title {{
         subcontrol-origin: margin;
         left: 12px;
         padding: 0 6px;
         color: #31557e;
         background: transparent;
-    }
+    }}
 
-    QStackedWidget#mainStack QScrollBar:vertical {
+    QStackedWidget#mainStack QScrollBar:vertical {{
         background: transparent;
         width: 10px;
         margin: 2px;
-    }
+    }}
 
-    QStackedWidget#mainStack QScrollBar::handle:vertical {
+    QStackedWidget#mainStack QScrollBar::handle:vertical {{
         background: rgba(116,143,171,125);
         border-radius: 5px;
         min-height: 26px;
-    }
+    }}
 
     QStackedWidget#mainStack QScrollBar::add-line:vertical,
     QStackedWidget#mainStack QScrollBar::sub-line:vertical,
     QStackedWidget#mainStack QScrollBar::add-page:vertical,
-    QStackedWidget#mainStack QScrollBar::sub-page:vertical {
+    QStackedWidget#mainStack QScrollBar::sub-page:vertical {{
         background: transparent;
         height: 0;
-    }
+    }}
 
-    QStackedWidget#mainStack QScrollBar:horizontal {
+    QStackedWidget#mainStack QScrollBar:horizontal {{
         background: transparent;
         height: 10px;
         margin: 2px;
-    }
+    }}
 
-    QStackedWidget#mainStack QScrollBar::handle:horizontal {
+    QStackedWidget#mainStack QScrollBar::handle:horizontal {{
         background: rgba(116,143,171,125);
         border-radius: 5px;
         min-width: 26px;
-    }
+    }}
 
     QStackedWidget#mainStack QScrollBar::add-line:horizontal,
     QStackedWidget#mainStack QScrollBar::sub-line:horizontal,
     QStackedWidget#mainStack QScrollBar::add-page:horizontal,
-    QStackedWidget#mainStack QScrollBar::sub-page:horizontal {
+    QStackedWidget#mainStack QScrollBar::sub-page:horizontal {{
         background: transparent;
         width: 0;
-    }
+    }}
 
     /* Familia visual única de botones dentro del área de trabajo */
     QStackedWidget#mainStack QPushButton,
