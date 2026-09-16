@@ -122,8 +122,13 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             batch_label.setText("Agregar pallets:")
         while batch_layout.count():
             batch_layout.takeAt(0)
+        batch_frame.setMinimumHeight(92)
+        batch_frame.setMaximumHeight(110)
+        batch_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         batch_layout.setHorizontalSpacing(8)
         batch_layout.setVerticalSpacing(6)
+        batch_layout.setRowMinimumHeight(0, 40)
+        batch_layout.setRowMinimumHeight(1, 40)
         batch_layout.setColumnStretch(1, 0)
         batch_layout.setColumnStretch(2, 1)
         batch_layout.setColumnStretch(3, 1)
@@ -131,8 +136,8 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
 
         if isinstance(batch_label, QLabel):
             batch_layout.addWidget(batch_label, 0, 0)
-        self.bulk_pallet_count_input.setMinimumWidth(110)
-        self.bulk_pallet_count_input.setMaximumWidth(140)
+        self.bulk_pallet_count_input.setMinimumWidth(120)
+        self.bulk_pallet_count_input.setMaximumWidth(150)
         batch_layout.addWidget(self.bulk_pallet_count_input, 0, 1)
         batch_layout.addWidget(self.add_pallet_button, 0, 2)
         batch_layout.addWidget(self.propose_distribution_button, 0, 3)
