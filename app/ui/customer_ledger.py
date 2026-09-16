@@ -97,16 +97,15 @@ class CustomerLedgerPage(QWidget):
         self._direct_client_id: int | None = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(18, 12, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("Cuenta corriente por cliente")
+        title = QLabel("Cuenta corriente")
         title.setObjectName("customerLedgerTitle")
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "Listado de clientes con movimientos y saldo consolidado. "
-            "Seleccione un cliente para ver el detalle."
+            "Saldos, cobranzas y movimientos por cliente."
         )
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -125,10 +124,11 @@ class CustomerLedgerPage(QWidget):
     def _build_clients_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("customerLedgerClientsPanel")
-        panel.setMinimumWidth(310)
+        panel.setMinimumWidth(300)
+        panel.setMaximumWidth(390)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
         header = QLabel("Clientes con movimientos")
         header.setObjectName("customerLedgerClientsHeader")
         layout.addWidget(header)
@@ -181,8 +181,8 @@ class CustomerLedgerPage(QWidget):
         header_card.setObjectName("customerLedgerHeaderCard")
         header_card.setFrameShape(QFrame.StyledPanel)
         header_layout = QVBoxLayout(header_card)
-        header_layout.setContentsMargins(16, 12, 16, 12)
-        header_layout.setSpacing(6)
+        header_layout.setContentsMargins(18, 14, 18, 14)
+        header_layout.setSpacing(7)
 
         self.detail_header = QLabel("Seleccione un cliente de la izquierda.")
         self.detail_header.setObjectName("customerLedgerDetailHeader")
@@ -202,7 +202,7 @@ class CustomerLedgerPage(QWidget):
         layout.addWidget(header_card)
 
         primary_actions = QHBoxLayout()
-        self.register_payment_button = QPushButton("Registrar pago")
+        self.register_payment_button = QPushButton("＋  Registrar pago")
         self.register_payment_button.setObjectName("customerLedgerRegisterPaymentButton")
         self.register_payment_button.setEnabled(False)
         self.register_payment_button.clicked.connect(self._on_register_payment)
@@ -233,62 +233,10 @@ class CustomerLedgerPage(QWidget):
         self.more_actions_button.setText("Acciones  ▾")
         self.more_actions_button.setToolTip("Imprimir, compartir o actuar sobre el movimiento seleccionado")
         self.more_actions_button.setPopupMode(QToolButton.InstantPopup)
-        self.more_actions_button.setStyleSheet("""
-            QToolButton {
-                background-color: #ffffff;
-                color: #0b6fdc;
-                border: 1px solid #0b6fdc;
-                border-radius: 4px;
-                padding: 6px 10px;
-                font-weight: 600;
-            }
-            QToolButton:hover {
-                background-color: #eef5ff;
-            }
-            QToolButton:pressed,
-            QToolButton::menu-button:pressed {
-                background-color: #dcecff;
-            }
-            QToolButton::menu-indicator {
-                image: none;
-            }
-        """)
+
         self.more_actions_menu = QMenu(self.more_actions_button)
         self.more_actions_menu.setObjectName("customerLedgerMoreActionsMenu")
-        self.more_actions_menu.setStyleSheet("""
-            QMenu {
-                background-color: #ffffff;
-                color: #1f2937;
-                border: 1px solid #cfd8e3;
-                padding: 6px 0;
-            }
-            QMenu::item {
-                background-color: transparent;
-                color: #1f2937;
-                padding: 7px 22px;
-                margin: 1px 4px;
-                border-radius: 3px;
-            }
-            QMenu::item:selected {
-                background-color: #e8f1ff;
-                color: #0b6fdc;
-            }
-            QMenu::item:disabled {
-                color: #9aa4b2;
-                background-color: transparent;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #e5e7eb;
-                margin: 6px 10px;
-            }
-            QMenu::section {
-                color: #64748b;
-                background-color: #f8fafc;
-                padding: 6px 18px 4px 18px;
-                font-weight: 600;
-            }
-        """)
+
 
         self.more_actions_menu.addSection("Extracto")
         self.print_statement_action = self.more_actions_menu.addAction("Imprimir")
