@@ -26,6 +26,7 @@ from app.services.client_payment_service import (
     ClientPaymentService,
 )
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.money import configure_money_input
 
 
 class ClientPaymentDialog(QDialog):
@@ -127,10 +128,7 @@ class ClientPaymentDialog(QDialog):
 
     def _new_amount_input(self) -> QDoubleSpinBox:
         amount = QDoubleSpinBox()
-        amount.setRange(0.0, 9999999999.99)
-        amount.setDecimals(2)
-        amount.setSingleStep(100.0)
-        amount.setPrefix("$ ")
+        configure_money_input(amount)
         amount.valueChanged.connect(self._refresh_total)
         return amount
 
