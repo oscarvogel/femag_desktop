@@ -1303,9 +1303,10 @@ class FemagDesktopWindow(QMainWindow):
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
-        close_button = _action_button("closeLoadOrderButton", "Cerrar")
-        annul_button = _action_button("annulLoadOrderButton", "Anular")
-        print_button = _action_button("printLoadOrderButton", "Imprimir")
+        close_button = _action_button("closeLoadOrderButton", "Cerrar", secondary=True)
+        annul_button = _action_button("annulLoadOrderButton", "Anular", secondary=True)
+        annul_button.setProperty("uiRole", "danger")
+        print_button = _action_button("printLoadOrderButton", "Imprimir", secondary=True)
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
         _set_button_icon(new_button, QStyle.SP_FileIcon)
@@ -2434,6 +2435,7 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.setVerticalSpacing(8)
         # Mantener las filas compactas arriba del QFrame; el stacked widget
         # heredaba el alto y las dejaba repartidas en huecos grandes.
+        header_layout.setAlignment(Qt.AlignTop)
         for row in range(3):
             header_layout.setRowStretch(row, 0)
         self.order_date = QDateEdit()
