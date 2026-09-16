@@ -1287,49 +1287,47 @@ class FemagDesktopWindow(QMainWindow):
         )
         selected_order_id: dict[str, int | None] = {"value": None}
         refreshing_selection: dict[str, bool] = {"value": False}
-        result_limit = 50
 
         layout.addWidget(_load_order_metrics_strip(service))
+
         feedback = FormFeedback("loadOrderFeedback")
 
         left_panel = QFrame()
         left_panel.setObjectName("contentPanel")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(12, 12, 12, 12)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
         actions = QHBoxLayout()
+        actions.setContentsMargins(10, 10, 10, 6)
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
-        detail_button = _action_button("detailLoadOrderButton", "Ver detalle", secondary=True)
-        pallets_button = _action_button("palletsLoadOrderButton", "Pallets", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
-        close_button = _action_button("closeLoadOrderButton", "Cerrar", secondary=True)
-        print_button = _action_button("printLoadOrderButton", "Imprimir", secondary=True)
+        close_button = _action_button("closeLoadOrderButton", "Cerrar")
+        annul_button = _action_button("annulLoadOrderButton", "Anular")
+        print_button = _action_button("printLoadOrderButton", "Imprimir")
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
-        annul_button = _action_button("annulLoadOrderButton", "Anular", secondary=True)
-        annul_button.setProperty("uiRole", "danger")
-
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
-        _set_button_icon(detail_button, QStyle.SP_FileDialogInfoView)
-        _set_button_icon(pallets_button, QStyle.SP_DirOpenIcon)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
         _set_button_icon(close_button, QStyle.SP_DialogCloseButton)
         _set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
         _set_button_icon(reprint_button, QStyle.SP_BrowserReload)
         _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
-
         can_reprint = _can_reprint_load_orders(self.user)
         reprint_button.setVisible(can_reprint)
+        search_input = QLineEdit()
+        search_input.setObjectName("loadOrderSearchInput")
+        search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
+        search_input.setMinimumWidth(220)
+        search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
+        _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
         for button in (
             new_button,
             edit_button,
-            detail_button,
-            pallets_button,
             issue_button,
             close_button,
             print_button,
@@ -1339,120 +1337,50 @@ class FemagDesktopWindow(QMainWindow):
         ):
             actions.addWidget(button)
         actions.addStretch(1)
+
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(10, 0, 10, 10)
+        search_row.setSpacing(8)
+        search_row.addWidget(search_input, 1)
+        search_row.addWidget(search_button)
+
         left_layout.addLayout(actions)
-
-        filters = QFrame()
-        filters.setObjectName("loadOrderFilters")
-        filters_layout = QGridLayout(filters)
-        filters_layout.setContentsMargins(10, 10, 10, 10)
-        filters_layout.setHorizontalSpacing(10)
-        filters_layout.setVerticalSpacing(8)
-
-        order_filter = QLineEdit()
-        order_filter.setObjectName("loadOrderNumberFilter")
-        order_filter.setPlaceholderText("Ej.: OC-990034")
-
-        client_filter = QComboBox()
-        client_filter.setObjectName("loadOrderClientFilter")
-        enable_combo_autocomplete(
-            client_filter,
-            placeholder="Buscar cliente...",
-            hint="Escribí parte del nombre para filtrar clientes.",
-        )
-        client_filter.addItem("Todos los clientes", None)
-        try:
-            client_rows = (
-                Client.select()
-                .where(Client.active == True)  # noqa: E712
-                .order_by(Client.name)
-            )
-        except Exception:
-            client_rows = []
-        for client in client_rows:
-            client_filter.addItem(client.name, client.id)
-
-        date_enabled = QCheckBox("Filtrar fecha")
-        date_enabled.setObjectName("loadOrderDateFilterEnabled")
-        date_filter = QDateEdit()
-        date_filter.setObjectName("loadOrderDateFilter")
-        date_filter.setCalendarPopup(True)
-        date_filter.setDisplayFormat("dd/MM/yyyy")
-        date_filter.setDate(QDate.currentDate())
-        date_filter.setEnabled(False)
-        date_enabled.toggled.connect(date_filter.setEnabled)
-
-        search_button = _action_button("searchLoadOrderButton", "Aplicar filtros")
-        clear_filters_button = _action_button("clearLoadOrderFiltersButton", "Limpiar", secondary=True)
-        _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
-
-        filters_layout.addWidget(QLabel("Orden"), 0, 0)
-        filters_layout.addWidget(order_filter, 1, 0)
-        filters_layout.addWidget(QLabel("Cliente"), 0, 1)
-        filters_layout.addWidget(client_filter, 1, 1)
-        filters_layout.addWidget(date_enabled, 0, 2)
-        filters_layout.addWidget(date_filter, 1, 2)
-        filters_layout.addWidget(search_button, 1, 3)
-        filters_layout.addWidget(clear_filters_button, 1, 4)
-        filters_layout.setColumnStretch(1, 1)
-        left_layout.addWidget(filters)
-
-        results_label = QLabel("")
-        results_label.setObjectName("loadOrderResultsLabel")
-        left_layout.addWidget(results_label)
+        left_layout.addLayout(search_row)
         left_layout.addWidget(feedback)
 
-        columns = tuple(spec.table_columns[:-1])
-        table = QTableWidget(0, len(columns))
+        table = QTableWidget(0, len(spec.table_columns))
         table.setObjectName("loadOrdersTable")
-        table.setHorizontalHeaderLabels(columns)
+        table.setHorizontalHeaderLabels(spec.table_columns)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        for column, width in enumerate((115, 95, 160, 150, 165, 190, 105)):
+        for column, width in enumerate((105, 90, 135, 135, 135, 190, 105, 145)):
             table.setColumnWidth(column, width)
         table.verticalHeader().setVisible(False)
         table.setShowGrid(False)
         table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setSelectionMode(QTableWidget.SingleSelection)
         table.setAlternatingRowColors(True)
-        table.setSortingEnabled(False)
         left_layout.addWidget(table, 1)
         layout.addWidget(left_panel, 1)
 
-        def _parsed_order_number() -> int | None:
-            raw = order_filter.text().strip().upper()
-            if not raw:
-                return None
-            digits = "".join(ch for ch in raw if ch.isdigit())
-            return int(digits) if digits else None
-
-        def _selected_client() -> Client | None:
-            text = client_filter.currentText().strip()
-            index = client_filter.findText(text, Qt.MatchFixedString)
-            if index < 0:
-                return None
-            client_id = client_filter.itemData(index)
-            return Client.get_by_id(client_id) if client_id else None
-
-        def refresh() -> None:
+        def refresh(*, query: str | None = None) -> None:
+            rows = service.list_orders() if hasattr(service, "list_orders") else []
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
-                return
-            day = date_filter.date().toPyDate() if date_enabled.isChecked() else None
-            rows = service.list_orders(
-                client=_selected_client(),
-                day=day,
-                order_number=_parsed_order_number(),
-                limit=result_limit,
-            )
-            selected_id = selected_order_id["value"]
+            query = (query if query is not None else search_input.text()).strip()
+            if query:
+                rows = [order for order in rows if _matches_load_order_query(order, query)]
+            selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
             if rows and not any(order.id == selected_id for order in rows):
                 selected_id = rows[0].id
                 selected_order_id["value"] = selected_id
-
+            selected_ids = {selected_id} if selected_id is not None else set()
             refreshing_selection["value"] = True
             try:
-                table.setRowCount(len(rows))
+                table.clearSpans()
+                table.setRowCount(0)
+                table.setRowCount(len(rows) + len(selected_ids))
+                visual_row = 0
                 selected_row = 0
-                for row_index, order in enumerate(rows):
+                for order in rows:
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
@@ -1461,14 +1389,27 @@ class FemagDesktopWindow(QMainWindow):
                         _summarize_order_products(order),
                         _load_order_pallet_progress(service, order),
                         _display_status(order.status),
+                        "",
                     )
                     for column, value in enumerate(values):
-                        item = QTableWidgetItem(value)
-                        table.setItem(row_index, column, item)
-                    table.item(row_index, 0).setData(Qt.UserRole, order.id)
-                    table.item(row_index, 6).setForeground(_status_color(order.status))
+                        table.setItem(visual_row, column, QTableWidgetItem(value))
+                    table.item(visual_row, 0).setData(Qt.UserRole, order.id)
+                    table.item(visual_row, 6).setForeground(_status_color(order.status))
+                    pallet_action = _action_button(
+                        f"prepareLoadOrderPalletsButton{order.id}",
+                        _load_order_pallet_action_text(service, order),
+                        secondary=bool(order.pallets.exists()),
+                    )
+                    pallet_action.setEnabled(order.is_unissued or order.pallets.exists())
+                    pallet_action.clicked.connect(
+                        lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
+                    )
+                    table.setCellWidget(visual_row, 7, pallet_action)
                     if order.id == selected_id:
-                        selected_row = row_index
+                        selected_row = visual_row
+                        visual_row += 1
+                        _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                    visual_row += 1
                 if rows:
                     table.setCurrentCell(selected_row, 0)
                 else:
@@ -1476,47 +1417,64 @@ class FemagDesktopWindow(QMainWindow):
                     clear_detail()
             finally:
                 refreshing_selection["value"] = False
-
             if rows:
-                load_selected(selected_row)
-            active_filters = bool(
-                order_filter.text().strip()
-                or client_filter.currentData()
-                or date_enabled.isChecked()
-            )
-            suffix = " (límite 50)" if len(rows) >= result_limit else ""
-            mode = "filtradas" if active_filters else "más recientes"
-            results_label.setText(f"Mostrando {len(rows)} órdenes {mode}{suffix}.")
+                load_selected(selected_row, rebuild_detail=False)
 
         def selected_order() -> LoadOrder | None:
             if selected_order_id["value"] is None:
                 return None
             return LoadOrder.get_by_id(selected_order_id["value"])
 
-        def load_selected(row: int) -> None:
-            if refreshing_selection["value"] or row < 0:
+        def load_selected(row: int, *, rebuild_detail: bool = True) -> None:
+            if refreshing_selection["value"]:
+                return
+            if row < 0:
                 return
             item = table.item(row, 0)
-            if item is None or item.data(Qt.UserRole) is None:
+            if item is None:
                 return
             order = LoadOrder.get_by_id(item.data(Qt.UserRole))
+            previous_id = selected_order_id["value"]
             selected_order_id["value"] = order.id
+            if rebuild_detail and previous_id != order.id:
+                refresh()
+                return
             set_action_state(order)
 
         def clear_detail() -> None:
-            for button in (issue_button, edit_button, detail_button, pallets_button, close_button, reprint_button):
-                button.setEnabled(False)
+            issue_button.setEnabled(False)
+            issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
+            edit_button.setEnabled(False)
+            edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+            close_button.setEnabled(False)
+            close_button.setToolTip("Seleccione una orden emitida para cerrar.")
+            reprint_button.setEnabled(False)
+            reprint_button.setToolTip("Seleccione una orden con impresión original.")
 
         def set_action_state(order: LoadOrder) -> None:
             is_pending = order.is_unissued
             is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
-            detail_button.setEnabled(True)
-            pallets_button.setEnabled(order.is_unissued or order.pallets.exists())
             close_button.setEnabled(is_issued)
             has_original_print = _has_printed_load_order(order)
             reprint_button.setEnabled(can_reprint and has_original_print)
+            if has_original_print:
+                reprint_button.setToolTip("Generar una copia marcada de la impresión original.")
+            else:
+                reprint_button.setToolTip("Primero imprima la orden original.")
+            if is_pending:
+                issue_button.setToolTip("Emitir la orden seleccionada.")
+                edit_button.setToolTip("Editar la orden pendiente seleccionada.")
+                close_button.setToolTip("Primero emita la orden para poder cerrarla.")
+            elif order.status == LoadOrder.STATUS_ISSUED:
+                issue_button.setToolTip("La orden ya esta emitida.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+                close_button.setToolTip("Cerrar la orden y liberar el chofer si no tiene otra carga activa.")
+            else:
+                issue_button.setToolTip("Solo se pueden emitir ordenes pendientes.")
+                edit_button.setToolTip("Solo se pueden editar ordenes pendientes.")
+                close_button.setToolTip("Solo se pueden cerrar ordenes emitidas.")
 
         def open_detail_dialog() -> None:
             order = selected_order()
@@ -1553,7 +1511,9 @@ class FemagDesktopWindow(QMainWindow):
         def open_pallets_dialog() -> None:
             order = selected_order()
             if order is None:
-                feedback.show_warning("Seleccione una orden para preparar sus pallets.", focus_widget=table)
+                feedback.show_warning(
+                    "Seleccione una orden para preparar sus pallets.", focus_widget=table
+                )
                 return
             if order.is_unissued:
                 try:
@@ -1577,6 +1537,10 @@ class FemagDesktopWindow(QMainWindow):
                     f"Pallets de la orden {_format_order_number(order.order_number)} guardados."
                 )
 
+        def open_pallets_for_order(order_id: int) -> None:
+            selected_order_id["value"] = order_id
+            open_pallets_dialog()
+
         def issue() -> None:
             order = selected_order()
             if order is None:
@@ -1584,9 +1548,11 @@ class FemagDesktopWindow(QMainWindow):
                 return
             try:
                 issued = operation_service.issue(order)
+                feedback.show_success(
+                    f"Orden {_format_order_number(issued.order_number)} emitida."
+                )
                 selected_order_id["value"] = issued.id
                 refresh()
-                feedback.show_success(f"Orden {_format_order_number(issued.order_number)} emitida.")
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
 
@@ -1597,9 +1563,11 @@ class FemagDesktopWindow(QMainWindow):
                 return
             try:
                 annulled = operation_service.annul(order, can_annul=_can_annul_load_orders(self.user))
+                feedback.show_success(
+                    f"Orden {_format_order_number(annulled.order_number)} anulada."
+                )
                 selected_order_id["value"] = annulled.id
                 refresh()
-                feedback.show_success(f"Orden {_format_order_number(annulled.order_number)} anulada.")
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
 
@@ -1620,12 +1588,12 @@ class FemagDesktopWindow(QMainWindow):
             if dialog.exec_() == QDialog.Accepted and dialog.closure() is not None:
                 closure = dialog.closure()
                 closed = LoadOrder.get_by_id(closure.order.id)
+                payment_status = closure_service.payment_status(closure).replace("_", " ")
+                feedback.show_success(
+                    f"Orden {_format_order_number(closed.order_number)} cerrada: {payment_status}."
+                )
                 selected_order_id["value"] = closed.id
                 refresh()
-                feedback.show_success(
-                    f"Orden {_format_order_number(closed.order_number)} cerrada: "
-                    f"{closure_service.payment_status(closure).replace('_', ' ')}."
-                )
 
         def print_order() -> None:
             order = selected_order()
@@ -1683,24 +1651,20 @@ class FemagDesktopWindow(QMainWindow):
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
 
-        def clear_filters() -> None:
-            order_filter.clear()
-            client_filter.setCurrentIndex(0)
-            date_enabled.setChecked(False)
-            date_filter.setDate(QDate.currentDate())
-            refresh()
+        def search_orders() -> None:
+            query = search_input.text().strip()
+            refresh(query=query)
+            count = _load_order_table_order_count(table)
+            if query:
+                feedback.show_info(f"Buscar '{query}': {count} resultado(s).")
+            else:
+                feedback.show_info(f"Buscar: {count} orden(es).")
 
-        table.currentCellChanged.connect(
-            lambda row, _column, _previous_row, _previous_column: load_selected(row)
-        )
-        table.cellDoubleClicked.connect(lambda _row, _column: open_detail_dialog())
+        table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
         edit_button.clicked.connect(open_edit_order_dialog)
-        detail_button.clicked.connect(open_detail_dialog)
-        pallets_button.clicked.connect(open_pallets_dialog)
-        search_button.clicked.connect(refresh)
-        clear_filters_button.clicked.connect(clear_filters)
-        order_filter.returnPressed.connect(refresh)
+        search_button.clicked.connect(search_orders)
+        search_input.returnPressed.connect(search_orders)
         issue_button.clicked.connect(issue)
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
