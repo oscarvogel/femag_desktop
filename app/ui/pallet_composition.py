@@ -140,18 +140,36 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         if isinstance(batch_label, QLabel):
             batch_label.setMinimumWidth(92)
             first_row_layout.addWidget(batch_label)
-        self.bulk_pallet_count_input.setMinimumWidth(140)
-        self.bulk_pallet_count_input.setMaximumWidth(170)
+
+        # Mantener la barra utilizable en notebooks de 1280px. Los textos de
+        # los botones no deben imponer su sizeHint como ancho mínimo del widget.
+        self.bulk_pallet_count_input.setMinimumWidth(80)
+        self.bulk_pallet_count_input.setMaximumWidth(96)
+        self.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        compact_buttons = (
+            self.add_pallet_button,
+            self.propose_distribution_button,
+            self.clear_assignments_button,
+            self.reorganize_pending_button,
+            self.recalculate_all_button,
+            self.configure_pallet_capacity_button,
+            self.configure_truck_capacity_button,
+        )
+        for button in compact_buttons:
+            button.setMinimumWidth(0)
+            button.setMaximumHeight(34)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
         first_row_layout.addWidget(self.bulk_pallet_count_input)
-        first_row_layout.addWidget(self.add_pallet_button)
-        first_row_layout.addWidget(self.propose_distribution_button)
+        first_row_layout.addWidget(self.add_pallet_button, 1)
+        first_row_layout.addWidget(self.propose_distribution_button, 2)
         first_row_layout.addStretch(1)
 
-        second_row_layout.addWidget(self.clear_assignments_button)
-        second_row_layout.addWidget(self.reorganize_pending_button)
-        second_row_layout.addWidget(self.recalculate_all_button)
-        second_row_layout.addWidget(self.configure_pallet_capacity_button)
-        second_row_layout.addWidget(self.configure_truck_capacity_button)
+        second_row_layout.addWidget(self.clear_assignments_button, 2)
+        second_row_layout.addWidget(self.reorganize_pending_button, 1)
+        second_row_layout.addWidget(self.recalculate_all_button, 1)
+        second_row_layout.addWidget(self.configure_pallet_capacity_button, 1)
+        second_row_layout.addWidget(self.configure_truck_capacity_button, 1)
         second_row_layout.addStretch(1)
 
         batch_layout.addWidget(first_row, 0, 0, 1, 2)
