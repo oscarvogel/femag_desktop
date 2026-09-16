@@ -85,6 +85,7 @@ from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
+from app.ui.glass_v2 import glass_v2_stylesheet
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
@@ -301,9 +302,10 @@ class FemagDesktopWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setWindowIcon(femag_icon())
-        self.resize(1280, 820)
-        self.setStyleSheet(STYLES)
+        self.resize(1440, 900)
+        self.setStyleSheet(STYLES + glass_v2_stylesheet())
         self.stack = QStackedWidget()
+        self.stack.setObjectName("mainStack")
         self.nav = QListWidget()
         self._route_indexes: dict[str, int] = {}
         self._expanded_sidebar_groups: set[str] = set()
@@ -312,19 +314,28 @@ class FemagDesktopWindow(QMainWindow):
 
     def _build(self) -> None:
         root = QWidget()
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self._topbar())
+        root.setObjectName("femagV2Root")
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(18, 18, 18, 14)
+        outer.setSpacing(0)
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        body.addWidget(self._sidebar(), 0)
-        body.addWidget(self.stack, 1)
-        layout.addLayout(body, 1)
-        layout.addWidget(self._statusbar())
+        shell = QFrame()
+        shell.setObjectName("femagV2Shell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(12, 12, 12, 12)
+        shell_layout.setSpacing(14)
 
+        shell_layout.addWidget(self._sidebar(), 0)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(4)
+        content.addWidget(self._topbar())
+        content.addWidget(self.stack, 1)
+        content.addWidget(self._statusbar())
+        shell_layout.addLayout(content, 1)
+
+        outer.addWidget(shell, 1)
         self.setCentralWidget(root)
         self._add_page("dashboard", self._dashboard_page())
         self._add_master_pages()
@@ -376,18 +387,16 @@ class FemagDesktopWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("topbar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(22, 10, 22, 10)
-        layout.setSpacing(16)
-        title = QLabel()
-        title.setObjectName("topbarBrandLogo")
-        title.setAccessibleName("Logo FEMAG")
-        title.setPixmap(load_brand_pixmap("femag-logo-ui.png", width=126, height=64))
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(10)
+
         search = QLineEdit()
         search.setObjectName("globalSearch")
-        search.setPlaceholderText("Buscar ordenes o clientes...")
-        search.setMinimumWidth(360)
+        search.setPlaceholderText("Buscar orden, cliente, chofer...")
+        search.setMinimumWidth(320)
         search.setMaximumWidth(520)
         search.returnPressed.connect(lambda: self._on_global_search(search))
+
         notifications = QPushButton("Avisos")
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
@@ -397,12 +406,27 @@ class FemagDesktopWindow(QMainWindow):
             button.setObjectName("topbarIconButton")
         notifications.setObjectName("avisoButton")
         help_button.setObjectName("helpButton")
+
         self.aviso_service = AvisoService()
-        self.aviso_dropdown = AvisoDropdown(user=self.user, on_navigate=self._navigate_to_route, parent=self)
+        self.aviso_dropdown = AvisoDropdown(
+            user=self.user,
+            on_navigate=self._navigate_to_route,
+            parent=self,
+        )
         self.notifications = notifications
         notifications.clicked.connect(self._toggle_avisos)
-        help_button.clicked.connect(lambda: QMessageBox.information(self, "Ayuda", future_module_message()))
-        QTimer.singleShot(60000, lambda: self.notifications.setText(f"Avisos ({self.aviso_service.count_unread(self.user)})" if self.aviso_service.count_unread(self.user) else "Avisos"))
+        help_button.clicked.connect(
+            lambda: QMessageBox.information(self, "Ayuda", future_module_message())
+        )
+        QTimer.singleShot(
+            60000,
+            lambda: self.notifications.setText(
+                f"Avisos ({self.aviso_service.count_unread(self.user)})"
+                if self.aviso_service.count_unread(self.user)
+                else "Avisos"
+            ),
+        )
+
         change_password.clicked.connect(self._open_change_password)
         can_configure = PermissionService.is_administrator(self.user)
         settings.setEnabled(can_configure)
@@ -411,11 +435,11 @@ class FemagDesktopWindow(QMainWindow):
         else:
             settings.setToolTip("Sólo un administrador puede configurar la numeración.")
         logout.clicked.connect(self._logout)
+
         user = QLabel(f"{self.shell.username}\n{self.shell.profile}")
         user.setObjectName("userBlock")
         user.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        layout.addWidget(title)
-        layout.addSpacing(30)
+
         layout.addWidget(search, 1)
         layout.addStretch(1)
         layout.addWidget(notifications)
@@ -471,18 +495,20 @@ class FemagDesktopWindow(QMainWindow):
         container = QFrame()
         container.setObjectName("sidebarContainer")
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 14, 12, 10)
+        layout.setContentsMargins(12, 16, 12, 12)
         layout.setSpacing(12)
+
         logo = QLabel()
         logo.setObjectName("sidebarBrandLogo")
         logo.setAccessibleName("Logo FEMAG")
         logo.setAlignment(Qt.AlignCenter)
-        logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=154, height=92))
-        logo.setMinimumHeight(92)
+        logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=136, height=78))
+        logo.setMinimumHeight(82)
         layout.addWidget(logo)
+
         self.nav.setObjectName("sidebar")
-        container.setFixedWidth(250)
-        self.nav.setSpacing(4)
+        container.setFixedWidth(215)
+        self.nav.setSpacing(2)
         self._populate_sidebar()
         layout.addWidget(self.nav, 1)
         return container
@@ -1018,6 +1044,8 @@ class FemagDesktopWindow(QMainWindow):
         spec = DashboardService().view_spec(demo_mode=demo_mode)
         page = _page(spec.title, "Vista general de actividad y accesos frecuentes")
         page.setObjectName("dashboardPage")
+        page.layout().setContentsMargins(18, 12, 18, 18)
+        page.layout().setSpacing(12)
         layout = page.layout()
 
         actions = QHBoxLayout()
@@ -1025,7 +1053,7 @@ class FemagDesktopWindow(QMainWindow):
             button = QPushButton(action.title)
             button.setObjectName(f"dashboard{action.title.replace(' ', '')}")
             button.setEnabled(action.enabled)
-            button.setMinimumHeight(52)
+            button.setMinimumHeight(44)
             if action.enabled and action.route_key:
                 if action.route_key == "load_orders.new":
                     button.clicked.connect(self._handle_dashboard_new_load_order)
