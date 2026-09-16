@@ -115,6 +115,66 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
         batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
 
+        # En resoluciones bajas, una sola fila horizontal aplasta el campo
+        # de cantidad. Reorganizamos las acciones en dos filas compactas.
+        batch_label = batch_layout.itemAtPosition(0, 0).widget()
+        if isinstance(batch_label, QLabel):
+            batch_label.setText("Agregar pallets:")
+        while batch_layout.count():
+            batch_layout.takeAt(0)
+        batch_frame.setMinimumHeight(104)
+        batch_frame.setMaximumHeight(116)
+        batch_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        batch_layout.setContentsMargins(0, 0, 0, 0)
+
+        first_row = QWidget(batch_frame)
+        first_row_layout = QHBoxLayout(first_row)
+        first_row_layout.setContentsMargins(0, 0, 0, 0)
+        first_row_layout.setSpacing(8)
+
+        second_row = QWidget(batch_frame)
+        second_row_layout = QHBoxLayout(second_row)
+        second_row_layout.setContentsMargins(0, 0, 0, 0)
+        second_row_layout.setSpacing(8)
+
+        if isinstance(batch_label, QLabel):
+            batch_label.setMinimumWidth(92)
+            first_row_layout.addWidget(batch_label)
+
+        # Mantener la barra utilizable en notebooks de 1280px. Los textos de
+        # los botones no deben imponer su sizeHint como ancho mínimo del widget.
+        self.bulk_pallet_count_input.setMinimumWidth(80)
+        self.bulk_pallet_count_input.setMaximumWidth(96)
+        self.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        compact_buttons = (
+            self.add_pallet_button,
+            self.propose_distribution_button,
+            self.clear_assignments_button,
+            self.reorganize_pending_button,
+            self.recalculate_all_button,
+            self.configure_pallet_capacity_button,
+            self.configure_truck_capacity_button,
+        )
+        for button in compact_buttons:
+            button.setMinimumWidth(0)
+            button.setMaximumHeight(34)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        first_row_layout.addWidget(self.bulk_pallet_count_input)
+        first_row_layout.addWidget(self.add_pallet_button, 1)
+        first_row_layout.addWidget(self.propose_distribution_button, 2)
+        first_row_layout.addStretch(1)
+
+        second_row_layout.addWidget(self.clear_assignments_button, 2)
+        second_row_layout.addWidget(self.reorganize_pending_button, 1)
+        second_row_layout.addWidget(self.recalculate_all_button, 1)
+        second_row_layout.addWidget(self.configure_pallet_capacity_button, 1)
+        second_row_layout.addWidget(self.configure_truck_capacity_button, 1)
+        second_row_layout.addStretch(1)
+
+        batch_layout.addWidget(first_row, 0, 0, 1, 2)
+        batch_layout.addWidget(second_row, 1, 0, 1, 2)
+
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
         self.lock_pallet_button.setObjectName("togglePalletLockButton")

@@ -284,6 +284,8 @@ class LoadOrderService:
         status: str | None = None,
         client: Client | None = None,
         day: date | None = None,
+        order_number: int | None = None,
+        limit: int | None = None,
     ) -> list[LoadOrder]:
         query = LoadOrder.select()
         if status is not None:
@@ -296,7 +298,12 @@ class LoadOrderService:
             query = query.where((LoadOrder.client == client) | (LoadOrder.id.in_(destination_orders)))
         if day is not None:
             query = query.where(LoadOrder.date == day)
-        return list(query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc()))
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
+        query = query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc())
+        if limit is not None:
+            query = query.limit(max(1, int(limit)))
+        return list(query)
 
     def validate_merchandise_uniqueness(self, order: LoadOrder) -> None:
         """Reject persisted orders that cannot be represented as unique pallet lines."""
