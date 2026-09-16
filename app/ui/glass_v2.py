@@ -188,6 +188,67 @@ def glass_v2_stylesheet() -> str:
         color: #294b70;
     }}
 
+    /* Familia visual única de botones dentro del área de trabajo */
+    QStackedWidget#mainStack QPushButton,
+    QStackedWidget#mainStack QToolButton {
+        min-height: 38px;
+        border-radius: 10px;
+        padding: 0 14px;
+        background-color: rgba(255,255,255,220);
+        border: 1px solid #cbd9e8;
+        color: #31557e;
+        font-weight: 600;
+    }
+
+    QStackedWidget#mainStack QPushButton:hover,
+    QStackedWidget#mainStack QToolButton:hover {
+        background-color: rgba(255,255,255,245);
+        border-color: #9ab9de;
+        color: #0b63c7;
+    }
+
+    QStackedWidget#mainStack QPushButton:pressed,
+    QStackedWidget#mainStack QToolButton:pressed {
+        background-color: #e8f2fd;
+        border-color: #86acd8;
+    }
+
+    QStackedWidget#mainStack QPushButton:disabled,
+    QStackedWidget#mainStack QToolButton:disabled {
+        background-color: rgba(230,236,243,220);
+        border-color: rgba(207,218,230,200);
+        color: #8a9aac;
+    }
+
+    QStackedWidget#mainStack QPushButton[uiRole="primary"],
+    QStackedWidget#mainStack QToolButton[uiRole="primary"] {
+        background-color: #1473e6;
+        border: 1px solid #1473e6;
+        color: white;
+        font-weight: 700;
+    }
+
+    QStackedWidget#mainStack QPushButton[uiRole="primary"]:hover,
+    QStackedWidget#mainStack QToolButton[uiRole="primary"]:hover {
+        background-color: #0f68cf;
+        border-color: #0f68cf;
+        color: white;
+    }
+
+    QStackedWidget#mainStack QPushButton[uiRole="secondary"],
+    QStackedWidget#mainStack QToolButton[uiRole="secondary"] {
+        background-color: rgba(255,255,255,220);
+        border: 1px solid #cbd9e8;
+        color: #31557e;
+    }
+
+    QStackedWidget#mainStack QPushButton[uiRole="danger"],
+    QStackedWidget#mainStack QToolButton[uiRole="danger"] {
+        background-color: rgba(255,245,246,225);
+        border: 1px solid #efc5cb;
+        color: #b4233c;
+    }
+
     QWidget#customerLedgerPage QPushButton,
     QWidget#customerLedgerPage QToolButton {{
         min-height: 38px;
