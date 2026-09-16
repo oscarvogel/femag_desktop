@@ -84,7 +84,7 @@ def test_issue_443_view_spec_exposes_collection_cards(db):
 
 
 def test_issue_443_dashboard_renders_collection_widgets(db):
-    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget, QWidget
+    from PyQt5.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QTableWidget, QWidget
 
     from app.models.security import User, UserProfile
     from app.services.permission_service import PermissionService
@@ -111,11 +111,15 @@ def test_issue_443_dashboard_renders_collection_widgets(db):
     assert next_7_card is not None
     assert next_30_card is not None
     assert debtor_card is not None
-    assert "#be123c" in overdue_card.styleSheet()
-    assert "#0f172a" in debtor_card.styleSheet()
     assert overdue_table is not None and overdue_table.minimumHeight() >= 210
     assert upcoming_table is not None and upcoming_table.minimumHeight() >= 210
     assert window.findChild(QWidget, "dashboardPage") is not None
+    assert window.findChild(QFrame, "dashboardQuickActions") is not None
+    assert window.findChild(QFrame, "dashboardMetricCard") is not None
+    assert window.findChild(QLabel, "dashboardHeading") is not None
+    planned_f150 = window.findChild(QPushButton, "dashboardF150")
+    assert planned_f150 is not None and not planned_f150.isEnabled()
+    assert planned_f150.property("dashboardState") == "planned"
 
     window.close()
 

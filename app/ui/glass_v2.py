@@ -122,6 +122,192 @@ def glass_v2_stylesheet() -> str:
         background: transparent;
     }}
 
+    QScrollArea#dashboardScrollArea {{
+        background: transparent;
+        border: none;
+    }}
+
+    QWidget#dashboardPage {{
+        background-color: rgba(242, 248, 250, 106);
+        border: 1px solid rgba(255, 255, 255, 110);
+        border-radius: 22px;
+    }}
+
+    QLabel#dashboardEyebrow {{
+        color: #6a836d;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.2px;
+        background: transparent;
+    }}
+
+    QLabel#dashboardHeading {{
+        color: #173d4b;
+        font-size: 30px;
+        font-weight: 700;
+        background: transparent;
+    }}
+
+    QLabel#dashboardSubheading {{
+        color: #617980;
+        font-size: 13px;
+        background: transparent;
+    }}
+
+    QFrame#dashboardQuickActions {{
+        background-color: rgba(255, 255, 255, 174);
+        border: 1px solid rgba(255, 255, 255, 225);
+        border-radius: 18px;
+    }}
+
+    QLabel#dashboardQuickActionsTitle {{
+        color: #254d5b;
+        font-size: 13px;
+        font-weight: 700;
+        background: transparent;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton {{
+        min-height: 38px;
+        border-radius: 10px;
+        padding: 0 12px;
+        background-color: rgba(250, 253, 253, 205);
+        border: 1px solid rgba(191, 210, 215, 205);
+        color: #315969;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton:hover {{
+        background-color: rgba(255, 255, 255, 245);
+        border-color: #8ab1b5;
+        color: #17636c;
+    }}
+
+    QPushButton#dashboardNuevaordendecarga {{
+        background-color: #167a76;
+        border: 1px solid #167a76;
+        color: white;
+        font-weight: 700;
+    }}
+
+    QPushButton#dashboardNuevaordendecarga:hover {{
+        background-color: #0e6966;
+        border-color: #0e6966;
+        color: white;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton[dashboardState="planned"] {{
+        background-color: rgba(242, 244, 241, 175);
+        border: 1px dashed rgba(150, 164, 153, 180);
+        color: #849189;
+        font-weight: 600;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton[dashboardState="planned"]:disabled {{
+        background-color: rgba(242, 244, 241, 175);
+        border: 1px dashed rgba(150, 164, 153, 180);
+        color: #849189;
+    }}
+
+    QFrame#dashboardMetricCard {{
+        min-height: 92px;
+        background-color: rgba(255, 255, 255, 183);
+        border: 1px solid rgba(255, 255, 255, 228);
+        border-radius: 16px;
+    }}
+
+    QFrame#dashboardMetricCard:hover {{
+        background-color: rgba(255, 255, 255, 220);
+        border-color: rgba(159, 193, 192, 215);
+    }}
+
+    QLabel#dashboardMetricLabel {{
+        color: #71868b;
+        font-size: 11px;
+        font-weight: 600;
+        background: transparent;
+    }}
+
+    QLabel#dashboardMetricValue {{
+        color: #173d4b;
+        font-size: 23px;
+        font-weight: 700;
+        background: transparent;
+    }}
+
+    QLabel#dashboardCollectionsTitle {{
+        color: #254d5b;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 6px;
+        background: transparent;
+    }}
+
+    QPushButton#dashboardOverdueBudgetsCard,
+    QPushButton#dashboardDueTodayCard,
+    QPushButton#dashboardNext7Card,
+    QPushButton#dashboardNext30Card,
+    QPushButton#dashboardDebtorBalanceCard {{
+        text-align: left;
+        padding: 12px 13px;
+        border-radius: 14px;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+
+    QPushButton#dashboardOverdueBudgetsCard {{
+        color: #9f3043;
+        background-color: rgba(255, 244, 245, 205);
+        border: 1px solid rgba(235, 191, 199, 210);
+    }}
+
+    QPushButton#dashboardDueTodayCard {{
+        color: #a55c16;
+        background-color: rgba(255, 248, 238, 207);
+        border: 1px solid rgba(237, 207, 167, 215);
+    }}
+
+    QPushButton#dashboardNext7Card {{
+        color: #8a690a;
+        background-color: rgba(255, 252, 235, 207);
+        border: 1px solid rgba(231, 217, 160, 215);
+    }}
+
+    QPushButton#dashboardNext30Card {{
+        color: #2c629d;
+        background-color: rgba(244, 249, 255, 207);
+        border: 1px solid rgba(192, 213, 239, 215);
+    }}
+
+    QPushButton#dashboardDebtorBalanceCard {{
+        color: #315969;
+        background-color: rgba(247, 251, 250, 207);
+        border: 1px solid rgba(196, 215, 215, 215);
+    }}
+
+    QPushButton#dashboardOverdueBudgetsCard:hover,
+    QPushButton#dashboardDueTodayCard:hover,
+    QPushButton#dashboardNext7Card:hover,
+    QPushButton#dashboardNext30Card:hover,
+    QPushButton#dashboardDebtorBalanceCard:hover {{
+        background-color: rgba(255, 255, 255, 238);
+        border-color: #83aaad;
+    }}
+
+    QLabel#dashboardPanelTitle {{
+        color: #254d5b;
+        font-size: 15px;
+        font-weight: 700;
+        background: transparent;
+    }}
+
+    QLabel#dashboardPanelCaption {{
+        color: #7a9093;
+        font-size: 11px;
+        background: transparent;
+    }}
+
     QLabel#heading,
     QLabel#customerLedgerTitle {{
         background: transparent;
@@ -148,6 +334,13 @@ def glass_v2_stylesheet() -> str:
         border-radius: 18px;
     }}
 
+    QFrame#dashboardOverduePanel,
+    QFrame#dashboardUpcomingPanel {{
+        background-color: rgba(255, 255, 255, 184);
+        border: 1px solid rgba(255, 255, 255, 228);
+        border-radius: 18px;
+    }}
+
     QLabel#cardValue,
     QLabel#customerLedgerBalanceValue {{
         color: #17345a;
@@ -168,6 +361,17 @@ def glass_v2_stylesheet() -> str:
         color: #294b70;
         selection-background-color: #e1eefc;
         selection-color: #14365e;
+    }}
+
+    QTableWidget#dashboardOverdueTable,
+    QTableWidget#dashboardUpcomingTable {{
+        background-color: rgba(251, 253, 253, 188);
+        alternate-background-color: rgba(238, 246, 245, 135);
+        border: 1px solid rgba(199, 216, 218, 185);
+        border-radius: 11px;
+        color: #365965;
+        selection-background-color: #dcefed;
+        selection-color: #173d4b;
     }}
 
     QHeaderView::section {{
@@ -385,6 +589,92 @@ def glass_v2_stylesheet() -> str:
         background-color: #1473e6;
         color: white;
         border: none;
+        font-weight: 700;
+    }}
+
+    /* El dashboard tiene prioridad sobre la familia genérica del área de trabajo. */
+    QFrame#dashboardQuickActions QPushButton {{
+        background-color: rgba(250, 253, 253, 205);
+        border: 1px solid rgba(191, 210, 215, 205);
+        color: #315969;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton[uiRole="primary"] {{
+        background-color: #167a76;
+        border: 1px solid #167a76;
+        color: white;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton[uiRole="primary"]:hover {{
+        background-color: #0e6966;
+        border-color: #0e6966;
+        color: white;
+    }}
+
+    QFrame#dashboardQuickActions QPushButton[dashboardState="planned"]:disabled {{
+        background-color: rgba(242, 244, 241, 175);
+        border: 1px dashed rgba(150, 164, 153, 180);
+        color: #849189;
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardOverdueBudgetsCard,
+    QStackedWidget#mainStack QPushButton#dashboardDueTodayCard,
+    QStackedWidget#mainStack QPushButton#dashboardNext7Card,
+    QStackedWidget#mainStack QPushButton#dashboardNext30Card,
+    QStackedWidget#mainStack QPushButton#dashboardDebtorBalanceCard {{
+        text-align: left;
+        padding: 12px 13px;
+        border-radius: 14px;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardOverdueBudgetsCard {{
+        color: #9f3043;
+        background-color: rgba(255, 244, 245, 205);
+        border: 1px solid rgba(235, 191, 199, 210);
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardDueTodayCard {{
+        color: #a55c16;
+        background-color: rgba(255, 248, 238, 207);
+        border: 1px solid rgba(237, 207, 167, 215);
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardNext7Card {{
+        color: #8a690a;
+        background-color: rgba(255, 252, 235, 207);
+        border: 1px solid rgba(231, 217, 160, 215);
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardNext30Card {{
+        color: #2c629d;
+        background-color: rgba(244, 249, 255, 207);
+        border: 1px solid rgba(192, 213, 239, 215);
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardDebtorBalanceCard {{
+        color: #315969;
+        background-color: rgba(247, 251, 250, 207);
+        border: 1px solid rgba(196, 215, 215, 215);
+    }}
+
+    QStackedWidget#mainStack QPushButton#dashboardOverdueBudgetsCard:hover,
+    QStackedWidget#mainStack QPushButton#dashboardDueTodayCard:hover,
+    QStackedWidget#mainStack QPushButton#dashboardNext7Card:hover,
+    QStackedWidget#mainStack QPushButton#dashboardNext30Card:hover,
+    QStackedWidget#mainStack QPushButton#dashboardDebtorBalanceCard:hover {{
+        background-color: rgba(255, 255, 255, 238);
+        border-color: #83aaad;
+    }}
+
+    QTableWidget#dashboardOverdueTable QHeaderView::section,
+    QTableWidget#dashboardUpcomingTable QHeaderView::section {{
+        background-color: rgba(232, 242, 241, 225);
+        color: #476a70;
+        border: none;
+        border-bottom: 1px solid #d4e3e2;
+        padding: 8px 7px;
         font-weight: 700;
     }}
     """
