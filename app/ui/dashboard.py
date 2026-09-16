@@ -151,7 +151,7 @@ class DashboardService:
             f"Choferes bloqueados: {summary['choferes_bloqueados'] or 0}",
             f"Órdenes abiertas: {summary['ordenes_pendientes'] or 0}",
             f"Último backup: {summary['ultimo_backup'] or 'Sin registros'}",
-            "Próximos módulos: remitos, F150.",
+            "Próximo módulo: F150.",
         ]
         if demo_mode:
             alerts.append("Modo demo visual con datos de prueba.")
