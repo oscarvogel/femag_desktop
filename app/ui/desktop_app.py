@@ -1108,19 +1108,19 @@ class FemagDesktopWindow(QMainWindow):
             button.setMinimumHeight(82)
             button.setCursor(Qt.PointingHandCursor)
             card_styles = {
-                "Presupuestos vencidos": ("#fff1f2", "#be123c", "#fecdd3"),
-                "Vence hoy": ("#fff7ed", "#c2410c", "#fed7aa"),
-                "Próximos 7 días": ("#fffbeb", "#a16207", "#fde68a"),
-                "Próximos 30 días": ("#eff6ff", "#1d4ed8", "#bfdbfe"),
-                "Saldo deudor clientes": ("#f8fafc", "#0f172a", "#cbd5e1"),
+                "Presupuestos vencidos": ("rgba(255,246,247,214)", "#b4233c", "#efc8cf"),
+                "Vence hoy": ("rgba(255,249,241,214)", "#b45309", "#efd2ae"),
+                "Próximos 7 días": ("rgba(255,252,238,214)", "#9a6700", "#eadb9a"),
+                "Próximos 30 días": ("rgba(244,248,255,214)", "#1f5db8", "#c7d9f2"),
+                "Saldo deudor clientes": ("rgba(249,251,253,214)", "#28445f", "#d2dce7"),
             }
             background, foreground, border = card_styles[card.title]
             button.setStyleSheet(
                 "QPushButton{"
                 f"color:{foreground};background:{background};border:1px solid {border};"
-                "text-align:left;padding:10px 12px;font-weight:700;border-radius:8px;"
+                "text-align:left;padding:11px 13px;font-weight:700;border-radius:11px;"
                 "}"
-                "QPushButton:hover{border:1px solid #64748b;background:#ffffff;}"
+                "QPushButton:hover{border:1px solid #9eb7d2;background:rgba(255,255,255,238);}"
             )
             if card.route_key == "customer_ledger":
                 button.clicked.connect(self._handle_dashboard_open_customer_ledger)
@@ -1139,9 +1139,6 @@ class FemagDesktopWindow(QMainWindow):
             panel = QFrame()
             panel.setObjectName(
                 "dashboardOverduePanel" if overdue else "dashboardUpcomingPanel"
-            )
-            panel.setStyleSheet(
-                "QFrame{background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;}"
             )
             panel_layout = QVBoxLayout(panel)
             panel_layout.setContentsMargins(10, 10, 10, 10)
