@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QFrame, QSizePolicy
+from PyQt5.QtWidgets import QFrame, QLabel, QSizePolicy
 
 
 def _compact_batch_actions(widget) -> None:
@@ -16,6 +16,12 @@ def _compact_batch_actions(widget) -> None:
 
     label_item = layout.itemAtPosition(0, 0)
     add_label = label_item.widget() if label_item is not None else None
+
+    # La UI actual ya puede haber organizado esta barra en dos filas mediante
+    # contenedores QWidget. En ese caso no debemos volver a compactarla: esta
+    # extensión solo aplica al layout legado cuyo primer elemento es el QLabel.
+    if not isinstance(add_label, QLabel):
+        return
 
     while layout.count():
         layout.takeAt(0)
