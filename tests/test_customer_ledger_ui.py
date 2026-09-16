@@ -453,7 +453,7 @@ def test_customer_ledger_compact_layout_for_real_data(db):
     assert "1 movimiento" in page.clients_table.item(0, 0).text()
     assert page.detail_header.text() == "Distribuidora Paraná"
     assert page.detail_movements.text() == "1 movimiento"
-    assert page.more_actions_button.text() == "Más acciones"
+    assert page.more_actions_button.text() == "Acciones  ▾"
     assert page.print_statement_action.isEnabled()
     assert page.whatsapp_statement_action.isEnabled()
     assert page.email_statement_action.isEnabled()
