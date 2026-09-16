@@ -548,24 +548,24 @@ def glass_v2_stylesheet() -> str:
         color: #315969;
     }}
 
-    QWidget#loadOrdersPage QFrame#loadOrderFilters {
+    QWidget#loadOrdersPage QFrame#loadOrderFilters {{
         background-color: rgba(255,255,255,165);
         border: 1px solid rgba(255,255,255,220);
         border-radius: 14px;
-    }
+    }}
 
-    QWidget#loadOrdersPage QLabel#loadOrderResultsLabel {
+    QWidget#loadOrdersPage QLabel#loadOrderResultsLabel {{
         color: #6b8186;
         font-size: 11px;
         background: transparent;
         padding: 0 2px;
-    }
+    }}
 
-    QWidget#loadOrdersPage QCheckBox#loadOrderDateFilterEnabled {
+    QWidget#loadOrdersPage QCheckBox#loadOrderDateFilterEnabled {{
         color: #49686f;
         background: transparent;
         spacing: 6px;
-    }
+    }}
 
     QWidget#loadOrdersPage QTableWidget#loadOrdersTable {{
         background-color: rgba(251,253,253,190);
