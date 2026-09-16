@@ -415,3 +415,46 @@ def test_admin_authorization_dialog_accepts_valid_admin(db):
     assert dialog.result() == QDialog.Accepted
     assert dialog.authorized_user() == admin
     assert dialog.reason() == "Corrección de caja"
+
+
+def test_customer_ledger_compact_layout_for_real_data(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Distribuidora Paraná",
+        cuit="30777777111",
+        iva_condition="RI",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="load_order_documental",
+        total_amount=125000,
+        currency="ARS",
+        description="Despacho demo",
+        source_ref="ux-441:1",
+        created_by="admin",
+    )
+
+    page = CustomerLedgerPage(
+        current_user="admin",
+        print_statement_callback=lambda _client: None,
+        whatsapp_statement_callback=lambda _client: None,
+        email_statement_callback=lambda _client: None,
+    )
+    app.processEvents()
+
+    assert page.clients_table.columnCount() == 2
+    assert "Distribuidora Paraná" in page.clients_table.item(0, 0).text()
+    assert "1 movimiento" in page.clients_table.item(0, 0).text()
+    assert page.detail_header.text() == "Distribuidora Paraná"
+    assert page.detail_movements.text() == "1 movimiento"
+    assert page.more_actions_button.text() == "Más acciones"
+    assert page.print_statement_action.isEnabled()
+    assert page.whatsapp_statement_action.isEnabled()
+    assert page.email_statement_action.isEnabled()
+    assert page.totals_label.text()
