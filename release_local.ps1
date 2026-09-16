@@ -189,8 +189,18 @@ try {
     Write-Host ""
     Write-Host "Para promoverlo a produccion: .\release.ps1 production" -ForegroundColor Cyan
 } finally {
-    # El build modifica identidad/version; siempre volver a lo versionado antes de restaurar el trabajo local.
-    git restore --source=HEAD -- app/build_info.py app/build_version.py 2>$null
+    # Si se creo stash al inicio, todo cambio que aparezca luego pertenece al proceso
+    # de release/tests/build. Limpiarlo antes de restaurar el trabajo original evita
+    # conflictos con capturas/PDFs generados por los tests.
+    if ($stashCreated) {
+        Write-Host ""
+        Write-Host "Limpiando artefactos temporales del release..." -ForegroundColor Yellow
+        git reset --hard HEAD *> $null
+        git clean -fd *> $null
+    } else {
+        # Sin stash, limitar la limpieza a los archivos de identidad que modifica el build.
+        git restore --source=HEAD -- app/build_info.py app/build_version.py 2>$null
+    }
 
     if ($stashCreated) {
         Write-Host ""
