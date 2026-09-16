@@ -91,6 +91,7 @@ from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
@@ -3178,9 +3179,7 @@ class LoadOrderProductDialog(QDialog):
         self.quantity_input.setDecimals(2)
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setObjectName("productDialogPrecioInput")
-        self.precio_input.setRange(0, 99999999)
-        self.precio_input.setDecimals(2)
-        self.precio_input.setPrefix("$ ")
+        configure_money_input(self.precio_input)
         self.descuento_input = QDoubleSpinBox()
         self.descuento_input.setObjectName("productDialogDescuentoInput")
         self.descuento_input.setRange(0, 100)
