@@ -559,3 +559,65 @@ def _model_by_table(table_name):
     from app.models import ALL_MODELS
 
     return next(model for model in ALL_MODELS if model._meta.table_name == table_name)
+
+
+
+def test_mysql_money_column_detects_integer_or_zero_scale_legacy_types():
+    from collections import namedtuple
+
+    from app.config.schema import _mysql_money_column_needs_fractional_fix
+
+    Column = namedtuple("Column", "data_type")
+
+    class MySQLDatabase:
+        pass
+
+    database = MySQLDatabase()
+
+    assert _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("int")
+    )
+    assert _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("decimal(18,0)")
+    )
+    assert not _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("decimal(18,2)")
+    )
+    assert not _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("double")
+    )
+
+
+def test_repair_payment_movement_restores_cents_from_receipt(db):
+    import pytest
+
+    from app.config.schema import _repair_payment_movement_amounts
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.services.client_payment_service import ClientPaymentService
+
+    client = Client.create(
+        name="Cliente Centavos",
+        cuit="30999999991",
+        iva_condition="RI",
+    )
+    payment = ClientPaymentService(current_user="tesoreria").register_payment(
+        client=client,
+        amount=898220.62,
+        method="retenciones_percepciones",
+    )
+    movement = ClientAccountMovement.get(
+        ClientAccountMovement.payment == payment,
+        ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT,
+    )
+    movement.amount = -898221.0
+    movement.net_amount = -898221.0
+    movement.total_amount = -898221.0
+    movement.save()
+
+    _repair_payment_movement_amounts(db)
+
+    movement = ClientAccountMovement.get_by_id(movement.id)
+    assert movement.amount == pytest.approx(-898220.62)
+    assert movement.net_amount == pytest.approx(-898220.62)
+    assert movement.total_amount == pytest.approx(-898220.62)
