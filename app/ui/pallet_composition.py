@@ -115,6 +115,33 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
         batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
 
+        # En resoluciones bajas, una sola fila horizontal aplasta el campo
+        # de cantidad. Reorganizamos las acciones en dos filas compactas.
+        batch_label = batch_layout.itemAtPosition(0, 0).widget()
+        if isinstance(batch_label, QLabel):
+            batch_label.setText("Agregar pallets:")
+        while batch_layout.count():
+            batch_layout.takeAt(0)
+        batch_layout.setHorizontalSpacing(8)
+        batch_layout.setVerticalSpacing(6)
+        batch_layout.setColumnStretch(1, 0)
+        batch_layout.setColumnStretch(2, 1)
+        batch_layout.setColumnStretch(3, 1)
+        batch_layout.setColumnStretch(4, 1)
+
+        if isinstance(batch_label, QLabel):
+            batch_layout.addWidget(batch_label, 0, 0)
+        self.bulk_pallet_count_input.setMinimumWidth(110)
+        self.bulk_pallet_count_input.setMaximumWidth(140)
+        batch_layout.addWidget(self.bulk_pallet_count_input, 0, 1)
+        batch_layout.addWidget(self.add_pallet_button, 0, 2)
+        batch_layout.addWidget(self.propose_distribution_button, 0, 3)
+        batch_layout.addWidget(self.clear_assignments_button, 1, 0, 1, 2)
+        batch_layout.addWidget(self.reorganize_pending_button, 1, 2)
+        batch_layout.addWidget(self.recalculate_all_button, 1, 3)
+        batch_layout.addWidget(self.configure_pallet_capacity_button, 1, 4)
+        batch_layout.addWidget(self.configure_truck_capacity_button, 1, 5)
+
         editor_layout = self.editor_title.parentWidget().layout()
         self.lock_pallet_button = QPushButton("Fijar pallet")
         self.lock_pallet_button.setObjectName("togglePalletLockButton")
