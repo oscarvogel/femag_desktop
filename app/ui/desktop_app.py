@@ -1052,8 +1052,13 @@ class FemagDesktopWindow(QMainWindow):
         for action in spec.quick_actions:
             button = QPushButton(action.title)
             button.setObjectName(f"dashboard{action.title.replace(' ', '')}")
+            primary_routes = {"load_orders.new", "customer_ledger.register_payment"}
+            button.setProperty(
+                "uiRole",
+                "primary" if action.route_key in primary_routes else "secondary",
+            )
             button.setEnabled(action.enabled)
-            button.setMinimumHeight(44)
+            button.setMinimumHeight(42)
             if action.enabled and action.route_key:
                 if action.route_key == "load_orders.new":
                     button.clicked.connect(self._handle_dashboard_new_load_order)
@@ -1202,6 +1207,7 @@ class FemagDesktopWindow(QMainWindow):
                 panel_layout.addWidget(empty)
 
             open_report = QPushButton("Ver todos los vencimientos")
+            open_report.setProperty("uiRole", "secondary")
             open_report.setObjectName(
                 "dashboardOpenOverdueReportButton"
                 if overdue
@@ -1829,6 +1835,8 @@ def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) 
 def _action_button(object_name: str, text: str, *, secondary: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName(object_name)
+    role = "secondary" if secondary else "primary"
+    button.setProperty("uiRole", role)
     if secondary:
         button.setProperty("secondary", True)
     return button
