@@ -230,13 +230,18 @@ class CustomerLedgerPage(QWidget):
 
         self.more_actions_button = QToolButton()
         self.more_actions_button.setObjectName("customerLedgerMoreActionsButton")
-        self.more_actions_button.setText("Más acciones")
+        self.more_actions_button.setText("Acciones  ▾")
+        self.more_actions_button.setToolTip("Imprimir, compartir o actuar sobre el movimiento seleccionado")
         self.more_actions_button.setPopupMode(QToolButton.InstantPopup)
         self.more_actions_menu = QMenu(self.more_actions_button)
-        self.print_statement_action = self.more_actions_menu.addAction("Imprimir extracto")
+
+        self.more_actions_menu.addSection("Extracto")
+        self.print_statement_action = self.more_actions_menu.addAction("Imprimir")
         self.whatsapp_statement_action = self.more_actions_menu.addAction("Enviar por WhatsApp")
         self.email_statement_action = self.more_actions_menu.addAction("Enviar por correo")
+
         self.more_actions_menu.addSeparator()
+        self.more_actions_menu.addSection("Movimiento seleccionado")
         self.print_receipt_action = self.more_actions_menu.addAction("Imprimir recibo")
         self.annul_payment_action = self.more_actions_menu.addAction("Anular pago")
         self.reverse_manual_debit_action = self.more_actions_menu.addAction("Reversar débito")
@@ -249,8 +254,8 @@ class CustomerLedgerPage(QWidget):
         self.reverse_manual_debit_action.triggered.connect(self._on_reverse_manual_debit)
         self.reverse_manual_credit_action.triggered.connect(self._on_reverse_manual_credit)
         self.more_actions_button.setMenu(self.more_actions_menu)
-        primary_actions.addWidget(self.more_actions_button)
         primary_actions.addStretch(1)
+        primary_actions.addWidget(self.more_actions_button)
         layout.addLayout(primary_actions)
 
         legacy_actions = QWidget()
