@@ -1079,10 +1079,20 @@ class FemagDesktopWindow(QMainWindow):
             )
             button.setMinimumHeight(82)
             button.setCursor(Qt.PointingHandCursor)
+            card_styles = {
+                "Presupuestos vencidos": ("#fff1f2", "#be123c", "#fecdd3"),
+                "Vence hoy": ("#fff7ed", "#c2410c", "#fed7aa"),
+                "Próximos 7 días": ("#fffbeb", "#a16207", "#fde68a"),
+                "Próximos 30 días": ("#eff6ff", "#1d4ed8", "#bfdbfe"),
+                "Saldo deudor clientes": ("#f8fafc", "#0f172a", "#cbd5e1"),
+            }
+            background, foreground, border = card_styles[card.title]
             button.setStyleSheet(
-                "QPushButton{text-align:left;padding:10px 12px;font-weight:600;"
-                "background:#ffffff;border:1px solid #dbe3ec;border-radius:8px;}"
-                "QPushButton:hover{background:#f8fafc;border-color:#94a3b8;}"
+                "QPushButton{"
+                f"color:{foreground};background:{background};border:1px solid {border};"
+                "text-align:left;padding:10px 12px;font-weight:700;border-radius:8px;"
+                "}"
+                "QPushButton:hover{border:1px solid #64748b;background:#ffffff;}"
             )
             if card.route_key == "customer_ledger":
                 button.clicked.connect(self._handle_dashboard_open_customer_ledger)
@@ -1124,7 +1134,9 @@ class FemagDesktopWindow(QMainWindow):
             table.setSelectionBehavior(QTableWidget.SelectRows)
             table.setAlternatingRowColors(True)
             table.setShowGrid(False)
-            table.setMaximumHeight(190)
+            table.verticalHeader().setDefaultSectionSize(30)
+            table.setMinimumHeight(210)
+            table.setMaximumHeight(230)
             table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 order_number = row.get("order_number")
@@ -1187,11 +1199,15 @@ class FemagDesktopWindow(QMainWindow):
         )
         layout.addLayout(details)
 
-        layout.addWidget(QLabel("Pendientes y alertas"))
-        for alert in spec.alerts:
-            layout.addWidget(QLabel(f"• {alert}"))
         layout.addStretch(1)
-        return page
+
+        scroll = QScrollArea()
+        scroll.setObjectName("dashboardScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
 
     def _table_page(self, title: str, columns: list[str], rows: list[list[str]]) -> QWidget:
         page = _page(title, "Listado maestro de consulta rápida")
