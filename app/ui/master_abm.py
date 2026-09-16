@@ -50,6 +50,7 @@ from app.services.client_opening_balance_service import (
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
+from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
 
 
@@ -521,9 +522,7 @@ class ClientOpeningBalanceDialog(QDialog):
         )
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("clientOpeningBalanceAmountInput")
-        self.amount_input.setDecimals(2)
-        self.amount_input.setRange(0.01, 999_999_999.99)
-        self.amount_input.setPrefix("$ ")
+        configure_money_input(self.amount_input, minimum=0.01)
         self.currency_input = QComboBox()
         self.currency_input.setObjectName("clientOpeningBalanceCurrencyInput")
         self.currency_input.setEditable(True)
