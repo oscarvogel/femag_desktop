@@ -514,41 +514,41 @@ def glass_v2_stylesheet() -> str:
     }}
 
     /* Ordenes de carga: workspace + alta/edicion + pallets */
-    QWidget#loadOrdersPage {
+    QWidget#loadOrdersPage {{
         background-color: rgba(242,248,250,105);
         border: 1px solid rgba(255,255,255,110);
         border-radius: 22px;
-    }
+    }}
 
-    QWidget#loadOrdersPage QLabel#heading {
+    QWidget#loadOrdersPage QLabel#heading {{
         color: #173d4b;
         font-size: 30px;
         font-weight: 700;
         background: transparent;
-    }
+    }}
 
-    QWidget#loadOrdersPage QLabel#subheading {
+    QWidget#loadOrdersPage QLabel#subheading {{
         color: #617980;
         font-size: 13px;
         background: transparent;
-    }
+    }}
 
-    QWidget#loadOrdersPage QFrame#contentPanel {
+    QWidget#loadOrdersPage QFrame#contentPanel {{
         background-color: rgba(255,255,255,182);
         border: 1px solid rgba(255,255,255,225);
         border-radius: 18px;
-    }
+    }}
 
-    QWidget#loadOrdersPage QLineEdit#loadOrderSearchInput {
+    QWidget#loadOrdersPage QLineEdit#loadOrderSearchInput {{
         min-height: 40px;
         background-color: rgba(255,255,255,225);
         border: 1px solid rgba(195,211,226,210);
         border-radius: 11px;
         padding: 0 13px;
         color: #315969;
-    }
+    }}
 
-    QWidget#loadOrdersPage QTableWidget#loadOrdersTable {
+    QWidget#loadOrdersPage QTableWidget#loadOrdersTable {{
         background-color: rgba(251,253,253,190);
         alternate-background-color: rgba(239,246,245,145);
         border: 1px solid rgba(199,216,218,190);
@@ -556,53 +556,53 @@ def glass_v2_stylesheet() -> str:
         color: #365965;
         selection-background-color: #dcefed;
         selection-color: #173d4b;
-    }
+    }}
 
-    QWidget#loadOrdersPage QTableWidget#loadOrdersTable QHeaderView::section {
+    QWidget#loadOrdersPage QTableWidget#loadOrdersTable QHeaderView::section {{
         background-color: rgba(232,242,241,225);
         color: #476a70;
         border: none;
         border-bottom: 1px solid #d4e3e2;
         padding: 8px 7px;
         font-weight: 700;
-    }
+    }}
 
     QDialog#loadOrderEntryDialog,
-    QDialog#loadOrderPalletDialog {
+    QDialog#loadOrderPalletDialog {{
         background-color: #edf4f7;
         color: #173d4b;
-    }
+    }}
 
     QDialog#loadOrderEntryDialog QLabel#dialogTitle,
-    QDialog#loadOrderPalletDialog QLabel#dialogTitle {
+    QDialog#loadOrderPalletDialog QLabel#dialogTitle {{
         color: #173d4b;
         font-size: 26px;
         font-weight: 700;
         background: transparent;
-    }
+    }}
 
     QDialog#loadOrderEntryDialog QLabel#formHint,
-    QDialog#loadOrderPalletDialog QLabel#formHint {
+    QDialog#loadOrderPalletDialog QLabel#formHint {{
         color: #698087;
         font-size: 12px;
         background: transparent;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QFrame#loadOrderEntryStepList {
+    QDialog#loadOrderEntryDialog QFrame#loadOrderEntryStepList {{
         background-color: rgba(255,255,255,178);
         border: 1px solid rgba(255,255,255,225);
         border-radius: 16px;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QLabel#loadOrderStepTitle {
+    QDialog#loadOrderEntryDialog QLabel#loadOrderStepTitle {{
         color: #6a836d;
         font-size: 11px;
         font-weight: 700;
         background: transparent;
         padding: 4px 8px 8px 8px;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"] {
+    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"] {{
         min-height: 42px;
         text-align: left;
         padding: 0 12px;
@@ -611,39 +611,39 @@ def glass_v2_stylesheet() -> str:
         border: 1px solid transparent;
         border-radius: 11px;
         font-weight: 600;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"]:hover {
+    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"]:hover {{
         background-color: rgba(255,255,255,180);
         border-color: rgba(179,205,207,170);
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"]:checked {
+    QDialog#loadOrderEntryDialog QPushButton[stepNav="true"]:checked {{
         background-color: rgba(220,239,237,235);
         border: 1px solid rgba(112,168,166,165);
         color: #17636c;
         font-weight: 700;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QStackedWidget#loadOrderEntryStepStack {
+    QDialog#loadOrderEntryDialog QStackedWidget#loadOrderEntryStepStack {{
         background: transparent;
         border: none;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QFrame#formSection {
+    QDialog#loadOrderEntryDialog QFrame#formSection {{
         background-color: rgba(255,255,255,190);
         border: 1px solid rgba(255,255,255,228);
         border-radius: 18px;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QLabel#sectionTitle {
+    QDialog#loadOrderEntryDialog QLabel#sectionTitle {{
         color: #254d5b;
         font-size: 16px;
         font-weight: 700;
         background: transparent;
-    }
+    }}
 
-    QDialog#loadOrderEntryDialog QTableWidget {
+    QDialog#loadOrderEntryDialog QTableWidget {{
         background-color: rgba(255,255,255,218);
         alternate-background-color: rgba(241,247,247,205);
         border: 1px solid rgba(200,216,218,195);
@@ -651,56 +651,56 @@ def glass_v2_stylesheet() -> str:
         color: #365965;
         selection-background-color: #dcefed;
         selection-color: #173d4b;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QWidget#palletCompositionWidget {
+    QDialog#loadOrderPalletDialog QWidget#palletCompositionWidget {{
         background: transparent;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QLabel#palletCompositionTitle {
+    QDialog#loadOrderPalletDialog QLabel#palletCompositionTitle {{
         color: #173d4b;
         font-size: 20px;
         font-weight: 700;
         background: transparent;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QFrame#palletEditorPanel {
+    QDialog#loadOrderPalletDialog QFrame#palletEditorPanel {{
         background-color: rgba(255,255,255,185);
         border: 1px solid rgba(255,255,255,225);
         border-radius: 16px;
         padding: 8px;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QFrame#loadOrderKgTotalFrame {
+    QDialog#loadOrderPalletDialog QFrame#loadOrderKgTotalFrame {{
         background-color: #176f70;
         border: 1px solid rgba(255,255,255,120);
         border-radius: 16px;
-    }
+    }}
 
     QDialog#loadOrderPalletDialog QScrollArea#palletCardScroll,
-    QDialog#loadOrderPalletDialog QScrollArea#palletEditorScroll {
+    QDialog#loadOrderPalletDialog QScrollArea#palletEditorScroll {{
         background: transparent;
         border: none;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs::pane {
+    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs::pane {{
         border: 1px solid rgba(201,218,220,195);
         border-radius: 12px;
         background-color: rgba(255,255,255,175);
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs QTabBar::tab {
+    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs QTabBar::tab {{
         background-color: rgba(255,255,255,160);
         color: #49686f;
         border: 1px solid rgba(201,218,220,185);
         padding: 8px 12px;
-    }
+    }}
 
-    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs QTabBar::tab:selected {
+    QDialog#loadOrderPalletDialog QTabWidget#palletEditorTabs QTabBar::tab:selected {{
         background-color: rgba(255,255,255,238);
         color: #17636c;
         font-weight: 700;
-    }
+    }}
 
     /* Controles generales: una sola familia visual para todas las pantallas */
     QStackedWidget#mainStack QLineEdit,
