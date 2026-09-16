@@ -10,11 +10,13 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QMenu,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QToolButton,
 )
 
 from app.models.accounting import ClientAccountMovement
@@ -113,9 +115,9 @@ class CustomerLedgerPage(QWidget):
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_clients_panel())
         splitter.addWidget(self._build_detail_panel())
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([420, 720])
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 7)
+        splitter.setSizes([460, 820])
         layout.addWidget(splitter, 1)
 
         self.refresh()
@@ -131,21 +133,29 @@ class CustomerLedgerPage(QWidget):
         header.setObjectName("customerLedgerClientsHeader")
         layout.addWidget(header)
 
+        filters_row = QHBoxLayout()
+        filters_row.setSpacing(8)
         self.search_input = QLineEdit()
         self.search_input.setObjectName("customerLedgerSearchInput")
         self.search_input.setPlaceholderText("Buscar cliente...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self.search_input)
+        filters_row.addWidget(self.search_input, 1)
 
         self.only_with_balance = QCheckBox("Solo con saldo")
         self.only_with_balance.setObjectName("customerLedgerOnlyWithBalance")
         self.only_with_balance.toggled.connect(self._on_search_changed)
-        layout.addWidget(self.only_with_balance)
+        filters_row.addWidget(self.only_with_balance)
+        layout.addLayout(filters_row)
 
-        self.clients_table = QTableWidget(0, 3)
+        self.totals_label = QLabel("")
+        self.totals_label.setObjectName("customerLedgerTotalsLabel")
+        self.totals_label.setWordWrap(True)
+        layout.addWidget(self.totals_label)
+
+        self.clients_table = QTableWidget(0, 2)
         self.clients_table.setObjectName("customerLedgerClientsTable")
-        self.clients_table.setHorizontalHeaderLabels(["Cliente", "Saldo", "Movs."])
+        self.clients_table.setHorizontalHeaderLabels(["Cliente", "Saldo"])
         self.clients_table.verticalHeader().setVisible(False)
         self.clients_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -155,15 +165,9 @@ class CustomerLedgerPage(QWidget):
         header_view = self.clients_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.Stretch)
         header_view.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.clients_table.verticalHeader().setDefaultSectionSize(28)
+        self.clients_table.verticalHeader().setDefaultSectionSize(46)
         self.clients_table.currentCellChanged.connect(self._on_client_selected)
         layout.addWidget(self.clients_table, 1)
-
-        self.totals_label = QLabel("")
-        self.totals_label.setObjectName("customerLedgerTotalsLabel")
-        self.totals_label.setWordWrap(True)
-        layout.addWidget(self.totals_label)
         return panel
 
     def _build_detail_panel(self) -> QWidget:
@@ -173,12 +177,29 @@ class CustomerLedgerPage(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        header_row = QHBoxLayout()
+        header_card = QFrame()
+        header_card.setObjectName("customerLedgerHeaderCard")
+        header_card.setFrameShape(QFrame.StyledPanel)
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(16, 12, 16, 12)
+        header_layout.setSpacing(6)
+
         self.detail_header = QLabel("Seleccione un cliente de la izquierda.")
         self.detail_header.setObjectName("customerLedgerDetailHeader")
         self.detail_header.setWordWrap(True)
-        header_row.addWidget(self.detail_header, 1)
-        layout.addLayout(header_row)
+        header_layout.addWidget(self.detail_header)
+
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(18)
+        self.detail_balance = QLabel("$ 0,00")
+        self.detail_balance.setObjectName("customerLedgerBalanceValue")
+        summary_row.addWidget(self.detail_balance)
+        self.detail_movements = QLabel("0 movimientos")
+        self.detail_movements.setObjectName("customerLedgerMovementsValue")
+        summary_row.addWidget(self.detail_movements)
+        summary_row.addStretch(1)
+        header_layout.addLayout(summary_row)
+        layout.addWidget(header_card)
 
         primary_actions = QHBoxLayout()
         self.register_payment_button = QPushButton("Registrar pago")
@@ -206,8 +227,37 @@ class CustomerLedgerPage(QWidget):
             self._on_register_manual_credit
         )
         primary_actions.addWidget(self.register_manual_credit_button)
+
+        self.more_actions_button = QToolButton()
+        self.more_actions_button.setObjectName("customerLedgerMoreActionsButton")
+        self.more_actions_button.setText("Más acciones")
+        self.more_actions_button.setPopupMode(QToolButton.InstantPopup)
+        self.more_actions_menu = QMenu(self.more_actions_button)
+        self.print_statement_action = self.more_actions_menu.addAction("Imprimir extracto")
+        self.whatsapp_statement_action = self.more_actions_menu.addAction("Enviar por WhatsApp")
+        self.email_statement_action = self.more_actions_menu.addAction("Enviar por correo")
+        self.more_actions_menu.addSeparator()
+        self.print_receipt_action = self.more_actions_menu.addAction("Imprimir recibo")
+        self.annul_payment_action = self.more_actions_menu.addAction("Anular pago")
+        self.reverse_manual_debit_action = self.more_actions_menu.addAction("Reversar débito")
+        self.reverse_manual_credit_action = self.more_actions_menu.addAction("Reversar crédito")
+        self.print_statement_action.triggered.connect(self._on_print_statement)
+        self.whatsapp_statement_action.triggered.connect(self._on_whatsapp_statement)
+        self.email_statement_action.triggered.connect(self._on_email_statement)
+        self.print_receipt_action.triggered.connect(self._on_print_receipt)
+        self.annul_payment_action.triggered.connect(self._on_annul_payment)
+        self.reverse_manual_debit_action.triggered.connect(self._on_reverse_manual_debit)
+        self.reverse_manual_credit_action.triggered.connect(self._on_reverse_manual_credit)
+        self.more_actions_button.setMenu(self.more_actions_menu)
+        primary_actions.addWidget(self.more_actions_button)
         primary_actions.addStretch(1)
         layout.addLayout(primary_actions)
+
+        legacy_actions = QWidget()
+        legacy_actions.setObjectName("customerLedgerLegacyActions")
+        legacy_actions.hide()
+        legacy_layout = QVBoxLayout(legacy_actions)
+        legacy_layout.setContentsMargins(0, 0, 0, 0)
 
         statement_actions = QHBoxLayout()
         self.print_statement_button = QPushButton("Imprimir extracto")
@@ -228,7 +278,7 @@ class CustomerLedgerPage(QWidget):
         self.email_statement_button.clicked.connect(self._on_email_statement)
         statement_actions.addWidget(self.email_statement_button)
         statement_actions.addStretch(1)
-        layout.addLayout(statement_actions)
+        legacy_layout.addLayout(statement_actions)
 
         payment_actions = QHBoxLayout()
         self.print_receipt_button = QPushButton("Imprimir recibo")
@@ -262,36 +312,8 @@ class CustomerLedgerPage(QWidget):
         )
         payment_actions.addWidget(self.reverse_manual_credit_button)
         payment_actions.addStretch(1)
-        layout.addLayout(payment_actions)
-
-        # Highlighted balance card
-        balance_card = QFrame()
-        balance_card.setObjectName("customerLedgerBalanceCard")
-        balance_card.setFrameShape(QFrame.StyledPanel)
-        balance_layout = QHBoxLayout(balance_card)
-        balance_layout.setContentsMargins(16, 12, 16, 12)
-        balance_layout.setSpacing(24)
-
-        saldo_block = QVBoxLayout()
-        saldo_label = QLabel("Saldo actual")
-        saldo_label.setObjectName("customerLedgerBalanceLabel")
-        self.detail_balance = QLabel("$ 0,00")
-        self.detail_balance.setObjectName("customerLedgerBalanceValue")
-        saldo_block.addWidget(saldo_label)
-        saldo_block.addWidget(self.detail_balance)
-        balance_layout.addLayout(saldo_block)
-
-        movimientos_block = QVBoxLayout()
-        movimientos_label = QLabel("Movimientos")
-        movimientos_label.setObjectName("customerLedgerMovementsLabel")
-        self.detail_movements = QLabel("0")
-        self.detail_movements.setObjectName("customerLedgerMovementsValue")
-        movimientos_block.addWidget(movimientos_label)
-        movimientos_block.addWidget(self.detail_movements)
-        balance_layout.addLayout(movimientos_block)
-
-        balance_layout.addStretch(1)
-        layout.addWidget(balance_card)
+        legacy_layout.addLayout(payment_actions)
+        layout.addWidget(legacy_actions)
 
         self.movements_table = QTableWidget(0, 6)
         self.movements_table.setObjectName("customerLedgerMovementsTable")
@@ -370,9 +392,13 @@ class CustomerLedgerPage(QWidget):
             if balance > 0.01:
                 total_to_collect += balance
 
-            name_cell = QTableWidgetItem(client.name)
+            movement_label = "movimiento" if movements == 1 else "movimientos"
+            name_cell = QTableWidgetItem(
+                f"{client.name}\n{movements} {movement_label}"
+            )
             name_cell.setData(Qt.UserRole, client.id)
             name_cell.setToolTip(client.name)
+            name_cell.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.clients_table.setItem(row_index, 0, name_cell)
 
             balance_text = f"${balance:,.2f}"
@@ -381,11 +407,6 @@ class CustomerLedgerPage(QWidget):
             balance_cell.setForeground(QBrush(_color_for_balance(balance)))
             balance_cell.setToolTip(balance_text)
             self.clients_table.setItem(row_index, 1, balance_cell)
-
-            movements_cell = QTableWidgetItem(str(movements))
-            movements_cell.setTextAlignment(Qt.AlignCenter)
-            movements_cell.setToolTip(f"{movements} movimiento(s)")
-            self.clients_table.setItem(row_index, 2, movements_cell)
 
         # Totals footer (sobre el conjunto filtrado para que coincida con la tabla)
         suffix = ""
@@ -438,11 +459,12 @@ class CustomerLedgerPage(QWidget):
         client = Client.get_by_id(item.data(Qt.UserRole))
         movements = movements_for_client(client)
         balances = running_balance(movements)
-        self.detail_header.setText(f"Detalle de cuenta corriente — {client.name}")
+        self.detail_header.setText(client.name)
         total = client_balance(client)
         self.detail_balance.setText(f"${total:,.2f}")
         _apply_color_to_label(self.detail_balance, _color_for_balance(total))
-        self.detail_movements.setText(str(len(movements)))
+        movement_label = "movimiento" if len(movements) == 1 else "movimientos"
+        self.detail_movements.setText(f"{len(movements)} {movement_label}")
         self.movements_table.setRowCount(len(movements))
         self.movements_table.setVisible(bool(movements))
         self.empty_label.setVisible(not bool(movements))
@@ -501,6 +523,7 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
         self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
         self.email_statement_button.setEnabled(self.email_statement_callback is not None)
+        self._sync_more_actions()
         self._update_payment_actions()
         self._update_manual_debit_action()
         self._update_manual_credit_action()
@@ -540,7 +563,7 @@ class CustomerLedgerPage(QWidget):
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
         self.detail_balance.setText("$ 0,00")
         _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
-        self.detail_movements.setText("0")
+        self.detail_movements.setText("0 movimientos")
         self.movements_table.setRowCount(0)
         self.empty_label.hide()
         self.register_payment_button.setEnabled(False)
@@ -557,6 +580,30 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_button.setEnabled(False)
         self.reverse_manual_debit_button.setEnabled(False)
         self.reverse_manual_credit_button.setEnabled(False)
+        self._sync_more_actions()
+
+    def _sync_more_actions(self) -> None:
+        if not hasattr(self, "more_actions_button"):
+            return
+        has_client = self._selected_client() is not None
+        self.print_statement_action.setEnabled(
+            has_client and self.print_statement_callback is not None
+        )
+        self.whatsapp_statement_action.setEnabled(
+            has_client and self.whatsapp_statement_callback is not None
+        )
+        self.email_statement_action.setEnabled(
+            has_client and self.email_statement_callback is not None
+        )
+        self.print_receipt_action.setEnabled(self.print_receipt_button.isEnabled())
+        self.annul_payment_action.setVisible(self.can_annul_payments)
+        self.annul_payment_action.setEnabled(self.annul_payment_button.isEnabled())
+        self.reverse_manual_debit_action.setEnabled(
+            self.reverse_manual_debit_button.isEnabled()
+        )
+        self.reverse_manual_credit_action.setEnabled(
+            self.reverse_manual_credit_button.isEnabled()
+        )
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
@@ -626,6 +673,7 @@ class CustomerLedgerPage(QWidget):
             and not has_reversal
             and self.reverse_manual_debit_callback is not None
         )
+        self._sync_more_actions()
 
     def _update_manual_credit_action(self) -> None:
         movement = self._selected_movement()
@@ -647,6 +695,7 @@ class CustomerLedgerPage(QWidget):
             and not has_reversal
             and self.reverse_manual_credit_callback is not None
         )
+        self._sync_more_actions()
 
     def _update_payment_actions(self) -> None:
         payment = self._selected_payment()
@@ -659,6 +708,7 @@ class CustomerLedgerPage(QWidget):
             and self.can_annul_payments
             and self.annul_payment_callback is not None
         )
+        self._sync_more_actions()
 
     def _on_print_receipt(self) -> None:
         payment = self._selected_payment()
