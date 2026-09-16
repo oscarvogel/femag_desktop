@@ -1354,6 +1354,11 @@ class FemagDesktopWindow(QMainWindow):
 
         client_filter = QComboBox()
         client_filter.setObjectName("loadOrderClientFilter")
+        enable_combo_autocomplete(
+            client_filter,
+            placeholder="Buscar cliente...",
+            hint="Escribí parte del nombre para filtrar clientes.",
+        )
         client_filter.addItem("Todos los clientes", None)
         try:
             client_rows = (
@@ -1420,7 +1425,11 @@ class FemagDesktopWindow(QMainWindow):
             return int(digits) if digits else None
 
         def _selected_client() -> Client | None:
-            client_id = client_filter.currentData()
+            text = client_filter.currentText().strip()
+            index = client_filter.findText(text, Qt.MatchFixedString)
+            if index < 0:
+                return None
+            client_id = client_filter.itemData(index)
             return Client.get_by_id(client_id) if client_id else None
 
         def refresh() -> None:
