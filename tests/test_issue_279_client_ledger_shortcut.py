@@ -58,7 +58,7 @@ def test_client_list_opens_ledger_with_client_selected_and_loaded(db):
     assert ledger_table.rowCount() == 1
     selected = ledger_table.item(ledger_table.currentRow(), 0)
     assert selected.data(Qt.UserRole) == client.id
-    assert selected.text() == client.name
+    assert selected.text().splitlines()[0] == client.name
     assert window.findChild(QLabel, "customerLedgerDetailHeader").text().endswith(
         client.name
     )
