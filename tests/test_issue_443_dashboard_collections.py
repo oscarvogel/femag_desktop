@@ -84,7 +84,7 @@ def test_issue_443_view_spec_exposes_collection_cards(db):
 
 
 def test_issue_443_dashboard_renders_collection_widgets(db):
-    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget, QWidget
 
     from app.models.security import User, UserProfile
     from app.services.permission_service import PermissionService
@@ -98,13 +98,24 @@ def test_issue_443_dashboard_renders_collection_widgets(db):
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
 
-    assert window.findChild(QPushButton, "dashboardOverdueBudgetsCard") is not None
-    assert window.findChild(QPushButton, "dashboardDueTodayCard") is not None
-    assert window.findChild(QPushButton, "dashboardNext7Card") is not None
-    assert window.findChild(QPushButton, "dashboardNext30Card") is not None
-    assert window.findChild(QPushButton, "dashboardDebtorBalanceCard") is not None
-    assert window.findChild(QTableWidget, "dashboardOverdueTable") is not None
-    assert window.findChild(QTableWidget, "dashboardUpcomingTable") is not None
+    overdue_card = window.findChild(QPushButton, "dashboardOverdueBudgetsCard")
+    due_today_card = window.findChild(QPushButton, "dashboardDueTodayCard")
+    next_7_card = window.findChild(QPushButton, "dashboardNext7Card")
+    next_30_card = window.findChild(QPushButton, "dashboardNext30Card")
+    debtor_card = window.findChild(QPushButton, "dashboardDebtorBalanceCard")
+    overdue_table = window.findChild(QTableWidget, "dashboardOverdueTable")
+    upcoming_table = window.findChild(QTableWidget, "dashboardUpcomingTable")
+
+    assert overdue_card is not None
+    assert due_today_card is not None
+    assert next_7_card is not None
+    assert next_30_card is not None
+    assert debtor_card is not None
+    assert "#be123c" in overdue_card.styleSheet()
+    assert "#0f172a" in debtor_card.styleSheet()
+    assert overdue_table is not None and overdue_table.minimumHeight() >= 210
+    assert upcoming_table is not None and upcoming_table.minimumHeight() >= 210
+    assert window.findChild(QWidget, "dashboardPage") is not None
 
     window.close()
 
