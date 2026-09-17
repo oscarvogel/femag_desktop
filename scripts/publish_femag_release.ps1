@@ -58,25 +58,38 @@ function Invoke-CheckedWithProgress {
             $argument
         }
     })
-    $process = $null
+    $job = $null
     $startedAt = Get-Date
     Write-Host "$ProgressLabel... (gh no informa porcentaje; se avisará cada 15 segundos)"
 
     try {
-        $process = Start-Process -FilePath $Command -ArgumentList $quotedArguments -NoNewWindow -PassThru
-        while (-not $process.HasExited) {
-            Start-Sleep -Seconds 15
-            if (-not $process.HasExited) {
+        $commandInfo = Get-Command $Command -ErrorAction Stop
+        $commandPath = if ($commandInfo.Path) { $commandInfo.Path } elseif ($commandInfo.Source) { $commandInfo.Source } else { $Command }
+        $job = Start-Job -ScriptBlock {
+            param([string]$FilePath, [string[]]$ArgumentList)
+
+            $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -NoNewWindow -PassThru -Wait
+            [int]$process.ExitCode
+        } -ArgumentList $commandPath, $quotedArguments
+        $lastProgressAt = $startedAt
+        while ($job.State -in @('NotStarted', 'Running')) {
+            Start-Sleep -Seconds 1
+            $job = Get-Job -Id $job.Id
+            if ($job.State -in @('NotStarted', 'Running') -and ((Get-Date) - $lastProgressAt).TotalSeconds -ge 15) {
                 $elapsed = (Get-Date) - $startedAt
                 Write-Host ("  {0} sigue en curso. Tiempo transcurrido: {1}" -f $ProgressLabel, $elapsed.ToString('hh\:mm\:ss'))
+                $lastProgressAt = Get-Date
             }
         }
-        $process.WaitForExit()
-        $exitCode = $process.ExitCode
+        $result = @(Receive-Job -Job $job -Wait)
+        if ($result.Count -ne 1) {
+            throw "No se pudo obtener el código de salida de: $Command"
+        }
+        $exitCode = [int]$result[0]
     }
     finally {
-        if ($null -ne $process) {
-            $process.Dispose()
+        if ($null -ne $job) {
+            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
         }
     }
 

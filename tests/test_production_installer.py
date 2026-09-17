@@ -80,6 +80,10 @@ def test_release_asset_upload_reports_progress_while_running() -> None:
     publish = PUBLISH.read_text(encoding="utf-8")
 
     assert "function Invoke-CheckedWithProgress" in publish
+    assert "Get-Command $Command" in publish
+    assert "$process = Start-Process -FilePath $FilePath" in publish
+    assert "Start-Job -ScriptBlock" in publish
+    assert "-PassThru -Wait" in publish
     assert "se avisará cada 15 segundos" in publish
     assert "Subiendo instalador candidate a GitHub" in publish
     assert "Subiendo instalador previous a GitHub" in publish
