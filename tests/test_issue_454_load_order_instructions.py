@@ -1,77 +1,37 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from load_order_printing_cases import _budget_order, _pdf_text
 
 
-def test_issue_454_separates_load_instructions_from_budget_description(db):
-    from PyQt5.QtWidgets import QApplication, QLabel
-
-    from app.services.load_order_service import LoadOrderService
-    from app.ui.desktop_app import LoadOrderEntryDialog
-    from app.ui.load_order_instructions_extension import (
-        BUDGET_DESCRIPTION_PLACEHOLDER,
-        LOAD_ORDER_INSTRUCTIONS_PLACEHOLDER,
-        configure_load_order_instruction_fields,
-    )
-
-    app = QApplication.instance() or QApplication([])
-    dialog = LoadOrderEntryDialog(
-        LoadOrderService(current_user="issue454"),
-        "issue454",
-    )
-
-    configure_load_order_instruction_fields(dialog)
-
-    instructions = dialog.observations_input
-    section = dialog.findChild(type(dialog.step_stack.widget(3)), "loadOrderInstructionsSection")
-    if section is None:
-        from PyQt5.QtWidgets import QFrame
-
-        section = dialog.findChild(QFrame, "loadOrderInstructionsSection")
-
-    assert section is not None
-    assert instructions.parentWidget() is section
-    assert instructions.placeholderText() == LOAD_ORDER_INSTRUCTIONS_PLACEHOLDER
-    assert "Orden de Carga" in instructions.toolTip()
-    assert "presupuestos" in instructions.toolTip()
-
-    review_page = dialog.step_stack.widget(3)
-    title = review_page.findChild(QLabel, "loadOrderInstructionsLabel")
-    helper = review_page.findChild(QLabel, "loadOrderInstructionsHelp")
-    assert title is not None
-    assert title.text() == "Instrucciones de carga de la orden"
-    assert helper is not None
-    assert "no en los presupuestos" in helper.text()
-
-    destination_label = dialog.findChild(QLabel, "loadOrderDestinationBudgetDescriptionLabel")
-    assert destination_label is not None
-    assert destination_label.text() == "Descripción comercial para presupuesto del cliente/destino"
-    assert dialog.destination_budget_description_input.placeholderText() == BUDGET_DESCRIPTION_PLACEHOLDER
-    assert "instrucciones" in dialog.destination_budget_description_input.toolTip().lower()
-
-    transport_page = dialog.step_stack.widget(0)
-    old_labels = [
-        label
-        for label in transport_page.findChildren(QLabel)
-        if label.text().strip() == "Observaciones"
-    ]
-    assert old_labels
-    assert all(label.isHidden() for label in old_labels)
-
-    dialog.close()
-    app.processEvents()
-
-
-def test_issue_454_runtime_installs_load_order_extension():
-    from app.ui import desktop_app
+def test_issue_454_prints_client_observation_on_load_order_and_budget(db, tmp_path):
+    from app.services.load_order_print_service import LoadOrderPrintService
     from app.ui.load_order_instructions_extension import install_load_order_instructions_extension
 
-    install_load_order_instructions_extension()
-    patched_class = desktop_app.LoadOrderEntryDialog
+    order, client = _budget_order([("Producto presupuesto", 21.0, 100.0, 10)])
+    destination = order.destinations.get()
+    destination.observations = "Entregar primero este cliente; separar 2 pallets."
+    destination.save()
 
-    assert getattr(desktop_app, "_load_order_instructions_extension_installed", False)
-    assert "Instructions" in patched_class.__mro__[0].__qualname__ or patched_class.__name__ == "LoadOrderEntryDialog"
-
-    # Installation is deliberately idempotent because app.main imports it at startup.
     install_load_order_instructions_extension()
-    assert desktop_app.LoadOrderEntryDialog is patched_class
+    service = LoadOrderPrintService(current_user="issue454")
+
+    load_order_pdf = service.export_pdf(order, tmp_path)
+    budget_pdf = service.export_budget(order, client, tmp_path)
+
+    load_order_text = _pdf_text(load_order_pdf)
+    budget_text = _pdf_text(budget_pdf)
+
+    assert "Entregar primero este cliente" in load_order_text
+    assert "separar 2 pallets" in load_order_text
+    assert "Entregar primero este cliente" in budget_text
+    assert "separar 2 pallets" in budget_text
+
+
+def test_issue_454_places_observation_next_to_destination_label():
+    from app.ui.load_order_instructions_extension import destination_label_with_observation
+
+    label = "CLIENTE PRUEBA - POSADAS - RUTA 12"
+
+    assert destination_label_with_observation(label, None) == label
+    assert destination_label_with_observation(label, "   ") == label
+    assert destination_label_with_observation(label, "Carga lateral") == (
+        "CLIENTE PRUEBA - POSADAS - RUTA 12 | Observación: Carga lateral"
+    )
