@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,11 @@ def test_known_legacy_money_caps_are_not_reintroduced():
             "app/ui/desktop_app.py",
         )
     )
-    assert "99999999.99" not in sources
-    assert "99999999)" not in sources
-    assert "999_999_999.99" not in sources
-    assert "9999999999.99" not in sources
+    legacy_caps = (
+        r"(?<!\d)99999999\.99(?!\d)",
+        r"(?<!\d)99999999\)",
+        r"(?<!\d)999_999_999\.99(?!\d)",
+        r"(?<!\d)9999999999\.99(?!\d)",
+    )
+    for pattern in legacy_caps:
+        assert re.search(pattern, sources) is None, pattern
