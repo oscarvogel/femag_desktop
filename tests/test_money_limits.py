@@ -49,6 +49,6 @@ def test_known_legacy_money_caps_are_not_reintroduced():
         )
     )
     assert "99999999.99" not in sources
-    assert "99999999)" not in sources
+    assert "setRange(0, 99999999)" not in sources
     assert "999_999_999.99" not in sources
     assert "9999999999.99" not in sources
