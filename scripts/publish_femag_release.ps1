@@ -214,6 +214,20 @@ function Copy-Manifest {
     return $copy
 }
 
+function Compare-FemagVersion {
+    param([string]$Left, [string]$Right)
+
+    $leftParts = $Left.Split('.')
+    $rightParts = $Right.Split('.')
+    for ($index = 0; $index -lt 6; $index++) {
+        $leftNumber = [int]$leftParts[$index]
+        $rightNumber = [int]$rightParts[$index]
+        if ($leftNumber -lt $rightNumber) { return -1 }
+        if ($leftNumber -gt $rightNumber) { return 1 }
+    }
+    return 0
+}
+
 function Commit-ReleasesRepository {
     param([string]$Path, [string]$Message)
 
@@ -297,6 +311,9 @@ function Promote-Candidate {
         if ($null -ne $latest -and [string]$latest.version -eq $Version -and ([string]$latest.sha256).ToLowerInvariant() -eq $Sha256.ToLowerInvariant()) {
             Write-Host 'La candidate ya está promovida exactamente. No se hacen cambios.'
             return
+        }
+        if ($null -ne $latest -and (Compare-FemagVersion $Version ([string]$latest.version)) -le 0) {
+            throw "La candidate $Version no es superior a latest $($latest.version); no se permite una regresión de producción."
         }
 
         Ensure-Release $candidateTag 'FEMAG candidate'
