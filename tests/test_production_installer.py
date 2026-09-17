@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ISS = ROOT / "installer" / "FEMAG_Desktop.iss"
 SPEC = ROOT / "installer" / "FEMAG_Desktop.spec"
 BUILD = ROOT / "scripts" / "build_production_installer.ps1"
+PUBLISH = ROOT / "scripts" / "publish_femag_release.ps1"
 ENTRYPOINT = ROOT / "app" / "production_entrypoint.py"
 DOC = ROOT / "docs" / "INSTALADOR_PRODUCCION.md"
 DEPLOY = ROOT / "DEPLOY.md"
@@ -73,3 +74,13 @@ def test_each_production_build_uses_timestamp_version() -> None:
     assert "OutputBaseFilename=FEMAG_Desktop_Produccion_Setup" in iss
     assert "AAAA.MM.DD.HH.MM.SS" in deploy
     assert "FEMAG_Desktop_Produccion_Setup.exe" in deploy
+
+
+def test_release_asset_upload_reports_progress_while_running() -> None:
+    publish = PUBLISH.read_text(encoding="utf-8")
+
+    assert "function Invoke-CheckedWithProgress" in publish
+    assert "se avisará cada 15 segundos" in publish
+    assert "Subiendo instalador candidate a GitHub" in publish
+    assert "Subiendo instalador previous a GitHub" in publish
+    assert "Subiendo instalador latest a GitHub" in publish

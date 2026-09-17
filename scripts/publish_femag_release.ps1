@@ -40,6 +40,54 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-CheckedWithProgress {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Command,
+        [Parameter(Mandatory = $true)] [string[]]$Arguments,
+        [Parameter(Mandatory = $true)] [string]$ProgressLabel
+    )
+
+    # gh no expone un porcentaje de avance para release upload. Ejecutamos el
+    # proceso aparte para poder informar que la transferencia sigue activa.
+    $quotedArguments = @($Arguments | ForEach-Object {
+        $argument = [string]$_
+        if ($argument -match '[\s"]') {
+            '"' + ($argument -replace '"', '\"') + '"'
+        }
+        else {
+            $argument
+        }
+    })
+    $process = $null
+    $startedAt = Get-Date
+    Write-Host "$ProgressLabel... (gh no informa porcentaje; se avisará cada 15 segundos)"
+
+    try {
+        $process = Start-Process -FilePath $Command -ArgumentList $quotedArguments -NoNewWindow -PassThru
+        while (-not $process.HasExited) {
+            Start-Sleep -Seconds 15
+            if (-not $process.HasExited) {
+                $elapsed = (Get-Date) - $startedAt
+                Write-Host ("  {0} sigue en curso. Tiempo transcurrido: {1}" -f $ProgressLabel, $elapsed.ToString('hh\:mm\:ss'))
+            }
+        }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        if ($null -ne $process) {
+            $process.Dispose()
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "Falló el comando: $Command $($Arguments -join ' ')"
+    }
+
+    $elapsed = (Get-Date) - $startedAt
+    Write-Host ("{0} completada en {1}." -f $ProgressLabel, $elapsed.ToString('hh\:mm\:ss')) -ForegroundColor Green
+}
+
 function Get-CheckedOutput {
     param(
         [Parameter(Mandatory = $true)] [string]$Command,
@@ -257,7 +305,7 @@ function Publish-Candidate {
     Write-Host "SHA256: $($artifact.Sha256)"
 
     Ensure-Release $candidateTag 'FEMAG candidate'
-    Invoke-Checked 'gh' @('release', 'upload', $candidateTag, $artifact.Installer, '--repo', $ReleaseRepo, '--clobber')
+    Invoke-CheckedWithProgress 'gh' @('release', 'upload', $candidateTag, $artifact.Installer, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador candidate a GitHub'
 
     $releasePath = Clone-ReleasesRepository
     try {
@@ -323,7 +371,7 @@ function Promote-Candidate {
 
         if ($null -ne $latest) {
             $latestAsset = Download-And-Verify $latestTag $latest (Join-Path $tempRoot 'latest')
-            Invoke-Checked 'gh' @('release', 'upload', $previousTag, $latestAsset, '--repo', $ReleaseRepo, '--clobber')
+            Invoke-CheckedWithProgress 'gh' @('release', 'upload', $previousTag, $latestAsset, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador previous a GitHub'
             $previous = Copy-Manifest $latest
             $previous['channel'] = 'previous'
             $previous['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$previousTag/$installerName"
@@ -331,7 +379,7 @@ function Promote-Candidate {
             Write-Utf8Json $previousPath $previous
         }
 
-        Invoke-Checked 'gh' @('release', 'upload', $latestTag, $candidateAsset, '--repo', $ReleaseRepo, '--clobber')
+        Invoke-CheckedWithProgress 'gh' @('release', 'upload', $latestTag, $candidateAsset, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador latest a GitHub'
         $promoted = Copy-Manifest $candidate
         $promoted['channel'] = 'latest'
         $promoted['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$latestTag/$installerName"
