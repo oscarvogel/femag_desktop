@@ -110,7 +110,7 @@ def test_load_order_account_movements_reference_each_client_budget_without_dupli
         budget = Budget.get(Budget.client == client)
         assert movement.budget == budget
         assert movement.reference == budget.display_number
-        assert movement.source_ref == f"Budget:{budget.id}"
+        assert movement.source_ref == f"LoadOrder:{order.id}"
         assert movement.total_amount == approx(budget.total_amount)
         assert client_balance(client) == approx(budget.total_amount)
 
