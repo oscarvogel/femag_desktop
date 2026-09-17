@@ -177,6 +177,18 @@ function Get-ReleaseAsset {
     return @($release.assets | Where-Object { $_.name -eq $AssetName -and $_.state -eq 'uploaded' }) | Select-Object -First 1
 }
 
+function Restore-GeneratedBuildMetadata {
+    foreach ($relativePath in @('app/build_info.py', 'app/build_version.py')) {
+        $content = Get-CheckedOutput 'git' @('-C', $repoRoot, 'show', "HEAD:$relativePath")
+        $absolutePath = Join-Path $repoRoot ($relativePath.Replace('/', '\'))
+        [System.IO.File]::WriteAllText(
+            $absolutePath,
+            ($content.TrimEnd() + "`n"),
+            [System.Text.UTF8Encoding]::new($false)
+        )
+    }
+}
+
 function Assert-GhAvailable {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         throw 'No se encontró GitHub CLI (gh) en PATH.'
@@ -226,6 +238,8 @@ function Invoke-LocalValidation {
         $python = 'python'
     }
 
+    Write-Host 'Restaurando metadata generada antes de validar...'
+    Restore-GeneratedBuildMetadata
     Write-Host 'Ejecutando git diff --check...'
     Invoke-Checked 'git' @('-C', $repoRoot, 'diff', '--check')
     Write-Host 'Ejecutando tests locales...'
@@ -235,50 +249,56 @@ function Invoke-LocalValidation {
 }
 
 function Invoke-ProductionBuild {
-    Write-Host 'Compilando EXE e instalador localmente...'
-    Invoke-Checked 'powershell.exe' @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', (Join-Path $repoRoot 'scripts\build_production_installer.ps1'),
-        '-SkipInstallDependencies'
-    )
+    try {
+        Write-Host 'Compilando EXE e instalador localmente...'
+        Invoke-Checked 'powershell.exe' @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $repoRoot 'scripts\build_production_installer.ps1'),
+            '-SkipInstallDependencies'
+        )
 
-    $exe = Join-Path $repoRoot 'dist\FEMAG Desktop\FEMAG Desktop.exe'
-    $installer = Join-Path $repoRoot 'installer\output\FEMAG_Desktop_Produccion_Setup.exe'
-    if (-not (Test-Path $exe)) { throw "No se encontró el EXE generado: $exe" }
-    if (-not (Test-Path $installer)) { throw "No se encontró el instalador generado: $installer" }
+        $exe = Join-Path $repoRoot 'dist\FEMAG Desktop\FEMAG Desktop.exe'
+        $installer = Join-Path $repoRoot 'installer\output\FEMAG_Desktop_Produccion_Setup.exe'
+        if (-not (Test-Path $exe)) { throw "No se encontró el EXE generado: $exe" }
+        if (-not (Test-Path $installer)) { throw "No se encontró el instalador generado: $installer" }
 
-    Write-Host 'Ejecutando smoke test sobre el EXE congelado...'
-    Invoke-Checked $exe @('--smoke')
+        Write-Host 'Ejecutando smoke test sobre el EXE congelado...'
+        Invoke-Checked $exe @('--smoke')
 
-    if (-not $SkipProductionHealthCheck) {
-        Write-Host 'Ejecutando production health-check sobre el EXE congelado...'
-        $oldCi = $env:FEMAG_HEALTH_CHECK_CI
-        try {
-            $env:FEMAG_HEALTH_CHECK_CI = '1'
-            Invoke-Checked $exe @('--production-health-check')
-        }
-        finally {
-            if ($null -eq $oldCi) { Remove-Item Env:FEMAG_HEALTH_CHECK_CI -ErrorAction SilentlyContinue }
-            else { $env:FEMAG_HEALTH_CHECK_CI = $oldCi }
-        }
-    }
-
-    $forbidden = @('*.ini', '.env', '*.env', '*secret*', '*credential*', '*.pem', '*.key')
-    foreach ($root in @((Join-Path $repoRoot 'dist\FEMAG Desktop'), (Join-Path $repoRoot 'installer\output'))) {
-        foreach ($pattern in $forbidden) {
-            $matches = @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -Filter $pattern -ErrorAction SilentlyContinue)
-            if ($matches.Count -gt 0) {
-                throw "Archivo prohibido en artefacto: $($matches[0].FullName)"
+        if (-not $SkipProductionHealthCheck) {
+            Write-Host 'Ejecutando production health-check sobre el EXE congelado...'
+            $oldCi = $env:FEMAG_HEALTH_CHECK_CI
+            try {
+                $env:FEMAG_HEALTH_CHECK_CI = '1'
+                Invoke-Checked $exe @('--production-health-check')
+            }
+            finally {
+                if ($null -eq $oldCi) { Remove-Item Env:FEMAG_HEALTH_CHECK_CI -ErrorAction SilentlyContinue }
+                else { $env:FEMAG_HEALTH_CHECK_CI = $oldCi }
             }
         }
-    }
 
-    $versionMatch = Select-String -Path (Join-Path $repoRoot 'app\build_info.py') -Pattern 'BUILD_VERSION = "(.+)"'
-    if (-not $versionMatch) { throw 'No se pudo obtener BUILD_VERSION.' }
-    $version = $versionMatch.Matches[0].Groups[1].Value
-    $sha = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-    return [pscustomobject]@{ Installer = $installer; Version = $version; Sha256 = $sha }
+        $forbidden = @('*.ini', '.env', '*.env', '*secret*', '*credential*', '*.pem', '*.key')
+        foreach ($root in @((Join-Path $repoRoot 'dist\FEMAG Desktop'), (Join-Path $repoRoot 'installer\output'))) {
+            foreach ($pattern in $forbidden) {
+                $matches = @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -Filter $pattern -ErrorAction SilentlyContinue)
+                if ($matches.Count -gt 0) {
+                    throw "Archivo prohibido en artefacto: $($matches[0].FullName)"
+                }
+            }
+        }
+
+        $versionMatch = Select-String -Path (Join-Path $repoRoot 'app\build_info.py') -Pattern 'BUILD_VERSION = "(.+)"'
+        if (-not $versionMatch) { throw 'No se pudo obtener BUILD_VERSION.' }
+        $version = $versionMatch.Matches[0].Groups[1].Value
+        $sha = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        return [pscustomobject]@{ Installer = $installer; Version = $version; Sha256 = $sha }
+    }
+    finally {
+        Write-Host 'Restaurando metadata generada del workspace...'
+        Restore-GeneratedBuildMetadata
+    }
 }
 
 function Ensure-Release {
