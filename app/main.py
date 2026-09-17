@@ -72,8 +72,13 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
     load_settings()
     configure_logging()
     try:
+        from PyQt5.QtWidgets import QApplication
+
+        from app.ui.form_input_behavior import install_form_input_behavior
         from app.ui.window_policy import install_workspace_window_policy
 
+        qt_app = QApplication.instance() or QApplication([])
+        install_form_input_behavior(qt_app)
         install_workspace_window_policy()
         install_managerial_dashboard_extension()
         install_managerial_sales_dispatch_extension()
