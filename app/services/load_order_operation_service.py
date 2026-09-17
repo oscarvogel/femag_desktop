@@ -5,6 +5,7 @@ from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
+from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
 from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
@@ -23,6 +24,7 @@ class LoadOrderOperationService:
         self.audit_service = audit_service or AuditService()
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
         self.prints = ConsolidatedLoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.budget_prints = BudgetPrintService(current_user=current_user, audit_service=self.audit_service)
         self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
 
     def issue(self, order: LoadOrder) -> LoadOrder:
@@ -90,12 +92,14 @@ class LoadOrderOperationService:
         return annulled
 
     def export_budgets(self, order: LoadOrder) -> list[Path]:
+        """Generate one persistent, numbered budget PDF per client in the load order."""
         order = LoadOrder.get_by_id(order.id)
-        return self.prints.export_budgets(order, self.prints_dir)
+        return self.budget_prints.export_for_load_order(order, self.prints_dir)
 
     def export_combined_budget(self, order: LoadOrder) -> Path:
+        """UI-compatible printable bundle: one numbered budget per client/page."""
         order = LoadOrder.get_by_id(order.id)
-        return self.prints.export_combined_budget(order, self.prints_dir)
+        return self.budget_prints.export_bundle_for_load_order(order, self.prints_dir)
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
