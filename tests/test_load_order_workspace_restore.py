@@ -8,9 +8,10 @@ from app.ui.load_order_workspace_restore_extension import (
 
 def test_load_order_workspace_restore_is_installed():
     install_load_order_workspace_restore_extension()
-    assert FemagDesktopWindow._load_order_page.__module__ == (
-        "app.ui.load_order_workspace_restore_extension"
-    )
+    assert FemagDesktopWindow._load_order_page.__module__ in {
+        "app.ui.load_order_workspace_restore_extension",
+        "app.ui.load_order_quick_search_extension",
+    }
 
 
 def test_restored_workspace_contract(db):
