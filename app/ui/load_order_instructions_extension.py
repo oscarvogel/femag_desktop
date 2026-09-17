@@ -15,7 +15,7 @@ def configure_load_order_instruction_fields(dialog) -> None:
     """Make the two observation concepts explicit without changing persistence.
 
     ``dialog.observations_input`` already persists to ``LoadOrder.observations`` and the
-    load-order print service already includes that value.  Destination observations,
+    load-order print service already includes that value. Destination observations,
     on the other hand, are the commercial description used by each client's budget.
     This helper moves the order-level field to the Review step and labels both concepts
     so operators do not enter loading instructions into a client's budget description.
@@ -28,44 +28,49 @@ def configure_load_order_instruction_fields(dialog) -> None:
         "y no deben aparecer en los presupuestos."
     )
 
-    # Remove the old, ambiguous label from the Transporte step. The input itself is
-    # reparented below, into the Review step, so it reads as a property of the order.
-    transport_page = dialog.step_stack.widget(0)
-    if transport_page is not None:
-        for label in transport_page.findChildren(QLabel):
-            if label.text().strip() == "Observaciones":
-                label.hide()
-
-    parent = observations_input.parentWidget()
-    if parent is not None and parent.layout() is not None:
-        parent.layout().removeWidget(observations_input)
-
     review_page = dialog.step_stack.widget(3)
-    if review_page is not None and review_page.layout() is not None:
-        section = QFrame(review_page)
-        section.setObjectName("loadOrderInstructionsSection")
-        section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(0, 4, 0, 4)
-        section_layout.setSpacing(4)
+    existing_section = None
+    if review_page is not None:
+        existing_section = review_page.findChild(QFrame, "loadOrderInstructionsSection")
 
-        title = QLabel("Instrucciones de carga de la orden", section)
-        title.setObjectName("loadOrderInstructionsLabel")
-        helper = QLabel(
-            "Indicaciones operativas para depósito/carga. Se imprimen en la Orden de Carga "
-            "y no en los presupuestos.",
-            section,
-        )
-        helper.setObjectName("loadOrderInstructionsHelp")
-        helper.setWordWrap(True)
+    if existing_section is None:
+        # Remove the old, ambiguous label from Transporte. The input itself is
+        # reparented into Revisar so it reads as a property of the complete order.
+        transport_page = dialog.step_stack.widget(0)
+        if transport_page is not None:
+            for label in transport_page.findChildren(QLabel):
+                if label.text().strip() == "Observaciones":
+                    label.hide()
 
-        observations_input.setParent(section)
-        section_layout.addWidget(title)
-        section_layout.addWidget(helper)
-        section_layout.addWidget(observations_input)
+        parent = observations_input.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().removeWidget(observations_input)
 
-        # Review currently contains title + preparation hint + table. Put the
-        # instructions immediately before the table.
-        review_page.layout().insertWidget(2, section)
+        if review_page is not None and review_page.layout() is not None:
+            section = QFrame(review_page)
+            section.setObjectName("loadOrderInstructionsSection")
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 4, 0, 4)
+            section_layout.setSpacing(4)
+
+            title = QLabel("Instrucciones de carga de la orden", section)
+            title.setObjectName("loadOrderInstructionsLabel")
+            helper = QLabel(
+                "Indicaciones operativas para depósito/carga. Se imprimen en la Orden de Carga "
+                "y no en los presupuestos.",
+                section,
+            )
+            helper.setObjectName("loadOrderInstructionsHelp")
+            helper.setWordWrap(True)
+
+            observations_input.setParent(section)
+            section_layout.addWidget(title)
+            section_layout.addWidget(helper)
+            section_layout.addWidget(observations_input)
+
+            # Review currently contains title + preparation hint + table. Put the
+            # instructions immediately before the table.
+            review_page.layout().insertWidget(2, section)
 
     destination_label = dialog.findChild(QLabel, "loadOrderDestinationBudgetDescriptionLabel")
     if destination_label is not None:
