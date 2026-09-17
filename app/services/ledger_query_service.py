@@ -23,7 +23,11 @@ def movements_for_client(client: Client) -> list[ClientAccountMovement]:
     return list(
         ClientAccountMovement.select()
         .where(ClientAccountMovement.client == client)
-        .order_by(ClientAccountMovement.created_at, ClientAccountMovement.id)
+        .order_by(
+            ClientAccountMovement.movement_date,
+            ClientAccountMovement.created_at,
+            ClientAccountMovement.id,
+        )
     )
 
 
