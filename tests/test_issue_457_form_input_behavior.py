@@ -13,8 +13,15 @@ from app.ui.form_input_behavior import install_form_input_behavior
 @pytest.fixture(scope="module")
 def qt_app():
     app = QApplication.instance() or QApplication([])
-    install_form_input_behavior(app)
-    return app
+    existing = getattr(app, "_femag_form_input_behavior", None)
+    behavior = install_form_input_behavior(app)
+    try:
+        yield app
+    finally:
+        if existing is None:
+            app.removeEventFilter(behavior)
+            if getattr(app, "_femag_form_input_behavior", None) is behavior:
+                delattr(app, "_femag_form_input_behavior")
 
 
 def _send_key(app, widget, key, text=""):
