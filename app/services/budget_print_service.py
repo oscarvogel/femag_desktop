@@ -1,11 +1,10 @@
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
@@ -24,12 +23,42 @@ class BudgetPrintService:
         budgets = self.budget_service.ensure_for_load_order(order)
         return [self.export_pdf(budget, output_dir) for budget in budgets]
 
+    def export_bundle_for_load_order(self, order: LoadOrder, output_dir: str | Path) -> Path:
+        """Genera un archivo imprimible con un presupuesto independiente por cliente/página."""
+        order = LoadOrder.get_by_id(order.id)
+        budgets = self.budget_service.ensure_for_load_order(order)
+        if not budgets:
+            raise ValueError("La orden no tiene clientes para presupuestar.")
+        directory = Path(output_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"presupuestos_OC-{order.order_number:06d}.pdf"
+        doc = self._document(target, title=f"Presupuestos OC-{order.order_number:06d}")
+        story = []
+        for index, budget in enumerate(budgets):
+            if index:
+                story.append(PageBreak())
+            story.extend(self._story(budget))
+        doc.build(story)
+        self.audit_service.record(
+            user=self.current_user,
+            module="Presupuestos",
+            action="imprimir_lote_orden",
+            record_ref=f"LoadOrder:{order.id}",
+            new_value={
+                "file_path": str(target),
+                "budget_ids": [budget.id for budget in budgets],
+                "budget_numbers": [budget.budget_number for budget in budgets],
+            },
+        )
+        return target
+
     def export_pdf(self, budget: Budget, output_dir: str | Path) -> Path:
         budget = Budget.get_by_id(budget.id)
         directory = Path(output_dir)
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"presupuesto_{budget.budget_number:06d}.pdf"
-        self._build_pdf(budget, target)
+        doc = self._document(target, title=f"Presupuesto {budget.display_number}")
+        doc.build(self._story(budget))
         self.audit_service.record(
             user=self.current_user,
             module="Presupuestos",
@@ -44,16 +73,19 @@ class BudgetPrintService:
         )
         return target
 
-    def _build_pdf(self, budget: Budget, target: Path) -> None:
-        doc = SimpleDocTemplate(
+    @staticmethod
+    def _document(target: Path, *, title: str) -> SimpleDocTemplate:
+        return SimpleDocTemplate(
             str(target),
             pagesize=A4,
             rightMargin=14 * mm,
             leftMargin=14 * mm,
             topMargin=14 * mm,
             bottomMargin=14 * mm,
-            title=f"Presupuesto {budget.display_number}",
+            title=title,
         )
+
+    def _story(self, budget: Budget) -> list:
         story = [
             Paragraph("PRESUPUESTO", self.styles["Title"]),
             Spacer(1, 3 * mm),
@@ -69,19 +101,26 @@ class BudgetPrintService:
             story.extend(
                 [
                     Spacer(1, 6 * mm),
-                    Paragraph(f"<b>Observaciones:</b> {budget.observations}", self.styles["BodyText"]),
+                    Paragraph(
+                        f"<b>Observaciones:</b> {budget.observations}",
+                        self.styles["BodyText"],
+                    ),
                 ]
             )
-        doc.build(story)
+        return story
 
     def _header_table(self, budget: Budget) -> Table:
         reference = budget.load_order_reference or "Presupuesto manual"
         data = [[
             f"Presupuesto N° {budget.budget_number:06d}",
             f"Fecha: {budget.issue_date:%d/%m/%Y}",
-            f"Referencia: {reference}",
+            (
+                f"Orden de carga asociada: {reference}"
+                if budget.load_order_id
+                else reference
+            ),
         ]]
-        table = Table(data, colWidths=[58 * mm, 48 * mm, 72 * mm])
+        table = Table(data, colWidths=[58 * mm, 43 * mm, 77 * mm])
         table.setStyle(
             TableStyle(
                 [
@@ -97,7 +136,7 @@ class BudgetPrintService:
         client = budget.client
         rows = [
             ["Cliente", client.name],
-            ["CUIT", getattr(client, "cuit", None) or "-"],
+            ["CUIT", client.cuit or "-"],
         ]
         table = Table(rows, colWidths=[30 * mm, 148 * mm])
         table.setStyle(
