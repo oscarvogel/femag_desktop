@@ -6,6 +6,7 @@ from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
 from app.ui.load_order_workspace_restore_extension import install_load_order_workspace_restore_extension
+from app.ui.load_order_quick_search_extension import install_load_order_quick_search_extension
 from app.ui.daily_collections_extension import install_daily_collections_extension
 from app.ui.collection_due_report_extension import install_collection_due_report_extension
 from app.ui.daily_operations_extension import install_daily_operations_extension
@@ -28,6 +29,7 @@ install_update_extension()
 install_application_lifecycle_extension()
 install_multi_station_refresh_extension()
 install_load_order_workspace_restore_extension()
+install_load_order_quick_search_extension()
 
 
 def smoke_check() -> str:
