@@ -1,7 +1,7 @@
 from load_order_printing_cases import _budget_order, _pdf_text
 
 
-def test_issue_454_prints_client_observation_on_load_order_and_budget(db, tmp_path):
+def test_issue_454_prints_client_load_observation_only_on_load_order(db, tmp_path):
     from app.services.load_order_print_service import LoadOrderPrintService
     from app.ui.load_order_instructions_extension import install_load_order_instructions_extension
 
@@ -21,8 +21,8 @@ def test_issue_454_prints_client_observation_on_load_order_and_budget(db, tmp_pa
 
     assert "Entregar primero este cliente" in load_order_text
     assert "separar 2 pallets" in load_order_text
-    assert "Entregar primero este cliente" in budget_text
-    assert "separar 2 pallets" in budget_text
+    assert "Entregar primero este cliente" not in budget_text
+    assert "separar 2 pallets" not in budget_text
 
 
 def test_issue_454_places_observation_next_to_destination_label():
