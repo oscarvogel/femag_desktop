@@ -9,6 +9,7 @@ param(
     [string]$Confirmation,
     [switch]$SkipLocalValidation,
     [switch]$SkipProductionHealthCheck,
+    [switch]$SkipPreviousBackup,
     [switch]$AllowDirty,
     [string]$Repo = 'oscarvogel/femag_desktop',
     [string]$ReleaseRepo = 'oscarvogel/vogel-releases'
@@ -111,10 +112,16 @@ function Invoke-ReleaseAssetUpload {
     $maxAttempts = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Invoke-CheckedWithProgress 'gh' @(
+            $uploadArguments = @(
                 'release', 'upload', $Tag, $AssetPath,
-                '--repo', $ReleaseRepo, '--clobber'
-            ) $ProgressLabel
+                '--repo', $ReleaseRepo
+            )
+            $existingAsset = Get-ReleaseAsset $Tag ([System.IO.Path]::GetFileName($AssetPath))
+            if ($null -ne $existingAsset) {
+                $uploadArguments += '--clobber'
+            }
+
+            Invoke-CheckedWithProgress 'gh' $uploadArguments $ProgressLabel
             return
         }
         catch {
@@ -157,6 +164,17 @@ function Get-CheckedOutput {
         throw "Falló el comando: $Command $($Arguments -join ' ')"
     }
     return ($output -join "`n").Trim()
+}
+
+function Get-ReleaseAsset {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Tag,
+        [Parameter(Mandatory = $true)] [string]$AssetName
+    )
+
+    $json = Get-CheckedOutput 'gh' @('release', 'view', $Tag, '--repo', $ReleaseRepo, '--json', 'assets')
+    $release = $json | ConvertFrom-Json
+    return @($release.assets | Where-Object { $_.name -eq $AssetName -and $_.state -eq 'uploaded' }) | Select-Object -First 1
 }
 
 function Assert-GhAvailable {
@@ -424,10 +442,12 @@ function Promote-Candidate {
 
         Ensure-Release $candidateTag 'FEMAG candidate'
         Ensure-Release $latestTag 'Vogel Releases - Latest'
-        Ensure-Release $previousTag 'FEMAG previous production'
+        if (-not $SkipPreviousBackup) {
+            Ensure-Release $previousTag 'FEMAG previous production'
+        }
         $candidateAsset = Download-And-Verify $candidateTag $candidate (Join-Path $tempRoot 'candidate')
 
-        if ($null -ne $latest) {
+        if (-not $SkipPreviousBackup -and $null -ne $latest) {
             $latestAsset = Download-And-Verify $latestTag $latest (Join-Path $tempRoot 'latest')
             if (Test-ReleaseAssetMatches $previousTag $installerName ([string]$latest.sha256)) {
                 Write-Host 'El asset previous ya coincide con latest; se omite la subida.' -ForegroundColor Green
@@ -440,6 +460,9 @@ function Promote-Candidate {
             $previous['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$previousTag/$installerName"
             $previous['archived_at'] = (Get-Date).ToUniversalTime().ToString('o')
             Write-Utf8Json $previousPath $previous
+        }
+        elseif ($SkipPreviousBackup) {
+            Write-Warning 'Se omite previous por -SkipPreviousBackup; la promoción directa no conserva backup automático.'
         }
 
         if (Test-ReleaseAssetMatches $latestTag $installerName ([string]$candidate.sha256)) {
