@@ -129,6 +129,23 @@ function Invoke-ReleaseAssetUpload {
     }
 }
 
+function Test-ReleaseAssetMatches {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Tag,
+        [Parameter(Mandatory = $true)] [string]$AssetName,
+        [Parameter(Mandatory = $true)] [string]$Sha256
+    )
+
+    $json = Get-CheckedOutput 'gh' @('release', 'view', $Tag, '--repo', $ReleaseRepo, '--json', 'assets')
+    $release = $json | ConvertFrom-Json
+    $asset = @($release.assets | Where-Object { $_.name -eq $AssetName -and $_.state -eq 'uploaded' }) | Select-Object -First 1
+    if ($null -eq $asset -or [string]::IsNullOrWhiteSpace([string]$asset.digest)) {
+        return $false
+    }
+
+    return ([string]$asset.digest).ToLowerInvariant() -eq "sha256:$($Sha256.ToLowerInvariant())"
+}
+
 function Get-CheckedOutput {
     param(
         [Parameter(Mandatory = $true)] [string]$Command,
@@ -412,7 +429,12 @@ function Promote-Candidate {
 
         if ($null -ne $latest) {
             $latestAsset = Download-And-Verify $latestTag $latest (Join-Path $tempRoot 'latest')
-            Invoke-ReleaseAssetUpload $previousTag $latestAsset 'Subiendo instalador previous a GitHub'
+            if (Test-ReleaseAssetMatches $previousTag $installerName ([string]$latest.sha256)) {
+                Write-Host 'El asset previous ya coincide con latest; se omite la subida.' -ForegroundColor Green
+            }
+            else {
+                Invoke-ReleaseAssetUpload $previousTag $latestAsset 'Subiendo instalador previous a GitHub'
+            }
             $previous = Copy-Manifest $latest
             $previous['channel'] = 'previous'
             $previous['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$previousTag/$installerName"
@@ -420,7 +442,12 @@ function Promote-Candidate {
             Write-Utf8Json $previousPath $previous
         }
 
-        Invoke-ReleaseAssetUpload $latestTag $candidateAsset 'Subiendo instalador latest a GitHub'
+        if (Test-ReleaseAssetMatches $latestTag $installerName ([string]$candidate.sha256)) {
+            Write-Host 'El asset latest ya coincide con candidate; se omite la subida.' -ForegroundColor Green
+        }
+        else {
+            Invoke-ReleaseAssetUpload $latestTag $candidateAsset 'Subiendo instalador latest a GitHub'
+        }
         $promoted = Copy-Manifest $candidate
         $promoted['channel'] = 'latest'
         $promoted['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$latestTag/$installerName"

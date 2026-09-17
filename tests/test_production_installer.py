@@ -81,6 +81,8 @@ def test_release_asset_upload_reports_progress_while_running() -> None:
 
     assert "function Invoke-CheckedWithProgress" in publish
     assert "function Invoke-ReleaseAssetUpload" in publish
+    assert "function Test-ReleaseAssetMatches" in publish
+    assert "se omite la subida" in publish
     assert "$maxAttempts = 3" in publish
     assert "Reintentando la subida en 20 segundos" in publish
     assert "Get-Command $Command" in publish
