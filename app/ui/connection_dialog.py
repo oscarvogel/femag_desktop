@@ -166,7 +166,8 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
         ) from exc
     except Exception as exc:
         raise RuntimeError(
-            f"No se pudo iniciar el cliente MySQL ({type(exc).__name__})."
+            f"No se pudo iniciar el cliente MySQL ({type(exc).__name__}): "
+            f"{str(exc) or 'sin detalle'}."
         ) from exc
     finally:
         if not database.is_closed():

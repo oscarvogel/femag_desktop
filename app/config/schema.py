@@ -7,6 +7,8 @@ from peewee import (
     FloatField,
     ForeignKeyField,
     IntegerField,
+    MySQLDatabase,
+    SqliteDatabase,
     TextField,
 )
 from playhouse.migrate import SqliteMigrator, migrate
@@ -16,6 +18,16 @@ from app.models import ALL_MODELS
 
 class SchemaValidationError(RuntimeError):
     """Raised when a workstation finds an incomplete runtime schema."""
+
+
+def _is_mysql_database(database) -> bool:
+    """Recognize Peewee MySQL databases and lightweight test doubles."""
+    return isinstance(database, MySQLDatabase) or database.__class__.__name__ == "MySQLDatabase"
+
+
+def _is_sqlite_database(database) -> bool:
+    """Recognize Peewee SQLite databases and lightweight test doubles."""
+    return isinstance(database, SqliteDatabase) or database.__class__.__name__ == "SqliteDatabase"
 
 
 def validate_runtime_schema(database) -> None:
@@ -67,7 +79,7 @@ def validate_runtime_schema(database) -> None:
 
 
 def _runtime_schema_snapshot(database):
-    if database.__class__.__name__ == "MySQLDatabase":
+    if _is_mysql_database(database):
         return _mysql_schema_snapshot(database)
 
     tables = set(database.get_tables())
@@ -200,7 +212,7 @@ def _consolidate_shared_client_addresses(database) -> None:
 
 
 def _ensure_sqlite_index_integrity(database) -> None:
-    if database.__class__.__name__ != "SqliteDatabase":
+    if not _is_sqlite_database(database):
         return
     issues = [row[0] for row in database.execute_sql("PRAGMA integrity_check").fetchall()]
     if issues == ["ok"]:
@@ -235,7 +247,7 @@ def _ensure_account_movement_source_index(database) -> None:
     for index in indexes:
         if index.unique and set(index.columns) == legacy_columns:
             escaped_name = _escape_identifier(index.name)
-            if database.__class__.__name__ == "MySQLDatabase":
+            if _is_mysql_database(database):
                 database.execute_sql(
                     f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
                 )
@@ -305,7 +317,7 @@ MONEY_FLOAT_COLUMNS = {
 def _mysql_money_column_needs_fractional_fix(
     database, table_name: str, column_name: str, existing_column
 ) -> bool:
-    if database.__class__.__name__ != "MySQLDatabase":
+    if not _is_mysql_database(database):
         return False
     if column_name not in MONEY_FLOAT_COLUMNS.get(table_name, set()):
         return False
@@ -395,7 +407,7 @@ def _ensure_model_columns(database, model) -> None:
                     f"ALTER TABLE `{_escape_identifier(table_name)}` "
                     f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
                 )
-            elif database.__class__.__name__ == "SqliteDatabase":
+            elif _is_sqlite_database(database):
                 _sqlite_drop_not_null(database, table_name, column_name)
 
 
@@ -438,7 +450,7 @@ def _escape_identifier(value: str) -> str:
 
 
 def _supports_modify_column(database) -> bool:
-    return database.__class__.__name__ == "MySQLDatabase"
+    return _is_mysql_database(database)
 
 
 def _sqlite_drop_not_null(database, table_name: str, column_name: str) -> None:

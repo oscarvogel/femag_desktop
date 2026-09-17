@@ -27,6 +27,8 @@ class FemagMySQLDatabase(MySQLDatabase):
             from app.config.schema import ensure_runtime_schema
             from app.services.client_payment_service import ClientPaymentService
 
+            if database_proxy.obj is not self:
+                database_proxy.initialize(self)
             ensure_runtime_schema(self)
             ClientPaymentService.ensure_default_payment_methods()
             self._femag_schema_prepared = True
