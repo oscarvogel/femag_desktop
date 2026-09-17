@@ -101,6 +101,34 @@ function Invoke-CheckedWithProgress {
     Write-Host ("{0} completada en {1}." -f $ProgressLabel, $elapsed.ToString('hh\:mm\:ss')) -ForegroundColor Green
 }
 
+function Invoke-ReleaseAssetUpload {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Tag,
+        [Parameter(Mandatory = $true)] [string]$AssetPath,
+        [Parameter(Mandatory = $true)] [string]$ProgressLabel
+    )
+
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-CheckedWithProgress 'gh' @(
+                'release', 'upload', $Tag, $AssetPath,
+                '--repo', $ReleaseRepo, '--clobber'
+            ) $ProgressLabel
+            return
+        }
+        catch {
+            if ($attempt -eq $maxAttempts) {
+                throw
+            }
+
+            Write-Warning ("{0} falló en el intento {1}/{2}: {3}" -f $ProgressLabel, $attempt, $maxAttempts, $_.Exception.Message)
+            Write-Host 'Reintentando la subida en 20 segundos...'
+            Start-Sleep -Seconds 20
+        }
+    }
+}
+
 function Get-CheckedOutput {
     param(
         [Parameter(Mandatory = $true)] [string]$Command,
@@ -318,7 +346,7 @@ function Publish-Candidate {
     Write-Host "SHA256: $($artifact.Sha256)"
 
     Ensure-Release $candidateTag 'FEMAG candidate'
-    Invoke-CheckedWithProgress 'gh' @('release', 'upload', $candidateTag, $artifact.Installer, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador candidate a GitHub'
+    Invoke-ReleaseAssetUpload $candidateTag $artifact.Installer 'Subiendo instalador candidate a GitHub'
 
     $releasePath = Clone-ReleasesRepository
     try {
@@ -384,7 +412,7 @@ function Promote-Candidate {
 
         if ($null -ne $latest) {
             $latestAsset = Download-And-Verify $latestTag $latest (Join-Path $tempRoot 'latest')
-            Invoke-CheckedWithProgress 'gh' @('release', 'upload', $previousTag, $latestAsset, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador previous a GitHub'
+            Invoke-ReleaseAssetUpload $previousTag $latestAsset 'Subiendo instalador previous a GitHub'
             $previous = Copy-Manifest $latest
             $previous['channel'] = 'previous'
             $previous['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$previousTag/$installerName"
@@ -392,7 +420,7 @@ function Promote-Candidate {
             Write-Utf8Json $previousPath $previous
         }
 
-        Invoke-CheckedWithProgress 'gh' @('release', 'upload', $latestTag, $candidateAsset, '--repo', $ReleaseRepo, '--clobber') 'Subiendo instalador latest a GitHub'
+        Invoke-ReleaseAssetUpload $latestTag $candidateAsset 'Subiendo instalador latest a GitHub'
         $promoted = Copy-Manifest $candidate
         $promoted['channel'] = 'latest'
         $promoted['download_url'] = "https://github.com/$ReleaseRepo/releases/download/$latestTag/$installerName"
