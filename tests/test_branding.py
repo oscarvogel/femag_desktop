@@ -104,7 +104,7 @@ def test_login_validation_uses_expanding_error_banner():
     window.close()
 
 
-def test_workspace_displays_balanced_branding_and_window_icon(db):
+def test_workspace_displays_sidebar_branding_and_window_icon(db):
     from PyQt5.QtWidgets import QApplication, QLabel
 
     from app.services.auth_service import AuthService
@@ -120,8 +120,7 @@ def test_workspace_displays_balanced_branding_and_window_icon(db):
     topbar_logo = window.findChild(QLabel, "topbarBrandLogo")
     assert sidebar_logo is not None
     assert sidebar_logo.pixmap() is not None and not sidebar_logo.pixmap().isNull()
-    assert topbar_logo is not None
-    assert topbar_logo.pixmap() is not None and not topbar_logo.pixmap().isNull()
+    assert topbar_logo is None
     assert not window.windowIcon().isNull()
     assert not app.windowIcon().isNull()
     window.close()
