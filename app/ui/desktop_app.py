@@ -91,6 +91,7 @@ from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
@@ -395,13 +396,6 @@ class FemagDesktopWindow(QMainWindow):
         layout.setContentsMargins(8, 4, 8, 8)
         layout.setSpacing(10)
 
-        brand_logo = QLabel()
-        brand_logo.setObjectName("topbarBrandLogo")
-        brand_logo.setAccessibleName("Logo FEMAG")
-        brand_logo.setAlignment(Qt.AlignCenter)
-        brand_logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=96, height=52))
-        brand_logo.setMinimumWidth(96)
-
         search = QLineEdit()
         search.setObjectName("globalSearch")
         search.setPlaceholderText("Buscar orden, cliente, chofer...")
@@ -452,7 +446,6 @@ class FemagDesktopWindow(QMainWindow):
         user.setObjectName("userBlock")
         user.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        layout.addWidget(brand_logo)
         layout.addWidget(search, 1)
         layout.addStretch(1)
         layout.addWidget(notifications)
@@ -3186,9 +3179,7 @@ class LoadOrderProductDialog(QDialog):
         self.quantity_input.setDecimals(2)
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setObjectName("productDialogPrecioInput")
-        self.precio_input.setRange(0, 99999999)
-        self.precio_input.setDecimals(2)
-        self.precio_input.setPrefix("$ ")
+        configure_money_input(self.precio_input)
         self.descuento_input = QDoubleSpinBox()
         self.descuento_input.setObjectName("productDialogDescuentoInput")
         self.descuento_input.setRange(0, 100)
