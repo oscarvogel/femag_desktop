@@ -4,6 +4,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Client
 from app.services.audit_service import AuditService
+from app.services.budget_service import BudgetService
 
 
 class AccountLedgerService:
@@ -13,11 +14,13 @@ class AccountLedgerService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
+        self.budget_service = BudgetService(current_user, self.audit_service)
 
     def generate_for_load_order(self, order: LoadOrder) -> list[ClientAccountMovement]:
         order = LoadOrder.get_by_id(order.id)
         movements = []
         for client in self._clients_for_order(order):
+            budget = self.budget_service.ensure_for_load_order_client(order, client)
             totals = self._load_order_totals_for_client(order, client)
             movement_date = order.date
             due_date = movement_date + timedelta(days=max(int(client.dias_plazo_pago or 0), 0))
@@ -27,6 +30,7 @@ class AccountLedgerService:
                 movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
                 is_reversal=False,
                 defaults={
+                    "budget": budget,
                     "amount": self.DOCUMENTAL_AMOUNT,
                     "net_amount": totals["neto_subtotal"],
                     "discount_amount": totals["descuento_importe"],
@@ -35,11 +39,16 @@ class AccountLedgerService:
                     "currency": self.CURRENCY,
                     "movement_date": movement_date,
                     "due_date": due_date,
-                    "description": self._description(order, totals),
-                    "source_ref": self._source_ref(order),
+                    "description": self._description(order, budget, totals),
+                    "source_ref": f"Budget:{budget.id}",
+                    "reference": budget.display_number,
                     "created_by": self.current_user,
                 },
             )
+            if not created and (movement.budget_id is None or not movement.reference):
+                movement.budget = budget
+                movement.reference = budget.display_number
+                movement.save(only=[ClientAccountMovement.budget, ClientAccountMovement.reference])
             movements.append(movement)
             if created:
                 self._update_budget_status(order, client)
@@ -62,6 +71,7 @@ class AccountLedgerService:
                 is_reversal=True,
                 reverses=original,
                 defaults={
+                    "budget": original.budget,
                     "amount": -original.amount,
                     "net_amount": -original.net_amount,
                     "discount_amount": -original.discount_amount,
@@ -71,7 +81,8 @@ class AccountLedgerService:
                     "movement_date": original.movement_date,
                     "due_date": original.due_date,
                     "description": f"Reverso {original.description}",
-                    "source_ref": self._source_ref(order),
+                    "source_ref": original.source_ref,
+                    "reference": original.reference,
                     "created_by": self.current_user,
                 },
             )
@@ -141,14 +152,14 @@ class AccountLedgerService:
             clients.append(order.client)
         return clients
 
-    def _description(self, order: LoadOrder, totals: dict | None = None) -> str:
+    def _description(self, order: LoadOrder, budget, totals: dict | None = None) -> str:
+        prefix = f"Presupuesto {budget.display_number} / OC-{order.order_number:06d}"
         if totals and totals["total"]:
             return (
-                f"Orden de carga OC-{order.order_number:06d} - "
-                f"Neto ${totals['total']:,.2f} (neto ${totals['neto_subtotal']:,.2f}, "
+                f"{prefix} - Neto ${totals['total']:,.2f} (neto ${totals['neto_subtotal']:,.2f}, "
                 f"desc. ${totals['descuento_importe']:,.2f}, IVA ${totals['iva_importe']:,.2f})"
             )
-        return f"Orden de carga OC-{order.order_number:06d} - movimiento documental sin importe comercial"
+        return f"{prefix} - movimiento documental sin importe comercial"
 
     def _source_ref(self, order: LoadOrder) -> str:
         return f"LoadOrder:{order.id}"
@@ -162,6 +173,8 @@ class AccountLedgerService:
             new_value={
                 "client_id": movement.client.id,
                 "load_order_id": movement.load_order.id,
+                "budget_id": movement.budget_id,
+                "reference": movement.reference,
                 "movement_type": movement.movement_type,
                 "amount": movement.amount,
                 "net_amount": movement.net_amount,
