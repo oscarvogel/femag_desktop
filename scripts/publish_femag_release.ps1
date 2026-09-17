@@ -274,9 +274,6 @@ function Publish-Candidate {
 }
 
 function Promote-Candidate {
-    if ([string]::IsNullOrWhiteSpace($Version)) { throw 'Falta -Version.' }
-    if ($Version -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$') { throw "Versión inválida: $Version" }
-    if ([string]::IsNullOrWhiteSpace($Sha256) -or $Sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Falta -Sha256 válido de 64 caracteres.' }
     if ($Confirmation -cne 'PROMOTE') { throw 'La promoción requiere -Confirmation PROMOTE.' }
 
     $releasePath = Clone-ReleasesRepository
@@ -288,6 +285,10 @@ function Promote-Candidate {
         $candidate = Read-Manifest $candidatePath
         Assert-Manifest $candidate 'candidate'
         if ([string]$candidate.channel -ne 'candidate') { throw 'candidate.json no declara channel=candidate.' }
+        if ([string]::IsNullOrWhiteSpace($Version)) { $Version = [string]$candidate.version }
+        if ([string]::IsNullOrWhiteSpace($Sha256)) { $Sha256 = [string]$candidate.sha256 }
+        if ($Version -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$') { throw "Versión inválida: $Version" }
+        if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'SHA256 inválido en candidate.json.' }
         if ([string]$candidate.version -ne $Version) { throw 'La versión candidate cambió.' }
         if (([string]$candidate.sha256).ToLowerInvariant() -ne $Sha256.ToLowerInvariant()) { throw 'El SHA256 candidate cambió.' }
 
