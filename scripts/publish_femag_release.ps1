@@ -31,7 +31,10 @@ function Invoke-Checked {
         [Parameter(Mandatory = $true)] [string[]]$Arguments
     )
 
-    & $Command @Arguments
+    # Enviar la salida operativa a la consola sin devolverla por el pipeline.
+    # Así las funciones que retornan objetos (por ejemplo el artefacto) no
+    # reciben también cada línea de PyInstaller/Inno Setup.
+    & $Command @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "Falló el comando: $Command $($Arguments -join ' ')"
     }
