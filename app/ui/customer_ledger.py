@@ -23,6 +23,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.ledger_query_service import (
+    client_balance,
     client_balances,
     movements_for_client,
     running_balance,
@@ -467,10 +468,13 @@ class CustomerLedgerPage(QWidget):
         movements = movements_for_client(client)
         balances = running_balance(movements)
         self.detail_header.setText(client.name)
-        # El encabezado y la última fila deben representar exactamente el mismo
-        # saldo. Usar el saldo final de los movimientos evita divergencias con
-        # un SUM() SQL cuando la base legacy devuelve una precisión distinta.
-        total = balances[-1] if balances else 0.0
+        # El saldo SQL es la fuente de verdad que también usa el panel izquierdo.
+        # La última fila debe mostrar ese mismo saldo para no presentar dos
+        # importes distintos para una misma cuenta.
+        total = client_balance(client)
+        display_balances = list(balances)
+        if display_balances:
+            display_balances[-1] = total
         self.detail_balance.setText(f"${total:,.2f}")
         _apply_color_to_label(self.detail_balance, _color_for_balance(total))
         movement_label = "movimiento" if len(movements) == 1 else "movimientos"
@@ -495,7 +499,7 @@ class CustomerLedgerPage(QWidget):
                 reference = movement.reference
             importe = movement.total_amount
             importe_text = f"${importe:,.2f}"
-            saldo_text = f"${balances[row_index]:,.2f}"
+            saldo_text = f"${display_balances[row_index]:,.2f}"
             values = (
                 _display_movement_date(movement),
                 type_label,
@@ -511,7 +515,7 @@ class CustomerLedgerPage(QWidget):
                 if column == 4:
                     cell.setForeground(QBrush(_color_for_balance(importe)))
                 if column == 5:
-                    cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
+                    cell.setForeground(QBrush(_color_for_balance(display_balances[row_index])))
                 # Tooltip con texto completo para todas las celdas
                 cell.setToolTip(value)
                 if (

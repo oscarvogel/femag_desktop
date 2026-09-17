@@ -92,6 +92,8 @@ def test_release_asset_upload_reports_progress_while_running() -> None:
     assert "Restaurando metadata generada antes de validar" in publish
     assert "Restaurando metadata generada del workspace" in publish
     assert '"HEAD:$relativePath"' in publish
+    assert "Download-And-Verify $latestTag $candidate" in publish
+    assert "Download-And-Verify $candidateTag $candidate" in publish
     assert "$maxAttempts = 3" in publish
     assert "Reintentando la subida en 20 segundos" in publish
     assert "Get-Command $Command" in publish

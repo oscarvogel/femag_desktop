@@ -494,6 +494,6 @@ def test_customer_ledger_header_matches_final_grid_balance(db, monkeypatch):
     page = CustomerLedgerPage(current_user="admin")
     app.processEvents()
 
-    assert page.detail_balance.text() == "$375,385,000.00"
+    assert page.detail_balance.text() == "$375,385,472.00"
     assert page.movements_table.item(0, 4).text() == "$375,385,000.00"
-    assert page.movements_table.item(0, 5).text() == "$375,385,000.00"
+    assert page.movements_table.item(0, 5).text() == "$375,385,472.00"

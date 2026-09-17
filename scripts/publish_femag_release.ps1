@@ -467,7 +467,6 @@ function Promote-Candidate {
         if (-not $SkipPreviousBackup) {
             Ensure-Release $previousTag 'FEMAG previous production'
         }
-        $candidateAsset = Download-And-Verify $candidateTag $candidate (Join-Path $tempRoot 'candidate')
 
         if (-not $SkipPreviousBackup -and $null -ne $latest) {
             $latestAsset = Download-And-Verify $latestTag $latest (Join-Path $tempRoot 'latest')
@@ -489,8 +488,10 @@ function Promote-Candidate {
 
         if (Test-ReleaseAssetMatches $latestTag $installerName ([string]$candidate.sha256)) {
             Write-Host 'El asset latest ya coincide con candidate; se omite la subida.' -ForegroundColor Green
+            $candidateAsset = Download-And-Verify $latestTag $candidate (Join-Path $tempRoot 'latest-candidate')
         }
         else {
+            $candidateAsset = Download-And-Verify $candidateTag $candidate (Join-Path $tempRoot 'candidate')
             Invoke-ReleaseAssetUpload $latestTag $candidateAsset 'Subiendo instalador latest a GitHub'
         }
         $promoted = Copy-Manifest $candidate
