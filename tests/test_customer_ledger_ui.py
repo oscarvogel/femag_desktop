@@ -458,3 +458,42 @@ def test_customer_ledger_compact_layout_for_real_data(db):
     assert page.whatsapp_statement_action.isEnabled()
     assert page.email_statement_action.isEnabled()
     assert page.totals_label.text()
+
+
+def test_customer_ledger_header_matches_final_grid_balance(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication
+
+    import app.ui.customer_ledger as customer_ledger_module
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Saldo Consistente",
+        cuit="30777777991",
+        iva_condition="RI",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="manual_debit",
+        total_amount=375_385_000,
+        currency="ARS",
+        description="Ingreso de prueba",
+        source_ref="ledger-consistency:1",
+        created_by="admin",
+    )
+
+    # Simula el SUM() de una base legacy devolviendo una precisión diferente.
+    monkeypatch.setattr(
+        customer_ledger_module,
+        "client_balance",
+        lambda _client: 375_385_472,
+        raising=False,
+    )
+    page = CustomerLedgerPage(current_user="admin")
+    app.processEvents()
+
+    assert page.detail_balance.text() == "$375,385,000.00"
+    assert page.movements_table.item(0, 4).text() == "$375,385,000.00"
+    assert page.movements_table.item(0, 5).text() == "$375,385,000.00"
