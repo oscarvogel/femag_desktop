@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QCheckBox, QComboBox, QLineEdit, QTableWidget
+from PyQt5.QtWidgets import QApplication, QCheckBox, QComboBox, QLineEdit, QTableWidget
 
 from app.ui.desktop_app import FemagDesktopWindow
 from app.ui.load_order_workspace_restore_extension import (
@@ -13,12 +13,20 @@ def test_load_order_workspace_restore_is_installed():
     )
 
 
-def test_restored_workspace_contract(qtbot, demo_user):
-    install_load_order_workspace_restore_extension()
-    window = FemagDesktopWindow(user=demo_user, demo_mode=True)
-    qtbot.addWidget(window)
+def test_restored_workspace_contract(db):
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
 
-    page = window.stack.findChild(type(window.stack), "__never__")
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="workspace_restore", password_hash="x", profile=profile)
+
+    app = QApplication.instance() or QApplication([])
+    install_load_order_workspace_restore_extension()
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    window.show()
+    app.processEvents()
+
     load_orders = window.findChild(QTableWidget, "loadOrdersTable")
     assert load_orders is not None
     assert load_orders.columnCount() == 7
