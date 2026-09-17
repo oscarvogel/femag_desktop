@@ -1,5 +1,6 @@
 from app.models.audit import AuditLog
 from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
+from app.models.budgets import Budget, BudgetItem
 from app.models.accounting import ClientAccountMovement
 from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
 from app.models.masters import (
@@ -38,7 +39,6 @@ ALL_MODELS = [
     MenuItem,
     Permission,
     AuditLog,
-    ClientAccountMovement,
     PaymentMethod,
     ClientPayment,
     ClientPaymentDetail,
@@ -63,6 +63,9 @@ ALL_MODELS = [
     LoadOrderClosure,
     LoadOrderReturnLine,
     LoadOrderBudgetStatus,
+    Budget,
+    BudgetItem,
+    ClientAccountMovement,
     RemittanceSeries,
     Remittance,
     RemittanceItem,
