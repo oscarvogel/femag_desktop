@@ -73,8 +73,16 @@ function Assert-CleanWorkspace {
     }
 
     $status = @(git -C $repoRoot status --porcelain)
+    $releaseInputs = @('app/', 'installer/', 'scripts/', 'requirements.txt', 'requirements-web.txt', 'requirements-build.txt')
+    $relevant = @($status | Where-Object {
+        $path = $_.Substring([Math]::Min(3, $_.Length)).Trim().Replace('\', '/')
+        $releaseInputs | Where-Object { $path -eq $_ -or $path.StartsWith($_) }
+    })
+    if ($relevant.Count -gt 0) {
+        throw 'El workspace tiene cambios en archivos del release. Commiteá sólo los archivos correctos o usá -AllowDirty de forma deliberada.'
+    }
     if ($status.Count -gt 0) {
-        throw 'El workspace tiene cambios sin commitear. Commiteá sólo los archivos correctos o usá -AllowDirty de forma deliberada.'
+        Write-Host 'Se ignoran cambios locales fuera del código y artefactos del release.'
     }
 }
 
