@@ -97,9 +97,9 @@ class LoadOrderOperationService:
         return self.budget_prints.export_for_load_order(order, self.prints_dir)
 
     def export_combined_budget(self, order: LoadOrder) -> Path:
-        """Legacy combined document kept for compatibility with older callers/tests."""
+        """UI-compatible printable bundle: one numbered budget per client/page."""
         order = LoadOrder.get_by_id(order.id)
-        return self.prints.export_combined_budget(order, self.prints_dir)
+        return self.budget_prints.export_bundle_for_load_order(order, self.prints_dir)
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
