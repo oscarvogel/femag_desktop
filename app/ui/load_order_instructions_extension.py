@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def destination_label_with_observation(label: str, observations: str | None) -> str:
-    """Append the client/destination observation to the load-order destination banner."""
+    """Append the client/destination load observation to the load-order banner."""
 
     observation = (observations or "").strip()
     if not observation:
@@ -11,12 +11,12 @@ def destination_label_with_observation(label: str, observations: str | None) -> 
 
 
 def install_load_order_instructions_extension() -> None:
-    """Make each client/destination observation visible on the printed load order.
+    """Show per-client load observations only on the printed load order.
 
-    `LoadOrderDestination.observations` is already the text captured for a specific
-    client/destination and is already reused by that client's budget.  Issue #454
-    requires the same text to also be visible in the load order, next to the client
-    it belongs to.  No persistence or budget behavior is changed here.
+    `LoadOrderDestination.observations` is an operational loading instruction for a
+    specific client/destination. Issue #454 requires it to be visible next to that
+    client in the load order, while it must not be exposed in the client budget.
+    No persistence changes are required.
     """
 
     from app.services import load_order_print_service
@@ -35,5 +35,11 @@ def install_load_order_instructions_extension() -> None:
         )
         return block
 
+    def budget_observations_without_load_instructions(self, order, *, client=None, destination=None):
+        # Destination observations are operational loading instructions and are
+        # intentionally omitted from customer-facing budgets.
+        return []
+
     service_class._destination_detail_block = destination_detail_block_with_observation
+    service_class._budget_observations = budget_observations_without_load_instructions
     service_class._client_observation_on_load_order_installed = True
