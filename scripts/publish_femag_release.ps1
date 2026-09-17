@@ -201,8 +201,10 @@ function Assert-CleanWorkspace {
 
     $status = @(git -C $repoRoot status --porcelain)
     $releaseInputs = @('app/', 'installer/', 'scripts/', 'requirements.txt', 'requirements-web.txt', 'requirements-build.txt')
+    $generatedReleaseFiles = @('app/build_info.py', 'app/build_version.py')
     $relevant = @($status | Where-Object {
         $path = $_.Substring([Math]::Min(3, $_.Length)).Trim().Replace('\', '/')
+        if ($path -in $generatedReleaseFiles) { return $false }
         $releaseInputs | Where-Object { $path -eq $_ -or $path.StartsWith($_) }
     })
     if ($relevant.Count -gt 0) {
