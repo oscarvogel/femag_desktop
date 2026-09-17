@@ -395,6 +395,13 @@ class FemagDesktopWindow(QMainWindow):
         layout.setContentsMargins(8, 4, 8, 8)
         layout.setSpacing(10)
 
+        brand_logo = QLabel()
+        brand_logo.setObjectName("topbarBrandLogo")
+        brand_logo.setAccessibleName("Logo FEMAG")
+        brand_logo.setAlignment(Qt.AlignCenter)
+        brand_logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=96, height=52))
+        brand_logo.setMinimumWidth(96)
+
         search = QLineEdit()
         search.setObjectName("globalSearch")
         search.setPlaceholderText("Buscar orden, cliente, chofer...")
@@ -445,6 +452,7 @@ class FemagDesktopWindow(QMainWindow):
         user.setObjectName("userBlock")
         user.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
+        layout.addWidget(brand_logo)
         layout.addWidget(search, 1)
         layout.addStretch(1)
         layout.addWidget(notifications)

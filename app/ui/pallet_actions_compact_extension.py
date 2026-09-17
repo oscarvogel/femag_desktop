@@ -17,18 +17,6 @@ def _compact_batch_actions(widget) -> None:
     label_item = layout.itemAtPosition(0, 0)
     add_label = label_item.widget() if label_item is not None else None
 
-    # La UI actual ya puede haber organizado esta barra en dos filas mediante
-    # contenedores QWidget. En ese caso no debemos volver a compactarla: esta
-    # extensión solo aplica al layout legado cuyo primer elemento es el QLabel.
-    if not isinstance(add_label, QLabel):
-        return
-
-    while layout.count():
-        layout.takeAt(0)
-
-    if add_label is not None:
-        add_label.setText("Agregar:")
-
     widget.propose_distribution_button.setText("Proponer distribucion")
     widget.reorganize_pending_button.setText("Reorganizar")
     widget.recalculate_all_button.setText("Recalcular")
@@ -49,6 +37,29 @@ def _compact_batch_actions(widget) -> None:
         button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         button.setMinimumWidth(0)
         button.setMaximumHeight(34)
+
+    widget.bulk_pallet_count_input.setMinimumWidth(80)
+    widget.bulk_pallet_count_input.setMaximumWidth(80)
+    widget.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    widget.bulk_pallet_count_input.setAlignment(Qt.AlignCenter)
+    widget.clear_assignments_button.setToolTip(
+        "Quita todas las asignaciones de mercaderia de los pallets."
+    )
+    widget.clear_assignments_button.setStyleSheet(
+        "QPushButton { color: #9b2c2c; font-weight: 700; }"
+    )
+
+    # La UI actual ya puede haber organizado esta barra en dos filas mediante
+    # contenedores QWidget. En ese caso no debemos volver a compactarla: esta
+    # extensión solo aplica al layout legado cuyo primer elemento es el QLabel.
+    if not isinstance(add_label, QLabel):
+        return
+
+    while layout.count():
+        layout.takeAt(0)
+
+    if add_label is not None:
+        add_label.setText("Agregar:")
 
     # El selector de cantidad es un dato operativo: no debe comprimirse cuando
     # la fila inferior necesita ganar espacio para los botones.
