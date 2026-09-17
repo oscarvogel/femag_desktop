@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
 from app.config.database import database_proxy
-from app.models.accounting import ClientAccountMovement
 from app.models.budgets import Budget, BudgetItem
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Client, Product
@@ -86,6 +85,8 @@ class BudgetService:
         issue_date: date | None = None,
         observations: str | None = None,
     ) -> Budget:
+        from app.models.accounting import ClientAccountMovement
+
         client = Client.get_by_id(client.id)
         normalized_items = [self._normalize_manual_item(item) for item in items]
         if not normalized_items:
@@ -135,6 +136,8 @@ class BudgetService:
         return budget
 
     def annul_manual(self, budget: Budget) -> Budget:
+        from app.models.accounting import ClientAccountMovement
+
         budget = Budget.get_by_id(budget.id)
         if budget.origin != Budget.ORIGIN_MANUAL:
             raise ValueError("Solo los presupuestos manuales se anulan con este flujo.")
@@ -262,7 +265,7 @@ class BudgetService:
             "total_amount": round(sum(item["total"] for item in items), 2),
         }
 
-    def _record(self, action: str, budget: Budget, movement: ClientAccountMovement | None = None) -> None:
+    def _record(self, action: str, budget: Budget, movement=None) -> None:
         self.audit_service.record(
             user=self.current_user,
             module="Presupuestos",
