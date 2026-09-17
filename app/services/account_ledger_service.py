@@ -40,15 +40,26 @@ class AccountLedgerService:
                     "movement_date": movement_date,
                     "due_date": due_date,
                     "description": self._description(order, budget, totals),
-                    "source_ref": f"Budget:{budget.id}",
+                    "source_ref": self._source_ref(order),
                     "reference": budget.display_number,
                     "created_by": self.current_user,
                 },
             )
-            if not created and (movement.budget_id is None or not movement.reference):
+            if not created and (
+                movement.budget_id is None
+                or not movement.reference
+                or movement.source_ref != self._source_ref(order)
+            ):
                 movement.budget = budget
                 movement.reference = budget.display_number
-                movement.save(only=[ClientAccountMovement.budget, ClientAccountMovement.reference])
+                movement.source_ref = self._source_ref(order)
+                movement.save(
+                    only=[
+                        ClientAccountMovement.budget,
+                        ClientAccountMovement.reference,
+                        ClientAccountMovement.source_ref,
+                    ]
+                )
             movements.append(movement)
             if created:
                 self._update_budget_status(order, client)
