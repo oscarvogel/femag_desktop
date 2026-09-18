@@ -61,21 +61,33 @@ function Assert-GhAuth {
     }
 }
 
-function Wait-And-WatchRun([string]$Workflow, [string]$Branch, [datetime]$Since) {
+function Get-LatestRunId([string]$Workflow, [string]$Branch) {
+    $raw = Invoke-Capture -Command "gh" `
+        -Arguments @("run", "list", "--repo", $Repo, "--workflow", $Workflow, "--branch", $Branch, "--limit", "1", "--json", "databaseId") `
+        -FailureMessage "No se pudo listar runs de $Workflow."
+    if (-not $raw -or $raw.Trim() -eq "[]") { return [long]0 }
+    $item = $raw | ConvertFrom-Json
+    if ($item -is [array]) { $item = $item[0] }
+    if ($null -eq $item) { return [long]0 }
+    return [long]$item.databaseId
+}
+
+function Wait-And-WatchRun([string]$Workflow, [string]$Branch, [long]$BeforeId) {
+    # Detección por ID monótono (no por reloj): el reloj local puede estar
+    # desviado del servidor y el filtro por createdAt perdía el run recién
+    # lanzado aunque existiera.
     Write-Host ""
     Write-Host "Buscando ejecucion de $Workflow en $Branch..." -ForegroundColor Cyan
     $runId = $null
     for ($i = 0; $i -lt 30 -and -not $runId; $i++) {
         Start-Sleep -Seconds 4
         $raw = Invoke-Capture -Command "gh" `
-            -Arguments @("run", "list", "--repo", $Repo, "--workflow", $Workflow, "--branch", $Branch, "--limit", "5", "--json", "databaseId,createdAt") `
+            -Arguments @("run", "list", "--repo", $Repo, "--workflow", $Workflow, "--branch", $Branch, "--limit", "5", "--json", "databaseId") `
             -FailureMessage "No se pudo listar runs de $Workflow."
         $json = $raw | ConvertFrom-Json
         if ($json) {
-            $fresh = @($json | Where-Object {
-                try { [datetime]$_.createdAt -gt $Since } catch { $false }
-            })
-            if ($fresh.Count -gt 0) { $runId = $fresh[0].databaseId }
+            $fresh = @($json | Where-Object { try { [long]$_.databaseId -gt $BeforeId } catch { $false } })
+            if ($fresh.Count -gt 0) { $runId = ($fresh | Sort-Object -Property databaseId | Select-Object -Last 1).databaseId }
         }
     }
     if (-not $runId) { throw "No se encontro la ejecucion recien lanzada de $Workflow." }
@@ -94,10 +106,10 @@ function Invoke-CandidateViaActions {
     if (-not $branch) { throw "No se pudo determinar la rama actual." }
     Write-Host "FEMAG CANDIDATE (GitHub Actions)" -ForegroundColor Yellow
     Write-Host "Rama: $branch"
-    $since = (Get-Date).ToUniversalTime()
+    $beforeId = Get-LatestRunId "publish-production.yml" $branch
     Invoke-Native -Command "gh" -Arguments @("workflow", "run", "publish-production.yml", "--repo", $Repo, "--ref", $branch) `
         -FailureMessage "No se pudo lanzar Publish FEMAG candidate."
-    Wait-And-WatchRun "publish-production.yml" $branch $since
+    Wait-And-WatchRun "publish-production.yml" $branch $beforeId
     Write-Host ""
     Write-Host "CANDIDATE PUBLICADO CORRECTAMENTE (Actions)." -ForegroundColor Green
 }
@@ -383,10 +395,10 @@ function Invoke-Production {
     Write-Host "SHA256 : $($candidate.sha256)"
     Write-Host ""
     Write-Host "Promoviendo exactamente este candidate a produccion..." -ForegroundColor Cyan
-    $since = (Get-Date).ToUniversalTime()
+    $beforeId = Get-LatestRunId "promote-production.yml" "main"
     Invoke-Native -Command "gh" -Arguments @("workflow", "run", "promote-production.yml", "--repo", $Repo, "--ref", "main", "-f", "operation=promote_candidate", "-f", "expected_version=$($candidate.version)", "-f", "expected_sha256=$($candidate.sha256)", "-f", "confirmation=PROMOTE") `
         -FailureMessage "No se pudo lanzar Promote FEMAG production."
-    Wait-And-WatchRun "promote-production.yml" "main" $since
+    Wait-And-WatchRun "promote-production.yml" "main" $beforeId
     Write-Host ""
     Write-Host "PRODUCCION PROMOVIDA CORRECTAMENTE." -ForegroundColor Green
 }
