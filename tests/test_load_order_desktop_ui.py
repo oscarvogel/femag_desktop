@@ -849,7 +849,7 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
 
 def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
-    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget, QInputDialog
 
     from app.models.accounting import ClientAccountMovement
     from app.models.load_orders import LoadOrder
@@ -894,6 +894,11 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
         QMessageBox,
         "question",
         lambda *_args, **_kwargs: (print_events.append(("question", "excel")), QMessageBox.Yes)[1],
+    )
+    monkeypatch.setattr(
+        QInputDialog,
+        "getMultiLineText",
+        lambda *_args, **_kwargs: ("Error de carga detectado en prueba", True),
     )
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
