@@ -1,23 +1,21 @@
 [CmdletBinding()]
 param(
     [switch]$SkipInstallDependencies,
-    [switch]$VersionOnly
+    [switch]$VersionOnly,
+    [string]$IsccPath,
+    [switch]$NoAutoInstall
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "Invoke-Native.ps1")
+. (Join-Path $PSScriptRoot "Resolve-InnoSetup.ps1")
 $Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $BuildVersionFile = Join-Path $RepoRoot "app\build_demo_version.py"
 $StateFile = Join-Path $RepoRoot "installer\.demo_build_state"
 $InstallerOutputDir = Join-Path $RepoRoot "installer\output"
-$IsccCandidates = @(
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-)
-$Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 function Get-DemoBuildVersion {
     param([string]$Path)
@@ -64,17 +62,19 @@ if ($VersionOnly) {
 if (-not (Test-Path $Python)) {
     throw "No existe $Python. Cree el entorno de desarrollo antes de compilar."
 }
-if (-not $Iscc) {
-    throw "No se encontro Inno Setup 6 (ISCC.exe) en esta PC de compilacion."
-}
+$resolveParams = @{}
+if ($IsccPath) { $resolveParams["IsccPath"] = $IsccPath }
+if ($NoAutoInstall) { $resolveParams["NoAutoInstall"] = $true }
+$Iscc = Resolve-InnoSetup @resolveParams
 
 Push-Location $RepoRoot
 try {
     Set-Content -LiteralPath $BuildVersionFile -Value "BUILD_DEMO_VERSION = `"$BuildVersion`"" -Encoding UTF8
 
     if (-not $SkipInstallDependencies) {
-        & $Python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
-        if ($LASTEXITCODE -ne 0) { throw "No se pudieron instalar las dependencias de compilacion." }
+        Invoke-Native -Command $Python `
+            -Arguments @("-m", "pip", "install", "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org", "-r", "requirements-build.txt") `
+            -FailureMessage "No se pudieron instalar las dependencias de compilacion."
     }
 
     Remove-Item -Recurse -Force "build\FEMAG Desktop DEMO" -ErrorAction SilentlyContinue
@@ -84,11 +84,13 @@ try {
             Remove-Item -Force
     }
 
-    & $Python -m PyInstaller --noconfirm --clean installer\FEMAG_Desktop_Demo.spec
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo." }
+    Invoke-Native -Command $Python `
+        -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "installer\FEMAG_Desktop_Demo.spec") `
+        -FailureMessage "PyInstaller fallo."
 
-    & $Iscc "/DMyAppVersion=$BuildVersion" installer\FEMAG_Desktop_Demo.iss
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
+    Invoke-Native -Command $Iscc `
+        -Arguments @("/DMyAppVersion=$BuildVersion", "installer\FEMAG_Desktop_Demo.iss") `
+        -FailureMessage "Inno Setup fallo."
 
     Write-Host "Version: $BuildVersion" -ForegroundColor Green
     Write-Host "Instalador generado: installer\output\FEMAG_Desktop_DEMO_Standalone_Setup.exe" -ForegroundColor Green

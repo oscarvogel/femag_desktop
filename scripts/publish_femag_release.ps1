@@ -34,7 +34,16 @@ function Invoke-Checked {
     # Enviar la salida operativa a la consola sin devolverla por el pipeline.
     # Así las funciones que retornan objetos (por ejemplo el artefacto) no
     # reciben también cada línea de PyInstaller/Inno Setup.
-    & $Command @Arguments | Out-Host
+    # El merge 2>&1 + EAP Continue evita que PowerShell 5.1 aborte ante el
+    # stderr normal de pip/PyInno cuando la salida está redirigida.
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command @Arguments 2>&1 | Out-Host
+    }
+    finally {
+        $ErrorActionPreference = $previousEAP
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Falló el comando: $Command $($Arguments -join ' ')"
     }
@@ -46,7 +55,17 @@ function Get-CheckedOutput {
         [Parameter(Mandatory = $true)] [string[]]$Arguments
     )
 
-    $output = & $Command @Arguments
+    # Merge 2>&1 + EAP Continue: git escribe progreso en stderr incluso en
+    # éxito y PowerShell 5.1 lo convertiría en error terminante si la salida
+    # del script está redirigida.
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Command @Arguments 2>&1 | ForEach-Object { "$_" }
+    }
+    finally {
+        $ErrorActionPreference = $previousEAP
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Falló el comando: $Command $($Arguments -join ' ')"
     }
