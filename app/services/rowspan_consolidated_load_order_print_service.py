@@ -136,11 +136,12 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         return spans, display_values
 
     def _destination_table(self, block: dict[str, object]) -> Table:
-        """Imprime la composición física real, pallet por pallet.
+        """Agrupa corridas de pallets de artículo único sin ocultar los mixtos.
 
-        La vista consolidada por producto sigue disponible en la clase base para
-        resúmenes, pero la orden operativa debe indicar exactamente qué contiene
-        cada pallet. Esto evita perder pallets mixtos durante la preparación.
+        Un artículo idéntico y exclusivo de varios pallets consecutivos se
+        imprime una sola vez con la cantidad por pallet y el número de pallets.
+        Los pallets mixtos conservan una fila por artículo y su celda de pallet
+        combinada verticalmente, pues esa composición debe permanecer visible.
         """
         header = [
             self._p("Producto / detalle", bold=True),
@@ -170,9 +171,43 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
             *([block.get("unassigned_block")] if block.get("unassigned_block") else []),
         ]
 
-        for sub_block in sub_blocks:
+        block_index = 0
+        while block_index < len(sub_blocks):
+            sub_block = sub_blocks[block_index]
             physical_rows = list(sub_block.get("rows", []))
             if not physical_rows:
+                block_index += 1
+                continue
+
+            group_key = self._single_product_pallet_key(sub_block)
+            if group_key is not None:
+                group_end = block_index + 1
+                while (
+                    group_end < len(sub_blocks)
+                    and self._single_product_pallet_key(sub_blocks[group_end]) == group_key
+                ):
+                    group_end += 1
+
+                row = physical_rows[0]
+                pallet_count = group_end - block_index
+                rows.append(
+                    [
+                        self._p(row["product"]),
+                        self._center_p(
+                            self._quantity_with_unit(row["quantity"], row.get("unit"))
+                        ),
+                        self._center_p(self._pallet_label(pallet_count)),
+                        self._p(row["lote"])
+                        if self._optional_operational_value(row.get("lote"))
+                        else "",
+                        self._p(row["elab"])
+                        if self._optional_operational_value(row.get("elab"))
+                        else "",
+                    ]
+                )
+                table_row += 1
+                has_rows = True
+                block_index = group_end
                 continue
 
             has_rows = True
@@ -197,6 +232,7 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
                 span_commands.append(
                     ("SPAN", (2, start_row), (2, table_row - 1))
                 )
+            block_index += 1
 
         if not has_rows:
             rows.append(
@@ -232,3 +268,19 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
             )
         )
         return table
+
+    def _single_product_pallet_key(self, sub_block: dict[str, object]) -> tuple | None:
+        """Identifica un pallet exclusivo que puede resumirse con sus iguales."""
+        label = str(sub_block.get("label") or "").strip()
+        rows = list(sub_block.get("rows", []))
+        if not label.isdigit() or len(rows) != 1:
+            return None
+
+        row = rows[0]
+        return (
+            str(row.get("product", "")),
+            str(row.get("unit", "")),
+            str(row.get("quantity", "")),
+            self._optional_operational_value(row.get("lote")),
+            self._optional_operational_value(row.get("elab")),
+        )
