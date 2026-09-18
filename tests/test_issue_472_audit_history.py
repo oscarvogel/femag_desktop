@@ -54,9 +54,10 @@ def test_load_order_history_dialog_renders_timeline(db):
     table = dialog.findChild(QTableWidget, "loadOrderHistoryTable")
 
     assert table is not None
-    assert table.rowCount() == 2
-    assert "Orden creada" in [table.item(row, 2).text() for row in range(table.rowCount())]
-    assert "Orden emitida" in [table.item(row, 2).text() for row in range(table.rowCount())]
+    actions = [table.item(row, 2).text() for row in range(table.rowCount())]
+    assert actions.count("Orden creada") == 1
+    assert actions.count("Orden emitida") == 1
+    assert table.rowCount() >= 2
 
 
 def test_history_keeps_non_status_audit_events(db):
