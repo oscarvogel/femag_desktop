@@ -230,6 +230,12 @@ def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
     return [(legacy, "", True)] if legacy else []
 
 
+def _current_client_phone(client) -> str:
+    client_id = getattr(client, "id", None)
+    current_client = Client.get_or_none(Client.id == client_id) if client_id is not None else None
+    return (getattr(current_client or client, "phone", None) or "").strip()
+
+
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
@@ -762,7 +768,7 @@ class FemagDesktopWindow(QMainWindow):
 
         dialog = WhatsAppSendDialog(
             client_name=client.name,
-            phone=getattr(client, "phone", "") or "",
+            phone=_current_client_phone(client),
             parent=self,
         )
         if dialog.exec_() != QDialog.Accepted:
