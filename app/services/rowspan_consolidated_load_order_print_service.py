@@ -136,10 +136,16 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
         return spans, display_values
 
     def _destination_table(self, block: dict[str, object]) -> Table:
+        """Imprime la composición física real, pallet por pallet.
+
+        La vista consolidada por producto sigue disponible en la clase base para
+        resúmenes, pero la orden operativa debe indicar exactamente qué contiene
+        cada pallet. Esto evita perder pallets mixtos durante la preparación.
+        """
         header = [
             self._p("Producto / detalle", bold=True),
             self._p("Cantidad total", bold=True),
-            self._p("Cant. pallets", bold=True),
+            self._p("Pallet", bold=True),
             self._p("Lote", bold=True),
             self._p("Elab.", bold=True),
         ]
@@ -154,29 +160,60 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
             ]
         )
 
-        consolidated = block.get("consolidated_rows") or self._consolidate_rows(block)
         span_commands: list[tuple] = []
-        if consolidated:
-            span_commands, pallet_values = self._pallet_spans(
-                block,
-                consolidated,
-                first_table_row=2,
-                pallet_column=2,
-            )
-            for index, row in enumerate(consolidated):
+        table_row = 2
+        has_rows = False
+
+        sub_blocks = [
+            *block.get("pallet_blocks", []),
+            *([block.get("loose_block")] if block.get("loose_block") else []),
+            *([block.get("unassigned_block")] if block.get("unassigned_block") else []),
+        ]
+
+        for sub_block in sub_blocks:
+            physical_rows = list(sub_block.get("rows", []))
+            if not physical_rows:
+                continue
+
+            has_rows = True
+            start_row = table_row
+            label = str(sub_block.get("label") or "-")
+
+            for index, row in enumerate(physical_rows):
                 rows.append(
                     [
                         self._p(row["product"]),
-                        self._center_p(self._quantity_with_unit(row["quantity"], row.get("unit"))),
-                        self._center_p(pallet_values[index]) if pallet_values[index] else "",
-                        self._p(row["lote"]) if row["lote"] else "",
-                        self._p(row["elab"]) if row["elab"] else "",
+                        self._center_p(
+                            self._quantity_with_unit(row["quantity"], row.get("unit"))
+                        ),
+                        self._center_p(label) if index == 0 else "",
+                        self._p(row["lote"]) if self._optional_operational_value(row.get("lote")) else "",
+                        self._p(row["elab"]) if self._optional_operational_value(row.get("elab")) else "",
                     ]
                 )
-        else:
-            rows.append([self._p("-"), self._center_p("-"), self._center_p("-"), self._p("-"), self._p("-")])
+                table_row += 1
 
-        table = Table(rows, colWidths=[82 * mm, 30 * mm, 26 * mm, 21 * mm, 21 * mm], repeatRows=2)
+            if len(physical_rows) > 1:
+                span_commands.append(
+                    ("SPAN", (2, start_row), (2, table_row - 1))
+                )
+
+        if not has_rows:
+            rows.append(
+                [
+                    self._p("-"),
+                    self._center_p("-"),
+                    self._center_p("-"),
+                    self._p("-"),
+                    self._p("-"),
+                ]
+            )
+
+        table = Table(
+            rows,
+            colWidths=[82 * mm, 30 * mm, 26 * mm, 21 * mm, 21 * mm],
+            repeatRows=2,
+        )
         table.setStyle(
             TableStyle(
                 [
