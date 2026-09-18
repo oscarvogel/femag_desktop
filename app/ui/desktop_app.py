@@ -760,9 +760,10 @@ class FemagDesktopWindow(QMainWindow):
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
 
+        current_client = Client.get_or_none(Client.id == getattr(client, "id", None)) or client
         dialog = WhatsAppSendDialog(
-            client_name=client.name,
-            phone=getattr(client, "phone", "") or "",
+            client_name=current_client.name,
+            phone=(getattr(current_client, "phone", None) or "").strip(),
             parent=self,
         )
         if dialog.exec_() != QDialog.Accepted:
