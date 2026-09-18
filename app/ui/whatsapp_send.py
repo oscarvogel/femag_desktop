@@ -20,9 +20,17 @@ from app.ui.form_feedback import FormFeedback
 
 
 class WhatsAppSendDialog(QDialog):
-    def __init__(self, *, client_name: str, phone: str, parent=None):
+    def __init__(
+        self,
+        *,
+        client_name: str,
+        phone: str,
+        default_message: str | None = None,
+        window_title: str = "Enviar extracto por WhatsApp",
+        parent=None,
+    ):
         super().__init__(parent)
-        self.setWindowTitle("Enviar extracto por WhatsApp")
+        self.setWindowTitle(window_title)
         self.setObjectName("whatsappSendDialog")
         self.resize(560, 330)
         root = QVBoxLayout(self)
@@ -33,8 +41,11 @@ class WhatsAppSendDialog(QDialog):
         self.phone_input.setObjectName("whatsappPhoneInput")
         self.phone_input.setPlaceholderText("Ej.: +54 9 3743 123456")
         self.caption_input = QTextEdit(
-            f"Hola {client_name}. Le enviamos adjunto el resumen actualizado de su "
-            "cuenta corriente con FEMAG. Ante cualquier consulta, quedamos a disposición."
+            default_message
+            or (
+                f"Hola {client_name}. Le enviamos adjunto el resumen actualizado de su "
+                "cuenta corriente con FEMAG. Ante cualquier consulta, quedamos a disposición."
+            )
         )
         self.caption_input.setObjectName("whatsappCaptionInput")
         self.caption_input.setMaximumHeight(100)
