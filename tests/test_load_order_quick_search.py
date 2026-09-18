@@ -1,4 +1,8 @@
-from PyQt5.QtWidgets import QLineEdit
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt5.QtWidgets import QApplication, QLineEdit
 
 from app.ui.load_order_quick_search_extension import (
     _order_matches_quick_search,
@@ -9,12 +13,22 @@ from app.ui.load_order_workspace_restore_extension import (
 )
 
 
-def test_quick_search_matches_operational_fields(db, demo_user):
+def _demo_user(username):
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    return User.create(username=username, password_hash="x", profile=profile)
+
+
+def test_quick_search_matches_operational_fields(db):
     from app.services.load_order_service import LoadOrderService
     from conftest import _master_data, _valid_order_payload
 
+    user = _demo_user("quick_search_fields")
     data = _master_data()
-    order = LoadOrderService(current_user=demo_user.username).create_order(
+    order = LoadOrderService(current_user=user.username).create_order(
         **_valid_order_payload(data)
     )
 
@@ -25,13 +39,15 @@ def test_quick_search_matches_operational_fields(db, demo_user):
     assert _order_matches_quick_search(order, order.products[0].product.name)
 
 
-def test_quick_search_widget_is_added(qtbot, demo_user):
+def test_quick_search_widget_is_added(db):
     from app.ui.desktop_app import FemagDesktopWindow
 
+    app = QApplication.instance() or QApplication([])
+    user = _demo_user("quick_search_widget")
     install_load_order_workspace_restore_extension()
     install_load_order_quick_search_extension()
-    window = FemagDesktopWindow(user=demo_user, demo_mode=True)
-    qtbot.addWidget(window)
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
 
     quick = window.findChild(QLineEdit, "loadOrderQuickSearchInput")
     assert quick is not None
