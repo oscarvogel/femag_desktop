@@ -52,6 +52,7 @@ from app.config.schema import (
 )
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
+from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.models.payments import ClientPayment
 from app.models.remittances import RemittanceSeries
@@ -847,9 +848,46 @@ class FemagDesktopWindow(QMainWindow):
         worker.signals.finished.connect(_finished)
         QThreadPool.globalInstance().start(worker)
 
-    def _share_budget_whatsapp(self, budget) -> None:
+    def _budget_for_movement(self, movement):
+        if movement.budget_id is not None:
+            return Budget.get_by_id(movement.budget_id)
+
+        source_ref = str(movement.source_ref or "")
+        if source_ref.startswith("Budget:"):
+            try:
+                budget_id = int(source_ref.split(":", 1)[1])
+            except (TypeError, ValueError):
+                budget_id = None
+            if budget_id is not None:
+                budget = Budget.get_or_none(Budget.id == budget_id)
+                if budget is not None:
+                    return budget
+
+        if movement.load_order_id is not None:
+            budget = Budget.get_or_none(
+                (Budget.load_order == movement.load_order_id)
+                & (Budget.client == movement.client_id)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            )
+            if budget is not None:
+                return budget
+            return BudgetPrintService(
+                current_user=self.shell.username
+            ).budget_service.ensure_for_load_order_client(
+                movement.load_order, movement.client
+            )
+
+        raise ValueError("El movimiento seleccionado no tiene un presupuesto asociado.")
+
+    def _share_budget_whatsapp(self, movement) -> None:
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
 
         client = budget.client
         dialog = WhatsAppSendDialog(
