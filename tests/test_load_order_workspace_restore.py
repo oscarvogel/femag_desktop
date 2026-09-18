@@ -37,3 +37,15 @@ def test_restored_workspace_contract(db):
     assert window.findChild(QLineEdit, "loadOrderSearchInput") is None
 
     window.close()
+
+
+def test_restored_workspace_keeps_excel_export_in_active_print_handler():
+    from pathlib import Path
+    import app.ui.load_order_workspace_restore_extension as extension
+
+    source = Path(extension.__file__).read_text(encoding="utf-8")
+    print_handler = source[source.index("    def print_order() -> None:"):source.index("    def reprint_order() -> None:")]
+
+    assert "QMessageBox.question" in print_handler
+    assert "export_pallet_layout_xlsx(order)" in print_handler
+    assert print_handler.index("QMessageBox.question") < print_handler.index("_open_print_output(resolved_path)")
