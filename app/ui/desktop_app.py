@@ -52,6 +52,7 @@ from app.config.schema import (
 )
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
+from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.models.payments import ClientPayment
 from app.models.remittances import RemittanceSeries
@@ -76,6 +77,7 @@ from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
 from app.services.client_manual_credit_service import ClientManualCreditService
 from app.services.client_email_service import ClientEmailService
+from app.services.budget_print_service import BudgetPrintService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.ui.form_feedback import FormFeedback
 from app.services import account_statement_mail_service
@@ -739,6 +741,7 @@ class FemagDesktopWindow(QMainWindow):
             register_manual_credit_callback=self._open_manual_credit_dialog,
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
+            whatsapp_budget_callback=self._share_budget_whatsapp,
             email_statement_callback=self._email_account_statement,
             print_receipt_callback=(
                 self._print_payment_receipt
@@ -839,6 +842,131 @@ class FemagDesktopWindow(QMainWindow):
             if button is not None:
                 button.setText("Enviar por WhatsApp")
                 button.setEnabled(True)
+
+        worker.signals.succeeded.connect(_success)
+        worker.signals.failed.connect(_failed)
+        worker.signals.finished.connect(_finished)
+        QThreadPool.globalInstance().start(worker)
+
+    def _budget_for_movement(self, movement):
+        if movement.budget_id is not None:
+            return Budget.get_by_id(movement.budget_id)
+
+        source_ref = str(movement.source_ref or "")
+        if source_ref.startswith("Budget:"):
+            try:
+                budget_id = int(source_ref.split(":", 1)[1])
+            except (TypeError, ValueError):
+                budget_id = None
+            if budget_id is not None:
+                budget = Budget.get_or_none(Budget.id == budget_id)
+                if budget is not None:
+                    return budget
+
+        if movement.load_order_id is not None:
+            budget = Budget.get_or_none(
+                (Budget.load_order == movement.load_order_id)
+                & (Budget.client == movement.client_id)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            )
+            if budget is not None:
+                return budget
+            return BudgetPrintService(
+                current_user=self.shell.username
+            ).budget_service.ensure_for_load_order_client(
+                movement.load_order, movement.client
+            )
+
+        raise ValueError("El movimiento seleccionado no tiene un presupuesto asociado.")
+
+    def _share_budget_whatsapp(self, movement) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
+
+        client = budget.client
+        dialog = WhatsAppSendDialog(
+            client_name=client.name,
+            phone=_current_client_phone(client),
+            default_message=(
+                f"Hola {client.name}. Le enviamos adjunto el presupuesto "
+                f"{budget.display_number} de FEMAG con el detalle correspondiente. "
+                "Ante cualquier consulta, quedamos a disposición."
+            ),
+            window_title="Enviar presupuesto por WhatsApp",
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+            envio = service.create_attempt(
+                tipo_documento="presupuesto",
+                documento_id=str(budget.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        page = self.stack.currentWidget()
+        action = (
+            page.whatsapp_budget_action
+            if isinstance(page, CustomerLedgerPage)
+            else None
+        )
+        if action is not None:
+            action.setEnabled(False)
+
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers = getattr(self, "_budget_whatsapp_workers", set())
+        self._budget_whatsapp_workers = workers
+        workers.add(worker)
+
+        def _success(result) -> None:
+            labels = {
+                "queued": "encolado",
+                "processing": "procesando",
+                "accepted": "aceptado por WhatsApp",
+                "delivered": "entregado",
+                "read": "leído",
+                "failed": "fallido",
+            }
+            status = labels.get(result.estado, result.estado)
+            QMessageBox.information(
+                self,
+                "WhatsApp",
+                f"Presupuesto {budget.display_number} enviado. Estado: {status}.\n"
+                f"Message ID: {result.message_id or '-'}",
+            )
+
+        def _failed(message: str) -> None:
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"No se pudo enviar el presupuesto: {message}",
+            )
+
+        def _finished() -> None:
+            workers.discard(worker)
+            if isinstance(page, CustomerLedgerPage):
+                page._sync_more_actions()
 
         worker.signals.succeeded.connect(_success)
         worker.signals.failed.connect(_failed)
