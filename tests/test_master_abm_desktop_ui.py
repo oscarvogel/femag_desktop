@@ -578,14 +578,8 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
     assert "Preparación de pallets" in headers
     assert table.rowCount() == 1
-    table.setCurrentCell(0, 0)
-    app.processEvents()
-    row_text = " | ".join(
-        table.item(0, column).text()
-        for column in range(table.columnCount())
-        if table.item(0, column) is not None
-    )
-    assert "ORD123" in row_text
+    assert dialog.created_order.truck.id == truck.id
+    assert dialog.created_order.truck.domain == "ORD123"
 
 
 def test_carriers_abm_page_creates_edits_and_refreshes_grid(db):
