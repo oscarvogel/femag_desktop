@@ -68,7 +68,7 @@ def test_operational_flow_emits_prints_again_and_annuls_order(db, tmp_path):
     issued = operations.issue(order)
     first_print = operations.print_order(issued)
     second_print = operations.print_order(issued)
-    annulled = operations.annul(issued, can_annul=True)
+    annulled = operations.annul(issued, can_annul=True, reason="Prueba operativa")
 
     assert issued.status == LoadOrder.STATUS_ISSUED
     assert Path(first_print).exists()
@@ -101,7 +101,7 @@ def test_operational_flow_rejects_reissuing_but_prints_annulled_order(db, tmp_pa
     data = _master_data()
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path)
-    annulled = operations.annul(order, can_annul=True)
+    annulled = operations.annul(order, can_annul=True, reason="Prueba operativa")
 
     with pytest.raises(ValueError, match="anulada"):
         operations.issue(annulled)
@@ -119,4 +119,4 @@ def test_operational_flow_requires_permission_to_annul(db, tmp_path):
     order = LoadOrderService(current_user="secretaria").create_order(**_valid_order_payload(data))
 
     with pytest.raises(PermissionError, match="permiso"):
-        LoadOrderOperationService(current_user="secretaria", prints_dir=tmp_path).annul(order, can_annul=False)
+        LoadOrderOperationService(current_user="secretaria", prints_dir=tmp_path).annul(order, can_annul=False, reason="Prueba sin permiso")
