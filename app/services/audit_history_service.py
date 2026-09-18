@@ -66,7 +66,15 @@ class AuditHistoryService:
         )
         for row in audit_rows:
             # Creation/status changes are already represented by LoadOrderStatusHistory.
-            if row.action in {"crear", "cambiar estado", "anular"}:
+            # Driver lock/release events remain in AuditLog as technical trace, but are
+            # intentionally hidden from the business timeline shown to users.
+            if row.action in {
+                "crear",
+                "cambiar estado",
+                "anular",
+                "bloquear chofer",
+                "liberar chofer",
+            }:
                 continue
             events.append(
                 AuditHistoryEvent(
