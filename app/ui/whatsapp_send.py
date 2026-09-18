@@ -33,7 +33,8 @@ class WhatsAppSendDialog(QDialog):
         self.phone_input.setObjectName("whatsappPhoneInput")
         self.phone_input.setPlaceholderText("Ej.: +54 9 3743 123456")
         self.caption_input = QTextEdit(
-            f"Hola {client_name}, le compartimos su extracto de cuenta corriente de FEMAG."
+            f"Hola {client_name}. Le enviamos adjunto el resumen actualizado de su "
+            "cuenta corriente con FEMAG. Ante cualquier consulta, quedamos a disposición."
         )
         self.caption_input.setObjectName("whatsappCaptionInput")
         self.caption_input.setMaximumHeight(100)
