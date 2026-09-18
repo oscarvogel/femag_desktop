@@ -5,7 +5,7 @@ from app.models.load_orders import LoadOrder
 from app.services.audit_history_service import AuditHistoryService
 from app.services.load_order_service import LoadOrderService
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
-from tests.conftest import _master_data, _valid_order_payload
+from conftest import _master_data, _valid_order_payload
 
 
 def test_load_order_history_combines_status_and_audit_without_duplicates(db):
