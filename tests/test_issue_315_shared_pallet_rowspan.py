@@ -27,29 +27,26 @@ def _shared_pallet_block():
     }
 
 
-def test_regular_detail_prints_physical_pallet_and_rowspans_all_its_articles():
+def test_regular_detail_consolidates_each_article_and_shows_its_pallet_count():
     service = _service()
     table = service._destination_table(_shared_pallet_block())
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
     assert rows[0] == ["Producto / detalle", "Cantidad total", "Pallet", "Lote", "Elab."]
     assert rows[2][1] == "30 BOLSAS"
-    assert rows[2][2] == "1"
-    assert rows[3][2] == ""
-    assert rows[4][2] == ""
-    assert rows[5][2] == ""
-    assert ("SPAN", (2, 2), (2, 5)) in table._spanCmds
+    assert rows[2][2] == "1 pallet"
+    assert [row[2] for row in rows[2:]] == ["1 pallet"] * 4
     assert table._cellvalues[2][1].style.alignment == 1
     assert table._cellvalues[2][2].style.alignment == 1
 
 
-def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
+def test_same_article_on_many_pallets_becomes_one_row_with_total_and_pallet_count():
     service = _service()
     block = {
         "destination": "GNESETTI SOFIA - ESPAÑA 3757",
         "pallet_blocks": [
             {
-                "label": "1",
+                "label": str(sequence),
                 "rows": [
                     {
                         "product": "BOLSAS DE FECULA NATIVA",
@@ -59,26 +56,8 @@ def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
                         "elab": "31/08/26",
                     }
                 ],
-            },
-            {
-                "label": "2",
-                "rows": [
-                    {
-                        "product": "BOLSAS DE FECULA NATIVA",
-                        "unit": "UNIDAD",
-                        "quantity": 30,
-                        "lote": "47",
-                        "elab": "31/08/26",
-                    },
-                    {
-                        "product": "BOLSAS FECULA X 10KG.",
-                        "unit": "UNIDAD",
-                        "quantity": 75,
-                        "lote": "43",
-                        "elab": "31/08/26",
-                    },
-                ],
-            },
+            }
+            for sequence in range(5, 14)
         ],
         "loose_block": None,
         "unassigned_block": None,
@@ -88,25 +67,13 @@ def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
     table = service._destination_table(block)
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    # Pallet 1 remains its own physical row.
     assert rows[2][0] == "BOLSAS DE FECULA NATIVA"
-    assert rows[2][1] == "60 UNIDADES"
-    assert rows[2][2] == "1"
-
-    # Pallet 2 remains one physical block with two article rows.
-    assert rows[3][0] == "BOLSAS DE FECULA NATIVA"
-    assert rows[3][1] == "30 UNIDADES"
-    assert rows[3][2] == "2"
-    assert rows[4][0] == "BOLSAS FECULA X 10KG."
-    assert rows[4][1] == "75 UNIDADES"
-    assert rows[4][2] == ""
-    assert ("SPAN", (2, 3), (2, 4)) in table._spanCmds
-
-    # Regression guard: it must not collapse both Nativa allocations into 90.
-    assert all(row[1] != "90 UNIDADES" for row in rows)
+    assert rows[2][1] == "540 UNIDADES"
+    assert rows[2][2] == "9 pallets"
+    assert len(rows) == 3
 
 
-def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
+def test_one_pallet_with_three_articles_keeps_one_row_per_article():
     service = _service()
     block = {
         "destination": "CLIENTE PRUEBA - DESTINO",
@@ -128,10 +95,7 @@ def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
     assert [rows[index][0] for index in (2, 3, 4)] == ["PRODUCTO A", "PRODUCTO B", "PRODUCTO C"]
-    assert rows[2][2] == "2"
-    assert rows[3][2] == ""
-    assert rows[4][2] == ""
-    assert ("SPAN", (2, 2), (2, 4)) in table._spanCmds
+    assert [rows[index][2] for index in (2, 3, 4)] == ["1 pallet"] * 3
 
 
 def test_issue_473_loose_merchandise_stays_separate_from_pallets():
@@ -158,5 +122,5 @@ def test_issue_473_loose_merchandise_stays_separate_from_pallets():
     table = service._destination_table(block)
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[2][2] == "1"
-    assert rows[3][2] == "SUELTO"
+    assert rows[2][2] == "1 pallet"
+    assert rows[3][2] == "Suelto (5)"
