@@ -76,21 +76,65 @@ def test_pallet_excel_matches_print_layout_and_keeps_mixed_pallet_cells_merged(d
 
     assert target.name == "orden_carga_1_armado_pallets.xlsx"
     workbook = load_workbook(target)
-    sheet = workbook["Armado de pallets"]
-    assert sheet["A1"].value == "2. DETALLE DEL PRODUCTO A DESPACHAR - ORDEN 0001"
-    assert [sheet.cell(4, column).value for column in range(1, 6)] == [
+    sheet = workbook["Orden de despacho"]
+
+    assert sheet["A1"].value == "ORDEN DE DESPACHO DE FECULA DE MANDIOCA"
+    assert sheet["A2"].value == "Nro.: 0001"
+    assert sheet["A4"].value == "QR de la orden"
+
+    values = {
+        (cell.row, cell.column): cell.value
+        for row in sheet.iter_rows()
+        for cell in row
+        if cell.value is not None
+    }
+    text_values = [str(value) for value in values.values()]
+
+    assert "1. DATOS DEL CLIENTE" in text_values
+    assert "2. DETALLE DEL PRODUCTO A DESPACHAR" in text_values
+    assert "3. DATOS DEL TRANSPORTE" in text_values
+    assert "Cliente Excel" in text_values
+    assert any("Misiones - Posadas - Ruta Excel" in value for value in text_values)
+    assert "Transporte Excel" in text_values
+    assert "XLSX123" in text_values
+    assert "Chofer Excel" in text_values
+    assert any(value.startswith("Observaciones:") for value in text_values)
+    assert any(value.startswith("Firma del encargado de carga:") for value in text_values)
+
+    header_row = next(
+        row
+        for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value == "Producto / detalle"
+    )
+    assert [sheet.cell(header_row, column).value for column in range(1, 6)] == [
         "Producto / detalle",
         "Cantidad total",
         "Pallet",
         "Lote",
         "Elab.",
     ]
-    assert sheet["A6"].value == "BOLSAS DE FECULA NATIVA"
-    assert sheet["B6"].value == "10 UNIDADES"
-    assert sheet["C6"].value == "1"
-    assert sheet["C7"].value is None
-    assert "C6:C7" in {str(merged) for merged in sheet.merged_cells.ranges}
-    assert sheet["A8"].value == "BOLSAS DE FECULA NATIVA"
-    assert sheet["B8"].value == "60 UNIDADES"
-    assert sheet["C8"].value == "9 pallets"
+
+    mixed_start = next(
+        row
+        for row in range(header_row + 1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value == "BOLSAS DE FECULA NATIVA"
+        and sheet.cell(row, 2).value == "10 UNIDADES"
+    )
+    assert sheet.cell(mixed_start, 3).value == "1"
+    assert sheet.cell(mixed_start + 1, 1).value == "PACK FECULA X 1 KG"
+    assert sheet.cell(mixed_start + 1, 3).value is None
+    assert f"C{mixed_start}:C{mixed_start + 1}" in {
+        str(merged) for merged in sheet.merged_cells.ranges
+    }
+
+    grouped_row = next(
+        row
+        for row in range(header_row + 1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value == "BOLSAS DE FECULA NATIVA"
+        and sheet.cell(row, 2).value == "60 UNIDADES"
+    )
+    assert sheet.cell(grouped_row, 3).value == "9 pallets"
+
+    assert sheet.page_setup.orientation == "portrait"
+    assert sheet.print_area
     assert AuditLog.select().where(AuditLog.action == "exportar_excel_pallets").count() == 1
