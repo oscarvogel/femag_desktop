@@ -96,7 +96,7 @@ class LoadOrderPalletExcelExportService:
             "Identificador para carga de lote y fecha de elaboración.",
         ).font = Font(size=8)
 
-        self._add_qr_image(sheet, order, printer, anchor=f"E3")
+        self._add_qr_image(sheet, order, printer)
         sheet.row_dimensions[row].height = 24
         row += 3
         return row
