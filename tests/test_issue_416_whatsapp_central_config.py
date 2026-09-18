@@ -97,6 +97,39 @@ def test_user_can_have_whatsapp_instance_and_envio_keeps_snapshot(db):
     assert envio.instance_id == "femag_oscar"
 
 
+
+def test_envio_uses_latest_persisted_user_instance_when_session_object_is_stale(db):
+    from app.models.security import User, UserProfile
+    from app.services.whatsapp_envio_service import WhatsAppEnvioService
+
+    class FakeClient:
+        config = type("Config", (), {"instance_id": None})()
+
+    profile = UserProfile.create(name="Administrador issue 480")
+    User.create(
+        username="oscar-stale",
+        password_hash="x",
+        profile=profile,
+        whatsapp_instance_id="instancia-anterior",
+    )
+    session_user = User.get(User.username == "oscar-stale")
+    updated_user = User.get_by_id(session_user.id)
+    updated_user.whatsapp_instance_id = "oscar_claro_2"
+    updated_user.save(only=[User.whatsapp_instance_id])
+
+    assert session_user.whatsapp_instance_id == "instancia-anterior"
+
+    envio = WhatsAppEnvioService(client=FakeClient()).create_attempt(
+        tipo_documento="extracto_cuenta",
+        documento_id="cliente-480",
+        destinatario="+54 9 376 4123456",
+        caption="Extracto de cuenta corriente",
+        pdf_path=__import__("pathlib").Path("extracto-cliente-480.pdf"),
+        usuario=session_user,
+    )
+
+    assert envio.instance_id == "oscar_claro_2"
+
 def test_user_without_instance_is_rejected_when_there_is_no_legacy_instance(db):
     import pytest
 

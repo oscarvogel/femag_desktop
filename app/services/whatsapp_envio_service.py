@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from app.models.security import User
 from app.models.whatsapp import WhatsAppEnvio
 from app.services.account_statement_share_service import normalize_whatsapp_phone
 from app.services.whatsapp_api_client import TERMINAL_STATUSES, WhatsAppApiClient
@@ -31,7 +32,14 @@ class WhatsAppEnvioService:
         self.client = client or WhatsAppApiClient()
 
     def _resolve_instance_for_user(self, usuario) -> str:
-        user_instance = (getattr(usuario, "whatsapp_instance_id", None) or "").strip()
+        user_instance = ""
+        user_id = getattr(usuario, "id", None)
+        if user_id is not None:
+            persisted_user = User.get_or_none(User.id == user_id)
+            if persisted_user is not None:
+                user_instance = (persisted_user.whatsapp_instance_id or "").strip()
+        else:
+            user_instance = (getattr(usuario, "whatsapp_instance_id", None) or "").strip()
         if user_instance:
             return user_instance
         legacy_instance = (getattr(getattr(self.client, "config", None), "instance_id", None) or "").strip()
