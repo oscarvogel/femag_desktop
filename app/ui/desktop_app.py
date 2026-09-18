@@ -1576,6 +1576,9 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.show_warning("Seleccione una orden para anular.", focus_widget=table)
                 return
+            if not _can_annul_load_orders(self.user):
+                feedback.show_error("No tiene permiso para anular ordenes de carga.", focus_widget=table)
+                return
             reason, accepted = QInputDialog.getMultiLineText(
                 self,
                 "Anular orden",
