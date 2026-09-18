@@ -848,7 +848,7 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
 
 def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget
 
     from app.models.accounting import ClientAccountMovement
     from app.models.load_orders import LoadOrder
@@ -885,6 +885,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.Yes)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -912,9 +913,11 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     assert "pdf generado correctamente" in feedback.text().lower()
     pdf_path = tmp_path / "orden_carga_1.pdf"
-    assert opened_outputs == [pdf_path]
+    excel_path = tmp_path / "orden_carga_1_armado_pallets.xlsx"
+    assert opened_outputs == [pdf_path, excel_path]
     assert str(pdf_path) in feedback.text()
     assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert excel_path.exists()
 
     reprint_button = window.findChild(QPushButton, "reprintLoadOrderButton")
     assert reprint_button is not None
@@ -924,7 +927,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     reprint_path = tmp_path / "orden_carga_1_reimpresion_1.pdf"
     assert "reimpresión generada correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, reprint_path]
+    assert opened_outputs == [pdf_path, excel_path, reprint_path]
     reprint_text = "\n".join(page.extract_text() or "" for page in PdfReader(str(reprint_path)).pages)
     assert "REIMPRESIÓN - copia 1 -" in reprint_text
 
@@ -943,7 +946,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     annulled_reprint_path = tmp_path / "orden_carga_1_reimpresion_2.pdf"
     assert "reimpresión generada correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, reprint_path, annulled_reprint_path]
+    assert opened_outputs == [pdf_path, excel_path, reprint_path, annulled_reprint_path]
     annulled_text = "\n".join(
         page.extract_text() or "" for page in PdfReader(str(annulled_reprint_path)).pages
     )
@@ -1199,7 +1202,7 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     assert sum("Observaciones: Presupuesto exclusivo Selection C." in text for text in texts) == 1
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget
 
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -1236,6 +1239,7 @@ def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, mon
         raise OSError("visor no disponible")
 
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", fail_open)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.No)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
