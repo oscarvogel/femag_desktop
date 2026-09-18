@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from PyQt5.QtWidgets import QFrame, QGridLayout, QLabel, QLineEdit, QPushButton, QTableWidget
+from PyQt5.QtWidgets import QFrame, QGridLayout, QLabel, QLineEdit, QTableWidget
 from PyQt5.QtCore import Qt
 
 from app.models.load_orders import LoadOrder
-from app.services.load_order_operation_service import LoadOrderOperationService
 import app.ui.desktop_app as desktop
 
 
@@ -49,12 +46,15 @@ def _order_matches_quick_search(order: LoadOrder, query: str) -> bool:
 
 
 def install_load_order_quick_search_extension() -> None:
-    """Agrega búsqueda libre y asegura presupuesto separado por cliente."""
+    """Agrega búsqueda libre al workspace actual de órdenes de carga."""
     global _INSTALLED
-    if _INSTALLED:
+
+    current = desktop.FemagDesktopWindow._load_order_page
+    if getattr(current, "_femag_quick_search_wrapped", False):
+        _INSTALLED = True
         return
 
-    original = desktop.FemagDesktopWindow._load_order_page
+    original = current
 
     def wrapped(self):
         page = original(self)
@@ -100,52 +100,9 @@ def install_load_order_quick_search_extension() -> None:
 
         quick.textChanged.connect(apply_quick_search)
 
-        budget_button = page.findChild(QPushButton, "budgetLoadOrderButton")
-        feedback = page.findChild(desktop.FormFeedback, "loadOrderFeedback")
-        if budget_button is not None and feedback is not None:
-            try:
-                budget_button.clicked.disconnect()
-            except TypeError:
-                pass
-
-            def print_split_budgets() -> None:
-                selected_row = table.currentRow()
-                item = table.item(selected_row, 0) if selected_row >= 0 else None
-                order_id = item.data(Qt.UserRole) if item is not None else None
-                if not order_id:
-                    feedback.show_warning(
-                        "Seleccione una orden para presupuestar.", focus_widget=table
-                    )
-                    return
-
-                try:
-                    order = LoadOrder.get_by_id(order_id)
-                    operation_service = LoadOrderOperationService(
-                        current_user=self.shell.username,
-                        prints_dir=desktop.LOAD_ORDER_PRINTS_DIR,
-                    )
-                    paths = operation_service.export_budgets(order)
-                    if not paths:
-                        feedback.show_warning(
-                            "La orden no tiene presupuestos para generar.", focus_widget=table
-                        )
-                        return
-
-                    resolved_paths = [Path(path).resolve() for path in paths]
-                    feedback.show_success(
-                        f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
-                    )
-                    for resolved in resolved_paths:
-                        try:
-                            desktop._open_print_output(resolved)
-                        except Exception:
-                            pass
-                except Exception as exc:
-                    feedback.show_error(str(exc), focus_widget=table)
-
-            budget_button.clicked.connect(print_split_budgets)
 
         return page
 
+    wrapped._femag_quick_search_wrapped = True
     desktop.FemagDesktopWindow._load_order_page = wrapped
     _INSTALLED = True
