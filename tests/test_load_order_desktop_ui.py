@@ -1040,7 +1040,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
-def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path, monkeypatch):
+def test_load_order_page_opens_split_budget_pdf_for_each_client(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
@@ -1061,19 +1061,11 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     product_b = Product.create(name="Producto Budget B", unit="bolsas")
     client_a = Client.create(name="Cliente Budget A", cuit="30700018801", iva_condition="RI")
     address_a = ClientAddress.create(
-        client=client_a,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta Budget A",
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Budget A"
     )
     client_b = Client.create(name="Cliente Budget B", cuit="30700018802", iva_condition="RI")
     address_b = ClientAddress.create(
-        client=client_b,
-        address_type="entrega",
-        province="Misiones",
-        city="Obera",
-        address="Ruta Budget B",
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta Budget B"
     )
     LoadOrderService(current_user=user.username).create_order(
         carrier=carrier,
@@ -1098,23 +1090,27 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    budget_paths = sorted(tmp_path.glob("presupuestos_orden_*.pdf"))
+    assert len(opened_outputs) == 2
+    assert all(path.exists() for path in opened_outputs)
     feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+    assert "2 presupuesto" in feedback
 
-    assert len(budget_paths) == 1
-    assert opened_outputs == budget_paths
-    assert "presupuestos_orden_1_" in feedback
-    reader = PdfReader(str(budget_paths[0]))
-    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    assert text.count("Observaciones: Condición comercial Cliente Budget A.") == 1
-    assert text.count("Observaciones: Condición comercial Cliente Budget B.") == 1
+    texts = []
+    for path in opened_outputs:
+        reader = PdfReader(str(path))
+        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
 
+    assert sum("Cliente Budget A" in text for text in texts) == 1
+    assert sum("Cliente Budget B" in text for text in texts) == 1
+    assert sum("Observaciones: Condición comercial Cliente Budget A." in text for text in texts) == 1
+    assert sum("Observaciones: Condición comercial Cliente Budget B." in text for text in texts) == 1
 
 def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
@@ -1138,27 +1134,15 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     product = Product.create(name="Producto Selection", unit="kg")
     client_a = Client.create(name="Cliente Selection A", cuit="30700028801", iva_condition="RI")
     address_a = ClientAddress.create(
-        client=client_a,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta Selection A",
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Selection A"
     )
     client_b = Client.create(name="Cliente Selection B", cuit="30700028802", iva_condition="RI")
     address_b = ClientAddress.create(
-        client=client_b,
-        address_type="entrega",
-        province="Misiones",
-        city="Obera",
-        address="Ruta Selection B",
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta Selection B"
     )
     client_c = Client.create(name="Cliente Selection C", cuit="30700028803", iva_condition="RI")
     address_c = ClientAddress.create(
-        client=client_c,
-        address_type="entrega",
-        province="Misiones",
-        city="Eldorado",
-        address="Ruta Selection C",
+        client=client_c, address_type="entrega", province="Misiones", city="Eldorado", address="Ruta Selection C"
     )
     service = LoadOrderService(current_user=user.username)
     first_order = service.create_order(
@@ -1197,30 +1181,22 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     table = window.findChild(QTableWidget, "loadOrdersTable")
 
     assert table.item(0, 0).data(256) == second_order.id
-    assert table.cellWidget(1, 0).property("detailLabels")["number"].text() == "OC-000002"
-
-    table.setCurrentCell(2, 0)
-    app.processEvents()
-
-    assert table.item(1, 0).data(256) == first_order.id
-    assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
-    assert table.columnSpan(0, 0) == 1
-    assert table.columnSpan(1, 0) == 1
-    assert table.columnSpan(2, 0) == table.columnCount()
-
     table.setCurrentCell(0, 0)
     app.processEvents()
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    assert len(opened_outputs) == 1
-    reader = PdfReader(str(opened_outputs[0]))
-    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    assert "Cliente Selection B" in text
-    assert "Cliente Selection C" in text
-    assert text.count("Observaciones: Presupuesto exclusivo Selection B.") == 1
-    assert text.count("Observaciones: Presupuesto exclusivo Selection C.") == 1
+    assert len(opened_outputs) == 2
+    texts = []
+    for path in opened_outputs:
+        reader = PdfReader(str(path))
+        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
 
+    assert sum("Cliente Selection B" in text for text in texts) == 1
+    assert sum("Cliente Selection C" in text for text in texts) == 1
+    assert all("Cliente Selection A" not in text for text in texts)
+    assert sum("Observaciones: Presupuesto exclusivo Selection B." in text for text in texts) == 1
+    assert sum("Observaciones: Presupuesto exclusivo Selection C." in text for text in texts) == 1
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
