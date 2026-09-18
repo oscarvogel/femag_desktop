@@ -884,8 +884,16 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     _complete_order_for_issue(order, user.username)
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
-    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
-    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.Yes)
+    print_events = []
+    monkeypatch.setattr(
+        "app.ui.desktop_app._open_print_output",
+        lambda path: (print_events.append(("open", Path(path).suffix.lower())), opened_outputs.append(path)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: (print_events.append(("question", "excel")), QMessageBox.Yes)[1],
+    )
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -915,6 +923,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     pdf_path = tmp_path / "orden_carga_1.pdf"
     excel_path = tmp_path / "orden_carga_1_armado_pallets.xlsx"
     assert opened_outputs == [pdf_path, excel_path]
+    assert print_events[:3] == [("question", "excel"), ("open", ".pdf"), ("open", ".xlsx")]
     assert str(pdf_path) in feedback.text()
     assert pdf_path.read_bytes().startswith(b"%PDF")
     assert excel_path.exists()
