@@ -7,6 +7,7 @@ from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
 from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
+from app.services.load_order_pallet_excel_export_service import LoadOrderPalletExcelExportService
 from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
@@ -25,6 +26,10 @@ class LoadOrderOperationService:
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
         self.prints = ConsolidatedLoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
         self.budget_prints = BudgetPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.pallet_excel = LoadOrderPalletExcelExportService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
         self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
 
     def issue(self, order: LoadOrder) -> LoadOrder:
@@ -47,6 +52,10 @@ class LoadOrderOperationService:
     def print_order(self, order: LoadOrder) -> Path:
         order = self._require_printable(order)
         return self.prints.export_pdf(order, self.prints_dir)
+
+    def export_pallet_layout_xlsx(self, order: LoadOrder) -> Path:
+        order = self._require_printable(order)
+        return self.pallet_excel.export(order, self.prints_dir)
 
     def reprint_order(self, order: LoadOrder, *, can_reprint: bool) -> Path:
         if not can_reprint:

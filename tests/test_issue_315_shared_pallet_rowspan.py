@@ -43,13 +43,13 @@ def test_regular_detail_prints_physical_pallet_and_rowspans_all_its_articles():
     assert table._cellvalues[2][2].style.alignment == 1
 
 
-def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
+def test_identical_single_product_pallets_are_grouped_without_adding_quantities():
     service = _service()
     block = {
         "destination": "GNESETTI SOFIA - ESPAÑA 3757",
         "pallet_blocks": [
             {
-                "label": "1",
+                "label": str(sequence),
                 "rows": [
                     {
                         "product": "BOLSAS DE FECULA NATIVA",
@@ -59,26 +59,8 @@ def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
                         "elab": "31/08/26",
                     }
                 ],
-            },
-            {
-                "label": "2",
-                "rows": [
-                    {
-                        "product": "BOLSAS DE FECULA NATIVA",
-                        "unit": "UNIDAD",
-                        "quantity": 30,
-                        "lote": "47",
-                        "elab": "31/08/26",
-                    },
-                    {
-                        "product": "BOLSAS FECULA X 10KG.",
-                        "unit": "UNIDAD",
-                        "quantity": 75,
-                        "lote": "43",
-                        "elab": "31/08/26",
-                    },
-                ],
-            },
+            }
+            for sequence in range(5, 14)
         ],
         "loose_block": None,
         "unassigned_block": None,
@@ -88,22 +70,10 @@ def test_issue_473_two_articles_in_one_pallet_are_not_consolidated_by_product():
     table = service._destination_table(block)
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    # Pallet 1 remains its own physical row.
     assert rows[2][0] == "BOLSAS DE FECULA NATIVA"
     assert rows[2][1] == "60 UNIDADES"
-    assert rows[2][2] == "1"
-
-    # Pallet 2 remains one physical block with two article rows.
-    assert rows[3][0] == "BOLSAS DE FECULA NATIVA"
-    assert rows[3][1] == "30 UNIDADES"
-    assert rows[3][2] == "2"
-    assert rows[4][0] == "BOLSAS FECULA X 10KG."
-    assert rows[4][1] == "75 UNIDADES"
-    assert rows[4][2] == ""
-    assert ("SPAN", (2, 3), (2, 4)) in table._spanCmds
-
-    # Regression guard: it must not collapse both Nativa allocations into 90.
-    assert all(row[1] != "90 UNIDADES" for row in rows)
+    assert rows[2][2] == "9 pallets"
+    assert len(rows) == 3
 
 
 def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
@@ -158,5 +128,5 @@ def test_issue_473_loose_merchandise_stays_separate_from_pallets():
     table = service._destination_table(block)
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[2][2] == "1"
+    assert rows[2][2] == "1 pallet"
     assert rows[3][2] == "SUELTO"

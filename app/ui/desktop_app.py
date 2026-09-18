@@ -1605,6 +1605,26 @@ class FemagDesktopWindow(QMainWindow):
                 path = operation_service.print_order(order)
                 resolved_path = Path(path).resolve()
                 feedback.show_success(f"PDF generado correctamente: {resolved_path}")
+
+                # Preguntar antes de abrir el visor externo del PDF. En Windows el visor
+                # toma el foco inmediatamente y el diálogo modal de Qt puede quedar detrás,
+                # dando la impresión de que la pregunta nunca apareció.
+                export_excel = QMessageBox.question(
+                    page,
+                    "Exportar armado de pallets",
+                    "¿Desea exportar el armado de pallets a Excel para editarlo fuera de FEMAG?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+
+                excel_path = None
+                if export_excel == QMessageBox.Yes:
+                    excel_path = operation_service.export_pallet_layout_xlsx(order).resolve()
+                    feedback.show_success(
+                        f"PDF generado correctamente: {resolved_path}\n"
+                        f"Excel de armado de pallets generado: {excel_path}"
+                    )
+
                 try:
                     _open_print_output(resolved_path)
                 except Exception as open_exc:
@@ -1612,6 +1632,15 @@ class FemagDesktopWindow(QMainWindow):
                         f"PDF generado correctamente: {resolved_path}. "
                         f"No se pudo abrir automaticamente: {open_exc}"
                     )
+
+                if excel_path is not None:
+                    try:
+                        _open_print_output(excel_path)
+                    except Exception as open_exc:
+                        feedback.show_warning(
+                            f"Excel generado correctamente: {excel_path}. "
+                            f"No se pudo abrir automaticamente: {open_exc}"
+                        )
                 set_action_state(order)
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
