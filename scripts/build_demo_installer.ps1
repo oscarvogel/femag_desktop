@@ -88,9 +88,23 @@ try {
         -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "installer\FEMAG_Desktop_Demo.spec") `
         -FailureMessage "PyInstaller fallo."
 
-    Invoke-Native -Command $Iscc `
-        -Arguments @("/DMyAppVersion=$BuildVersion", "installer\FEMAG_Desktop_Demo.iss") `
-        -FailureMessage "Inno Setup fallo."
+    # Reintento ante bloqueos transitorios del antivirus (ver build de producción).
+    $isccAttempts = 0
+    $isccOk = $false
+    while (-not $isccOk -and $isccAttempts -lt 2) {
+        $isccAttempts++
+        try {
+            Invoke-Native -Command $Iscc `
+                -Arguments @("/DMyAppVersion=$BuildVersion", "installer\FEMAG_Desktop_Demo.iss") `
+                -FailureMessage "Inno Setup fallo."
+            $isccOk = $true
+        } catch {
+            if ($isccAttempts -ge 2) { throw }
+            Write-Warning "ISCC falló (intento $isccAttempts/2): $($_.Exception.Message)"
+            Write-Host "Esperando 15s por posible bloqueo transitorio (antivirus) y reintentando..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 15
+        }
+    }
 
     Write-Host "Version: $BuildVersion" -ForegroundColor Green
     Write-Host "Instalador generado: installer\output\FEMAG_Desktop_DEMO_Standalone_Setup.exe" -ForegroundColor Green

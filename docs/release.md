@@ -69,3 +69,15 @@ installer/output/FEMAG_Desktop_Produccion_Setup.exe
 - Los archivos de versión `app/build_version.py` / `app/build_info.py` se
   regeneran en cada build y se descartan antes de restaurar tu stash, para que
   nunca bloqueen ni ensucien tu trabajo.
+
+## Antivirus (Defender en tiempo real)
+
+PyInstaller genera cientos de archivos que Defender escanea al crearlos. Si
+ISCC falla con `no puede encontrar la ruta especificada` (exit=2) y al
+reintentar pasa, fue un bloqueo transitorio: el build ya reintenta ISCC una
+vez automáticamente. Para evitarlo del todo, excluir el workspace (una vez,
+PowerShell **como administrador**):
+
+```powershell
+Add-MpPreference -ExclusionPath "C:\Programacion\dante\femag_desktop"
+```
