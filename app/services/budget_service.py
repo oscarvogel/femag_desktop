@@ -27,6 +27,30 @@ class BudgetService:
         order = LoadOrder.get_by_id(order.id)
         return [self.ensure_for_load_order_client(order, client) for client in self._clients_for_order(order)]
 
+    def _observations_for_order_client(self, order: LoadOrder, client: Client) -> str | None:
+        """Condiciones comerciales del cliente dentro de la orden.
+
+        Une las observaciones de los destinos de ese cliente (y, como
+        respaldo, las observaciones de sus renglones), sin duplicados,
+        para que el PDF separado por cliente conserve la información
+        comercial que antes mostraba el presupuesto combinado.
+        """
+        seen: list[str] = []
+
+        def _remember(value: str | None) -> None:
+            cleaned = (value or "").strip()
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+
+        for destination in order.destinations.order_by(LoadOrderDestination.sequence):
+            if destination.client_id == client.id:
+                _remember(destination.observations)
+        for row in self._load_order_rows_for_client(order, client):
+            _remember(row.observations)
+        if not seen:
+            return None
+        return " / ".join(seen)
+
     def ensure_for_load_order_client(self, order: LoadOrder, client: Client) -> Budget:
         order = LoadOrder.get_by_id(order.id)
         client = Client.get_by_id(client.id)
@@ -36,6 +60,10 @@ class BudgetService:
             & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
         )
         if existing is not None:
+            backfill = self._observations_for_order_client(order, client)
+            if backfill and not (existing.observations or "").strip():
+                existing.observations = backfill
+                existing.save(only=[Budget.observations])
             return existing
 
         rows = self._load_order_rows_for_client(order, client)
@@ -50,7 +78,7 @@ class BudgetService:
                 load_order=order,
                 origin=Budget.ORIGIN_LOAD_ORDER,
                 issue_date=order.date,
-                observations=None,
+                observations=self._observations_for_order_client(order, client),
                 net_amount=totals["net_amount"],
                 discount_amount=totals["discount_amount"],
                 vat_amount=totals["vat_amount"],

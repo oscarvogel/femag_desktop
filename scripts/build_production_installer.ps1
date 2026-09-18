@@ -1,31 +1,35 @@
 [CmdletBinding()]
 param(
     [switch]$SkipInstallDependencies,
-    [string]$PythonPath
+    [string]$PythonPath,
+    [string]$IsccPath,
+    [switch]$NoAutoInstall
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "Invoke-Native.ps1")
+. (Join-Path $PSScriptRoot "Resolve-InnoSetup.ps1")
+
 $Python = if ($PythonPath) { $PythonPath } else { Join-Path $RepoRoot ".venv\Scripts\python.exe" }
+if ((-not (Test-Path -LiteralPath $Python)) -and (Get-Command python -ErrorAction SilentlyContinue)) {
+    $Python = (Get-Command python).Source
+}
 $BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
 $BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
 $BuildInfoFile = Join-Path $RepoRoot "app\build_info.py"
 $InstallerOutputDir = Join-Path $RepoRoot "installer\output"
-$IsccCandidates = @(
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-)
-$Iscc = $IsccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-if (-not (Test-Path $Python)) {
+if (-not (Test-Path -LiteralPath $Python)) {
     throw "No existe $Python. Cree el entorno de desarrollo o indique -PythonPath."
 }
-if (-not $Iscc) {
-    throw "No se encontro Inno Setup 6 (ISCC.exe) en esta PC de compilacion."
-}
+
+$resolveParams = @{}
+if ($IsccPath) { $resolveParams["IsccPath"] = $IsccPath }
+if ($NoAutoInstall) { $resolveParams["NoAutoInstall"] = $true }
+$Iscc = Resolve-InnoSetup @resolveParams
 
 Push-Location $RepoRoot
 try {
@@ -38,22 +42,44 @@ try {
     )
 
     if (-not $SkipInstallDependencies) {
-        & $Python -m pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements-build.txt
-        if ($LASTEXITCODE -ne 0) { throw "No se pudieron instalar las dependencias de compilacion." }
+        Invoke-Native -Command $Python `
+            -Arguments @("-m", "pip", "install", "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org", "-r", "requirements-build.txt") `
+            -FailureMessage "No se pudieron instalar las dependencias de compilacion."
     }
 
     Remove-Item -Recurse -Force "build\FEMAG Desktop" -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force "dist\FEMAG Desktop" -ErrorAction SilentlyContinue
-    if (Test-Path $InstallerOutputDir) {
+    if (-not (Test-Path -LiteralPath $InstallerOutputDir)) {
+        New-Item -ItemType Directory -Force $InstallerOutputDir | Out-Null
+    } else {
         Get-ChildItem -LiteralPath $InstallerOutputDir -Filter "FEMAG_Desktop_Produccion_Setup*.exe" -File |
             Remove-Item -Force
     }
 
-    & $Python -m PyInstaller --noconfirm --clean installer\FEMAG_Desktop.spec
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller fallo." }
+    Invoke-Native -Command $Python `
+        -Arguments @("-m", "PyInstaller", "--noconfirm", "--clean", "installer\FEMAG_Desktop.spec") `
+        -FailureMessage "PyInstaller fallo."
 
-    & $Iscc "/DMyAppVersion=$BuildVersion" installer\FEMAG_Desktop.iss
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo." }
+    # Reintento: ISCC puede fallar transitoriamente si el antivirus en tiempo
+    # real bloquea/escanea archivos recién generados por PyInstaller mientras
+    # compila ("no puede encontrar la ruta especificada", exit=2). El fallo
+    # real y persistente se reporta igual tras el segundo intento.
+    $isccAttempts = 0
+    $isccOk = $false
+    while (-not $isccOk -and $isccAttempts -lt 2) {
+        $isccAttempts++
+        try {
+            Invoke-Native -Command $Iscc `
+                -Arguments @("/DMyAppVersion=$BuildVersion", "installer\FEMAG_Desktop.iss") `
+                -FailureMessage "Inno Setup fallo."
+            $isccOk = $true
+        } catch {
+            if ($isccAttempts -ge 2) { throw }
+            Write-Warning "ISCC falló (intento $isccAttempts/2): $($_.Exception.Message)"
+            Write-Host "Esperando 15s por posible bloqueo transitorio (antivirus) y reintentando..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 15
+        }
+    }
 
     Write-Host "Version: $BuildVersion" -ForegroundColor Green
     Write-Host "Instalador generado: installer\output\FEMAG_Desktop_Produccion_Setup.exe" -ForegroundColor Green
