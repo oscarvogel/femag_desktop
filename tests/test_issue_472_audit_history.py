@@ -54,10 +54,11 @@ def test_load_order_history_dialog_renders_timeline(db):
     table = dialog.findChild(QTableWidget, "loadOrderHistoryTable")
 
     assert table is not None
+    assert table.rowCount() == 2
     actions = [table.item(row, 2).text() for row in range(table.rowCount())]
     assert actions.count("Orden creada") == 1
     assert actions.count("Orden emitida") == 1
-    assert table.rowCount() >= 2
+    assert "Bloquear chofer" not in actions
 
 
 def test_history_keeps_non_status_audit_events(db):
