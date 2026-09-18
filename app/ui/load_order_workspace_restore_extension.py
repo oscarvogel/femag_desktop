@@ -34,10 +34,8 @@ _INSTALLED = False
 
 
 def install_load_order_workspace_restore_extension() -> None:
-    """Restaura el workspace Glass V2 que fue revertido accidentalmente por 098da731."""
+    """Restaura el workspace operativo base de órdenes de carga."""
     global _INSTALLED
-    if _INSTALLED:
-        return
     desktop.FemagDesktopWindow._load_order_page = _restored_load_order_page
     _INSTALLED = True
 
@@ -452,13 +450,21 @@ def _restored_load_order_page(self):
             feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
             return
         try:
-            path = operation_service.export_combined_budget(order)
-            resolved = Path(path).resolve()
-            feedback.show_success(f"Presupuesto generado: {resolved}")
-            try:
-                desktop._open_print_output(resolved)
-            except Exception:
-                pass
+            paths = operation_service.export_budgets(order)
+            if not paths:
+                feedback.show_warning(
+                    "La orden no tiene presupuestos para generar.", focus_widget=table
+                )
+                return
+            resolved_paths = [Path(path).resolve() for path in paths]
+            feedback.show_success(
+                f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
+            )
+            for resolved in resolved_paths:
+                try:
+                    desktop._open_print_output(resolved)
+                except Exception:
+                    pass
         except Exception as exc:
             feedback.show_error(str(exc), focus_widget=table)
 
