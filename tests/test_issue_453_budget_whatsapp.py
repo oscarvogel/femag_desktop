@@ -129,7 +129,7 @@ def test_customer_ledger_enables_budget_whatsapp_for_legacy_load_order_movement_
     from PyQt5.QtWidgets import QApplication
 
     from app.models.accounting import ClientAccountMovement
-    from app.models.masters import Client
+    from app.models.masters import Carrier, Client, Driver, Truck
     from app.models.load_orders import LoadOrder
     from app.ui.customer_ledger import CustomerLedgerPage
 
@@ -139,10 +139,16 @@ def test_customer_ledger_enables_budget_whatsapp_for_legacy_load_order_movement_
         cuit="30777774532",
         iva_condition="RI",
     )
+    carrier = Carrier.create(name="Transportista legacy 453")
+    driver = Driver.create(name="Chofer legacy 453", carrier=carrier)
+    truck = Truck.create(domain="LEG453", carrier=carrier)
     order = LoadOrder.create(
         order_number=45399,
         client=client,
-        status="emitida",
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        status=LoadOrder.STATUS_ISSUED,
     )
     movement = ClientAccountMovement.create(
         client=client,
