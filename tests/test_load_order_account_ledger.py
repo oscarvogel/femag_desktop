@@ -23,7 +23,7 @@ def test_account_movements_have_physical_duplicate_protection(db):
             amount=0,
             currency="ARS",
             description="duplicado no permitido",
-            source_ref=f"LoadOrder:{issued.id}",
+            source_ref=original.source_ref,
             is_reversal=False,
             created_by="admin",
         )
@@ -133,7 +133,8 @@ def test_multi_client_load_order_generates_one_valued_movement_per_client(db):
     assert "Cliente Sur" in names
     for m in movements:
         assert m.load_order.id == order.id
-        assert m.source_ref == f"LoadOrder:{order.id}"
+        assert m.budget_id is not None
+        assert m.source_ref == f"Budget:{m.budget_id}"
         assert m.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER
 
 
