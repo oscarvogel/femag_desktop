@@ -1642,13 +1642,21 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
                 return
             try:
-                path = operation_service.export_combined_budget(order)
-                resolved = Path(path).resolve()
-                feedback.show_success(f"Presupuesto generado: {resolved}")
-                try:
-                    _open_print_output(resolved)
-                except Exception:
-                    pass
+                paths = operation_service.export_budgets(order)
+                if not paths:
+                    feedback.show_warning(
+                        "La orden no tiene presupuestos para generar.", focus_widget=table
+                    )
+                    return
+                resolved_paths = [Path(path).resolve() for path in paths]
+                feedback.show_success(
+                    f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
+                )
+                for resolved in resolved_paths:
+                    try:
+                        _open_print_output(resolved)
+                    except Exception:
+                        pass
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
 
