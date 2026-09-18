@@ -1605,13 +1605,10 @@ class FemagDesktopWindow(QMainWindow):
                 path = operation_service.print_order(order)
                 resolved_path = Path(path).resolve()
                 feedback.show_success(f"PDF generado correctamente: {resolved_path}")
-                try:
-                    _open_print_output(resolved_path)
-                except Exception as open_exc:
-                    feedback.show_warning(
-                        f"PDF generado correctamente: {resolved_path}. "
-                        f"No se pudo abrir automaticamente: {open_exc}"
-                    )
+
+                # Preguntar antes de abrir el visor externo del PDF. En Windows el visor
+                # toma el foco inmediatamente y el diálogo modal de Qt puede quedar detrás,
+                # dando la impresión de que la pregunta nunca apareció.
                 export_excel = QMessageBox.question(
                     page,
                     "Exportar armado de pallets",
@@ -1619,12 +1616,24 @@ class FemagDesktopWindow(QMainWindow):
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,
                 )
+
+                excel_path = None
                 if export_excel == QMessageBox.Yes:
                     excel_path = operation_service.export_pallet_layout_xlsx(order).resolve()
                     feedback.show_success(
                         f"PDF generado correctamente: {resolved_path}\n"
                         f"Excel de armado de pallets generado: {excel_path}"
                     )
+
+                try:
+                    _open_print_output(resolved_path)
+                except Exception as open_exc:
+                    feedback.show_warning(
+                        f"PDF generado correctamente: {resolved_path}. "
+                        f"No se pudo abrir automaticamente: {open_exc}"
+                    )
+
+                if excel_path is not None:
                     try:
                         _open_print_output(excel_path)
                     except Exception as open_exc:
