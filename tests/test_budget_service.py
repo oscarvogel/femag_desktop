@@ -152,7 +152,7 @@ def test_manual_budget_creates_debt_and_annulment_reverses_it(db):
     assert movement.reference == budget.display_number
     assert movement.total_amount == approx(expected_total)
 
-    service.annul_manual(budget)
+    service.annul_manual(budget, reason="Anulación de prueba")
     service.annul_manual(budget)
     budget = Budget.get_by_id(budget.id)
     assert budget.status == Budget.STATUS_ANNULLED
