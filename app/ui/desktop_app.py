@@ -98,6 +98,7 @@ from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
+from app.ui.audit_query_page import AuditQueryPage
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.dashboard import DashboardService, future_module_message
@@ -364,6 +365,7 @@ class FemagDesktopWindow(QMainWindow):
             WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),
         )
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
+        self._add_page("audit_query", AuditQueryPage(parent=self))
         self._add_page("avisos", AvisoCenterPage(user=self.user, on_navigate=self._navigate_to_route, parent=self))
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
