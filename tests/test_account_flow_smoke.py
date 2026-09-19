@@ -91,7 +91,7 @@ def test_full_account_flow_smoke(db):
     assert ClientPayment.select().count() == 2
 
     # 5. Anular OC -> solo se revierte el debito. Los pagos sobreviven.
-    LoadOrderOperationService(current_user="admin").annul(order, can_annul=True)
+    LoadOrderOperationService(current_user="admin").annul(order, can_annul=True, reason="Anulación smoke")
     movements = list(ClientAccountMovement.select().order_by(ClientAccountMovement.id))
     # 1 debito OC + 1 reverso OC + 2 pagos = 4 movimientos.
     assert len(movements) == 4
