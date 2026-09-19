@@ -163,10 +163,13 @@ class BudgetService:
             self._record("crear_manual", budget, movement=movement)
         return budget
 
-    def annul_manual(self, budget: Budget) -> Budget:
+    def annul_manual(self, budget: Budget, *, reason: str | None = None) -> Budget:
         from app.models.accounting import ClientAccountMovement
 
         budget = Budget.get_by_id(budget.id)
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("Debe indicar el motivo de la anulación.")
         if budget.origin != Budget.ORIGIN_MANUAL:
             raise ValueError("Solo los presupuestos manuales se anulan con este flujo.")
         if budget.status == Budget.STATUS_ANNULLED:
@@ -205,7 +208,7 @@ class BudgetService:
             )
             budget.status = Budget.STATUS_ANNULLED
             budget.save(only=[Budget.status])
-            self._record("anular_manual", budget)
+            self._record("anular_manual", budget, reason=reason)
         return budget
 
     def _load_order_rows_for_client(self, order: LoadOrder, client: Client) -> list[LoadOrderProduct]:
@@ -293,7 +296,13 @@ class BudgetService:
             "total_amount": round(sum(item["total"] for item in items), 2),
         }
 
-    def _record(self, action: str, budget: Budget, movement=None) -> None:
+    def _record(
+        self,
+        action: str,
+        budget: Budget,
+        movement=None,
+        reason: str | None = None,
+    ) -> None:
         self.audit_service.record(
             user=self.current_user,
             module="Presupuestos",
@@ -307,5 +316,7 @@ class BudgetService:
                 "status": budget.status,
                 "total_amount": budget.total_amount,
                 "movement_id": movement.id if movement is not None else None,
+                "reason": reason,
             },
+            observation=reason,
         )
