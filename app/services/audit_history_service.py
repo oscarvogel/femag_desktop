@@ -8,6 +8,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder, LoadOrderStatusHistory
 from app.models.payments import ClientPayment
+from app.models.remittances import Remittance
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,24 @@ class AuditHistoryService:
 
         return sorted(events, key=lambda event: event.occurred_at)
 
+
+    def remittance_history(self, remittance: Remittance) -> list[AuditHistoryEvent]:
+        remittance = Remittance.get_by_id(remittance.id)
+        return self._audit_record_history(
+            module="Remitos",
+            record_ref=f"Remittance:{remittance.id}",
+            labels={
+                "crear": "Remito creado",
+                "modificar": "Remito modificado",
+                "emitir": "Remito emitido",
+                "anular": "Remito anulado",
+                "imprimir": "Remito impreso",
+                "reimprimir": "Remito reimpreso",
+            },
+            fallback_detail=(
+                f"{remittance.remittance_number} · {remittance.client_name}"
+            ),
+        )
 
     def payment_history(self, payment: ClientPayment) -> list[AuditHistoryEvent]:
         payment = ClientPayment.get_by_id(payment.id)
