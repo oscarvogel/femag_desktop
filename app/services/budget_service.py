@@ -167,13 +167,13 @@ class BudgetService:
         from app.models.accounting import ClientAccountMovement
 
         budget = Budget.get_by_id(budget.id)
-        reason = (reason or "").strip()
-        if not reason:
-            raise ValueError("Debe indicar el motivo de la anulación.")
         if budget.origin != Budget.ORIGIN_MANUAL:
             raise ValueError("Solo los presupuestos manuales se anulan con este flujo.")
         if budget.status == Budget.STATUS_ANNULLED:
             return budget
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("Debe indicar el motivo de la anulación.")
         original = ClientAccountMovement.get_or_none(
             (ClientAccountMovement.budget == budget)
             & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_BUDGET_MANUAL)
