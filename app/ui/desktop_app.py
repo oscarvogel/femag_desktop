@@ -1497,7 +1497,13 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(left_panel, 1)
 
         def refresh(*, query: str | None = None) -> None:
-            rows = service.list_orders() if hasattr(service, "list_orders") else []
+            rows = (
+                service.list_orders_prefetched()
+                if hasattr(service, "list_orders_prefetched")
+                else service.list_orders()
+                if hasattr(service, "list_orders")
+                else []
+            )
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
             query = (query if query is not None else search_input.text()).strip()
@@ -1516,7 +1522,11 @@ class FemagDesktopWindow(QMainWindow):
                 visual_row = 0
                 selected_row = 0
                 for order in rows:
-                    composition = service.composition(order)
+                    composition = (
+                        service.composition_from_loaded(order)
+                        if hasattr(service, "composition_from_loaded")
+                        else service.composition(order)
+                    )
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
