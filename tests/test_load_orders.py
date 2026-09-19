@@ -472,6 +472,31 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(status=first.STATUS_CLOSED) == [first]
     assert service.list_orders(client=data["client"]) == [second, first]
 
+def test_build_grid_snapshots_preserves_visible_order_data(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    rows = service.list_orders()
+    snapshots = service.build_grid_snapshots(rows)
+    snapshot = snapshots[order.id]
+
+    assert snapshot["clients_summary"] == "Cliente FEMAG"
+    assert snapshot["deliveries_summary"] == "Posadas"
+    assert snapshot["products_summary"] == "Fecula de mandioca"
+    assert snapshot["carrier_name"] == "Transporte Norte"
+    assert snapshot["driver_name"] == "Juan Perez"
+    assert snapshot["truck_domain"] == "AB123CD"
+
+    regular = service.composition(order)
+    bulk = snapshot["composition"]
+    assert bulk.can_issue == regular.can_issue
+    assert bulk.pending_quantity == regular.pending_quantity
+    assert len(bulk.pallets) == len(regular.pallets)
+
+
 def test_list_orders_prefetched_preserves_relations_and_composition(db):
     from app.services.load_order_service import LoadOrderService
 
