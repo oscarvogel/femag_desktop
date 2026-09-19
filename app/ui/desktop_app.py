@@ -97,6 +97,7 @@ from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
+from app.ui.audit_history_dialog import LoadOrderHistoryDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -1438,6 +1439,7 @@ class FemagDesktopWindow(QMainWindow):
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
+        history_button = _action_button("historyLoadOrderButton", "Historial", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         close_button = _action_button("closeLoadOrderButton", "Cerrar")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
@@ -1463,6 +1465,7 @@ class FemagDesktopWindow(QMainWindow):
         for button in (
             new_button,
             edit_button,
+            history_button,
             issue_button,
             close_button,
             print_button,
@@ -1581,6 +1584,8 @@ class FemagDesktopWindow(QMainWindow):
             issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
             edit_button.setEnabled(False)
             edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+            history_button.setEnabled(False)
+            history_button.setToolTip("Seleccione una orden para ver su historial.")
             close_button.setEnabled(False)
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
             reprint_button.setEnabled(False)
@@ -1591,6 +1596,8 @@ class FemagDesktopWindow(QMainWindow):
             is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
+            history_button.setEnabled(True)
+            history_button.setToolTip("Ver la trazabilidad completa de la orden seleccionada.")
             close_button.setEnabled(is_issued)
             has_original_print = _has_printed_load_order(order)
             reprint_button.setEnabled(can_reprint and has_original_print)
@@ -1617,6 +1624,13 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para ver el detalle.", focus_widget=table)
                 return
             LoadOrderDetailDialog(order, self).exec_()
+
+        def open_history_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.show_warning("Seleccione una orden para ver su historial.", focus_widget=table)
+                return
+            LoadOrderHistoryDialog(order, self).exec_()
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -1696,8 +1710,29 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.show_warning("Seleccione una orden para anular.", focus_widget=table)
                 return
+            if not _can_annul_load_orders(self.user):
+                feedback.show_error("No tiene permiso para anular ordenes de carga.", focus_widget=table)
+                return
+            reason, accepted = QInputDialog.getMultiLineText(
+                self,
+                "Anular orden",
+                f"Indique el motivo de anulación de la orden {_format_order_number(order.order_number)}:",
+            )
+            if not accepted:
+                return
+            reason = reason.strip()
+            if not reason:
+                feedback.show_warning(
+                    "Debe indicar el motivo de la anulación.",
+                    focus_widget=table,
+                )
+                return
             try:
-                annulled = operation_service.annul(order, can_annul=_can_annul_load_orders(self.user))
+                annulled = operation_service.annul(
+                    order,
+                    can_annul=_can_annul_load_orders(self.user),
+                    reason=reason,
+                )
                 feedback.show_success(
                     f"Orden {_format_order_number(annulled.order_number)} anulada."
                 )
@@ -1835,6 +1870,7 @@ class FemagDesktopWindow(QMainWindow):
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
         edit_button.clicked.connect(open_edit_order_dialog)
+        history_button.clicked.connect(open_history_dialog)
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
         issue_button.clicked.connect(issue)

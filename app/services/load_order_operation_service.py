@@ -90,13 +90,16 @@ class LoadOrderOperationService:
             reprinted_at=datetime.now(),
         )
 
-    def annul(self, order: LoadOrder, *, can_annul: bool) -> LoadOrder:
+    def annul(self, order: LoadOrder, *, can_annul: bool, reason: str | None = None) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_ANNULLED:
             raise ValueError("La orden ya esta anulada.")
         if order.status == LoadOrder.STATUS_CLOSED:
             raise ValueError("No se puede anular una orden cerrada.")
-        annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason="Anulada desde pantalla")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("Debe indicar el motivo de la anulación.")
+        annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason=reason)
         self.account_ledger.reverse_for_load_order(annulled)
         return annulled
 

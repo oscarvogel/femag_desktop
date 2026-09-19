@@ -251,7 +251,7 @@ def test_annulling_load_order_reverses_account_movements(db):
     operations = LoadOrderOperationService(current_user="admin")
     issued = _issue_complete(operations, order)
 
-    annulled = operations.annul(issued, can_annul=True)
+    annulled = operations.annul(issued, can_annul=True, reason="Anulación de prueba")
 
     movements = list(ClientAccountMovement.select().order_by(ClientAccountMovement.id))
     assert annulled.status == LoadOrder.STATUS_ANNULLED
@@ -273,7 +273,7 @@ def test_annulling_twice_does_not_duplicate_reversal_movements(db):
     order = LoadOrderService(current_user="admin").create_order(**_valid_order_payload(data))
     operations = LoadOrderOperationService(current_user="admin")
     issued = _issue_complete(operations, order)
-    annulled = operations.annul(issued, can_annul=True)
+    annulled = operations.annul(issued, can_annul=True, reason="Anulación de prueba")
 
     AccountLedgerService(current_user="admin").reverse_for_load_order(annulled)
 
@@ -460,7 +460,7 @@ def test_annulling_resets_budget_status_to_pending_via_recreate(db):
     budget = LoadOrderBudgetStatus.get()
     assert budget.status == LoadOrderBudgetStatus.STATUS_APPLIED
 
-    operations.annul(issued, can_annul=True)
+    operations.annul(issued, can_annul=True, reason="Anulación de prueba")
 
     budgets = list(LoadOrderBudgetStatus.select().where(LoadOrderBudgetStatus.order == order))
     if budgets:

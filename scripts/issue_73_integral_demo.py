@@ -40,7 +40,7 @@ def run_integral_demo(
     order_pdf = operations.print_order(issued)
     regenerated_pdf = operations.print_order(issued)
 
-    annulled = operations.annul(issued, can_annul=True)
+    annulled = operations.annul(issued, can_annul=True, reason="Anulación de demo integral #73")
     originals = _movements_for(annulled, reversal=False)
     reversals = _movements_for(annulled, reversal=True)
     readme = _write_readme(
