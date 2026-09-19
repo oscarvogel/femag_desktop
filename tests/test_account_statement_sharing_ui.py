@@ -2,11 +2,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-def test_whatsapp_handler_generates_pdf_and_queues_gateway_send(monkeypatch, tmp_path):
+def test_whatsapp_handler_generates_pdf_and_queues_gateway_send(db, monkeypatch, tmp_path):
     from PyQt5.QtWidgets import QDialog
+    from app.models.masters import Client
     from app.ui.desktop_app import FemagDesktopWindow
 
-    client = SimpleNamespace(id=9, name="Cliente Uno", phone="0376 15 4123456")
+    client = Client.create(
+        name="Cliente Uno",
+        cuit="30748800001",
+        iva_condition="RI",
+        phone="0376 15 4123456",
+    )
     pdf_path = tmp_path / "extracto.pdf"
     created = []
     started = []
@@ -49,15 +55,16 @@ def test_whatsapp_handler_generates_pdf_and_queues_gateway_send(monkeypatch, tmp
 
     assert len(created) == 1
     assert created[0]["tipo_documento"] == "extracto_cuenta"
-    assert created[0]["documento_id"] == "9"
+    assert created[0]["documento_id"] == str(client.id)
     assert created[0]["destinatario"] == "+54 9 376 4123456"
     assert created[0]["caption"] == "Extracto FEMAG"
     assert created[0]["pdf_path"] == pdf_path
     assert started == [fake_worker]
 
 
-def test_whatsapp_handler_reports_configuration_error(monkeypatch, tmp_path):
+def test_whatsapp_handler_reports_configuration_error(db, monkeypatch, tmp_path):
     from PyQt5.QtWidgets import QDialog
+    from app.models.masters import Client
     from app.ui.desktop_app import FemagDesktopWindow
 
     warnings = []
@@ -66,7 +73,12 @@ def test_whatsapp_handler_reports_configuration_error(monkeypatch, tmp_path):
         user=SimpleNamespace(id=1),
         stack=SimpleNamespace(currentWidget=lambda: None),
     )
-    client = SimpleNamespace(id=9, name="Cliente Uno", phone=None)
+    client = Client.create(
+        name="Cliente Uno",
+        cuit="30748800002",
+        iva_condition="RI",
+        phone=None,
+    )
     fake_dialog = SimpleNamespace(
         exec_=lambda: QDialog.Accepted,
         phone=lambda: "+54 9 376 4123456",
