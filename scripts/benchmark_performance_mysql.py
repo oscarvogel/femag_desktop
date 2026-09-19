@@ -54,6 +54,63 @@ def _rss_mb() -> float | None:
     return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
 
 
+
+def _wrap_window_stage(database, cls, name: str, timings: list[dict]) -> None:
+    original = getattr(cls, name)
+
+    def wrapped(self, *args, **kwargs):
+        started = time.perf_counter()
+        before = getattr(database, "_perf_query_counter", 0)
+        value = original(self, *args, **kwargs)
+        elapsed = time.perf_counter() - started
+        after = getattr(database, "_perf_query_counter", 0)
+        timings.append(
+            {
+                "stage": name,
+                "seconds": round(elapsed, 4),
+                "queries": max(0, after - before),
+            }
+        )
+        return value
+
+    setattr(cls, name, wrapped)
+
+
+@contextmanager
+def _window_stage_profiler(database, cls):
+    stage_names = (
+        "_dashboard_page",
+        "_add_master_pages",
+        "_load_order_page",
+        "_customer_ledger_page",
+        "_legacy_dbf_import_page",
+        "_sidebar",
+        "_topbar",
+        "_statusbar",
+    )
+    originals = {}
+    timings: list[dict] = []
+    original_execute = database.execute_sql
+    database._perf_query_counter = 0
+
+    def counted_execute(*args, **kwargs):
+        database._perf_query_counter += 1
+        return original_execute(*args, **kwargs)
+
+    database.execute_sql = counted_execute
+    try:
+        for name in stage_names:
+            if hasattr(cls, name):
+                originals[name] = getattr(cls, name)
+                _wrap_window_stage(database, cls, name, timings)
+        yield timings
+    finally:
+        database.execute_sql = original_execute
+        for name, original in originals.items():
+            setattr(cls, name, original)
+        if hasattr(database, "_perf_query_counter"):
+            delattr(database, "_perf_query_counter")
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark MySQL FEMAG #491.")
     parser.add_argument("--db-name", default=None)
@@ -131,13 +188,24 @@ def main() -> int:
         from app.ui.desktop_app import FemagDesktopWindow
 
         app = QApplication.instance() or QApplication([])
-        result, window = _measure(
-            database,
-            "FemagDesktopWindow constructor",
-            lambda: FemagDesktopWindow(user=user, demo_mode=False),
-        )
+        with _window_stage_profiler(database, FemagDesktopWindow) as stage_timings:
+            result, window = _measure(
+                database,
+                "FemagDesktopWindow constructor",
+                lambda: FemagDesktopWindow(user=user, demo_mode=False),
+            )
         results.append(result)
         app.processEvents()
+
+        if stage_timings:
+            print("-" * 72)
+            print("DESGLOSE CONSTRUCTOR POR ETAPA")
+            for stage in sorted(stage_timings, key=lambda row: row["seconds"], reverse=True):
+                print(
+                    f"{stage['stage']:<34} "
+                    f"{stage['seconds']:>8.3f} s   SQL: {stage['queries']}"
+                )
+            print("-" * 72)
 
         rss = _rss_mb()
         if rss is not None:
@@ -153,6 +221,7 @@ def main() -> int:
             "orders": total_orders,
             "rss_mb": rss,
             "results": results,
+            "window_stages": stage_timings,
         }
 
         path = (
