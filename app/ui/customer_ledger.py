@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QToolButton,
+    QMessageBox,
 )
 
 from app.models.accounting import ClientAccountMovement
@@ -773,14 +774,22 @@ class CustomerLedgerPage(QWidget):
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_debit_callback is None:
             return
-        self.reverse_manual_debit_callback(movement)
+        try:
+            self.reverse_manual_debit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar débito", str(exc))
+            return
         self.refresh()
 
     def _on_reverse_manual_credit(self) -> None:
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_credit_callback is None:
             return
-        self.reverse_manual_credit_callback(movement)
+        try:
+            self.reverse_manual_credit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar crédito", str(exc))
+            return
         self.refresh()
 
 
