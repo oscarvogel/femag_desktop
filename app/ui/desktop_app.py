@@ -1497,18 +1497,25 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(left_panel, 1)
 
         def refresh(*, query: str | None = None) -> None:
-            rows = (
-                service.list_orders_prefetched()
-                if hasattr(service, "list_orders_prefetched")
-                else service.list_orders()
-                if hasattr(service, "list_orders")
-                else []
-            )
+            rows = service.list_orders() if hasattr(service, "list_orders") else []
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
+            snapshots = (
+                service.build_grid_snapshots(rows)
+                if hasattr(service, "build_grid_snapshots")
+                else {}
+            )
             query = (query if query is not None else search_input.text()).strip()
             if query:
-                rows = [order for order in rows if _matches_load_order_query(order, query)]
+                rows = [
+                    order
+                    for order in rows
+                    if _matches_load_order_grid_snapshot(
+                        order,
+                        snapshots.get(order.id),
+                        query,
+                    )
+                ]
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
             if rows and not any(order.id == selected_id for order in rows):
                 selected_id = rows[0].id
@@ -1522,17 +1529,16 @@ class FemagDesktopWindow(QMainWindow):
                 visual_row = 0
                 selected_row = 0
                 for order in rows:
-                    composition = (
-                        service.composition_from_loaded(order)
-                        if hasattr(service, "composition_from_loaded")
-                        else service.composition(order)
-                    )
+                    snapshot = snapshots.get(order.id) or {}
+                    composition = snapshot.get("composition")
+                    if composition is None:
+                        composition = service.composition(order)
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
-                        _summarize_order_clients(order),
-                        _summarize_order_deliveries(order),
-                        _summarize_order_products(order),
+                        snapshot.get("clients_summary", ""),
+                        snapshot.get("deliveries_summary", ""),
+                        snapshot.get("products_summary", ""),
                         _load_order_pallet_progress_from_composition(composition),
                         _display_status(order.status),
                         "",
@@ -1555,7 +1561,13 @@ class FemagDesktopWindow(QMainWindow):
                     if order.id == selected_id:
                         selected_row = visual_row
                         visual_row += 1
-                        _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                        _add_load_order_detail_row(
+                            table,
+                            visual_row,
+                            order,
+                            open_detail_dialog,
+                            snapshot=snapshot,
+                        )
                     visual_row += 1
                 if rows:
                     table.setCurrentCell(selected_row, 0)
@@ -2127,7 +2139,14 @@ class _FieldFocusNavigation(QObject):
         return True
 
 
-def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
+def _add_load_order_detail_row(
+    table: QTableWidget,
+    row: int,
+    order: LoadOrder,
+    open_detail_dialog,
+    *,
+    snapshot: dict | None = None,
+) -> None:
     item = QTableWidgetItem("")
     item.setData(Qt.UserRole, order.id)
     table.setItem(row, 0, item)
@@ -2135,7 +2154,7 @@ def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, 
     detail = _inline_load_order_detail_panel()
     labels: dict[str, QLabel] = detail.property("detailLabels")
     view_button: QPushButton = detail.property("viewDetailButton")
-    _set_inline_load_order_detail(labels, order)
+    _set_inline_load_order_detail(labels, order, snapshot=snapshot)
     view_button.setEnabled(True)
     view_button.clicked.connect(open_detail_dialog)
     table.setCellWidget(row, 0, detail)
@@ -2275,19 +2294,43 @@ def _detail_panel(spec) -> QFrame:
     return panel
 
 
-def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -> None:
-    first_pallet = _first_related(order.pallets)
+def _set_inline_load_order_detail(
+    labels: dict[str, QLabel],
+    order: LoadOrder,
+    *,
+    snapshot: dict | None = None,
+) -> None:
+    snapshot = snapshot or {}
+    if snapshot:
+        clients_summary = snapshot.get("clients_summary", "")
+        deliveries_summary = snapshot.get("deliveries_summary", "")
+        products_summary = snapshot.get("products_summary", "")
+        driver_name = snapshot.get("driver_name", "")
+        carrier_name = snapshot.get("carrier_name", "")
+        truck_domain = snapshot.get("truck_domain", "")
+        pallet_quantity = snapshot.get("first_pallet_quantity", 0)
+        pallet_weight = snapshot.get("first_pallet_weight", "-")
+    else:
+        first_pallet = _first_related(order.pallets)
+        clients_summary = _summarize_order_clients(order)
+        deliveries_summary = _summarize_order_deliveries(order)
+        products_summary = _summarize_order_products(order)
+        driver_name = order.driver.name
+        carrier_name = order.carrier.name
+        truck_domain = order.truck.domain
+        pallet_quantity = first_pallet.quantity if first_pallet else 0
+        pallet_weight = _estimated_weight(first_pallet)
+
     labels["number"].setText(_format_order_number(order.order_number))
     labels["status"].setText(_display_status(order.status))
     labels["status"].setProperty("statusKey", _status_key(order.status))
     labels["summary"].setText(
-        f"{_summarize_order_clients(order)} | {_summarize_order_deliveries(order)} | "
-        f"{_summarize_order_products(order)}"
+        f"{clients_summary} | {deliveries_summary} | {products_summary}"
     )
     labels["transport"].setText(
-        f"{order.date.strftime('%d/%m/%Y')} | {order.driver.name} | "
-        f"{order.carrier.name} | {order.truck.domain} | "
-        f"Pallets: {first_pallet.quantity if first_pallet else 0} | Peso: {_estimated_weight(first_pallet)}"
+        f"{order.date.strftime('%d/%m/%Y')} | {driver_name} | "
+        f"{carrier_name} | {truck_domain} | "
+        f"Pallets: {pallet_quantity} | Peso: {pallet_weight}"
     )
     labels["observations"].setText(f"Obs: {order.observations}" if order.observations else "")
 
@@ -3726,6 +3769,32 @@ def _open_print_output(path: Path) -> None:
         startfile(str(target))
         return
     webbrowser.open(target.as_uri())
+
+
+def _matches_load_order_grid_snapshot(
+    order: LoadOrder,
+    snapshot: dict | None,
+    query: str,
+) -> bool:
+    snapshot = snapshot or {}
+    text = " ".join(
+        (
+            _format_order_number(order.order_number),
+            str(order.order_number),
+            order.date.strftime("%d/%m/%Y"),
+            order.status,
+            snapshot.get("carrier_name", ""),
+            snapshot.get("driver_name", ""),
+            snapshot.get("truck_domain", ""),
+            snapshot.get("clients_summary", ""),
+            snapshot.get("deliveries_summary", ""),
+            snapshot.get("products_summary", ""),
+            snapshot.get("destinations_text", ""),
+            snapshot.get("products_text", ""),
+            order.observations or "",
+        )
+    )
+    return query.lower() in text.lower()
 
 
 def _matches_load_order_query(order: LoadOrder, query: str) -> bool:
