@@ -297,7 +297,9 @@ def test_customer_ledger_registers_and_reverses_manual_debit(db):
     page = CustomerLedgerPage(
         current_user="caja",
         register_manual_debit_callback=register,
-        reverse_manual_debit_callback=service.reverse_manual_debit,
+        reverse_manual_debit_callback=lambda movement: service.reverse_manual_debit(
+            movement, reason="Reverso desde UI de prueba"
+        ),
     )
     # La página sólo lista clientes con movimientos; crear el primero y refrescar.
     register(client)
