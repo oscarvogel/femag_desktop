@@ -472,6 +472,69 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(status=first.STATUS_CLOSED) == [first]
     assert service.list_orders(client=data["client"]) == [second, first]
 
+def test_list_orders_page_uses_50_rows_and_searches_full_database(db):
+    from datetime import date
+
+    from app.models.load_orders import LoadOrder, LoadOrderDestination
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    old_client = Client.create(
+        name="Cliente Historico Buscable",
+        cuit="30700000999",
+        iva_condition="RI",
+    )
+    old_address = ClientAddress.create(
+        client=old_client,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta historica 999",
+    )
+
+    created = []
+    for number in range(1, 56):
+        created.append(
+            LoadOrder.create(
+                order_number=number,
+                date=date(2026, 1, 1),
+                carrier=data["carrier"],
+                driver=data["driver"],
+                truck=data["truck"],
+                status=LoadOrder.STATUS_CLOSED,
+                created_by="paging_test",
+                updated_by="paging_test",
+            )
+        )
+
+    LoadOrderDestination.create(
+        order=created[0],
+        client=old_client,
+        delivery_address=old_address,
+        sequence=1,
+    )
+
+    service = LoadOrderService(current_user="paging_test")
+    first_page, total = service.list_orders_page(page=1, page_size=50)
+    second_page, total_second = service.list_orders_page(page=2, page_size=50)
+
+    assert total == 55
+    assert total_second == 55
+    assert len(first_page) == 50
+    assert len(second_page) == 5
+    assert first_page[0].order_number == 55
+    assert second_page[-1].order_number == 1
+
+    matches, match_total = service.list_orders_page(
+        page=1,
+        page_size=50,
+        search="Historico Buscable",
+    )
+    assert match_total == 1
+    assert [row.order_number for row in matches] == [1]
+
+
 def test_build_grid_snapshots_preserves_visible_order_data(db):
     from app.services.load_order_service import LoadOrderService
 
