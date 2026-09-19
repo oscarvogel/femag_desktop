@@ -1516,13 +1516,14 @@ class FemagDesktopWindow(QMainWindow):
                 visual_row = 0
                 selected_row = 0
                 for order in rows:
+                    composition = service.composition(order)
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
                         _summarize_order_clients(order),
                         _summarize_order_deliveries(order),
                         _summarize_order_products(order),
-                        _load_order_pallet_progress(service, order),
+                        _load_order_pallet_progress_from_composition(composition),
                         _display_status(order.status),
                         "",
                     )
@@ -1530,12 +1531,13 @@ class FemagDesktopWindow(QMainWindow):
                         table.setItem(visual_row, column, QTableWidgetItem(value))
                     table.item(visual_row, 0).setData(Qt.UserRole, order.id)
                     table.item(visual_row, 6).setForeground(_status_color(order.status))
+                    has_pallets = bool(composition.pallets)
                     pallet_action = _action_button(
                         f"prepareLoadOrderPalletsButton{order.id}",
-                        _load_order_pallet_action_text(service, order),
-                        secondary=bool(order.pallets.exists()),
+                        _load_order_pallet_action_text_from_composition(order, composition),
+                        secondary=has_pallets,
                     )
-                    pallet_action.setEnabled(order.is_unissued or order.pallets.exists())
+                    pallet_action.setEnabled(order.is_unissued or has_pallets)
                     pallet_action.clicked.connect(
                         lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
                     )
@@ -2035,8 +2037,7 @@ def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
     return metrics
 
 
-def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
-    composition = service.composition(order)
+def _load_order_pallet_progress_from_composition(composition) -> str:
     pallet_count = len(composition.pallets)
     if pallet_count == 0:
         return "Sin preparar"
@@ -2051,14 +2052,22 @@ def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> 
     return f"{pallet_count} pallet" + ("s · Revisar pesos" if pallet_count != 1 else " · Revisar pesos")
 
 
-def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
-    if not order.pallets.exists():
+def _load_order_pallet_action_text_from_composition(order: LoadOrder, composition) -> str:
+    if not composition.pallets:
         return "Armar pallets" if order.is_unissued else "Sin pallets"
     if not order.is_unissued:
         return "Ver pallets"
-    if service.composition(order).can_issue:
+    if composition.can_issue:
         return "Editar pallets"
     return "Continuar"
+
+
+def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_progress_from_composition(service.composition(order))
+
+
+def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_action_text_from_composition(order, service.composition(order))
 
 
 def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
