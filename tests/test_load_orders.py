@@ -472,6 +472,32 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(status=first.STATUS_CLOSED) == [first]
     assert service.list_orders(client=data["client"]) == [second, first]
 
+def test_list_orders_prefetched_preserves_relations_and_composition(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    loaded = service.list_orders_prefetched()
+    assert [row.id for row in loaded] == [order.id]
+
+    prefetched = loaded[0]
+    assert [destination.client.name for destination in prefetched.destinations] == [
+        "Cliente FEMAG"
+    ]
+    assert [line.product.name for line in prefetched.products] == [
+        "Fecula de mandioca"
+    ]
+
+    loaded_composition = service.composition_from_loaded(prefetched)
+    regular_composition = service.composition(order)
+
+    assert loaded_composition.can_issue == regular_composition.can_issue
+    assert loaded_composition.pending_quantity == regular_composition.pending_quantity
+    assert len(loaded_composition.pallets) == len(regular_composition.pallets)
+
+
 def test_update_order_rejects_direct_status_changes(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService
