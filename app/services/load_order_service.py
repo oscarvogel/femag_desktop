@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -306,6 +307,221 @@ class LoadOrderService:
         if limit is not None:
             query = query.limit(max(1, int(limit)))
         return list(query)
+
+    def build_grid_snapshots(self, orders: list[LoadOrder]) -> dict[int, dict]:
+        """Construye datos de grilla en bloque, sin navegar FKs/backrefs por fila."""
+        if not orders:
+            return {}
+
+        order_ids = [order.id for order in orders]
+        carrier_ids = {order.carrier_id for order in orders if order.carrier_id}
+        driver_ids = {order.driver_id for order in orders if order.driver_id}
+        truck_ids = {order.truck_id for order in orders if order.truck_id}
+
+        carriers = {
+            row.id: row.name
+            for row in Carrier.select(Carrier.id, Carrier.name).where(Carrier.id.in_(carrier_ids))
+        } if carrier_ids else {}
+        drivers = {
+            row.id: row.name
+            for row in Driver.select(Driver.id, Driver.name).where(Driver.id.in_(driver_ids))
+        } if driver_ids else {}
+        trucks = {
+            row.id: row.domain
+            for row in Truck.select(Truck.id, Truck.domain).where(Truck.id.in_(truck_ids))
+        } if truck_ids else {}
+
+        destination_rows = list(
+            LoadOrderDestination.select().where(LoadOrderDestination.order.in_(order_ids))
+        )
+        client_ids = {row.client_id for row in destination_rows if row.client_id}
+        address_ids = {
+            row.delivery_address_id for row in destination_rows if row.delivery_address_id
+        }
+        clients = {
+            row.id: row.name
+            for row in Client.select(Client.id, Client.name).where(Client.id.in_(client_ids))
+        } if client_ids else {}
+        addresses = {
+            row.id: (row.address, row.city)
+            for row in ClientAddress.select(
+                ClientAddress.id,
+                ClientAddress.address,
+                ClientAddress.city,
+            ).where(ClientAddress.id.in_(address_ids))
+        } if address_ids else {}
+
+        destinations_by_order: dict[int, list[LoadOrderDestination]] = defaultdict(list)
+        destination_meta: dict[int, tuple[int, int]] = {}
+        for row in destination_rows:
+            destinations_by_order[row.order_id].append(row)
+            destination_meta[row.id] = (row.client_id, row.delivery_address_id)
+
+        product_rows = list(
+            LoadOrderProduct.select().where(LoadOrderProduct.order.in_(order_ids))
+        )
+        product_ids = {row.product_id for row in product_rows if row.product_id}
+        products = {
+            row.id: row.name
+            for row in Product.select(Product.id, Product.name).where(Product.id.in_(product_ids))
+        } if product_ids else {}
+        products_by_order: dict[int, list[LoadOrderProduct]] = defaultdict(list)
+        for row in product_rows:
+            products_by_order[row.order_id].append(row)
+
+        pallet_rows = list(
+            LoadOrderPallet.select().where(LoadOrderPallet.order.in_(order_ids))
+        )
+        pallets_by_order: dict[int, list[LoadOrderPallet]] = defaultdict(list)
+        pallet_order: dict[int, int] = {}
+        for row in pallet_rows:
+            pallets_by_order[row.order_id].append(row)
+            pallet_order[row.id] = row.order_id
+
+        pallet_ids = list(pallet_order)
+        allocation_rows = list(
+            LoadOrderPalletAllocation.select().where(
+                LoadOrderPalletAllocation.pallet.in_(pallet_ids)
+            )
+        ) if pallet_ids else []
+        allocations_by_pallet: dict[int, list[LoadOrderPalletAllocation]] = defaultdict(list)
+        for row in allocation_rows:
+            allocations_by_pallet[row.pallet_id].append(row)
+
+        loose_rows = list(
+            LoadOrderLooseAllocation.select().where(
+                LoadOrderLooseAllocation.order.in_(order_ids)
+            )
+        )
+        loose_by_order: dict[int, list[LoadOrderLooseAllocation]] = defaultdict(list)
+        for row in loose_rows:
+            loose_by_order[row.order_id].append(row)
+
+        snapshots: dict[int, dict] = {}
+        for order in orders:
+            destinations = destinations_by_order.get(order.id, [])
+            order_products = products_by_order.get(order.id, [])
+            order_pallets = sorted(
+                pallets_by_order.get(order.id, []),
+                key=lambda row: row.sequence,
+            )
+
+            client_names = []
+            delivery_cities = []
+            destination_parts = []
+            for destination in destinations:
+                client_name = clients.get(destination.client_id, "")
+                address, city = addresses.get(destination.delivery_address_id, ("", ""))
+                if client_name and client_name not in client_names:
+                    client_names.append(client_name)
+                if city and city not in delivery_cities:
+                    delivery_cities.append(city)
+                destination_parts.append(
+                    f"{client_name}: {address}, {city}".strip()
+                )
+
+            product_names = [products.get(row.product_id, "") for row in order_products]
+            if len(product_names) == 1:
+                products_summary = product_names[0]
+            elif product_names:
+                products_summary = f"{len(product_names)} productos"
+            else:
+                products_summary = ""
+
+            requested = []
+            product_parts = []
+            for row in order_products:
+                client_id, address_id = destination_meta.get(row.destination_id, (0, 0))
+                client_name = clients.get(client_id, "")
+                address, city = addresses.get(address_id, ("", ""))
+                product_name = products.get(row.product_id, "")
+                requested.append(
+                    RequestedLine(
+                        destination_id=row.destination_id,
+                        product_id=row.product_id,
+                        quantity=row.quantity,
+                        label=f"{client_name} / {address} / {product_name}",
+                    )
+                )
+                product_parts.append(
+                    f"{client_name}: {product_name} x {row.quantity:g} {row.unit}"
+                )
+
+            pallet_drafts = []
+            for pallet in order_pallets:
+                allocations = []
+                for allocation in allocations_by_pallet.get(pallet.id, []):
+                    client_id, address_id = destination_meta.get(
+                        allocation.destination_id, (0, 0)
+                    )
+                    client_name = clients.get(client_id, "")
+                    address, _city = addresses.get(address_id, ("", ""))
+                    product_name = products.get(allocation.product_id, "")
+                    allocations.append(
+                        AllocationDraft(
+                            destination_id=allocation.destination_id,
+                            product_id=allocation.product_id,
+                            quantity=allocation.quantity,
+                            peso_unitario_kg=allocation.peso_unitario_kg,
+                            client_id=client_id,
+                            label=f"{client_name} / {address} / {product_name}",
+                        )
+                    )
+                pallet_drafts.append(
+                    PalletDraft(
+                        sequence=pallet.sequence,
+                        allocations=tuple(allocations),
+                    )
+                )
+
+            loose_drafts = []
+            for allocation in loose_by_order.get(order.id, []):
+                client_id, address_id = destination_meta.get(
+                    allocation.destination_id, (0, 0)
+                )
+                client_name = clients.get(client_id, "")
+                address, _city = addresses.get(address_id, ("", ""))
+                product_name = products.get(allocation.product_id, "")
+                loose_drafts.append(
+                    LooseAllocationDraft(
+                        destination_id=allocation.destination_id,
+                        product_id=allocation.product_id,
+                        quantity=allocation.quantity,
+                        peso_unitario_kg=allocation.peso_unitario_kg,
+                        client_id=client_id,
+                        label=f"{client_name} / {address} / {product_name}",
+                    )
+                )
+
+            composition = PalletCompositionService().reconcile(
+                requested=requested,
+                pallets=pallet_drafts,
+                loose=loose_drafts,
+            )
+            first_pallet = order_pallets[0] if order_pallets else None
+            snapshots[order.id] = {
+                "clients_summary": (
+                    f"VARIOS ({len(client_names)})"
+                    if len(client_names) > 1
+                    else (client_names[0] if client_names else "")
+                ),
+                "deliveries_summary": "; ".join(delivery_cities),
+                "products_summary": products_summary,
+                "destinations_text": "\n".join(destination_parts) or "-",
+                "products_text": "\n".join(product_parts) or "-",
+                "carrier_name": carriers.get(order.carrier_id, ""),
+                "driver_name": drivers.get(order.driver_id, ""),
+                "truck_domain": trucks.get(order.truck_id, ""),
+                "composition": composition,
+                "first_pallet_quantity": first_pallet.quantity if first_pallet else 0,
+                "first_pallet_weight": (
+                    f"{first_pallet.weight * first_pallet.quantity:g} kg"
+                    if first_pallet
+                    else "-"
+                ),
+            }
+        return snapshots
+
 
     def list_orders_prefetched(
         self,
