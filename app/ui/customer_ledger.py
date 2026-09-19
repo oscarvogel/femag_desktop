@@ -17,11 +17,13 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QToolButton,
+    QMessageBox,
 )
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
+from app.ui.financial_history_dialog import FinancialHistoryDialog
 from app.services.ledger_query_service import (
     client_balance,
     client_balances,
@@ -247,6 +249,7 @@ class CustomerLedgerPage(QWidget):
 
         self.more_actions_menu.addSeparator()
         self.more_actions_menu.addSection("Movimiento seleccionado")
+        self.history_action = self.more_actions_menu.addAction("Ver historial")
         self.whatsapp_budget_action = self.more_actions_menu.addAction(
             "Enviar presupuesto por WhatsApp"
         )
@@ -257,6 +260,7 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_action.triggered.connect(self._on_print_statement)
         self.whatsapp_statement_action.triggered.connect(self._on_whatsapp_statement)
         self.email_statement_action.triggered.connect(self._on_email_statement)
+        self.history_action.triggered.connect(self._on_history)
         self.whatsapp_budget_action.triggered.connect(self._on_whatsapp_budget)
         self.print_receipt_action.triggered.connect(self._on_print_receipt)
         self.annul_payment_action.triggered.connect(self._on_annul_payment)
@@ -619,6 +623,9 @@ class CustomerLedgerPage(QWidget):
                 or str(movement.source_ref or "").startswith("Budget:")
             )
         )
+        self.history_action.setEnabled(
+            FinancialHistoryDialog.supports(movement)
+        )
         self.whatsapp_budget_action.setEnabled(
             can_resolve_budget and self.whatsapp_budget_callback is not None
         )
@@ -737,6 +744,12 @@ class CustomerLedgerPage(QWidget):
         )
         self._sync_more_actions()
 
+    def _on_history(self) -> None:
+        movement = self._selected_movement()
+        if not FinancialHistoryDialog.supports(movement):
+            return
+        FinancialHistoryDialog(movement, self).exec_()
+
     def _on_whatsapp_budget(self) -> None:
         if self.whatsapp_budget_callback is None:
             return
@@ -761,14 +774,22 @@ class CustomerLedgerPage(QWidget):
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_debit_callback is None:
             return
-        self.reverse_manual_debit_callback(movement)
+        try:
+            self.reverse_manual_debit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar débito", str(exc))
+            return
         self.refresh()
 
     def _on_reverse_manual_credit(self) -> None:
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_credit_callback is None:
             return
-        self.reverse_manual_credit_callback(movement)
+        try:
+            self.reverse_manual_credit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar crédito", str(exc))
+            return
         self.refresh()
 
 

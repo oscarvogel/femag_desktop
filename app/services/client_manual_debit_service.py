@@ -74,9 +74,13 @@ class ClientManualDebitService:
         movement: ClientAccountMovement,
         *,
         reversal_date: date | None = None,
+        reason: str | None = None,
     ) -> ClientAccountMovement:
         if movement is None or not isinstance(movement, ClientAccountMovement):
             raise ClientManualDebitError("Debe seleccionar un débito manual.")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ClientManualDebitError("Debe indicar el motivo del reverso.")
         database = ClientAccountMovement._meta.database
 
         with database.atomic():
@@ -126,7 +130,9 @@ class ClientManualDebitService:
                 new_value={
                     **self._audit_value(reversal),
                     "reversal_movement_id": reversal.id,
+                    "reason": reason,
                 },
+                observation=reason,
             )
         return reversal
 

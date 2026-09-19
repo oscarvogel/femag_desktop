@@ -133,7 +133,7 @@ def test_manual_debit_and_reversal_account_flow_smoke(db):
     assert client_balance(client) == approx(5000)
     assert debit.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT
 
-    reversal = service.reverse_manual_debit(debit)
+    reversal = service.reverse_manual_debit(debit, reason="Reverso smoke de prueba")
     assert client_balance(client) == 0
     assert reversal.reverses == debit
     assert reversal.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL

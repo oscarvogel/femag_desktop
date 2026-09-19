@@ -488,6 +488,7 @@ class RemittanceService:
             record_ref=f"Remittance:{remittance.id}",
             old_value=old_snapshot,
             new_value=self._snapshot(remittance),
+            observation=reason.strip(),
         )
         return remittance
 
@@ -515,6 +516,8 @@ class RemittanceService:
             "truck_domain": remittance.truck_domain,
             "trailer_domain": remittance.trailer_domain,
             "source_order_id": remittance.source_order_id,
+            "annulled_by": remittance.annulled_by,
+            "annulment_reason": remittance.annulment_reason,
             "items": [
                 {
                     "product": item.product_name,

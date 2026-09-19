@@ -185,7 +185,7 @@ def test_page_preview_action_generates_selected_draft_pdf(db, tmp_path, monkeypa
 
 
 def test_page_annul_action_requires_reason_and_refreshes_state(db, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QMessageBox
+    from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
 
     from app.models.remittances import Remittance
     from app.services.remittance_service import RemittanceService
@@ -202,9 +202,14 @@ def test_page_annul_action_requires_reason_and_refreshes_state(db, tmp_path, mon
     page = remittances_ui.RemittancesPage(current_user="ui_annul_action", output_dir=tmp_path)
     page.table.selectRow(0)
     monkeypatch.setattr(
-        remittances_ui.QInputDialog,
-        "getMultiLineText",
-        lambda *_args, **_kwargs: ("Formulario dañado", True),
+        remittances_ui.AuditReasonDialog,
+        "exec_",
+        lambda _dialog: QDialog.Accepted,
+    )
+    monkeypatch.setattr(
+        remittances_ui.AuditReasonDialog,
+        "reason",
+        lambda _dialog: "Formulario dañado",
     )
     monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
 

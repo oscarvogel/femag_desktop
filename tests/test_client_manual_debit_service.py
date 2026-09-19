@@ -79,6 +79,7 @@ def test_reverse_manual_debit_restores_balance_and_audits(db):
     reversal = service.reverse_manual_debit(
         original,
         reversal_date=date(2026, 8, 8),
+        reason="Corrección contable de prueba",
     )
 
     assert reversal.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL
@@ -94,7 +95,7 @@ def test_reverse_manual_debit_restores_balance_and_audits(db):
     assert audit.new_value["reversal_movement_id"] == reversal.id
 
     with pytest.raises(ClientManualDebitError, match="ya fue reversado"):
-        service.reverse_manual_debit(original)
+        service.reverse_manual_debit(original, reason="Segundo intento")
     assert ClientAccountMovement.select().count() == 2
 
 
@@ -109,7 +110,7 @@ def test_reverse_manual_debit_rejects_other_movement_types(db):
     )
 
     with pytest.raises(ClientManualDebitError, match="no es un débito manual"):
-        ClientManualDebitService(current_user="caja").reverse_manual_debit(movement)
+        ClientManualDebitService(current_user="caja").reverse_manual_debit(movement, reason="Prueba")
 
 
 def test_register_manual_debit_rolls_back_when_audit_fails(db):

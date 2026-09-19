@@ -86,6 +86,7 @@ def test_reverse_manual_credit_restores_balance_and_prevents_double_reversal(db)
     reversal = service.reverse_manual_credit(
         original,
         reversal_date=date(2026, 8, 14),
+        reason="Corrección contable de prueba",
     )
 
     assert reversal.movement_type == ClientAccountMovement.TYPE_MANUAL_CREDIT_REVERSAL
@@ -102,7 +103,7 @@ def test_reverse_manual_credit_restores_balance_and_prevents_double_reversal(db)
     assert audit.new_value["reversal_movement_id"] == reversal.id
 
     with pytest.raises(ClientManualCreditError, match="ya fue reversado"):
-        service.reverse_manual_credit(original)
+        service.reverse_manual_credit(original, reason="Segundo intento")
     assert ClientAccountMovement.select().count() == 2
 
 
@@ -117,7 +118,7 @@ def test_reverse_manual_credit_rejects_other_movement_types(db):
     )
 
     with pytest.raises(ClientManualCreditError, match="no es un crédito manual"):
-        ClientManualCreditService(current_user="caja").reverse_manual_credit(movement)
+        ClientManualCreditService(current_user="caja").reverse_manual_credit(movement, reason="Prueba")
 
 
 def test_register_manual_credit_rolls_back_when_audit_fails(db):
@@ -185,7 +186,10 @@ def test_customer_ledger_registers_displays_and_reverses_manual_credit(db):
     page = CustomerLedgerPage(
         current_user="caja",
         register_manual_credit_callback=register,
-        reverse_manual_credit_callback=service.reverse_manual_credit,
+        reverse_manual_credit_callback=lambda movement: service.reverse_manual_credit(
+            movement,
+            reason="Reverso desde UI de prueba",
+        ),
     )
     register(client)
     page.refresh()
@@ -289,7 +293,7 @@ def test_account_statement_includes_manual_credit_and_reversal(db, tmp_path):
         reference="NC-PDF-288",
         observations="Cliente frecuente",
     )
-    service.reverse_manual_credit(credit)
+    service.reverse_manual_credit(credit, reason="Reverso para extracto")
 
     pdf_path = account_statement_print_service.export_account_statement(client, tmp_path)
     text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf_path)).pages)

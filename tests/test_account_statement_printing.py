@@ -136,7 +136,11 @@ def test_export_account_statement_includes_manual_debit_and_reversal(db, tmp_pat
         description="Interés por mora",
         reference="ND-PDF-217",
     )
-    service.reverse_manual_debit(debit, reversal_date=date(2026, 8, 8))
+    service.reverse_manual_debit(
+        debit,
+        reversal_date=date(2026, 8, 8),
+        reason="Reverso para extracto de prueba",
+    )
 
     pdf_path = account_statement_print_service.export_account_statement(client, tmp_path)
     text = _pdf_text(pdf_path)
