@@ -308,6 +308,63 @@ class LoadOrderService:
             query = query.limit(max(1, int(limit)))
         return list(query)
 
+    def list_orders_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+    ) -> tuple[list[LoadOrder], int]:
+        """Devuelve una página de órdenes y el total global filtrado.
+
+        La búsqueda se resuelve en SQL sobre toda la base; nunca se limita
+        a las filas ya visibles en la grilla.
+        """
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        query = LoadOrder.select()
+
+        term = (search or "").strip()
+        if term:
+            carrier_ids = Carrier.select(Carrier.id).where(Carrier.name.contains(term))
+            driver_ids = Driver.select(Driver.id).where(Driver.name.contains(term))
+            truck_ids = Truck.select(Truck.id).where(Truck.domain.contains(term))
+            client_ids = Client.select(Client.id).where(Client.name.contains(term))
+            address_ids = ClientAddress.select(ClientAddress.id).where(
+                ClientAddress.address.contains(term) | ClientAddress.city.contains(term)
+            )
+            destination_orders = LoadOrderDestination.select(
+                LoadOrderDestination.order
+            ).where(
+                LoadOrderDestination.client.in_(client_ids)
+                | LoadOrderDestination.delivery_address.in_(address_ids)
+            )
+            product_ids = Product.select(Product.id).where(Product.name.contains(term))
+            product_orders = LoadOrderProduct.select(LoadOrderProduct.order).where(
+                LoadOrderProduct.product.in_(product_ids)
+            )
+
+            condition = (
+                LoadOrder.status.contains(term)
+                | LoadOrder.observations.contains(term)
+                | LoadOrder.carrier.in_(carrier_ids)
+                | LoadOrder.driver.in_(driver_ids)
+                | LoadOrder.truck.in_(truck_ids)
+                | LoadOrder.id.in_(destination_orders)
+                | LoadOrder.id.in_(product_orders)
+            )
+            normalized_number = term.upper().replace("OC-", "").strip()
+            if normalized_number.isdigit():
+                condition = condition | (LoadOrder.order_number == int(normalized_number))
+            query = query.where(condition)
+
+        total = query.count()
+        rows = list(
+            query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc())
+            .paginate(page, page_size)
+        )
+        return rows, total
+
     def build_grid_snapshots(self, orders: list[LoadOrder]) -> dict[int, dict]:
         """Construye datos de grilla en bloque, sin navegar FKs/backrefs por fila."""
         if not orders:
