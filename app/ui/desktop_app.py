@@ -1479,6 +1479,22 @@ class FemagDesktopWindow(QMainWindow):
         search_row.addWidget(search_input, 1)
         search_row.addWidget(search_button)
 
+        pagination_row = QHBoxLayout()
+        pagination_row.setContentsMargins(10, 0, 10, 10)
+        pagination_row.setSpacing(8)
+        previous_page_button = _action_button(
+            "previousLoadOrderPageButton", "Anterior", secondary=True
+        )
+        next_page_button = _action_button(
+            "nextLoadOrderPageButton", "Siguiente", secondary=True
+        )
+        page_label = QLabel("Página 1 de 1 · 0 órdenes")
+        page_label.setObjectName("loadOrderPageLabel")
+        pagination_row.addWidget(previous_page_button)
+        pagination_row.addWidget(next_page_button)
+        pagination_row.addStretch(1)
+        pagination_row.addWidget(page_label)
+
         left_layout.addLayout(actions)
         left_layout.addLayout(search_row)
         left_layout.addWidget(feedback)
@@ -1494,28 +1510,55 @@ class FemagDesktopWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
+        left_layout.addLayout(pagination_row)
         layout.addWidget(left_panel, 1)
 
-        def refresh(*, query: str | None = None) -> None:
-            rows = service.list_orders() if hasattr(service, "list_orders") else []
+        page_state = {"page": 1, "page_size": 50, "total": 0, "pages": 1}
+
+        def refresh(*, query: str | None = None, page_number: int | None = None) -> None:
+            query = (query if query is not None else search_input.text()).strip()
+            if page_number is not None:
+                page_state["page"] = max(1, int(page_number))
+
+            if hasattr(service, "list_orders_page"):
+                rows, total = service.list_orders_page(
+                    page=page_state["page"],
+                    page_size=page_state["page_size"],
+                    search=query,
+                )
+            else:
+                rows = service.list_orders(limit=page_state["page_size"]) if hasattr(service, "list_orders") else []
+                total = len(rows)
+
+            page_state["total"] = total
+            page_state["pages"] = max(
+                1,
+                (total + page_state["page_size"] - 1) // page_state["page_size"],
+            )
+            if page_state["page"] > page_state["pages"]:
+                page_state["page"] = page_state["pages"]
+                if hasattr(service, "list_orders_page"):
+                    rows, total = service.list_orders_page(
+                        page=page_state["page"],
+                        page_size=page_state["page_size"],
+                        search=query,
+                    )
+                    page_state["total"] = total
+
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
+
             snapshots = (
                 service.build_grid_snapshots(rows)
                 if hasattr(service, "build_grid_snapshots")
                 else {}
             )
-            query = (query if query is not None else search_input.text()).strip()
-            if query:
-                rows = [
-                    order
-                    for order in rows
-                    if _matches_load_order_grid_snapshot(
-                        order,
-                        snapshots.get(order.id),
-                        query,
-                    )
-                ]
+            page_label.setText(
+                f"Página {page_state['page']} de {page_state['pages']} · "
+                f"{page_state['total']} orden(es)"
+            )
+            previous_page_button.setEnabled(page_state["page"] > 1)
+            next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
             if rows and not any(order.id == selected_id for order in rows):
                 selected_id = rows[0].id
@@ -1870,12 +1913,26 @@ class FemagDesktopWindow(QMainWindow):
 
         def search_orders() -> None:
             query = search_input.text().strip()
-            refresh(query=query)
-            count = _load_order_table_order_count(table)
+            page_state["page"] = 1
+            refresh(query=query, page_number=1)
             if query:
-                feedback.show_info(f"Buscar '{query}': {count} resultado(s).")
+                feedback.show_info(
+                    f"Buscar '{query}': {page_state['total']} resultado(s)."
+                )
             else:
-                feedback.show_info(f"Buscar: {count} orden(es).")
+                feedback.show_info(
+                    f"Buscar: {page_state['total']} orden(es)."
+                )
+
+        def previous_page() -> None:
+            if page_state["page"] <= 1:
+                return
+            refresh(page_number=page_state["page"] - 1)
+
+        def next_page() -> None:
+            if page_state["page"] >= page_state["pages"]:
+                return
+            refresh(page_number=page_state["page"] + 1)
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
@@ -1883,6 +1940,8 @@ class FemagDesktopWindow(QMainWindow):
         history_button.clicked.connect(open_history_dialog)
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
+        previous_page_button.clicked.connect(previous_page)
+        next_page_button.clicked.connect(next_page)
         issue_button.clicked.connect(issue)
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
