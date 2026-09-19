@@ -33,6 +33,8 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.remittances import Remittance, RemittanceSeries
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
+from app.ui.audit_reason_dialog import AuditReasonDialog
+from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 
 
 REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
@@ -545,6 +547,8 @@ class RemittancesPage(QWidget):
         print_button.setObjectName("printRemittanceButton")
         preview_button = QPushButton("Vista previa NO FISCAL")
         preview_button.setObjectName("previewRemittanceButton")
+        history_button = QPushButton("Historial")
+        history_button.setObjectName("historyRemittanceButton")
         annul_button = QPushButton("Anular")
         annul_button.setObjectName("annulRemittanceButton")
         calibration_button = QPushButton("Hoja de calibración")
@@ -555,6 +559,7 @@ class RemittancesPage(QWidget):
         actions.addWidget(issue_button)
         actions.addWidget(preview_button)
         actions.addWidget(print_button)
+        actions.addWidget(history_button)
         actions.addWidget(annul_button)
         actions.addWidget(calibration_button)
         actions.addStretch(1)
@@ -576,6 +581,7 @@ class RemittancesPage(QWidget):
         issue_button.clicked.connect(self._issue)
         preview_button.clicked.connect(self._preview_selected)
         print_button.clicked.connect(self._print_selected)
+        history_button.clicked.connect(self._history_selected)
         annul_button.clicked.connect(self._annul_selected)
         calibration_button.clicked.connect(self._print_calibration)
         self.refresh()
@@ -700,6 +706,13 @@ class RemittancesPage(QWidget):
             return
         self._open_pdf(pdf_path)
 
+    def _history_selected(self) -> None:
+        remittance = self._selected()
+        if remittance is None:
+            QMessageBox.information(self, "Remitos", "Seleccione un remito.")
+            return
+        RemittanceHistoryDialog(remittance, self).exec_()
+
     def _annul_selected(self) -> None:
         remittance = self._selected()
         if remittance is None:
@@ -708,15 +721,22 @@ class RemittancesPage(QWidget):
         if remittance.status == Remittance.STATUS_ANNULLED:
             QMessageBox.information(self, "Remitos", "El remito seleccionado ya está anulado.")
             return
-        reason, accepted = QInputDialog.getMultiLineText(
-            self,
-            "Anular remito",
-            f"Motivo de anulación de {remittance.remittance_number}:",
+        dialog = AuditReasonDialog(
+            title=f"Anular {remittance.remittance_number}",
+            prompt=(
+                "Indique el motivo de la anulación. El remito original y su "
+                "evolución permanecerán en el historial."
+            ),
+            confirm_text="Anular remito",
+            parent=self,
         )
-        if not accepted:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
-            annulled = RemittanceService(self.current_user).annul(remittance, reason=reason)
+            annulled = RemittanceService(self.current_user).annul(
+                remittance,
+                reason=dialog.reason(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Anular remito", str(exc))
             return
