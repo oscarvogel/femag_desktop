@@ -143,6 +143,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Usuarios", route_key="user_management"),
             approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
+            approved_item("Auditoría", route_key="audit_query"),
         )
         if item.action_key is not None
     ]
