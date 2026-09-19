@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+from peewee import prefetch
+
 from app.config.database import database_proxy
 from app.models.load_orders import (
     LoadOrder,
@@ -304,6 +306,115 @@ class LoadOrderService:
         if limit is not None:
             query = query.limit(max(1, int(limit)))
         return list(query)
+
+    def list_orders_prefetched(
+        self,
+        *,
+        status: str | None = None,
+        day: date | None = None,
+        order_number: int | None = None,
+        limit: int | None = None,
+    ) -> list[LoadOrder]:
+        """Listado para UI con relaciones precargadas en bloque.
+
+        Mantiene list_orders() intacto para servicios/tests que sólo necesitan
+        cabeceras. Esta variante evita consultas N+1 al renderizar la grilla.
+        """
+        query = LoadOrder.select().order_by(
+            LoadOrder.date.desc(),
+            LoadOrder.order_number.desc(),
+        )
+        if status is not None:
+            query = query.where(LoadOrder.status == status)
+        if day is not None:
+            query = query.where(LoadOrder.date == day)
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
+        if limit is not None:
+            query = query.limit(max(1, int(limit)))
+
+        destinations = LoadOrderDestination.select()
+        products = LoadOrderProduct.select()
+        pallets = LoadOrderPallet.select()
+        allocations = LoadOrderPalletAllocation.select()
+        loose = LoadOrderLooseAllocation.select()
+
+        return list(
+            prefetch(
+                query,
+                destinations,
+                products,
+                pallets,
+                allocations,
+                loose,
+                Client,
+                ClientAddress,
+                Product,
+                PalletType,
+            )
+        )
+
+    def composition_from_loaded(self, order: LoadOrder):
+        """Calcula composición usando relaciones ya precargadas, sin reconsultar DB."""
+        products = list(order.products)
+        pallets = sorted(list(order.pallets), key=lambda row: row.sequence)
+        loose_allocations = list(order.loose_allocations)
+
+        requested = [
+            RequestedLine(
+                destination_id=product.destination.id,
+                product_id=product.product.id,
+                quantity=product.quantity,
+                label=(
+                    f"{product.destination.client.name} / "
+                    f"{product.destination.delivery_address.address} / "
+                    f"{product.product.name}"
+                ),
+            )
+            for product in products
+            if product.destination_id is not None
+        ]
+        pallet_drafts = [
+            PalletDraft(
+                sequence=pallet.sequence,
+                allocations=tuple(
+                    AllocationDraft(
+                        destination_id=allocation.destination.id,
+                        product_id=allocation.product.id,
+                        quantity=allocation.quantity,
+                        peso_unitario_kg=allocation.peso_unitario_kg,
+                        client_id=allocation.destination.client.id,
+                        label=(
+                            f"{allocation.destination.client.name} / "
+                            f"{allocation.destination.delivery_address.address} / "
+                            f"{allocation.product.name}"
+                        ),
+                    )
+                    for allocation in list(pallet.allocations)
+                ),
+            )
+            for pallet in pallets
+        ]
+        loose = [
+            LooseAllocationDraft(
+                destination_id=allocation.destination.id,
+                product_id=allocation.product.id,
+                quantity=allocation.quantity,
+                peso_unitario_kg=allocation.peso_unitario_kg,
+                client_id=allocation.destination.client.id,
+                label=(
+                    f"{allocation.destination.client.name} / "
+                    f"{allocation.destination.delivery_address.address} / "
+                    f"{allocation.product.name}"
+                ),
+            )
+            for allocation in loose_allocations
+        ]
+        return PalletCompositionService().reconcile(
+            requested=requested,
+            pallets=pallet_drafts,
+            loose=loose,
+        )
 
     def validate_merchandise_uniqueness(self, order: LoadOrder) -> None:
         """Reject persisted orders that cannot be represented as unique pallet lines."""
