@@ -98,6 +98,7 @@ from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
+from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
@@ -1086,38 +1087,23 @@ class FemagDesktopWindow(QMainWindow):
             )
             return
 
-        reason, accepted = QInputDialog.getText(
-            self,
-            "Anular recibo",
-            f"Motivo de anulación del recibo {payment.receipt_number}:",
+        dialog = AuditReasonDialog(
+            title=f"Anular recibo {payment.receipt_number}",
+            prompt=(
+                "Indique el motivo de la anulación. Se generará un contra-asiento "
+                "y el recibo original quedará conservado en la auditoría."
+            ),
+            confirm_text="Anular recibo",
+            parent=self,
         )
-        if not accepted:
-            return
-        reason = reason.strip()
-        if not reason:
-            QMessageBox.warning(
-                self,
-                "Anular recibo",
-                "Debe indicar el motivo de la anulación.",
-            )
-            return
-
-        answer = QMessageBox.question(
-            self,
-            "Anular recibo",
-            f"¿Confirma la anulación del recibo {payment.receipt_number}?\n"
-            "Se generará un contra-asiento y el recibo original quedará auditado.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
 
         try:
             ClientPaymentService(current_user=self.user.username).annul_payment(
                 payment,
                 authorized_by=self.user,
-                reason=reason,
+                reason=dialog.reason(),
             )
         except Exception as exc:
             QMessageBox.warning(self, "Anular recibo", str(exc))
@@ -1129,20 +1115,24 @@ class FemagDesktopWindow(QMainWindow):
         )
 
     def _reverse_manual_debit(self, movement) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Reversar débito",
-            "¿Confirma el reverso del débito manual seleccionado? "
-            "Se generará un movimiento inverso y se conservará la auditoría.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+        dialog = AuditReasonDialog(
+            title="Reversar débito manual",
+            prompt=(
+                "Indique el motivo del reverso. Se generará un movimiento inverso "
+                "y el movimiento original permanecerá en el historial."
+            ),
+            confirm_text="Reversar débito",
+            parent=self,
         )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
             ClientManualDebitService(
                 current_user=self.shell.username
-            ).reverse_manual_debit(movement)
+            ).reverse_manual_debit(
+                movement,
+                reason=dialog.reason(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Reversar débito", str(exc))
             return
@@ -1153,20 +1143,24 @@ class FemagDesktopWindow(QMainWindow):
         )
 
     def _reverse_manual_credit(self, movement) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Reversar crédito",
-            "¿Confirma el reverso del crédito manual seleccionado? "
-            "Se generará un movimiento inverso y se conservará la auditoría.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+        dialog = AuditReasonDialog(
+            title="Reversar crédito manual",
+            prompt=(
+                "Indique el motivo del reverso. Se generará un movimiento inverso "
+                "y el movimiento original permanecerá en el historial."
+            ),
+            confirm_text="Reversar crédito",
+            parent=self,
         )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
             ClientManualCreditService(
                 current_user=self.shell.username
-            ).reverse_manual_credit(movement)
+            ).reverse_manual_credit(
+                movement,
+                reason=dialog.reason(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Reversar crédito", str(exc))
             return
