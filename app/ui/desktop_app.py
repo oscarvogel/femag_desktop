@@ -2276,7 +2276,7 @@ def _detail_panel(spec) -> QFrame:
 
 
 def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -> None:
-    first_pallet = order.pallets.first()
+    first_pallet = _first_related(order.pallets)
     labels["number"].setText(_format_order_number(order.order_number))
     labels["status"].setText(_display_status(order.status))
     labels["status"].setProperty("statusKey", _status_key(order.status))
@@ -3756,6 +3756,10 @@ def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
         return PermissionService().has_permission(user, section, action, title)
     except (InterfaceError, OperationalError):
         return False
+
+
+def _first_related(rows):
+    return next(iter(rows), None)
 
 
 def _summarize_order_clients(order: LoadOrder) -> str:
