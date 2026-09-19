@@ -35,17 +35,27 @@ def _ensure_masters() -> dict:
         name="AUDIT472 Transporte Demo",
         defaults={"cuit": "30747200001", "phone": "3764-720001"},
     )
-    driver, _ = Driver.get_or_create(
-        name="AUDIT472 Chofer Demo",
-        defaults={"carrier": carrier, "document": "D47200001", "phone": "3764-720002"},
-    )
-    driver.carrier = carrier
-    driver.available = True
-    driver.save()
+    logistics = []
+    for index in range(1, 4):
+        driver, _ = Driver.get_or_create(
+            name=f"AUDIT472 Chofer Demo {index}",
+            defaults={
+                "carrier": carrier,
+                "document": f"D4720000{index}",
+                "phone": f"3764-72000{index + 1}",
+            },
+        )
+        driver.carrier = carrier
+        driver.available = True
+        driver.save()
 
-    truck, _ = Truck.get_or_create(domain="AU472DE", defaults={"carrier": carrier})
-    truck.carrier = carrier
-    truck.save()
+        truck, _ = Truck.get_or_create(
+            domain=f"AU47{index}DE",
+            defaults={"carrier": carrier},
+        )
+        truck.carrier = carrier
+        truck.save()
+        logistics.append((driver, truck))
 
     client, _ = Client.get_or_create(
         cuit="30747200002",
@@ -110,19 +120,26 @@ def _ensure_masters() -> dict:
 
     return {
         "carrier": carrier,
-        "driver": driver,
-        "truck": truck,
+        "logistics": logistics,
         "client": client,
         "address": address,
         "product": product,
     }
 
 
-def _create_order(username: str, masters: dict, *, label: str, quantity: int = 40) -> LoadOrder:
+def _create_order(
+    username: str,
+    masters: dict,
+    *,
+    logistics_index: int,
+    label: str,
+    quantity: int = 40,
+) -> LoadOrder:
+    driver, truck = masters["logistics"][logistics_index]
     return LoadOrderService(current_user=username).create_order(
         carrier=masters["carrier"],
-        driver=masters["driver"],
-        truck=masters["truck"],
+        driver=driver,
+        truck=truck,
         destinations=[
             {
                 "client": masters["client"],
@@ -172,18 +189,36 @@ def seed_controlled_audit_demo(
     service = LoadOrderService(current_user=username)
     operations = LoadOrderOperationService(current_user=username, prints_dir=output_dir)
 
-    pending = _create_order(username, masters, label="PENDIENTE_MODIFICADA", quantity=40)
+    pending = _create_order(
+        username,
+        masters,
+        logistics_index=0,
+        label="PENDIENTE_MODIFICADA",
+        quantity=40,
+    )
     pending = service.update_order(
         pending,
         observations="AUDIT472 pendiente modificada para validar evento 'Orden modificada'",
     )
 
-    emitted = _create_order(username, masters, label="EMITIDA_IMPRESA", quantity=50)
+    emitted = _create_order(
+        username,
+        masters,
+        logistics_index=1,
+        label="EMITIDA_IMPRESA",
+        quantity=50,
+    )
     emitted = operations.issue(emitted)
     pdf_path = operations.print_order(emitted)
     xlsx_path = operations.export_pallet_layout_xlsx(emitted)
 
-    ready_to_annul = _create_order(username, masters, label="EMITIDA_PARA_ANULAR", quantity=60)
+    ready_to_annul = _create_order(
+        username,
+        masters,
+        logistics_index=2,
+        label="EMITIDA_PARA_ANULAR",
+        quantity=60,
+    )
     ready_to_annul = operations.issue(ready_to_annul)
 
     history = AuditHistoryService()
