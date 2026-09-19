@@ -98,6 +98,7 @@ from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
+from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -1713,25 +1714,14 @@ class FemagDesktopWindow(QMainWindow):
             if not _can_annul_load_orders(self.user):
                 feedback.show_error("No tiene permiso para anular ordenes de carga.", focus_widget=table)
                 return
-            reason, accepted = QInputDialog.getMultiLineText(
-                self,
-                "Anular orden",
-                f"Indique el motivo de anulación de la orden {_format_order_number(order.order_number)}:",
-            )
-            if not accepted:
-                return
-            reason = reason.strip()
-            if not reason:
-                feedback.show_warning(
-                    "Debe indicar el motivo de la anulación.",
-                    focus_widget=table,
-                )
+            dialog = LoadOrderAnnulDialog(order, self)
+            if dialog.exec_() != QDialog.Accepted:
                 return
             try:
                 annulled = operation_service.annul(
                     order,
                     can_annul=_can_annul_load_orders(self.user),
-                    reason=reason,
+                    reason=dialog.reason(),
                 )
                 feedback.show_success(
                     f"Orden {_format_order_number(annulled.order_number)} anulada."

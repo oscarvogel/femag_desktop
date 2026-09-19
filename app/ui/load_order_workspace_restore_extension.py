@@ -69,6 +69,7 @@ def _restored_load_order_page(self):
     new_button = desktop._action_button("newLoadOrderButton", "Nuevo")
     edit_button = desktop._action_button("editLoadOrderButton", "Editar", secondary=True)
     detail_button = desktop._action_button("detailLoadOrderButton", "Ver detalle", secondary=True)
+    history_button = desktop._action_button("historyLoadOrderButton", "Historial", secondary=True)
     pallets_button = desktop._action_button("palletsLoadOrderButton", "Pallets", secondary=True)
     issue_button = desktop._action_button("issueLoadOrderButton", "Emitir")
     close_button = desktop._action_button("closeLoadOrderButton", "Cerrar", secondary=True)
@@ -81,6 +82,7 @@ def _restored_load_order_page(self):
     desktop._set_button_icon(new_button, QStyle.SP_FileIcon)
     desktop._set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
     desktop._set_button_icon(detail_button, QStyle.SP_FileDialogInfoView)
+    desktop._set_button_icon(history_button, QStyle.SP_FileDialogInfoView)
     desktop._set_button_icon(pallets_button, QStyle.SP_DirOpenIcon)
     desktop._set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
     desktop._set_button_icon(close_button, QStyle.SP_DialogCloseButton)
@@ -95,6 +97,7 @@ def _restored_load_order_page(self):
         new_button,
         edit_button,
         detail_button,
+        history_button,
         pallets_button,
         issue_button,
         close_button,
@@ -271,6 +274,7 @@ def _restored_load_order_page(self):
             issue_button,
             edit_button,
             detail_button,
+            history_button,
             pallets_button,
             close_button,
             reprint_button,
@@ -283,6 +287,7 @@ def _restored_load_order_page(self):
         issue_button.setEnabled(is_pending)
         edit_button.setEnabled(is_pending)
         detail_button.setEnabled(True)
+        history_button.setEnabled(True)
         pallets_button.setEnabled(order.is_unissued or order.pallets.exists())
         close_button.setEnabled(is_issued)
         has_original_print = desktop._has_printed_load_order(order)
@@ -294,6 +299,13 @@ def _restored_load_order_page(self):
             feedback.show_warning("Seleccione una orden para ver el detalle.", focus_widget=table)
             return
         desktop.LoadOrderDetailDialog(order, self).exec_()
+
+    def open_history_dialog() -> None:
+        order = selected_order()
+        if order is None:
+            feedback.show_warning("Seleccione una orden para ver su historial.", focus_widget=table)
+            return
+        desktop.LoadOrderHistoryDialog(order, self).exec_()
 
     def open_new_order_dialog() -> None:
         dialog = desktop.LoadOrderEntryDialog(service, self.shell.username, self)
@@ -367,10 +379,20 @@ def _restored_load_order_page(self):
         if order is None:
             feedback.show_warning("Seleccione una orden para anular.", focus_widget=table)
             return
+        if not desktop._can_annul_load_orders(self.user):
+            feedback.show_error(
+                "No tiene permiso para anular ordenes de carga.",
+                focus_widget=table,
+            )
+            return
+        dialog = desktop.LoadOrderAnnulDialog(order, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
         try:
             annulled = operation_service.annul(
                 order,
-                can_annul=desktop._can_annul_load_orders(self.user),
+                can_annul=True,
+                reason=dialog.reason(),
             )
             selected_order_id["value"] = annulled.id
             refresh()
@@ -509,6 +531,7 @@ def _restored_load_order_page(self):
     new_button.clicked.connect(open_new_order_dialog)
     edit_button.clicked.connect(open_edit_order_dialog)
     detail_button.clicked.connect(open_detail_dialog)
+    history_button.clicked.connect(open_history_dialog)
     pallets_button.clicked.connect(open_pallets_dialog)
     search_button.clicked.connect(refresh)
     clear_filters_button.clicked.connect(clear_filters)
