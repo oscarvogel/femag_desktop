@@ -40,6 +40,31 @@ def _complete_order_for_issue(order, current_user):
     return order
 
 
+def test_desktop_window_builds_with_prefetched_load_orders(db):
+    from PyQt5.QtWidgets import QApplication, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="perf_prefetch_ui", password_hash="x", profile=profile)
+    data = _master_data()
+    LoadOrderService(current_user=user.username).create_order(
+        **_valid_order_payload(data)
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    assert table is not None
+    assert table.rowCount() >= 1
+
+
 def test_load_order_product_action_uses_visible_warning_when_destination_is_missing(db):
     from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
 
