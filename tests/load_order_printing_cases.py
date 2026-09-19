@@ -342,7 +342,7 @@ def test_pdf_marks_annulled_order_without_changing_status(db, tmp_path):
     from app.services.load_order_print_service import LoadOrderPrintService
 
     order = _order()
-    annulled = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).annul(order, can_annul=True)
+    annulled = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).annul(order, can_annul=True, reason="Anulación de prueba")
 
     pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(annulled, tmp_path)
     text = _pdf_text(pdf_path)
