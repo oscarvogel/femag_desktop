@@ -186,7 +186,10 @@ def test_customer_ledger_registers_displays_and_reverses_manual_credit(db):
     page = CustomerLedgerPage(
         current_user="caja",
         register_manual_credit_callback=register,
-        reverse_manual_credit_callback=service.reverse_manual_credit,
+        reverse_manual_credit_callback=lambda movement: service.reverse_manual_credit(
+            movement,
+            reason="Reverso desde UI de prueba",
+        ),
     )
     register(client)
     page.refresh()
