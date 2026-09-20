@@ -76,9 +76,15 @@ class ManagerialDashboardPage(QWidget):
         super().__init__(parent)
         self.setObjectName("managerialDashboardPage")
         self.service = service or ManagerialDashboardService()
+        self._loaded = False
         self._build_ui()
         self._apply_preset("este mes")
-        self.refresh()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._loaded:
+            self._loaded = True
+            self.refresh()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
