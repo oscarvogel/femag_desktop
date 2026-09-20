@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.services.audit_query_service import AuditQueryService
+from app.utils.datetime_utils import utc_datetime_to_local
 
 
 class AuditQueryPage(QWidget):
@@ -178,9 +179,7 @@ class AuditQueryPage(QWidget):
 
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
-            occurred = row.occurred_at
-            if getattr(occurred, "tzinfo", None) is not None:
-                occurred = occurred.astimezone()
+            occurred = utc_datetime_to_local(row.occurred_at)
             values = (
                 occurred.strftime("%d/%m/%Y %H:%M"),
                 row.module,

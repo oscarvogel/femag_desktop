@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 from app.models.accounting import ClientAccountMovement
 from app.models.budgets import Budget
 from app.services.audit_history_service import AuditHistoryEvent, AuditHistoryService
+from app.utils.datetime_utils import utc_datetime_to_local
 
 
 class FinancialHistoryDialog(QDialog):
@@ -139,9 +140,7 @@ class FinancialHistoryDialog(QDialog):
 
     @staticmethod
     def _row_values(event: AuditHistoryEvent) -> tuple[str, str, str, str, str]:
-        occurred = event.occurred_at
-        if getattr(occurred, "tzinfo", None) is not None:
-            occurred = occurred.astimezone()
+        occurred = utc_datetime_to_local(event.occurred_at)
         transition = ""
         if event.previous_status or event.new_status:
             transition = f"{event.previous_status or '—'} → {event.new_status or '—'}"
