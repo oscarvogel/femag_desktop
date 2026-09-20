@@ -472,6 +472,120 @@ def test_list_orders_returns_created_orders_newest_first(db):
     assert service.list_orders(status=first.STATUS_CLOSED) == [first]
     assert service.list_orders(client=data["client"]) == [second, first]
 
+def test_list_orders_page_uses_50_rows_and_searches_full_database(db):
+    from datetime import date
+
+    from app.models.load_orders import LoadOrder, LoadOrderDestination
+    from app.models.masters import Client, ClientAddress
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    old_client = Client.create(
+        name="Cliente Historico Buscable",
+        cuit="30700000999",
+        iva_condition="RI",
+    )
+    old_address = ClientAddress.create(
+        client=old_client,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Ruta historica 999",
+    )
+
+    created = []
+    for number in range(1, 56):
+        created.append(
+            LoadOrder.create(
+                order_number=number,
+                date=date(2026, 1, 1),
+                carrier=data["carrier"],
+                driver=data["driver"],
+                truck=data["truck"],
+                status=LoadOrder.STATUS_CLOSED,
+                created_by="paging_test",
+                updated_by="paging_test",
+            )
+        )
+
+    LoadOrderDestination.create(
+        order=created[0],
+        client=old_client,
+        delivery_address=old_address,
+        sequence=1,
+    )
+
+    service = LoadOrderService(current_user="paging_test")
+    first_page, total = service.list_orders_page(page=1, page_size=50)
+    second_page, total_second = service.list_orders_page(page=2, page_size=50)
+
+    assert total == 55
+    assert total_second == 55
+    assert len(first_page) == 50
+    assert len(second_page) == 5
+    assert first_page[0].order_number == 55
+    assert second_page[-1].order_number == 1
+
+    matches, match_total = service.list_orders_page(
+        page=1,
+        page_size=50,
+        search="Historico Buscable",
+    )
+    assert match_total == 1
+    assert [row.order_number for row in matches] == [1]
+
+
+def test_build_grid_snapshots_preserves_visible_order_data(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    rows = service.list_orders()
+    snapshots = service.build_grid_snapshots(rows)
+    snapshot = snapshots[order.id]
+
+    assert snapshot["clients_summary"] == "Cliente FEMAG"
+    assert snapshot["deliveries_summary"] == "Posadas"
+    assert snapshot["products_summary"] == "Fecula de mandioca"
+    assert snapshot["carrier_name"] == "Transporte Norte"
+    assert snapshot["driver_name"] == "Juan Perez"
+    assert snapshot["truck_domain"] == "AB123CD"
+
+    regular = service.composition(order)
+    bulk = snapshot["composition"]
+    assert bulk.can_issue == regular.can_issue
+    assert bulk.pending_quantity == regular.pending_quantity
+    assert len(bulk.pallets) == len(regular.pallets)
+
+
+def test_list_orders_prefetched_preserves_relations_and_composition(db):
+    from app.services.load_order_service import LoadOrderService
+
+    data = _master_data()
+    service = LoadOrderService(current_user="admin")
+    order = service.create_order(**_valid_order_payload(data))
+
+    loaded = service.list_orders_prefetched()
+    assert [row.id for row in loaded] == [order.id]
+
+    prefetched = loaded[0]
+    assert [destination.client.name for destination in prefetched.destinations] == [
+        "Cliente FEMAG"
+    ]
+    assert [line.product.name for line in prefetched.products] == [
+        "Fecula de mandioca"
+    ]
+
+    loaded_composition = service.composition_from_loaded(prefetched)
+    regular_composition = service.composition(order)
+
+    assert loaded_composition.can_issue == regular_composition.can_issue
+    assert loaded_composition.pending_quantity == regular_composition.pending_quantity
+    assert len(loaded_composition.pallets) == len(regular_composition.pallets)
+
+
 def test_update_order_rejects_direct_status_changes(db):
     from app.models.load_orders import LoadOrder
     from app.services.load_order_service import LoadOrderService
