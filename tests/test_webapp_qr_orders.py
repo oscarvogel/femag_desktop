@@ -197,3 +197,38 @@ def test_annulled_order_token_is_rejected_by_service(db):
         assert "anulada" in str(exc).lower()
     else:
         raise AssertionError("Una orden anulada no debe resolverse como operativa")
+
+
+def test_pwa_manifest_and_service_worker_are_available(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.mimetype == "application/manifest+json"
+    payload = manifest.get_json()
+    assert payload["name"] == "FEMAG · Despachos"
+    assert payload["display"] == "standalone"
+    assert payload["start_url"] == "/"
+    assert payload["icons"][0]["src"] == "/pwa/icon.png"
+
+    service_worker = client.get("/service-worker.js")
+    assert service_worker.status_code == 200
+    assert b"serviceWorker" not in service_worker.data
+    assert b"fetch" in service_worker.data
+
+    icon = client.get("/pwa/icon.png")
+    assert icon.status_code == 200
+    assert icon.mimetype == "image/png"
+
+
+def test_base_template_registers_pwa(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get("/")
+
+    assert b"manifest.webmanifest" in response.data
+    assert b"serviceWorker.register" in response.data
+    assert b"apple-mobile-web-app-capable" in response.data
