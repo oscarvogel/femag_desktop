@@ -53,7 +53,7 @@ def _restored_load_order_page(self):
     )
     selected_order_id: dict[str, int | None] = {"value": None}
     refreshing_selection: dict[str, bool] = {"value": False}
-    result_limit = 50
+    page_state = {"page": 1, "page_size": 50, "total": 0, "pages": 1}
 
     layout.addWidget(desktop._load_order_metrics_strip(service))
     feedback = FormFeedback("loadOrderFeedback")
@@ -182,6 +182,23 @@ def _restored_load_order_page(self):
     table.setAlternatingRowColors(True)
     table.setSortingEnabled(False)
     left_layout.addWidget(table, 1)
+
+    pagination_row = QHBoxLayout()
+    pagination_row.setSpacing(8)
+    previous_page_button = desktop._action_button(
+        "previousLoadOrderPageButton", "Anterior", secondary=True
+    )
+    next_page_button = desktop._action_button(
+        "nextLoadOrderPageButton", "Siguiente", secondary=True
+    )
+    page_label = QLabel("Página 1 de 1 · 0 orden(es)")
+    page_label.setObjectName("loadOrderPageLabel")
+    pagination_row.addWidget(previous_page_button)
+    pagination_row.addWidget(next_page_button)
+    pagination_row.addStretch(1)
+    pagination_row.addWidget(page_label)
+    left_layout.addLayout(pagination_row)
+
     layout.addWidget(left_panel, 1)
 
     def _parsed_order_number() -> int | None:
@@ -199,16 +216,41 @@ def _restored_load_order_page(self):
         client_id = client_filter.itemData(index)
         return Client.get_by_id(client_id) if client_id else None
 
-    def refresh() -> None:
-        if not hasattr(service, "list_orders"):
-            feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
+    def refresh(*, page_number: int | None = None) -> None:
+        if not hasattr(service, "list_orders_page"):
+            feedback.show_info("Paginación de órdenes no disponible en la capa funcional.")
             return
+        if page_number is not None:
+            page_state["page"] = max(1, int(page_number))
+
         day = date_filter.date().toPyDate() if date_enabled.isChecked() else None
-        rows = service.list_orders(
+        rows, total = service.list_orders_page(
+            page=page_state["page"],
+            page_size=page_state["page_size"],
             client=_selected_client(),
             day=day,
             order_number=_parsed_order_number(),
-            limit=result_limit,
+        )
+        page_state["total"] = total
+        page_state["pages"] = max(
+            1,
+            (total + page_state["page_size"] - 1) // page_state["page_size"],
+        )
+        if page_state["page"] > page_state["pages"]:
+            page_state["page"] = page_state["pages"]
+            rows, total = service.list_orders_page(
+                page=page_state["page"],
+                page_size=page_state["page_size"],
+                client=_selected_client(),
+                day=day,
+                order_number=_parsed_order_number(),
+            )
+            page_state["total"] = total
+
+        snapshots = (
+            service.build_grid_snapshots(rows)
+            if hasattr(service, "build_grid_snapshots")
+            else {}
         )
         selected_id = selected_order_id["value"]
         if rows and not any(order.id == selected_id for order in rows):
@@ -220,13 +262,17 @@ def _restored_load_order_page(self):
             table.setRowCount(len(rows))
             selected_row = 0
             for row_index, order in enumerate(rows):
+                snapshot = snapshots.get(order.id) or {}
+                composition = snapshot.get("composition")
+                if composition is None:
+                    composition = service.composition(order)
                 values = (
                     desktop._format_order_number(order.order_number),
                     order.date.strftime("%d/%m/%Y"),
-                    desktop._summarize_order_clients(order),
-                    desktop._summarize_order_deliveries(order),
-                    desktop._summarize_order_products(order),
-                    desktop._load_order_pallet_progress(service, order),
+                    snapshot.get("clients_summary", ""),
+                    snapshot.get("deliveries_summary", ""),
+                    snapshot.get("products_summary", ""),
+                    desktop._load_order_pallet_progress_from_composition(composition),
                     desktop._display_status(order.status),
                 )
                 for column, value in enumerate(values):
@@ -250,9 +296,16 @@ def _restored_load_order_page(self):
             or client_filter.currentData()
             or date_enabled.isChecked()
         )
-        suffix = " (límite 50)" if len(rows) >= result_limit else ""
         mode = "filtradas" if active_filters else "más recientes"
-        results_label.setText(f"Mostrando {len(rows)} órdenes {mode}{suffix}.")
+        results_label.setText(
+            f"Mostrando {len(rows)} órdenes {mode} en esta página."
+        )
+        page_label.setText(
+            f"Página {page_state['page']} de {page_state['pages']} · "
+            f"{page_state['total']} orden(es)"
+        )
+        previous_page_button.setEnabled(page_state["page"] > 1)
+        next_page_button.setEnabled(page_state["page"] < page_state["pages"])
 
     def selected_order() -> LoadOrder | None:
         if selected_order_id["value"] is None:
@@ -522,7 +575,20 @@ def _restored_load_order_page(self):
         client_filter.setCurrentIndex(0)
         date_enabled.setChecked(False)
         date_filter.setDate(QDate.currentDate())
-        refresh()
+        page_state["page"] = 1
+        refresh(page_number=1)
+
+    def apply_filters() -> None:
+        page_state["page"] = 1
+        refresh(page_number=1)
+
+    def previous_page() -> None:
+        if page_state["page"] > 1:
+            refresh(page_number=page_state["page"] - 1)
+
+    def next_page() -> None:
+        if page_state["page"] < page_state["pages"]:
+            refresh(page_number=page_state["page"] + 1)
 
     table.currentCellChanged.connect(
         lambda row, _column, _previous_row, _previous_column: load_selected(row)
@@ -533,9 +599,11 @@ def _restored_load_order_page(self):
     detail_button.clicked.connect(open_detail_dialog)
     history_button.clicked.connect(open_history_dialog)
     pallets_button.clicked.connect(open_pallets_dialog)
-    search_button.clicked.connect(refresh)
+    search_button.clicked.connect(apply_filters)
     clear_filters_button.clicked.connect(clear_filters)
-    order_filter.returnPressed.connect(refresh)
+    order_filter.returnPressed.connect(apply_filters)
+    previous_page_button.clicked.connect(previous_page)
+    next_page_button.clicked.connect(next_page)
     issue_button.clicked.connect(issue)
     close_button.clicked.connect(close_order)
     annul_button.clicked.connect(annul)
