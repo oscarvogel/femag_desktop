@@ -200,6 +200,31 @@ class ManagerialSummaryService:
         path.write_text(self.render_email_html(summary), encoding="utf-8")
         return path
 
+    @staticmethod
+    def record_delivery(
+        *,
+        mode: str,
+        channel: str,
+        recipient: str,
+        status: str,
+        run_key: str | None = None,
+        provider_message_id: str | None = None,
+        error: str | None = None,
+    ):
+        from app.models.system import ManagerialSummaryDelivery
+        from app.models.base import utc_now
+
+        return ManagerialSummaryDelivery.create(
+            run_key=run_key,
+            mode=mode,
+            channel=channel,
+            recipient=recipient,
+            status=status,
+            provider_message_id=provider_message_id,
+            error=error,
+            finished_at=utc_now(),
+        )
+
     def send_email(
         self,
         summary: ManagerialSummary,
