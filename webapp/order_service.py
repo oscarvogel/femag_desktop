@@ -23,6 +23,10 @@ class InvalidQrPayloadError(ValueError):
     pass
 
 
+class OrderUnavailableError(LookupError):
+    pass
+
+
 def normalize_qr_token(value: str) -> str:
     raw = (value or "").strip()
     if raw.startswith(QR_PREFIX):
