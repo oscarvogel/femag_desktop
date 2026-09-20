@@ -92,20 +92,34 @@ class ManagerialSummarySendDialog(QDialog):
 
         if self.email_check.isChecked():
             try:
-                self.service.send_email(self.summary, recipient=self.email_input.text())
+                recipient = self.email_input.text().strip()
+                self.service.send_email(self.summary, recipient=recipient)
+                self.service.record_delivery(mode="manual", channel="email", recipient=recipient, status="sent")
                 results.append("Email: enviado")
             except Exception as exc:
+                recipient = self.email_input.text().strip()
+                self.service.record_delivery(mode="manual", channel="email", recipient=recipient, status="failed", error=str(exc))
                 errors.append(f"Email: {exc}")
 
         if self.whatsapp_check.isChecked():
             try:
-                self.service.send_whatsapp(
+                recipient = self.phone_input.text().strip()
+                response = self.service.send_whatsapp(
                     self.summary,
-                    phone=self.phone_input.text(),
+                    phone=recipient,
                     instance_id=self.instance_input.text(),
+                )
+                self.service.record_delivery(
+                    mode="manual",
+                    channel="whatsapp",
+                    recipient=recipient,
+                    status=str(response.get("status") or "accepted"),
+                    provider_message_id=response.get("messageId"),
                 )
                 results.append("WhatsApp: aceptado por gateway")
             except Exception as exc:
+                recipient = self.phone_input.text().strip()
+                self.service.record_delivery(mode="manual", channel="whatsapp", recipient=recipient, status="failed", error=str(exc))
                 errors.append(f"WhatsApp: {exc}")
 
         message = "\n".join(results + errors)
