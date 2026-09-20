@@ -1479,6 +1479,22 @@ class FemagDesktopWindow(QMainWindow):
         search_row.addWidget(search_input, 1)
         search_row.addWidget(search_button)
 
+        pagination_row = QHBoxLayout()
+        pagination_row.setContentsMargins(10, 0, 10, 10)
+        pagination_row.setSpacing(8)
+        previous_page_button = _action_button(
+            "previousLoadOrderPageButton", "Anterior", secondary=True
+        )
+        next_page_button = _action_button(
+            "nextLoadOrderPageButton", "Siguiente", secondary=True
+        )
+        page_label = QLabel("Página 1 de 1 · 0 órdenes")
+        page_label.setObjectName("loadOrderPageLabel")
+        pagination_row.addWidget(previous_page_button)
+        pagination_row.addWidget(next_page_button)
+        pagination_row.addStretch(1)
+        pagination_row.addWidget(page_label)
+
         left_layout.addLayout(actions)
         left_layout.addLayout(search_row)
         left_layout.addWidget(feedback)
@@ -1494,15 +1510,55 @@ class FemagDesktopWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
+        left_layout.addLayout(pagination_row)
         layout.addWidget(left_panel, 1)
 
-        def refresh(*, query: str | None = None) -> None:
-            rows = service.list_orders() if hasattr(service, "list_orders") else []
+        page_state = {"page": 1, "page_size": 50, "total": 0, "pages": 1}
+
+        def refresh(*, query: str | None = None, page_number: int | None = None) -> None:
+            query = (query if query is not None else search_input.text()).strip()
+            if page_number is not None:
+                page_state["page"] = max(1, int(page_number))
+
+            if hasattr(service, "list_orders_page"):
+                rows, total = service.list_orders_page(
+                    page=page_state["page"],
+                    page_size=page_state["page_size"],
+                    search=query,
+                )
+            else:
+                rows = service.list_orders(limit=page_state["page_size"]) if hasattr(service, "list_orders") else []
+                total = len(rows)
+
+            page_state["total"] = total
+            page_state["pages"] = max(
+                1,
+                (total + page_state["page_size"] - 1) // page_state["page_size"],
+            )
+            if page_state["page"] > page_state["pages"]:
+                page_state["page"] = page_state["pages"]
+                if hasattr(service, "list_orders_page"):
+                    rows, total = service.list_orders_page(
+                        page=page_state["page"],
+                        page_size=page_state["page_size"],
+                        search=query,
+                    )
+                    page_state["total"] = total
+
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
-            query = (query if query is not None else search_input.text()).strip()
-            if query:
-                rows = [order for order in rows if _matches_load_order_query(order, query)]
+
+            snapshots = (
+                service.build_grid_snapshots(rows)
+                if hasattr(service, "build_grid_snapshots")
+                else {}
+            )
+            page_label.setText(
+                f"Página {page_state['page']} de {page_state['pages']} · "
+                f"{page_state['total']} orden(es)"
+            )
+            previous_page_button.setEnabled(page_state["page"] > 1)
+            next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
             if rows and not any(order.id == selected_id for order in rows):
                 selected_id = rows[0].id
@@ -1516,13 +1572,17 @@ class FemagDesktopWindow(QMainWindow):
                 visual_row = 0
                 selected_row = 0
                 for order in rows:
+                    snapshot = snapshots.get(order.id) or {}
+                    composition = snapshot.get("composition")
+                    if composition is None:
+                        composition = service.composition(order)
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
-                        _summarize_order_clients(order),
-                        _summarize_order_deliveries(order),
-                        _summarize_order_products(order),
-                        _load_order_pallet_progress(service, order),
+                        snapshot.get("clients_summary", ""),
+                        snapshot.get("deliveries_summary", ""),
+                        snapshot.get("products_summary", ""),
+                        _load_order_pallet_progress_from_composition(composition),
                         _display_status(order.status),
                         "",
                     )
@@ -1530,12 +1590,13 @@ class FemagDesktopWindow(QMainWindow):
                         table.setItem(visual_row, column, QTableWidgetItem(value))
                     table.item(visual_row, 0).setData(Qt.UserRole, order.id)
                     table.item(visual_row, 6).setForeground(_status_color(order.status))
+                    has_pallets = bool(composition.pallets)
                     pallet_action = _action_button(
                         f"prepareLoadOrderPalletsButton{order.id}",
-                        _load_order_pallet_action_text(service, order),
-                        secondary=bool(order.pallets.exists()),
+                        _load_order_pallet_action_text_from_composition(order, composition),
+                        secondary=has_pallets,
                     )
-                    pallet_action.setEnabled(order.is_unissued or order.pallets.exists())
+                    pallet_action.setEnabled(order.is_unissued or has_pallets)
                     pallet_action.clicked.connect(
                         lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
                     )
@@ -1543,7 +1604,13 @@ class FemagDesktopWindow(QMainWindow):
                     if order.id == selected_id:
                         selected_row = visual_row
                         visual_row += 1
-                        _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                        _add_load_order_detail_row(
+                            table,
+                            visual_row,
+                            order,
+                            open_detail_dialog,
+                            snapshot=snapshot,
+                        )
                     visual_row += 1
                 if rows:
                     table.setCurrentCell(selected_row, 0)
@@ -1846,12 +1913,26 @@ class FemagDesktopWindow(QMainWindow):
 
         def search_orders() -> None:
             query = search_input.text().strip()
-            refresh(query=query)
-            count = _load_order_table_order_count(table)
+            page_state["page"] = 1
+            refresh(query=query, page_number=1)
             if query:
-                feedback.show_info(f"Buscar '{query}': {count} resultado(s).")
+                feedback.show_info(
+                    f"Buscar '{query}': {page_state['total']} resultado(s)."
+                )
             else:
-                feedback.show_info(f"Buscar: {count} orden(es).")
+                feedback.show_info(
+                    f"Buscar: {page_state['total']} orden(es)."
+                )
+
+        def previous_page() -> None:
+            if page_state["page"] <= 1:
+                return
+            refresh(page_number=page_state["page"] - 1)
+
+        def next_page() -> None:
+            if page_state["page"] >= page_state["pages"]:
+                return
+            refresh(page_number=page_state["page"] + 1)
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
@@ -1859,6 +1940,8 @@ class FemagDesktopWindow(QMainWindow):
         history_button.clicked.connect(open_history_dialog)
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
+        previous_page_button.clicked.connect(previous_page)
+        next_page_button.clicked.connect(next_page)
         issue_button.clicked.connect(issue)
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
@@ -2035,8 +2118,7 @@ def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
     return metrics
 
 
-def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
-    composition = service.composition(order)
+def _load_order_pallet_progress_from_composition(composition) -> str:
     pallet_count = len(composition.pallets)
     if pallet_count == 0:
         return "Sin preparar"
@@ -2051,14 +2133,22 @@ def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> 
     return f"{pallet_count} pallet" + ("s · Revisar pesos" if pallet_count != 1 else " · Revisar pesos")
 
 
-def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
-    if not order.pallets.exists():
+def _load_order_pallet_action_text_from_composition(order: LoadOrder, composition) -> str:
+    if not composition.pallets:
         return "Armar pallets" if order.is_unissued else "Sin pallets"
     if not order.is_unissued:
         return "Ver pallets"
-    if service.composition(order).can_issue:
+    if composition.can_issue:
         return "Editar pallets"
     return "Continuar"
+
+
+def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_progress_from_composition(service.composition(order))
+
+
+def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_action_text_from_composition(order, service.composition(order))
 
 
 def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
@@ -2108,7 +2198,14 @@ class _FieldFocusNavigation(QObject):
         return True
 
 
-def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
+def _add_load_order_detail_row(
+    table: QTableWidget,
+    row: int,
+    order: LoadOrder,
+    open_detail_dialog,
+    *,
+    snapshot: dict | None = None,
+) -> None:
     item = QTableWidgetItem("")
     item.setData(Qt.UserRole, order.id)
     table.setItem(row, 0, item)
@@ -2116,7 +2213,7 @@ def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, 
     detail = _inline_load_order_detail_panel()
     labels: dict[str, QLabel] = detail.property("detailLabels")
     view_button: QPushButton = detail.property("viewDetailButton")
-    _set_inline_load_order_detail(labels, order)
+    _set_inline_load_order_detail(labels, order, snapshot=snapshot)
     view_button.setEnabled(True)
     view_button.clicked.connect(open_detail_dialog)
     table.setCellWidget(row, 0, detail)
@@ -2256,19 +2353,43 @@ def _detail_panel(spec) -> QFrame:
     return panel
 
 
-def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -> None:
-    first_pallet = order.pallets.first()
+def _set_inline_load_order_detail(
+    labels: dict[str, QLabel],
+    order: LoadOrder,
+    *,
+    snapshot: dict | None = None,
+) -> None:
+    snapshot = snapshot or {}
+    if snapshot:
+        clients_summary = snapshot.get("clients_summary", "")
+        deliveries_summary = snapshot.get("deliveries_summary", "")
+        products_summary = snapshot.get("products_summary", "")
+        driver_name = snapshot.get("driver_name", "")
+        carrier_name = snapshot.get("carrier_name", "")
+        truck_domain = snapshot.get("truck_domain", "")
+        pallet_quantity = snapshot.get("first_pallet_quantity", 0)
+        pallet_weight = snapshot.get("first_pallet_weight", "-")
+    else:
+        first_pallet = _first_related(order.pallets)
+        clients_summary = _summarize_order_clients(order)
+        deliveries_summary = _summarize_order_deliveries(order)
+        products_summary = _summarize_order_products(order)
+        driver_name = order.driver.name
+        carrier_name = order.carrier.name
+        truck_domain = order.truck.domain
+        pallet_quantity = first_pallet.quantity if first_pallet else 0
+        pallet_weight = _estimated_weight(first_pallet)
+
     labels["number"].setText(_format_order_number(order.order_number))
     labels["status"].setText(_display_status(order.status))
     labels["status"].setProperty("statusKey", _status_key(order.status))
     labels["summary"].setText(
-        f"{_summarize_order_clients(order)} | {_summarize_order_deliveries(order)} | "
-        f"{_summarize_order_products(order)}"
+        f"{clients_summary} | {deliveries_summary} | {products_summary}"
     )
     labels["transport"].setText(
-        f"{order.date.strftime('%d/%m/%Y')} | {order.driver.name} | "
-        f"{order.carrier.name} | {order.truck.domain} | "
-        f"Pallets: {first_pallet.quantity if first_pallet else 0} | Peso: {_estimated_weight(first_pallet)}"
+        f"{order.date.strftime('%d/%m/%Y')} | {driver_name} | "
+        f"{carrier_name} | {truck_domain} | "
+        f"Pallets: {pallet_quantity} | Peso: {pallet_weight}"
     )
     labels["observations"].setText(f"Obs: {order.observations}" if order.observations else "")
 
@@ -3709,6 +3830,32 @@ def _open_print_output(path: Path) -> None:
     webbrowser.open(target.as_uri())
 
 
+def _matches_load_order_grid_snapshot(
+    order: LoadOrder,
+    snapshot: dict | None,
+    query: str,
+) -> bool:
+    snapshot = snapshot or {}
+    text = " ".join(
+        (
+            _format_order_number(order.order_number),
+            str(order.order_number),
+            order.date.strftime("%d/%m/%Y"),
+            order.status,
+            snapshot.get("carrier_name", ""),
+            snapshot.get("driver_name", ""),
+            snapshot.get("truck_domain", ""),
+            snapshot.get("clients_summary", ""),
+            snapshot.get("deliveries_summary", ""),
+            snapshot.get("products_summary", ""),
+            snapshot.get("destinations_text", ""),
+            snapshot.get("products_text", ""),
+            order.observations or "",
+        )
+    )
+    return query.lower() in text.lower()
+
+
 def _matches_load_order_query(order: LoadOrder, query: str) -> bool:
     text = " ".join(
         (
@@ -3737,6 +3884,10 @@ def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
         return PermissionService().has_permission(user, section, action, title)
     except (InterfaceError, OperationalError):
         return False
+
+
+def _first_related(rows):
+    return next(iter(rows), None)
 
 
 def _summarize_order_clients(order: LoadOrder) -> str:
