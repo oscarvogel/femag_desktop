@@ -63,19 +63,23 @@ def production_health_check() -> int:
 
 
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
+    from app.config.secure_credentials import has_runtime_configuration
+
     packaged_app = bool(getattr(sys, "frozen", False))
+    saved_runtime_config = has_runtime_configuration()
     use_secure_config = bool(
         not demo_mode
         and (
             configure
             or packaged_app
+            or saved_runtime_config
             or os.getenv("FEMAG_SECURE_CONFIG") == "1"
         )
     )
     if use_secure_config:
-        # Un EXE instalado nunca debe heredar accidentalmente SQLite/demo del
-        # entorno del usuario. La configuración segura del puesto es la fuente
-        # autoritativa para MySQL.
+        # Toda ejecución normal (EXE o source) usa la configuración segura
+        # del puesto cuando existe. Así evitamos que .env o variables viejas
+        # de demo redirijan FEMAG a SQLite por accidente.
         os.environ["FEMAG_SECURE_CONFIG"] = "1"
         os.environ["FEMAG_DEMO"] = "0"
         os.environ["FEMAG_DB_ENGINE"] = "mysql"
