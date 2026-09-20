@@ -232,3 +232,16 @@ def test_base_template_registers_pwa(db):
     assert b"manifest.webmanifest" in response.data
     assert b"serviceWorker.register" in response.data
     assert b"apple-mobile-web-app-capable" in response.data
+
+
+def test_home_exposes_direct_pwa_install_button(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get("/")
+
+    assert response.status_code == 200
+    assert b"Instalar FEMAG" in response.data
+    assert b"beforeinstallprompt" in response.data
+    assert b"appinstalled" in response.data
+    assert b"Agregar a pantalla de inicio" in response.data
