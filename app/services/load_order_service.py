@@ -314,6 +314,9 @@ class LoadOrderService:
         page: int = 1,
         page_size: int = 50,
         search: str | None = None,
+        client: Client | None = None,
+        day: date | None = None,
+        order_number: int | None = None,
     ) -> tuple[list[LoadOrder], int]:
         """Devuelve una página de órdenes y el total global filtrado.
 
@@ -323,6 +326,18 @@ class LoadOrderService:
         page = max(1, int(page))
         page_size = max(1, int(page_size))
         query = LoadOrder.select()
+        if client is not None:
+            client = self._require_instance(client, Client, "cliente")
+            destination_orders = LoadOrderDestination.select(
+                LoadOrderDestination.order
+            ).where(LoadOrderDestination.client == client)
+            query = query.where(
+                (LoadOrder.client == client) | (LoadOrder.id.in_(destination_orders))
+            )
+        if day is not None:
+            query = query.where(LoadOrder.date == day)
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
 
         term = (search or "").strip()
         if term:
