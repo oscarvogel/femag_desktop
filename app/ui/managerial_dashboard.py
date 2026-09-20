@@ -18,6 +18,8 @@ from PyQt5.QtWidgets import (
 )
 
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
+from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
+from app.ui.managerial_summary_send import ManagerialSummarySendDialog
 
 
 PERIOD_PRESETS = (
@@ -117,6 +119,16 @@ class ManagerialDashboardPage(QWidget):
         refresh.setObjectName("managerialRefreshButton")
         refresh.clicked.connect(self.refresh)
         header.addWidget(refresh)
+
+        open_html = QPushButton("Abrir dashboard web")
+        open_html.setObjectName("managerialOpenHtmlButton")
+        open_html.clicked.connect(lambda: ManagerialDashboardHtmlReport().open())
+        header.addWidget(open_html)
+
+        send_summary = QPushButton("Enviar resumen gerencial")
+        send_summary.setObjectName("managerialSendSummaryButton")
+        send_summary.clicked.connect(self._open_send_summary)
+        header.addWidget(send_summary)
         root.addLayout(header)
 
         self.policy_label = QLabel()
@@ -225,6 +237,10 @@ class ManagerialDashboardPage(QWidget):
             date(end_qdate.year(), end_qdate.month(), end_qdate.day()),
             self.period_combo.currentText(),
         )
+
+    def _open_send_summary(self) -> None:
+        dialog = ManagerialSummarySendDialog(parent=self)
+        dialog.exec_()
 
     def refresh(self) -> None:
         snapshot = self.service.snapshot(self.selected_period())
