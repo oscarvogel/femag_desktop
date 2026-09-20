@@ -45,10 +45,11 @@ def load_settings() -> Settings:
         secure_connection = load_runtime_connection()
 
     env_file = os.getenv("FEMAG_ENV_FILE", ".env")
-    # El .env local es la fuente unica para configuracion no sensible al modo de DB,
-    # incluido WhatsApp. Las credenciales DB seguras siguen teniendo prioridad.
+    # El .env completa valores faltantes, pero nunca debe pisar variables
+    # explícitas del proceso/shell. Esto evita que una configuración de demo
+    # contamine una ejecución MySQL iniciada expresamente por el operador.
     if load_dotenv:
-        load_dotenv(env_file, override=True)
+        load_dotenv(env_file, override=False)
 
     demo = False if secure_connection else _flag_enabled(os.getenv("FEMAG_DEMO"))
     db_engine = (
