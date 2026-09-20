@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication, QCheckBox, QComboBox, QLineEdit, QTableWidget
+from PyQt5.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton, QTableWidget
 
 from app.ui.desktop_app import FemagDesktopWindow
 from app.ui.load_order_workspace_restore_extension import (
@@ -35,6 +35,59 @@ def test_restored_workspace_contract(db):
     assert window.findChild(QComboBox, "loadOrderClientFilter") is not None
     assert window.findChild(QCheckBox, "loadOrderDateFilterEnabled") is not None
     assert window.findChild(QLineEdit, "loadOrderSearchInput") is None
+
+    window.close()
+
+
+def test_restored_workspace_paginates_real_screen(db):
+    from datetime import date
+
+    from app.models.load_orders import LoadOrder
+    from app.models.masters import Carrier, Driver, Truck
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="workspace_paging", password_hash="x", profile=profile)
+    carrier = Carrier.create(name="Paging Carrier")
+    driver = Driver.create(name="Paging Driver", carrier=carrier)
+    truck = Truck.create(domain="PAGE50", carrier=carrier)
+
+    for number in range(1, 56):
+        LoadOrder.create(
+            order_number=number,
+            date=date(2026, 9, 19),
+            carrier=carrier,
+            driver=driver,
+            truck=truck,
+            status=LoadOrder.STATUS_CLOSED,
+            created_by=user.username,
+            updated_by=user.username,
+        )
+
+    app = QApplication.instance() or QApplication([])
+    install_load_order_workspace_restore_extension()
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    label = window.findChild(QLabel, "loadOrderPageLabel")
+    previous_button = window.findChild(QPushButton, "previousLoadOrderPageButton")
+    next_button = window.findChild(QPushButton, "nextLoadOrderPageButton")
+
+    assert table.rowCount() == 50
+    assert label.text() == "Página 1 de 2 · 55 orden(es)"
+    assert previous_button.isEnabled() is False
+    assert next_button.isEnabled() is True
+
+    next_button.click()
+    app.processEvents()
+
+    assert table.rowCount() == 5
+    assert label.text() == "Página 2 de 2 · 55 orden(es)"
+    assert previous_button.isEnabled() is True
+    assert next_button.isEnabled() is False
 
     window.close()
 
