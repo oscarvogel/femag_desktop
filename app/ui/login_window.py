@@ -19,6 +19,7 @@ class LoginWindow(QDialog):
         super().__init__(parent)
         self.authenticated_user = None
         self.demo_mode = demo_mode
+        self._explicit_close_requested = False
         self.setWindowTitle("FEMAG Desktop - Inicio de sesión")
         self.setWindowIcon(femag_icon())
         self.setFixedWidth(780)
@@ -172,7 +173,7 @@ class LoginWindow(QDialog):
         cancel_btn = QPushButton("Salir")
         cancel_btn.setObjectName("loginCancelButton")
         cancel_btn.setMinimumWidth(90)
-        cancel_btn.clicked.connect(self.reject)
+        cancel_btn.clicked.connect(self._cancel_login)
         buttons.addWidget(cancel_btn)
 
         login_btn = QPushButton("Ingresar")
@@ -189,6 +190,30 @@ class LoginWindow(QDialog):
         root.addWidget(shell)
         self.setLayout(root)
 
+    def _cancel_login(self):
+        self._explicit_close_requested = True
+        logger.info("Login cerrado explícitamente con botón Salir")
+        super().reject()
+
+    def reject(self):
+        if self.authenticated_user is None and not self._explicit_close_requested:
+            logger.warning(
+                "Se ignoró reject() implícito del login sin usuario autenticado"
+            )
+            return
+        super().reject()
+
+    def closeEvent(self, event):  # noqa: N802 - API Qt
+        self._explicit_close_requested = True
+        logger.info("Login cerrado explícitamente con la X")
+        super().closeEvent(event)
+
+    def keyPressEvent(self, event):  # noqa: N802 - API Qt
+        if event.key() == Qt.Key_Escape:
+            self._explicit_close_requested = True
+            logger.info("Login cerrado explícitamente con Esc")
+        super().keyPressEvent(event)
+
     def _fill_demo(self):
         self.username_input.setText("demo")
         self.password_input.setText("demo")
@@ -197,6 +222,7 @@ class LoginWindow(QDialog):
 
     def _attempt_login(self):
         username = self.username_input.text().strip()
+        logger.info("Intento de login para usuario %r", username)
         password = self.password_input.text()
         if not username or not password:
             focus_widget = self.username_input if not username else self.password_input
@@ -216,10 +242,13 @@ class LoginWindow(QDialog):
             self.adjustSize()
             return
         if user is None:
+            logger.info("Login rechazado para usuario %r; diálogo permanece abierto", username)
             self.feedback.show_error(
                 "Usuario o contraseña incorrectos. Verifique sus credenciales.",
                 focus_widget=self.password_input,
             )
+            self.password_input.selectAll()
+            self.password_input.setFocus()
             self.adjustSize()
             return
         self.authenticated_user = user
