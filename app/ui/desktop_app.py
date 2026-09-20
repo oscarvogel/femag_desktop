@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 import webbrowser
@@ -115,6 +116,7 @@ from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
+logger = logging.getLogger(__name__)
 
 
 class _AccountStatementMailSignals(QObject):
@@ -264,7 +266,21 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
             return 0
         user = login.authenticated_user
         app.setStyleSheet(STYLES + glass_v2_stylesheet())
-        window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
+        try:
+            window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
+        except Exception as exc:
+            logger.exception(
+                "Fallo al construir FemagDesktopWindow para usuario %r",
+                getattr(user, "username", None),
+            )
+            QMessageBox.critical(
+                None,
+                "FEMAG Desktop - Error al iniciar",
+                "El usuario fue autenticado, pero no se pudo abrir la ventana principal.\n\n"
+                f"Detalle: {exc}\n\n"
+                "Revise femag.log para ver el traceback completo.",
+            )
+            continue
         window.show()
         result = app.exec_()
         if not window.session_closed:
