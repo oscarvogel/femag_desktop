@@ -164,18 +164,19 @@ class LoginWindow(QDialog):
 
         buttons.addStretch()
 
+        login_btn = QPushButton("Ingresar")
+        login_btn.setObjectName("loginSubmitButton")
+        login_btn.setMinimumWidth(110)
+        login_btn.setDefault(True)
+        login_btn.setAutoDefault(True)
+        login_btn.clicked.connect(self._attempt_login)
+        buttons.addWidget(login_btn)
+
         cancel_btn = QPushButton("Salir")
         cancel_btn.setObjectName("loginCancelButton")
         cancel_btn.setMinimumWidth(90)
         cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(cancel_btn)
-
-        login_btn = QPushButton("Ingresar")
-        login_btn.setObjectName("loginSubmitButton")
-        login_btn.setMinimumWidth(110)
-        login_btn.setDefault(True)
-        login_btn.clicked.connect(self._attempt_login)
-        buttons.addWidget(login_btn)
 
         outer_layout.addLayout(buttons)
 
