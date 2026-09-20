@@ -63,16 +63,30 @@ def production_health_check() -> int:
 
 
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
-    if configure:
+    packaged_app = bool(getattr(sys, "frozen", False))
+    use_secure_config = bool(
+        not demo_mode
+        and (
+            configure
+            or packaged_app
+            or os.getenv("FEMAG_SECURE_CONFIG") == "1"
+        )
+    )
+    if use_secure_config:
+        # Un EXE instalado nunca debe heredar accidentalmente SQLite/demo del
+        # entorno del usuario. La configuración segura del puesto es la fuente
+        # autoritativa para MySQL.
         os.environ["FEMAG_SECURE_CONFIG"] = "1"
-    if not demo_mode and (configure or os.getenv("FEMAG_SECURE_CONFIG") == "1"):
-        from PyQt5.QtWidgets import QApplication
+        os.environ["FEMAG_DEMO"] = "0"
+        os.environ["FEMAG_DB_ENGINE"] = "mysql"
 
+        from PyQt5.QtWidgets import QApplication
         from app.ui.connection_dialog import ensure_runtime_configuration
 
         qt_app = QApplication.instance() or QApplication([])
         if not ensure_runtime_configuration(force=configure):
             return 0
+
     load_settings()
     configure_logging()
     try:
