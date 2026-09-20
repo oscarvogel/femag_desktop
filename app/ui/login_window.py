@@ -1,3 +1,5 @@
+import logging
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QStackedLayout, QSizePolicy, QVBoxLayout, QWidget
@@ -7,6 +9,9 @@ from app.services.auth_service import AuthService
 from app.ui.branding import branding_asset_path, femag_icon, load_brand_pixmap
 from app.ui.form_feedback import FormFeedback
 from app.ui.user_management import InitialAdminDialog
+
+
+logger = logging.getLogger(__name__)
 
 
 class LoginWindow(QDialog):
@@ -200,7 +205,16 @@ class LoginWindow(QDialog):
             )
             self.adjustSize()
             return
-        user = AuthService().authenticate(username, password)
+        try:
+            user = AuthService().authenticate(username, password)
+        except Exception as exc:
+            logger.exception("Fallo inesperado durante autenticación de usuario %r", username)
+            self.feedback.show_error(
+                f"No se pudo completar el ingreso: {exc}",
+                focus_widget=self.password_input,
+            )
+            self.adjustSize()
+            return
         if user is None:
             self.feedback.show_error(
                 "Usuario o contraseña incorrectos. Verifique sus credenciales.",
