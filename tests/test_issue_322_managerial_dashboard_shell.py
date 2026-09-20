@@ -35,7 +35,9 @@ def test_managerial_dashboard_opens_inside_grouped_desktop_shell_for_admin(db):
         assert window.nav.item(row).text().strip() == "Resumen gerencial"
         page = window.stack.widget(window._route_indexes["managerial_dashboard"])
         assert page.objectName() == "managerialDashboardPage"
-        assert page.findChild(type(page.findChild.__self__) if False else object) is not None or page is not None
+        from PyQt5.QtWidgets import QPushButton
+        assert page.findChild(QPushButton, "managerialSendSummaryButton") is not None
+        assert page.findChild(QPushButton, "managerialOpenHtmlButton") is not None
         window.close()
     finally:
         uninstall_managerial_dashboard_extension()
