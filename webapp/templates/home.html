@@ -5,6 +5,8 @@
   <h1>Buscar orden de despacho</h1>
   <p class="muted">Escaneá el QR con la cámara o pegá el contenido leído. Acepta <strong>FEMAG:LOAD_ORDER:&lt;token&gt;</strong> o solamente el token.</p>
 
+  <button id="installAppButton" type="button" hidden style="margin-bottom:10px">Instalar FEMAG</button>
+  <p id="installAppHint" class="muted" hidden style="margin-bottom:12px"></p>
   <button id="scanButton" type="button">Escanear QR</button>
   <div id="scanner" hidden style="margin-top:14px">
     <video id="scannerVideo" playsinline muted style="width:100%;max-height:420px;border-radius:12px;background:#111"></video>
@@ -23,6 +25,8 @@
 
 <script>
 (() => {
+  const installButton = document.getElementById('installAppButton');
+  const installHint = document.getElementById('installAppHint');
   const scanButton = document.getElementById('scanButton');
   const stopButton = document.getElementById('stopScanButton');
   const scanner = document.getElementById('scanner');
@@ -33,6 +37,53 @@
   let stream = null;
   let detector = null;
   let scanning = false;
+  let deferredInstallPrompt = null;
+
+  const isStandalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
+
+  if (!isStandalone) {
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      installButton.hidden = false;
+      installHint.hidden = true;
+    });
+
+    const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    if (isIos) {
+      installButton.hidden = false;
+      installHint.hidden = true;
+    }
+  }
+
+  installButton.addEventListener('click', async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      if (choice.outcome === 'accepted') {
+        installButton.hidden = true;
+        installHint.hidden = true;
+      }
+      return;
+    }
+
+    const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    if (isIos) {
+      installHint.textContent = 'En Safari: Compartir → Agregar a pantalla de inicio.';
+    } else {
+      installHint.textContent = 'Si no aparece el instalador, abrí el menú del navegador y elegí “Instalar aplicación”.';
+    }
+    installHint.hidden = false;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installButton.hidden = true;
+    installHint.hidden = true;
+    deferredInstallPrompt = null;
+  });
 
   function stopScanner() {
     scanning = false;
