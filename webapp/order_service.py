@@ -37,9 +37,14 @@ def normalize_qr_token(value: str) -> str:
 def get_order_by_token(value: str) -> LoadOrder:
     token = normalize_qr_token(value)
     try:
-        return LoadOrder.get(LoadOrder.qr_token == token)
+        order = LoadOrder.get(LoadOrder.qr_token == token)
     except DoesNotExist as exc:
         raise OrderNotFoundError("No se encontró una orden para este QR.") from exc
+    if order.status == LoadOrder.STATUS_ANNULLED:
+        raise OrderUnavailableError(
+            f"La orden #{order.order_number} está anulada y no puede operarse desde el QR."
+        )
+    return order
 
 
 def order_lines(order: LoadOrder) -> list[LoadOrderProduct]:
