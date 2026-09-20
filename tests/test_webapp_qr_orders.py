@@ -1,5 +1,8 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
+
+from PIL import Image
 
 from conftest import _master_data
 
@@ -211,16 +214,26 @@ def test_pwa_manifest_and_service_worker_are_available(db):
     assert payload["name"] == "FEMAG · Despachos"
     assert payload["display"] == "standalone"
     assert payload["start_url"] == "/"
-    assert payload["icons"][0]["src"] == "/pwa/icon.png"
+    assert payload["icons"][0]["src"] == "/pwa/icon-192.png"
+    assert payload["icons"][0]["sizes"] == "192x192"
+    assert payload["icons"][1]["src"] == "/pwa/icon-512.png"
+    assert payload["icons"][1]["sizes"] == "512x512"
 
     service_worker = client.get("/service-worker.js")
     assert service_worker.status_code == 200
     assert b"serviceWorker" not in service_worker.data
     assert b"fetch" in service_worker.data
 
-    icon = client.get("/pwa/icon.png")
-    assert icon.status_code == 200
-    assert icon.mimetype == "image/png"
+    icon_192 = client.get("/pwa/icon-192.png")
+    assert icon_192.status_code == 200
+    assert icon_192.mimetype == "image/png"
+
+    icon_512 = client.get("/pwa/icon-512.png")
+    assert icon_512.status_code == 200
+    assert icon_512.mimetype == "image/png"
+
+    assert Image.open(BytesIO(icon_192.data)).size == (192, 192)
+    assert Image.open(BytesIO(icon_512.data)).size == (512, 512)
 
 
 def test_base_template_registers_pwa(db):
