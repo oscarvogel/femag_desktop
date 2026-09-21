@@ -108,6 +108,7 @@ def test_issue_512_payment_detail_resolves_and_renders_compound_payment(db):
 
 
 def test_issue_512_customer_ledger_detail_button_and_double_click_use_same_action(db, monkeypatch):
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
 
     from app.models.accounting import ClientAccountMovement
