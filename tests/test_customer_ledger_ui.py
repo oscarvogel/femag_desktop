@@ -357,10 +357,12 @@ def test_customer_ledger_can_start_first_manual_debit_without_existing_movements
     )
     app.processEvents()
 
-    assert page.clients_table.rowCount() == 0
+    assert page.clients_table.rowCount() == 1
+    assert "Cliente Sin Movimientos" in page.clients_table.item(0, 0).text()
+    assert page.clients_table.item(0, 1).text() == "$0.00"
     assert page.register_manual_debit_button.isEnabled()
     page.register_manual_debit_button.click()
-    assert presets == [None]
+    assert presets == [client]
 
 
 def test_desktop_wires_manual_debit_actions_into_customer_ledger(db):
