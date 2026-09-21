@@ -237,7 +237,7 @@ def test_customer_ledger_can_start_first_manual_credit_without_movements(db):
     from app.ui.customer_ledger import CustomerLedgerPage
 
     app = QApplication.instance() or QApplication([])
-    Client.create(
+    client = Client.create(
         name="Cliente Sin Movimientos Crédito",
         cuit="30700001288",
         iva_condition="RI",
@@ -249,10 +249,12 @@ def test_customer_ledger_can_start_first_manual_credit_without_movements(db):
     )
     app.processEvents()
 
-    assert page.clients_table.rowCount() == 0
+    assert page.clients_table.rowCount() == 1
+    assert "Cliente Sin Movimientos Crédito" in page.clients_table.item(0, 0).text()
+    assert page.clients_table.item(0, 1).text() == "$0.00"
     assert page.register_manual_credit_button.isEnabled()
     page.register_manual_credit_button.click()
-    assert presets == [None]
+    assert presets == [client]
 
 
 def test_desktop_wires_manual_credit_actions_into_customer_ledger(db):
