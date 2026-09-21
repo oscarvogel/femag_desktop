@@ -176,3 +176,104 @@ def test_issue_512_non_document_movement_disables_detail(db):
 
     assert not page.view_detail_button.isEnabled()
     assert not page.document_detail_action.isEnabled()
+
+
+def test_issue_512_load_order_detail_resolves_from_movement_fk(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+
+    app = QApplication.instance() or QApplication([])
+    product = Product.create(name="Producto OC #512", unit="kg")
+    client = Client.create(
+        name="Cliente OC detalle",
+        cuit="30777779515",
+        iva_condition="RI",
+    )
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12 km 8",
+    )
+    carrier = Carrier.create(name="Transportista #512")
+    driver = Driver.create(name="Chofer #512", carrier=carrier)
+    truck = Truck.create(domain="DET512", carrier=carrier)
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [{"product": product, "quantity": 15}],
+            }
+        ],
+        pallets=[],
+    )
+    movement = ClientAccountMovement.create(
+        client=client,
+        load_order=order,
+        movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
+        total_amount=5000,
+        currency="ARS",
+        movement_date=date(2026, 9, 21),
+        description="Despacho asociado",
+        source_ref=f"LoadOrder:{order.id}",
+        reference=f"OC-{order.order_number:06d}",
+        created_by="admin",
+    )
+
+    kind, document = LedgerDocumentDetailDialog.resolve_document(movement)
+    assert kind == "load_order"
+    assert document.id == order.id
+
+    dialog = LedgerDocumentDetailDialog(movement)
+    app.processEvents()
+
+    assert f"OC-{order.order_number:06d}" in dialog.windowTitle()
+    assert dialog.detail_table.rowCount() == 1
+    assert dialog.detail_table.item(0, 0).text() == client.name
+    assert dialog.detail_table.item(0, 2).text() == product.name
+
+
+def test_issue_512_historical_payment_without_fk_has_read_only_detail(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente pago histórico",
+        cuit="30777779516",
+        iva_condition="RI",
+    )
+    movement = ClientAccountMovement.create(
+        client=client,
+        movement_type=ClientAccountMovement.TYPE_PAYMENT,
+        total_amount=-100955352.96,
+        currency="ARS",
+        movement_date=date(2026, 8, 31),
+        description="Cobro parcial demo para Dashboard Gerencial",
+        source_ref="legacy-payment:7",
+        reference="DEMO-PAGO-7",
+        created_by="demo",
+    )
+
+    kind, document = LedgerDocumentDetailDialog.resolve_document(movement)
+    assert kind == "payment_movement"
+    assert document.id == movement.id
+    assert LedgerDocumentDetailDialog.supports(movement)
+
+    dialog = LedgerDocumentDetailDialog(movement)
+    app.processEvents()
+
+    assert "DEMO-PAGO-7" in dialog.windowTitle()
+    assert dialog.payment_total_label.text() == "$ 100,955,352.96"
