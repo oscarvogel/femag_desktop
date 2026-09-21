@@ -15,14 +15,18 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.models.budgets import Budget
 from app.models.masters import Client, Product
+from app.services.budget_service import BudgetService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 
 
 class ManualBudgetDialog(QDialog):
-    def __init__(self, *, client: Client, parent=None):
+    def __init__(self, *, client: Client, current_user: str, parent=None):
         super().__init__(parent)
         self.client = Client.get_by_id(client.id)
+        self.current_user = current_user
+        self._budget: Budget | None = None
         self.setObjectName("manualBudgetDialog")
         self.setWindowTitle("Nuevo presupuesto manual")
         self.resize(920, 620)
@@ -146,6 +150,9 @@ class ManualBudgetDialog(QDialog):
 
         self._sync_product_defaults()
 
+    def budget(self) -> Budget | None:
+        return self._budget
+
     def budget_items(self) -> list[dict]:
         return [dict(item) for item in self._items]
 
@@ -239,6 +246,15 @@ class ManualBudgetDialog(QDialog):
     def _confirm(self) -> None:
         if not self._items:
             self._show_warning("Agregue al menos un producto al presupuesto.")
+            return
+        try:
+            self._budget = BudgetService(self.current_user).create_manual(
+                client=self.client,
+                items=self.budget_items(),
+                observations=self.observations(),
+            )
+        except Exception as exc:
+            self._show_warning(f"No se pudo crear el presupuesto: {exc}")
             return
         self.accept()
 
