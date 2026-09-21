@@ -207,6 +207,14 @@ class LedgerDocumentDetailDialog(QDialog):
         self.payment_total_label = self._add_row(form, "Importe", _money(payment.amount))
         self._add_row(form, "Medio", self._payment_method_label(payment))
         self._add_row(form, "Referencia", payment.reference or "—")
+        if payment.closure_id is not None:
+            self._add_row(
+                form,
+                "Imputado a",
+                f"OC-{payment.closure.order.order_number:06d} · cierre #{payment.closure.id}",
+            )
+        else:
+            self._add_row(form, "Imputado a", "Cuenta corriente general")
         self._add_row(form, "Observaciones", payment.observations or "—")
         if payment.status == ClientPayment.STATUS_ANNULLED:
             self._add_row(form, "Motivo anulación", payment.annulment_reason or "—")
