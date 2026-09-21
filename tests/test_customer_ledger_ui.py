@@ -462,3 +462,66 @@ def test_customer_ledger_compact_layout_for_real_data(db):
     assert page.whatsapp_statement_action.isEnabled()
     assert page.email_statement_action.isEnabled()
     assert page.totals_label.text()
+
+
+
+def test_issue_511_customer_ledger_splits_debit_credit_and_running_balance(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Debe Haber",
+        cuit="30777779511",
+        iva_condition="RI",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="manual_debit",
+        total_amount=1000,
+        currency="ARS",
+        description="Débito de prueba",
+        source_ref="issue-511:debit",
+        created_by="admin",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="manual_credit",
+        total_amount=-250,
+        currency="ARS",
+        description="Crédito de prueba",
+        source_ref="issue-511:credit",
+        created_by="admin",
+    )
+
+    page = CustomerLedgerPage(current_user="admin")
+    app.processEvents()
+
+    headers = [
+        page.movements_table.horizontalHeaderItem(column).text()
+        for column in range(page.movements_table.columnCount())
+    ]
+    assert headers == [
+        "Fecha",
+        "Tipo",
+        "Referencia",
+        "Descripción",
+        "Debe",
+        "Haber",
+        "Saldo",
+    ]
+
+    assert page.movements_table.rowCount() == 2
+
+    assert page.movements_table.item(0, 4).text() == "$1,000.00"
+    assert page.movements_table.item(0, 5).text() == ""
+    assert page.movements_table.item(0, 6).text() == "$1,000.00"
+
+    assert page.movements_table.item(1, 4).text() == ""
+    assert page.movements_table.item(1, 5).text() == "$250.00"
+    assert page.movements_table.item(1, 6).text() == "$750.00"
+
+    assert page.detail_balance.text() == "$750.00"
