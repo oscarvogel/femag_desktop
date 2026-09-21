@@ -36,6 +36,8 @@ MOVEMENT_TYPE_LABELS = {
     "opening_balance": "Saldo inicial",
     "load_order_documental": "Orden de carga",
     "load_order_documental_reversal": "Reverso OC",
+    "budget_manual": "Presupuesto manual",
+    "budget_manual_reversal": "Anulación presupuesto",
     "payment": "Pago",
     "payment_reversal": "Anulación de pago",
     "manual_debit": "Débito manual",
@@ -70,6 +72,7 @@ class CustomerLedgerPage(QWidget):
         *,
         current_user: str,
         register_payment_callback=None,
+        create_manual_budget_callback=None,
         register_manual_debit_callback=None,
         register_manual_credit_callback=None,
         print_statement_callback=None,
@@ -87,6 +90,7 @@ class CustomerLedgerPage(QWidget):
         self.setObjectName("customerLedgerPage")
         self.current_user = current_user
         self.register_payment_callback = register_payment_callback
+        self.create_manual_budget_callback = create_manual_budget_callback
         self.register_manual_debit_callback = register_manual_debit_callback
         self.register_manual_credit_callback = register_manual_credit_callback
         self.print_statement_callback = print_statement_callback
@@ -211,6 +215,12 @@ class CustomerLedgerPage(QWidget):
         self.register_payment_button.setEnabled(False)
         self.register_payment_button.clicked.connect(self._on_register_payment)
         primary_actions.addWidget(self.register_payment_button)
+
+        self.create_manual_budget_button = QPushButton("Nuevo presupuesto")
+        self.create_manual_budget_button.setObjectName("customerLedgerCreateManualBudgetButton")
+        self.create_manual_budget_button.setEnabled(False)
+        self.create_manual_budget_button.clicked.connect(self._on_create_manual_budget)
+        primary_actions.addWidget(self.create_manual_budget_button)
 
         self.register_manual_debit_button = QPushButton("Registrar débito")
         self.register_manual_debit_button.setObjectName("customerLedgerRegisterManualDebitButton")
@@ -532,6 +542,9 @@ class CustomerLedgerPage(QWidget):
                     cell.setData(Qt.UserRole + 1, movement.id)
                 self.movements_table.setItem(row_index, column, cell)
         self.register_payment_button.setEnabled(self.register_payment_callback is not None)
+        self.create_manual_budget_button.setEnabled(
+            self.create_manual_budget_callback is not None
+        )
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
@@ -585,6 +598,7 @@ class CustomerLedgerPage(QWidget):
         self.movements_table.setRowCount(0)
         self.empty_label.hide()
         self.register_payment_button.setEnabled(False)
+        self.create_manual_budget_button.setEnabled(False)
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
@@ -646,6 +660,15 @@ class CustomerLedgerPage(QWidget):
         if client is None:
             return
         self.register_payment_callback(client)
+        self.refresh()
+
+    def _on_create_manual_budget(self) -> None:
+        if self.create_manual_budget_callback is None:
+            return
+        client = self._selected_client()
+        if client is None:
+            return
+        self.create_manual_budget_callback(client)
         self.refresh()
 
     def _on_register_manual_debit(self) -> None:
