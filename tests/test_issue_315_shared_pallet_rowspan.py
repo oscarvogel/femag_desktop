@@ -43,7 +43,7 @@ def test_regular_detail_prints_physical_pallet_and_rowspans_all_its_articles():
     assert table._cellvalues[2][2].style.alignment == 1
 
 
-def test_identical_single_product_pallets_are_grouped_without_adding_quantities():
+def test_identical_single_product_pallets_are_grouped_with_total_quantity():
     service = _service()
     block = {
         "destination": "GNESETTI SOFIA - ESPAÑA 3757",
@@ -74,6 +74,37 @@ def test_identical_single_product_pallets_are_grouped_without_adding_quantities(
     assert rows[2][1] == "60 UNIDADES"
     assert rows[2][2] == "9 pallets"
     assert len(rows) == 3
+
+
+def test_grouped_single_product_pallets_print_total_for_reported_cases():
+    service = _service()
+
+    def grouped_row(pallet_count):
+        block = {
+            "destination": "CLIENTE PRUEBA - DESTINO",
+            "pallet_blocks": [
+                {
+                    "label": str(sequence),
+                    "rows": [
+                        {
+                            "product": "BOLSAS DE FECULA NATIVA",
+                            "unit": "UNIDAD",
+                            "quantity": 60,
+                            "lote": "",
+                            "elab": "",
+                        }
+                    ],
+                }
+                for sequence in range(1, pallet_count + 1)
+            ],
+            "loose_block": None,
+            "unassigned_block": None,
+        }
+        table = service._destination_table(block)
+        return [_plain_text(cell) for cell in table._cellvalues[2]]
+
+    assert grouped_row(19)[1:3] == ["1140 UNIDADES", "19 pallets"]
+    assert grouped_row(2)[1:3] == ["120 UNIDADES", "2 pallets"]
 
 
 def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
