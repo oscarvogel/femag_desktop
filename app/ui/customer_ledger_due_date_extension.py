@@ -4,7 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QHeaderView, QTableWidgetItem
 
 
-DUE_DATE_COLUMN = 6
+DUE_DATE_COLUMN = 7
 
 
 def install_customer_ledger_due_date_extension() -> None:
@@ -20,7 +20,7 @@ def install_customer_ledger_due_date_extension() -> None:
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            if self.movements_table.columnCount() == 6:
+            if self.movements_table.columnCount() == DUE_DATE_COLUMN:
                 self.movements_table.insertColumn(DUE_DATE_COLUMN)
                 self.movements_table.setHorizontalHeaderItem(
                     DUE_DATE_COLUMN, QTableWidgetItem("Vencimiento")
