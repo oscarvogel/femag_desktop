@@ -123,9 +123,13 @@ class LedgerDocumentDetailDialog(QDialog):
         return value_label
 
     def _build_budget(self, layout: QVBoxLayout, budget: Budget) -> None:
-        self.setWindowTitle(f"Detalle de presupuesto {budget.display_number}")
+        order_reference = budget.load_order_reference
+        title_text = f"Presupuesto {budget.display_number}"
+        if order_reference:
+            title_text += f" · {order_reference}"
+        self.setWindowTitle(f"Detalle de {title_text}")
         title, subtitle = self._title(
-            f"Presupuesto {budget.display_number}",
+            title_text,
             "Detalle completo del presupuesto asociado al movimiento de cuenta corriente.",
         )
         layout.addWidget(title)
@@ -144,7 +148,7 @@ class LedgerDocumentDetailDialog(QDialog):
             "Origen",
             "Manual" if budget.origin == Budget.ORIGIN_MANUAL else "Orden de carga",
         )
-        self._add_row(form, "Orden de carga", budget.load_order_reference or "—")
+        self.order_reference_label = self._add_row(form, "Orden asociada", order_reference or "—")
         self._add_row(form, "Neto", _money(budget.net_amount))
         self._add_row(form, "Descuento", _money(budget.discount_amount))
         self._add_row(form, "IVA", _money(budget.vat_amount))
