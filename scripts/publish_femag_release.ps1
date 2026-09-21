@@ -95,9 +95,11 @@ function Assert-CleanWorkspace {
     }
 
     $status = @(git -C $repoRoot status --porcelain)
+    $generatedBuildIdentity = @('app/build_info.py', 'app/build_version.py')
     $releaseInputs = @('app/', 'installer/', 'scripts/', 'requirements.txt', 'requirements-web.txt', 'requirements-build.txt')
     $relevant = @($status | Where-Object {
         $path = $_.Substring([Math]::Min(3, $_.Length)).Trim().Replace('\', '/')
+        if ($path -in $generatedBuildIdentity) { return $false }
         $releaseInputs | Where-Object { $path -eq $_ -or $path.StartsWith($_) }
     })
     if ($relevant.Count -gt 0) {
@@ -106,6 +108,27 @@ function Assert-CleanWorkspace {
     if ($status.Count -gt 0) {
         Write-Host 'Se ignoran cambios locales fuera del código y artefactos del release.'
     }
+}
+
+function Set-CandidateBuildIdentity {
+    param([Parameter(Mandatory = $true)] [string]$BuildVersion)
+
+    if ($BuildVersion -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$') {
+        throw "Versión de build inválida: $BuildVersion"
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText(
+        (Join-Path $repoRoot 'app\build_version.py'),
+        "BUILD_VERSION = `"$BuildVersion`"`n",
+        $utf8NoBom
+    )
+    [System.IO.File]::WriteAllText(
+        (Join-Path $repoRoot 'app\build_info.py'),
+        "APP_ID = `"femag`"`nBUILD_VERSION = `"$BuildVersion`"`n",
+        $utf8NoBom
+    )
+    Write-Host "Identidad candidate preparada: $BuildVersion"
 }
 
 function Invoke-LocalValidation {
@@ -128,12 +151,15 @@ function Invoke-LocalValidation {
 }
 
 function Invoke-ProductionBuild {
+    param([Parameter(Mandatory = $true)] [string]$BuildVersion)
+
     Write-Host 'Compilando EXE e instalador localmente...'
     Invoke-Checked 'powershell.exe' @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', (Join-Path $repoRoot 'scripts\build_production_installer.ps1'),
-        '-SkipInstallDependencies'
+        '-SkipInstallDependencies',
+        '-BuildVersion', $BuildVersion
     )
 
     $exe = Join-Path $repoRoot 'dist\FEMAG Desktop\FEMAG Desktop.exe'
@@ -270,8 +296,10 @@ function Commit-ReleasesRepository {
 
 function Publish-Candidate {
     Assert-CleanWorkspace
+    $candidateVersion = Get-Date -Format 'yyyy.MM.dd.HH.mm.ss'
+    Set-CandidateBuildIdentity -BuildVersion $candidateVersion
     Invoke-LocalValidation
-    $artifact = Invoke-ProductionBuild
+    $artifact = Invoke-ProductionBuild -BuildVersion $candidateVersion
     Write-Host "Versión local: $($artifact.Version)"
     Write-Host "SHA256: $($artifact.Sha256)"
 

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipInstallDependencies,
+    [string]$BuildVersion,
     [string]$PythonPath,
     [string]$IsccPath,
     [switch]$NoAutoInstall
@@ -17,7 +18,9 @@ $Python = if ($PythonPath) { $PythonPath } else { Join-Path $RepoRoot ".venv\Scr
 if ((-not (Test-Path -LiteralPath $Python)) -and (Get-Command python -ErrorAction SilentlyContinue)) {
     $Python = (Get-Command python).Source
 }
-$BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
+if (-not $BuildVersion) {
+    $BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
+}
 $BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
 $BuildInfoFile = Join-Path $RepoRoot "app\build_info.py"
 $InstallerOutputDir = Join-Path $RepoRoot "installer\output"
