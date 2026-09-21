@@ -32,7 +32,8 @@ def install_workspace_window_policy() -> None:
         window.showMaximized()
 
     def _exec_dialog(dialog: QDialog) -> int:
-        if _is_workspace_dialog_title(dialog.windowTitle()):
+        is_document_detail = dialog.objectName() == "ledgerDocumentDetailDialog"
+        if not is_document_detail and _is_workspace_dialog_title(dialog.windowTitle()):
             dialog.showMaximized()
         return _original_dialog_exec(dialog)
 
