@@ -151,12 +151,15 @@ function Invoke-LocalValidation {
 }
 
 function Invoke-ProductionBuild {
+    param([Parameter(Mandatory = $true)] [string]$BuildVersion)
+
     Write-Host 'Compilando EXE e instalador localmente...'
     Invoke-Checked 'powershell.exe' @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', (Join-Path $repoRoot 'scripts\build_production_installer.ps1'),
-        '-SkipInstallDependencies'
+        '-SkipInstallDependencies',
+        '-BuildVersion', $BuildVersion
     )
 
     $exe = Join-Path $repoRoot 'dist\FEMAG Desktop\FEMAG Desktop.exe'
@@ -293,8 +296,10 @@ function Commit-ReleasesRepository {
 
 function Publish-Candidate {
     Assert-CleanWorkspace
+    $candidateVersion = Get-Date -Format 'yyyy.MM.dd.HH.mm.ss'
+    Set-CandidateBuildIdentity -BuildVersion $candidateVersion
     Invoke-LocalValidation
-    $artifact = Invoke-ProductionBuild
+    $artifact = Invoke-ProductionBuild -BuildVersion $candidateVersion
     Write-Host "Versión local: $($artifact.Version)"
     Write-Host "SHA256: $($artifact.Sha256)"
 
