@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PyQt5.QtWidgets import QApplication
 
@@ -62,3 +62,64 @@ def test_audit_query_page_renders_events(db):
     assert page.table.item(0, 1).text() == "Presupuestos"
     assert page.table.item(0, 2).text() == "PRES-000007"
     assert page.table.item(0, 3).text() == "audit_ui"
+
+
+def test_audit_query_service_paginates_without_materializing_all_rows(db):
+    base = datetime(2026, 9, 21, 12, 0)
+    with db.atomic():
+        for index in range(120):
+            AuditLog.create(
+                user="admin",
+                occurred_at=base + timedelta(seconds=index),
+                module="Auditoría",
+                action="prueba",
+                record_ref=f"Audit:{index}",
+                new_value={"number": f"AUD-{index:04d}"},
+            )
+
+    service = AuditQueryService()
+
+    first = service.search_page(page=0, page_size=50)
+    second = service.search_page(page=1, page_size=50)
+    third = service.search_page(page=2, page_size=50)
+
+    assert len(first.rows) == 50
+    assert first.has_previous is False
+    assert first.has_next is True
+    assert len(second.rows) == 50
+    assert second.has_previous is True
+    assert second.has_next is True
+    assert len(third.rows) == 20
+    assert third.has_previous is True
+    assert third.has_next is False
+
+
+def test_audit_query_page_navigates_50_rows_at_a_time(db):
+    app = QApplication.instance() or QApplication([])
+    base = datetime(2026, 9, 21, 12, 0)
+    with db.atomic():
+        for index in range(75):
+            AuditLog.create(
+                user="admin",
+                occurred_at=base + timedelta(seconds=index),
+                module="Auditoría",
+                action="prueba",
+                record_ref=f"Audit:{index}",
+                new_value={"number": f"AUD-{index:04d}"},
+            )
+
+    page = AuditQueryPage()
+    app.processEvents()
+
+    assert page.table.rowCount() == 50
+    assert page.previous_button.isEnabled() is False
+    assert page.next_button.isEnabled() is True
+    assert "Página 1" in page.results_label.text()
+
+    page.next_page()
+    app.processEvents()
+
+    assert page.table.rowCount() == 25
+    assert page.previous_button.isEnabled() is True
+    assert page.next_button.isEnabled() is False
+    assert "Página 2" in page.results_label.text()
