@@ -24,6 +24,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.ui.financial_history_dialog import FinancialHistoryDialog
+from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
 from app.services.ledger_query_service import (
     client_balance,
     client_balances,
@@ -242,6 +243,13 @@ class CustomerLedgerPage(QWidget):
         )
         primary_actions.addWidget(self.register_manual_credit_button)
 
+        self.view_detail_button = QPushButton("Ver detalle")
+        self.view_detail_button.setObjectName("customerLedgerViewDetailButton")
+        self.view_detail_button.setEnabled(False)
+        self.view_detail_button.setToolTip("Abrir el documento asociado al movimiento seleccionado")
+        self.view_detail_button.clicked.connect(self._on_open_document_detail)
+        primary_actions.addWidget(self.view_detail_button)
+
         self.more_actions_button = QToolButton()
         self.more_actions_button.setObjectName("customerLedgerMoreActionsButton")
         self.more_actions_button.setText("Acciones  ▾")
@@ -259,6 +267,7 @@ class CustomerLedgerPage(QWidget):
 
         self.more_actions_menu.addSeparator()
         self.more_actions_menu.addSection("Movimiento seleccionado")
+        self.document_detail_action = self.more_actions_menu.addAction("Ver detalle")
         self.history_action = self.more_actions_menu.addAction("Ver historial")
         self.whatsapp_budget_action = self.more_actions_menu.addAction(
             "Enviar presupuesto por WhatsApp"
@@ -270,6 +279,7 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_action.triggered.connect(self._on_print_statement)
         self.whatsapp_statement_action.triggered.connect(self._on_whatsapp_statement)
         self.email_statement_action.triggered.connect(self._on_email_statement)
+        self.document_detail_action.triggered.connect(self._on_open_document_detail)
         self.history_action.triggered.connect(self._on_history)
         self.whatsapp_budget_action.triggered.connect(self._on_whatsapp_budget)
         self.print_receipt_action.triggered.connect(self._on_print_receipt)
@@ -363,6 +373,7 @@ class CustomerLedgerPage(QWidget):
         self.movements_table.setShowGrid(False)
         self.movements_table.verticalHeader().setDefaultSectionSize(26)
         self.movements_table.currentCellChanged.connect(self._on_movement_selected)
+        self.movements_table.cellDoubleClicked.connect(self._on_open_document_detail)
         layout.addWidget(self.movements_table, 1)
 
         self.empty_label = QLabel(
@@ -631,6 +642,7 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_button.setEnabled(False)
         self.reverse_manual_debit_button.setEnabled(False)
         self.reverse_manual_credit_button.setEnabled(False)
+        self.view_detail_button.setEnabled(False)
         self._sync_more_actions()
 
     def _sync_more_actions(self) -> None:
@@ -656,6 +668,9 @@ class CustomerLedgerPage(QWidget):
                 or str(movement.source_ref or "").startswith("Budget:")
             )
         )
+        can_view_document = LedgerDocumentDetailDialog.supports(movement)
+        self.view_detail_button.setEnabled(can_view_document)
+        self.document_detail_action.setEnabled(can_view_document)
         self.history_action.setEnabled(
             FinancialHistoryDialog.supports(movement)
         )
@@ -785,6 +800,12 @@ class CustomerLedgerPage(QWidget):
             and self.annul_payment_callback is not None
         )
         self._sync_more_actions()
+
+    def _on_open_document_detail(self, *_args) -> None:
+        movement = self._selected_movement()
+        if not LedgerDocumentDetailDialog.supports(movement):
+            return
+        LedgerDocumentDetailDialog(movement, self).exec_()
 
     def _on_history(self) -> None:
         movement = self._selected_movement()
