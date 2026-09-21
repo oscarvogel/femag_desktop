@@ -76,13 +76,24 @@ class AuditQueryService:
 
         needle = (reference or "").strip()
         if needle:
-            # AuditLog guarda old/new como texto JSON. Este filtro reduce candidatos
-            # en SQL antes de materializar objetos y mantiene record_ref searchable.
-            query = query.where(
+            conditions = (
                 AuditLog.record_ref.contains(needle)
                 | AuditLog.old_value.contains(needle)
                 | AuditLog.new_value.contains(needle)
             )
+            upper = needle.upper()
+            for prefix, json_key in (("OC-", "order_number"), ("PRES-", "budget_number")):
+                if upper.startswith(prefix):
+                    suffix = needle[len(prefix):]
+                    try:
+                        number = int(suffix)
+                    except ValueError:
+                        break
+                    json_fragment = f'"{json_key}": {number}'
+                    conditions |= AuditLog.old_value.contains(json_fragment)
+                    conditions |= AuditLog.new_value.contains(json_fragment)
+                    break
+            query = query.where(conditions)
 
         ordered = query.order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc())
         offset = page * page_size
