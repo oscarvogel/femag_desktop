@@ -19,6 +19,7 @@ from app.models.budgets import Budget
 from app.models.masters import Client, Product
 from app.services.budget_service import BudgetService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.form_feedback import FormFeedback
 
 
 class ManualBudgetDialog(QDialog):
@@ -131,9 +132,7 @@ class ManualBudgetDialog(QDialog):
         self.observations_input.setMaximumHeight(86)
         layout.addWidget(self.observations_input)
 
-        self.feedback = QLabel("")
-        self.feedback.setObjectName("manualBudgetFeedback")
-        self.feedback.setWordWrap(True)
+        self.feedback = FormFeedback("manualBudgetFeedback")
         layout.addWidget(self.feedback)
 
         actions = QHBoxLayout()
@@ -212,7 +211,7 @@ class ManualBudgetDialog(QDialog):
             }
         )
         self._reload_items()
-        self.feedback.clear()
+        self.feedback.clear_message()
         self.quantity_input.setValue(1.0)
 
     def _remove_selected(self) -> None:
@@ -259,7 +258,7 @@ class ManualBudgetDialog(QDialog):
         self.accept()
 
     def _show_warning(self, message: str) -> None:
-        self.feedback.setText(message)
+        self.feedback.show_warning(message)
 
     @staticmethod
     def _quantity(value: float) -> str:
