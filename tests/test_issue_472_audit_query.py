@@ -123,3 +123,20 @@ def test_audit_query_page_navigates_50_rows_at_a_time(db):
     assert page.previous_button.isEnabled() is True
     assert page.next_button.isEnabled() is False
     assert "Página 2" in page.results_label.text()
+
+
+def test_audit_query_page_search_preserves_formatted_load_order_reference(db):
+    AuditLog.create(
+        user="admin",
+        occurred_at=datetime(2026, 9, 21, 13, 0),
+        module="Órdenes de carga",
+        action="emitir",
+        record_ref="LoadOrder:154",
+        new_value={"order_number": 154, "status": "Emitida"},
+    )
+
+    service = AuditQueryService()
+    result = service.search_page(reference="OC-000154")
+
+    assert len(result.rows) == 1
+    assert service.display_reference(result.rows[0]) == "OC-000154"
