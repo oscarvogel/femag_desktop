@@ -137,7 +137,7 @@ class CustomerLedgerPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
-        header = QLabel("Clientes con movimientos")
+        header = QLabel("Clientes")
         header.setObjectName("customerLedgerClientsHeader")
         layout.addWidget(header)
 
@@ -398,6 +398,18 @@ class CustomerLedgerPage(QWidget):
         self.clients_table.blockSignals(True)
         self.clients_table.clearContents()
         all_balances = client_balances()
+        known_client_ids = {entry["client"].id for entry in all_balances}
+        for client in (
+            Client.select()
+            .where(Client.active == True)  # noqa: E712
+            .order_by(Client.name)
+        ):
+            if client.id not in known_client_ids:
+                all_balances.append(
+                    {"client": client, "balance": 0.0, "movements": 0}
+                )
+                known_client_ids.add(client.id)
+
         if self._direct_client_id is not None and not any(
             entry["client"].id == self._direct_client_id for entry in all_balances
         ):
