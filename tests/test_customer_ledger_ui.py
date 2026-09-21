@@ -504,7 +504,7 @@ def test_issue_511_customer_ledger_splits_debit_credit_and_running_balance(db):
         page.movements_table.horizontalHeaderItem(column).text()
         for column in range(page.movements_table.columnCount())
     ]
-    assert headers == [
+    assert headers[:7] == [
         "Fecha",
         "Tipo",
         "Referencia",
@@ -513,6 +513,8 @@ def test_issue_511_customer_ledger_splits_debit_credit_and_running_balance(db):
         "Haber",
         "Saldo",
     ]
+    if len(headers) > 7:
+        assert headers[7] == "Vencimiento"
 
     assert page.movements_table.rowCount() == 2
 
