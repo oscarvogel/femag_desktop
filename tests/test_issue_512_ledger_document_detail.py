@@ -58,6 +58,7 @@ def test_issue_512_budget_detail_resolves_and_renders(db):
     app.processEvents()
 
     assert budget.display_number in dialog.windowTitle()
+    assert dialog.order_reference_label.text() == "—"
     assert dialog.detail_table.rowCount() == 1
     assert dialog.detail_table.item(0, 0).text() == "Fécula detalle #512"
     assert dialog.detail_table.item(0, 1).text() == "2"
