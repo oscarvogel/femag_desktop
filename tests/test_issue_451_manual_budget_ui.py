@@ -129,3 +129,33 @@ def test_customer_ledger_labels_manual_budget_movements(db):
         for row in range(page.movements_table.rowCount())
     ]
     assert "Presupuesto manual" in labels
+
+
+def test_customer_ledger_manual_budget_allows_zero_balance_client(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente sin saldo para presupuesto",
+        cuit="30745100004",
+        iva_condition="RI",
+    )
+    selected = []
+    page = CustomerLedgerPage(
+        current_user="admin",
+        create_manual_budget_callback=selected.append,
+    )
+    app.processEvents()
+
+    assert page.clients_table.rowCount() == 1
+    assert "Cliente sin saldo para presupuesto" in page.clients_table.item(0, 0).text()
+    assert page.clients_table.item(0, 1).text() == "$0.00"
+    assert page.create_manual_budget_button.isEnabled()
+
+    page.create_manual_budget_button.click()
+    app.processEvents()
+
+    assert selected == [client]
