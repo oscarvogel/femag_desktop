@@ -86,6 +86,7 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.glass_v2 import glass_v2_stylesheet
@@ -742,6 +743,7 @@ class FemagDesktopWindow(QMainWindow):
         return CustomerLedgerPage(
             current_user=self.shell.username,
             register_payment_callback=self._open_payment_dialog,
+            create_manual_budget_callback=self._open_manual_budget_dialog,
             register_manual_debit_callback=self._open_manual_debit_dialog,
             register_manual_credit_callback=self._open_manual_credit_dialog,
             print_statement_callback=self._print_account_statement,
@@ -1022,6 +1024,37 @@ class FemagDesktopWindow(QMainWindow):
         )
         worker.signals.finished.connect(lambda: workers.discard(worker))
         _start_mail_worker(worker)
+
+    def _open_manual_budget_dialog(self, preset_client=None) -> None:
+        if preset_client is None:
+            return
+        try:
+            dialog = ManualBudgetDialog(
+                client=preset_client,
+                current_user=self.shell.username,
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Presupuesto manual",
+                f"No se pudo abrir el formulario: {exc}",
+            )
+            return
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        budget = dialog.budget()
+        if budget is None:
+            return
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+        except Exception:
+            return
+        _open_print_output(pdf_path)
 
     def _open_payment_dialog(self, preset_client=None) -> None:
         try:
