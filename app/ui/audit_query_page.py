@@ -23,10 +23,13 @@ from app.utils.datetime_utils import utc_datetime_to_local
 
 
 class AuditQueryPage(QWidget):
+    PAGE_SIZE = 50
+
     def __init__(self, *, parent=None, service: AuditQueryService | None = None):
         super().__init__(parent)
         self.setObjectName("auditQueryPage")
         self.service = service or AuditQueryService()
+        self.current_page = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 12, 18, 18)
@@ -106,9 +109,18 @@ class AuditQueryPage(QWidget):
         grid.addLayout(actions, 3, 0, 1, 4)
         layout.addWidget(filters)
 
+        results_bar = QHBoxLayout()
         self.results_label = QLabel("")
         self.results_label.setObjectName("auditQueryResultsLabel")
-        layout.addWidget(self.results_label)
+        self.previous_button = QPushButton("Anterior")
+        self.previous_button.setObjectName("auditQueryPreviousButton")
+        self.next_button = QPushButton("Siguiente")
+        self.next_button.setObjectName("auditQueryNextButton")
+        results_bar.addWidget(self.results_label)
+        results_bar.addStretch(1)
+        results_bar.addWidget(self.previous_button)
+        results_bar.addWidget(self.next_button)
+        layout.addLayout(results_bar)
 
         self.table = QTableWidget(0, 7)
         self.table.setObjectName("auditQueryTable")
@@ -130,18 +142,22 @@ class AuditQueryPage(QWidget):
         self.table.setShowGrid(False)
 
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        for column in range(6):
+            header.setSectionResizeMode(column, QHeaderView.Interactive)
         header.setSectionResizeMode(6, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 145)
+        self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(2, 150)
+        self.table.setColumnWidth(3, 130)
+        self.table.setColumnWidth(4, 150)
+        self.table.setColumnWidth(5, 180)
         layout.addWidget(self.table, 1)
 
-        self.search_button.clicked.connect(self.refresh)
+        self.search_button.clicked.connect(self.apply_filters)
         self.clear_button.clicked.connect(self.clear_filters)
-        self.reference_input.returnPressed.connect(self.refresh)
+        self.reference_input.returnPressed.connect(self.apply_filters)
+        self.previous_button.clicked.connect(self.previous_page)
+        self.next_button.clicked.connect(self.next_page)
         self.refresh()
 
     @staticmethod
@@ -150,6 +166,10 @@ class AuditQueryPage(QWidget):
         for value in values:
             combo.addItem(value, value)
 
+    def apply_filters(self) -> None:
+        self.current_page = 0
+        self.refresh()
+
     def clear_filters(self) -> None:
         self.module_combo.setCurrentIndex(0)
         self.user_combo.setCurrentIndex(0)
@@ -157,10 +177,23 @@ class AuditQueryPage(QWidget):
         self.reference_input.clear()
         self.date_from_enabled.setChecked(False)
         self.date_to_enabled.setChecked(False)
+        self.current_page = 0
+        self.refresh()
+
+    def previous_page(self) -> None:
+        if self.current_page <= 0:
+            return
+        self.current_page -= 1
+        self.refresh()
+
+    def next_page(self) -> None:
+        if not self.next_button.isEnabled():
+            return
+        self.current_page += 1
         self.refresh()
 
     def refresh(self) -> None:
-        rows = self.service.search(
+        page = self.service.search_page(
             module=self.module_combo.currentData(),
             user=self.user_combo.currentData(),
             action=self.action_combo.currentData(),
@@ -175,27 +208,38 @@ class AuditQueryPage(QWidget):
                 if self.date_to_enabled.isChecked()
                 else None
             ),
+            page=self.current_page,
+            page_size=self.PAGE_SIZE,
         )
 
-        self.table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            occurred = utc_datetime_to_local(row.occurred_at)
-            values = (
-                occurred.strftime("%d/%m/%Y %H:%M"),
-                row.module,
-                self.service.display_reference(row),
-                row.user or "Sistema",
-                row.action.replace("_", " "),
-                self.service.transition(row),
-                self.service.reason_or_summary(row),
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value or ""))
-                if column == 0:
-                    item.setTextAlignment(Qt.AlignCenter)
-                item.setToolTip(str(value or ""))
-                self.table.setItem(row_index, column, item)
+        # Evita repaints parciales mientras se insertan las celdas.
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(len(page.rows))
+            for row_index, row in enumerate(page.rows):
+                occurred = utc_datetime_to_local(row.occurred_at)
+                values = (
+                    occurred.strftime("%d/%m/%Y %H:%M"),
+                    row.module,
+                    self.service.display_reference(row),
+                    row.user or "Sistema",
+                    row.action.replace("_", " "),
+                    self.service.transition(row),
+                    self.service.reason_or_summary(row),
+                )
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value or ""))
+                    if column == 0:
+                        item.setTextAlignment(Qt.AlignCenter)
+                    item.setToolTip(str(value or ""))
+                    self.table.setItem(row_index, column, item)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
+        self.previous_button.setEnabled(page.has_previous)
+        self.next_button.setEnabled(page.has_next)
         self.results_label.setText(
-            f"Mostrando {len(rows)} evento{'s' if len(rows) != 1 else ''} de auditoría."
+            f"Página {page.page + 1} · Mostrando {len(page.rows)} "
+            f"evento{'s' if len(page.rows) != 1 else ''} de auditoría."
         )

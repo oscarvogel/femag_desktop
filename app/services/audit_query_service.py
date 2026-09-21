@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, time
 
 from app.models.audit import AuditLog
+
+
+@dataclass(frozen=True)
+class AuditPage:
+    rows: list[AuditLog]
+    page: int
+    page_size: int
+    has_previous: bool
+    has_next: bool
 
 
 class AuditQueryService:
@@ -15,17 +25,15 @@ class AuditQueryService:
             "actions": self._distinct_values(AuditLog.action),
         }
 
-    def search(
+    def _base_query(
         self,
         *,
         module: str | None = None,
         user: str | None = None,
         action: str | None = None,
-        reference: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
-        limit: int = 500,
-    ) -> list[AuditLog]:
+    ):
         query = AuditLog.select()
         if module:
             query = query.where(AuditLog.module == module)
@@ -41,6 +49,86 @@ class AuditQueryService:
             query = query.where(
                 AuditLog.occurred_at <= datetime.combine(date_to, time.max)
             )
+        return query
+
+    def search_page(
+        self,
+        *,
+        module: str | None = None,
+        user: str | None = None,
+        action: str | None = None,
+        reference: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        page: int = 0,
+        page_size: int = 50,
+    ) -> AuditPage:
+        """Devuelve sólo una página para evitar cargar cientos de filas en la UI."""
+        page = max(int(page), 0)
+        page_size = max(int(page_size), 1)
+        query = self._base_query(
+            module=module,
+            user=user,
+            action=action,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        needle = (reference or "").strip()
+        if needle:
+            conditions = (
+                AuditLog.record_ref.contains(needle)
+                | AuditLog.old_value.contains(needle)
+                | AuditLog.new_value.contains(needle)
+            )
+            upper = needle.upper()
+            for prefix, json_key in (("OC-", "order_number"), ("PRES-", "budget_number")):
+                if upper.startswith(prefix):
+                    suffix = needle[len(prefix):]
+                    try:
+                        number = int(suffix)
+                    except ValueError:
+                        break
+                    json_fragment = f'"{json_key}": {number}'
+                    conditions |= AuditLog.old_value.contains(json_fragment)
+                    conditions |= AuditLog.new_value.contains(json_fragment)
+                    break
+            query = query.where(conditions)
+
+        ordered = query.order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc())
+        offset = page * page_size
+        rows = list(ordered.offset(offset).limit(page_size + 1))
+        has_next = len(rows) > page_size
+        if has_next:
+            rows = rows[:page_size]
+
+        return AuditPage(
+            rows=rows,
+            page=page,
+            page_size=page_size,
+            has_previous=page > 0,
+            has_next=has_next,
+        )
+
+    def search(
+        self,
+        *,
+        module: str | None = None,
+        user: str | None = None,
+        action: str | None = None,
+        reference: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        limit: int = 500,
+    ) -> list[AuditLog]:
+        """Compatibilidad con consultas existentes no paginadas."""
+        query = self._base_query(
+            module=module,
+            user=user,
+            action=action,
+            date_from=date_from,
+            date_to=date_to,
+        )
         rows = list(
             query.order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc())
             .limit(max(int(limit), 1))
