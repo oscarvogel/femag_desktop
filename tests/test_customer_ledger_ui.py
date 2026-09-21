@@ -345,7 +345,7 @@ def test_customer_ledger_can_start_first_manual_debit_without_existing_movements
     from app.ui.customer_ledger import CustomerLedgerPage
 
     app = QApplication.instance() or QApplication([])
-    Client.create(
+    client = Client.create(
         name="Cliente Sin Movimientos",
         cuit="30777779217",
         iva_condition="RI",
