@@ -71,7 +71,7 @@ def test_identical_single_product_pallets_are_grouped_with_total_quantity():
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
     assert rows[2][0] == "BOLSAS DE FECULA NATIVA"
-    assert rows[2][1] == "60 UNIDADES"
+    assert rows[2][1] == "540 UNIDADES"
     assert rows[2][2] == "9 pallets"
     assert len(rows) == 3
 
