@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 
 from app.models.accounting import ClientAccountMovement
 from app.models.budgets import Budget
+from app.models.load_orders import LoadOrder, LoadOrderProduct
 from app.models.payments import ClientPayment, ClientPaymentDetail
 
 
@@ -47,6 +48,10 @@ class LedgerDocumentDetailDialog(QDialog):
 
         if self.document_type == "budget":
             self._build_budget(layout, self.document)
+        elif self.document_type == "load_order":
+            self._build_load_order(layout, self.document)
+        elif self.document_type == "payment_movement":
+            self._build_payment_movement(layout, self.movement)
         else:
             self._build_payment(layout, self.document)
 
@@ -62,7 +67,7 @@ class LedgerDocumentDetailDialog(QDialog):
     def _source_movement(cls, movement: ClientAccountMovement | None):
         if movement is None:
             return None
-        if movement.budget_id is not None or movement.payment_id is not None:
+        if movement.budget_id is not None or movement.payment_id is not None or movement.load_order_id is not None:
             return movement
         if movement.reverses_id is not None:
             return movement.reverses
@@ -71,7 +76,7 @@ class LedgerDocumentDetailDialog(QDialog):
     @classmethod
     def resolve_document(
         cls, movement: ClientAccountMovement | None
-    ) -> tuple[str | None, Budget | ClientPayment | None]:
+    ) -> tuple[str | None, Budget | ClientPayment | LoadOrder | ClientAccountMovement | None]:
         source = cls._source_movement(movement)
         if source is None:
             return None, None
@@ -80,6 +85,8 @@ class LedgerDocumentDetailDialog(QDialog):
             return "budget", Budget.get_or_none(Budget.id == source.budget_id)
         if source.payment_id is not None:
             return "payment", ClientPayment.get_or_none(ClientPayment.id == source.payment_id)
+        if source.load_order_id is not None:
+            return "load_order", LoadOrder.get_or_none(LoadOrder.id == source.load_order_id)
 
         source_ref = str(source.source_ref or "")
         if source_ref.startswith("Budget:"):
@@ -91,6 +98,26 @@ class LedgerDocumentDetailDialog(QDialog):
                 budget = Budget.get_or_none(Budget.id == budget_id)
                 if budget is not None:
                     return "budget", budget
+
+        reference = str(source.reference or "").strip()
+        if reference.startswith("OC-"):
+            try:
+                order_number = int(reference.split("-", 1)[1])
+            except (TypeError, ValueError):
+                order_number = None
+            if order_number is not None:
+                order = LoadOrder.get_or_none(LoadOrder.order_number == order_number)
+                if order is not None:
+                    return "load_order", order
+
+        if source.movement_type in (
+            ClientAccountMovement.TYPE_PAYMENT,
+            ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
+        ):
+            receipt = ClientPayment.get_or_none(ClientPayment.receipt_number == reference)
+            if receipt is not None:
+                return "payment", receipt
+            return "payment_movement", source
         return None, None
 
     @classmethod
@@ -190,6 +217,105 @@ class LedgerDocumentDetailDialog(QDialog):
                 cell.setToolTip(value)
                 self.detail_table.setItem(row, column, cell)
         layout.addWidget(self.detail_table, 1)
+
+    def _build_load_order(self, layout: QVBoxLayout, order: LoadOrder) -> None:
+        order_ref = f"OC-{order.order_number:06d}"
+        self.setWindowTitle(f"Detalle de orden de carga {order_ref}")
+        title, subtitle = self._title(
+            f"Orden de carga {order_ref}",
+            "Detalle de la orden asociada al movimiento de cuenta corriente.",
+        )
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        card, form = self._info_card()
+        self._add_row(form, "Fecha", _date(order.date))
+        self._add_row(form, "Estado", order.status)
+        self._add_row(form, "Transportista", order.carrier.name if order.carrier_id else "—")
+        self._add_row(form, "Chofer", order.driver.name if order.driver_id else "—")
+        self._add_row(form, "Camión", order.truck.domain if order.truck_id else "—")
+        self._add_row(form, "Observaciones", order.observations or "—")
+        layout.addWidget(card)
+
+        self.detail_table = QTableWidget(0, 5)
+        self.detail_table.setObjectName("ledgerLoadOrderDetailTable")
+        self.detail_table.setHorizontalHeaderLabels(
+            ["Cliente", "Destino", "Producto", "Cantidad", "Unidad"]
+        )
+        self.detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.detail_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.detail_table.verticalHeader().setVisible(False)
+        self.detail_table.setAlternatingRowColors(True)
+        header = self.detail_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+
+        rows = list(
+            LoadOrderProduct.select()
+            .where(LoadOrderProduct.order == order)
+            .order_by(LoadOrderProduct.id)
+        )
+        self.detail_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            destination = row.destination
+            client_name = (
+                destination.client.name
+                if destination is not None and destination.client_id is not None
+                else (order.client.name if order.client_id is not None else "")
+            )
+            address = ""
+            if destination is not None and destination.delivery_address_id is not None:
+                address = destination.delivery_address.address or ""
+            values = (
+                client_name,
+                address,
+                row.product.name,
+                self._quantity(row.quantity),
+                row.unit or "",
+            )
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column == 3:
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                cell.setToolTip(value)
+                self.detail_table.setItem(row_index, column, cell)
+        layout.addWidget(self.detail_table, 1)
+
+    def _build_payment_movement(
+        self, layout: QVBoxLayout, movement: ClientAccountMovement
+    ) -> None:
+        reference = movement.reference or "Pago"
+        self.setWindowTitle(f"Detalle de pago {reference}")
+        title, subtitle = self._title(
+            f"Pago {reference}",
+            "Movimiento histórico de pago sin comprobante vinculado en la base actual.",
+        )
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        card, form = self._info_card()
+        self._add_row(form, "Cliente", movement.client.name)
+        self._add_row(form, "Fecha", _date(movement.movement_date))
+        self.payment_total_label = self._add_row(
+            form, "Importe", _money(abs(float(movement.total_amount or 0)))
+        )
+        self._add_row(form, "Referencia", movement.reference or "—")
+        self._add_row(form, "Descripción", movement.description or "—")
+        self._add_row(form, "Observaciones", movement.observations or "—")
+        self._add_row(
+            form,
+            "Comprobante",
+            "Movimiento histórico: no existe un recibo vinculado para mostrar medios de pago.",
+        )
+        layout.addWidget(card)
+
+        self.detail_table = QTableWidget(0, 0)
+        self.detail_table.setObjectName("ledgerLegacyPaymentDetailTable")
+        self.detail_table.hide()
+        layout.addWidget(self.detail_table)
 
     def _build_payment(self, layout: QVBoxLayout, payment: ClientPayment) -> None:
         self.setWindowTitle(f"Detalle de recibo {payment.receipt_number}")
