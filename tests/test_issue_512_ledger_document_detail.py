@@ -39,6 +39,7 @@ def _manual_budget(db):
 
 
 def test_issue_512_budget_detail_resolves_and_renders(db):
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
 
     from app.models.accounting import ClientAccountMovement
@@ -131,7 +132,7 @@ def test_issue_512_customer_ledger_detail_button_and_double_click_use_same_actio
     row = next(
         row
         for row in range(page.movements_table.rowCount())
-        if page.movements_table.item(row, 0).data(0x0100 + 1) == movement.id
+        if page.movements_table.item(row, 0).data(Qt.UserRole + 1) == movement.id
     )
     page.movements_table.setCurrentCell(row, 0)
     app.processEvents()
