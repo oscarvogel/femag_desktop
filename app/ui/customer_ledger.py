@@ -343,10 +343,10 @@ class CustomerLedgerPage(QWidget):
         legacy_layout.addLayout(payment_actions)
         layout.addWidget(legacy_actions)
 
-        self.movements_table = QTableWidget(0, 6)
+        self.movements_table = QTableWidget(0, 7)
         self.movements_table.setObjectName("customerLedgerMovementsTable")
         self.movements_table.setHorizontalHeaderLabels(
-            ["Fecha", "Tipo", "Referencia", "Descripción", "Importe", "Saldo"]
+            ["Fecha", "Tipo", "Referencia", "Descripción", "Debe", "Haber", "Saldo"]
         )
         movements_header = self.movements_table.horizontalHeader()
         movements_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -355,6 +355,7 @@ class CustomerLedgerPage(QWidget):
         movements_header.setSectionResizeMode(3, QHeaderView.Stretch)
         movements_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         movements_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        movements_header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.movements_table.verticalHeader().setVisible(False)
         self.movements_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.movements_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -523,24 +524,30 @@ class CustomerLedgerPage(QWidget):
                 reference = movement.payment.receipt_number
             elif movement.reference:
                 reference = movement.reference
-            importe = movement.total_amount
-            importe_text = f"${importe:,.2f}"
+            amount = float(movement.total_amount or 0)
+            debit = amount if amount > 0 else 0.0
+            credit = abs(amount) if amount < 0 else 0.0
+            debit_text = f"${debit:,.2f}" if debit else ""
+            credit_text = f"${credit:,.2f}" if credit else ""
             saldo_text = f"${balances[row_index]:,.2f}"
             values = (
                 _display_movement_date(movement),
                 type_label,
                 reference,
                 _display_description(movement),
-                importe_text,
+                debit_text,
+                credit_text,
                 saldo_text,
             )
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if column in (4, 5):
+                if column in (4, 5, 6):
                     cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if column == 4:
-                    cell.setForeground(QBrush(_color_for_balance(importe)))
-                if column == 5:
+                if column == 4 and debit:
+                    cell.setForeground(QBrush(SALDO_COLOR_OWES))
+                if column == 5 and credit:
+                    cell.setForeground(QBrush(SALDO_COLOR_CREDIT))
+                if column == 6:
                     cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
                 # Tooltip con texto completo para todas las celdas
                 cell.setToolTip(value)
