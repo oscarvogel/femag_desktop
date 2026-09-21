@@ -47,11 +47,10 @@ def test_pyinstaller_keeps_known_femag_packaging_requirements():
     assert 'app/ui/assets/branding' in spec
 
 
-def test_main_merge_publishes_candidate_only_after_real_validation():
+def test_candidate_workflow_is_manual_and_validates_before_publish():
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "push:" in workflow
-    assert "- main" in workflow
     assert "workflow_dispatch:" in workflow
+    assert "push:" not in workflow
     assert "pull_request:" not in workflow
     assert "VOGEL_RELEASES_TOKEN" in workflow
     assert "apps/femag/candidate.json" in workflow
@@ -64,6 +63,9 @@ def test_main_merge_publishes_candidate_only_after_real_validation():
     assert "git add -- apps/femag/candidate.json" in workflow
     assert "git add -- apps/femag/latest.json" not in workflow
     assert "gh release upload latest" not in workflow
+    local_release = (ROOT / "scripts" / "publish_femag_release.ps1").read_text(encoding="utf-8")
+    assert "Verificando bytes publicados del candidate" in local_release
+    assert "Download-And-Verify $candidateTag" in local_release
 
 
 def test_promotion_is_manual_idempotent_and_promotes_same_bytes_with_previous():

@@ -306,6 +306,10 @@ function Publish-Candidate {
     Ensure-Release $candidateTag 'FEMAG candidate'
     Invoke-Checked 'gh' @('release', 'upload', $candidateTag, $artifact.Installer, '--repo', $ReleaseRepo, '--clobber')
 
+    Write-Host 'Verificando bytes publicados del candidate...'
+    $verificationManifest = [pscustomobject]@{ sha256 = $artifact.Sha256 }
+    $null = Download-And-Verify $candidateTag $verificationManifest (Join-Path $tempRoot 'candidate-upload-verification')
+
     $releasePath = Clone-ReleasesRepository
     try {
         $manifest = [ordered]@{
