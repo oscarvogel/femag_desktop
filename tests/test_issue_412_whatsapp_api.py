@@ -5,6 +5,25 @@ from pathlib import Path
 import pytest
 
 
+_WHATSAPP_ENV_VARS = (
+    "WHATSAPP_ENABLED",
+    "WHATSAPP_API_URL",
+    "WHATSAPP_API_KEY",
+    "WHATSAPP_INSTANCE_ID",
+    "WHATSAPP_API_TIMEOUT",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_whatsapp_env(monkeypatch):
+    # load_settings() usa load_dotenv(override=False): un test previo que
+    # cargue un .env con WHATSAPP_ENABLED=true lo deja fijado en os.environ
+    # y contamina a los siguientes. Cada test parte del env limpio para que
+    # su .env temporal sea la unica fuente.
+    for var in _WHATSAPP_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 def test_whatsapp_config_reads_single_local_env(monkeypatch, tmp_path):
     from app.services.whatsapp_api_client import WhatsAppApiClient
 
