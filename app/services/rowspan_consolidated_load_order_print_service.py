@@ -190,11 +190,12 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
 
                 row = physical_rows[0]
                 pallet_count = group_end - block_index
+                group_total_quantity = float(row["quantity"]) * pallet_count
                 rows.append(
                     [
                         self._p(row["product"]),
                         self._center_p(
-                            self._quantity_with_unit(row["quantity"], row.get("unit"))
+                            self._quantity_with_unit(group_total_quantity, row.get("unit"))
                         ),
                         self._center_p(self._pallet_label(pallet_count)),
                         self._p(row["lote"])
