@@ -291,3 +291,20 @@ def test_export_account_statement_repeats_header_and_numbers_pages(db, tmp_path)
         assert "COMPROBANTE" in text
         assert "CONCEPTO" in text
         assert f"{page_number} de {len(reader.pages)}" in text
+
+
+def test_account_statement_filename_is_safe_on_windows(db, tmp_path):
+    from app.models.masters import Client
+    from app.services import account_statement_print_service
+
+    client = Client.create(
+        name='"S Y T" S.R.L.: sucursal/centro?*',
+        cuit="30788888882",
+        iva_condition="RI",
+    )
+
+    pdf_path = account_statement_print_service.export_account_statement(client, tmp_path)
+
+    assert pdf_path.exists()
+    assert pdf_path.name == "extracto_S_Y_T_S.R.L._sucursal_centro.pdf"
+    assert not any(char in pdf_path.name for char in '<>:"/\\|?*')
