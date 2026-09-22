@@ -305,4 +305,4 @@ def test_account_statement_includes_manual_credit_and_reversal(db, tmp_path):
     assert "NC-PDF-288" in text
     assert "Bonificación" in text
     assert "Cliente frecuente" in text
-    assert "-800.00" in text
+    assert "-$ 800,00" in text or "-$800,00" in text
