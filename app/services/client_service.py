@@ -63,6 +63,36 @@ class ClientService:
             raise ValueError("Los días de plazo de pago no pueden ser negativos.")
         return days
 
+    @staticmethod
+    def active_clients_query():
+        """Clientes habilitados para nuevas operaciones, ordenados por nombre."""
+        return Client.select().where(Client.active == True).order_by(Client.name)  # noqa: E712
+
+    @staticmethod
+    def ensure_active(client: Client) -> Client:
+        """Impide usar un cliente inactivo en una operación nueva."""
+        if not bool(client.active):
+            raise ValueError("El cliente seleccionado está inactivo y no puede usarse en nuevas operaciones.")
+        return client
+
+    def set_active(self, client: Client, active: bool) -> Client:
+        """Activa/desactiva un cliente sin eliminar su historial."""
+        active = bool(active)
+        if bool(client.active) == active:
+            return client
+        previous = bool(client.active)
+        client.active = active
+        client.save(only=[Client.active])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Clientes",
+            action="activar" if active else "desactivar",
+            record_ref=f"Client:{client.id}",
+            old_value={"active": previous},
+            new_value={"active": active},
+        )
+        return client
+
     def add_address(
         self,
         client: Client,
