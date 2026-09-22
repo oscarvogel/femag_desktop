@@ -7,7 +7,7 @@ hiddenimports += collect_submodules("dotenv")
 
 
 a = Analysis(
-    ["../app/jobs/send_managerial_summary.py"],
+    ["../app/managerial_summary_entrypoint.py"],
     pathex=[".."],
     binaries=[],
     datas=[],
