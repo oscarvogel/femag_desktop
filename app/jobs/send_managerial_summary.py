@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import date
 
 from app.config.database import initialize_runtime_database
@@ -172,6 +173,11 @@ def health_check() -> dict[str, str]:
         result["database"] = "ok"
 
         config = ManagerialDeliveryConfig.from_env()
+        result["config_file"] = os.getenv("FEMAG_ENV_FILE", ".env")
+        result["whatsapp_api_url"] = config.whatsapp_api_url or "missing"
+        result["whatsapp_api_key"] = "configured" if config.whatsapp_api_key else "missing"
+        result["whatsapp_instance"] = config.whatsapp_instance_id or "missing"
+        result["whatsapp_phone"] = config.phone or "missing"
         if config.phone:
             if not config.whatsapp_instance_id:
                 result["whatsapp"] = "failed: falta FEMAG_MANAGERIAL_WHATSAPP_INSTANCE"
