@@ -35,3 +35,28 @@ def test_issue_454_places_observation_next_to_destination_label():
     assert destination_label_with_observation(label, "Carga lateral") == (
         "CLIENTE PRUEBA - POSADAS - RUTA 12 | Observación: Carga lateral"
     )
+
+
+def test_issue_520_uses_numbered_budget_observation_on_client_line(db, tmp_path):
+    from app.services.budget_service import BudgetService
+    from app.services.load_order_print_service import LoadOrderPrintService
+    from app.ui.load_order_instructions_extension import install_load_order_instructions_extension
+
+    order, client = _budget_order([("Producto presupuesto", 0.0, 100.0, 10)])
+    destination = order.destinations.get()
+    destination.observations = "Observacion operativa anterior"
+    destination.save()
+
+    budget = BudgetService(current_user="issue520").ensure_for_load_order_client(order, client)
+    budget.observations = "480 ALMIDON NUEVO - 540 ALMIDON ESTACIONADO"
+    budget.save()
+
+    install_load_order_instructions_extension()
+    pdf_path = LoadOrderPrintService(current_user="issue520").export_pdf(order, tmp_path)
+    text = " ".join(_pdf_text(pdf_path).split())
+
+    assert (
+        "Cliente IVA Presupuesto - Ruta IVA - Posadas | Observación: "
+        "480 ALMIDON NUEVO - 540 ALMIDON ESTACIONADO"
+    ) in text
+    assert "Observacion operativa anterior" not in text
