@@ -33,6 +33,11 @@ def install_client_payment_term_extension() -> None:
                 master_abm._price_list_options(),
                 include_empty=False,
             )
+            self.active_combo = master_abm._combo(
+                "clientActiveInput",
+                [(True, "Activo"), (False, "Inactivo")],
+                include_empty=False,
+            )
             self.payment_term_input = QSpinBox()
             self.payment_term_input.setObjectName("clientPaymentTermDaysInput")
             self.payment_term_input.setRange(0, 3650)
@@ -54,10 +59,12 @@ def install_client_payment_term_extension() -> None:
             form.addWidget(self.phone_input, 3, 1)
             form.addWidget(QLabel("Lista de precios"), 4, 0)
             form.addWidget(self.price_list_combo, 4, 1)
-            form.addWidget(QLabel("Plazo de pago"), 5, 0)
-            form.addWidget(self.payment_term_input, 5, 1)
-            form.addWidget(QLabel("Máx. despachos pendientes"), 6, 0)
-            form.addWidget(self.credit_limit_input, 6, 1)
+            form.addWidget(QLabel("Estado"), 5, 0)
+            form.addWidget(self.active_combo, 5, 1)
+            form.addWidget(QLabel("Plazo de pago"), 6, 0)
+            form.addWidget(self.payment_term_input, 6, 1)
+            form.addWidget(QLabel("Máx. despachos pendientes"), 7, 0)
+            form.addWidget(self.credit_limit_input, 7, 1)
             layout.addLayout(form)
             self.feedback = master_abm._entry_feedback(layout)
             master_abm._entry_footer(layout, self, "saveClientButton", self._save)
@@ -65,6 +72,7 @@ def install_client_payment_term_extension() -> None:
         def _load_record(self) -> None:
             if self.record_id is None:
                 self.iva_input.setText("RI")
+                master_abm._set_combo(self.active_combo, True)
                 self.payment_term_input.setValue(0)
                 self.credit_limit_input.setValue(0)
                 return
@@ -74,6 +82,7 @@ def install_client_payment_term_extension() -> None:
             self.iva_input.setText(client.iva_condition)
             self.phone_input.setText(client.phone or "")
             master_abm._set_combo(self.price_list_combo, client.lista_precios)
+            master_abm._set_combo(self.active_combo, bool(client.active))
             self.payment_term_input.setValue(int(client.dias_plazo_pago or 0))
             self.credit_limit_input.setValue(int(client.max_despachos_pendientes or 0))
 
@@ -109,6 +118,9 @@ def install_client_payment_term_extension() -> None:
                     )
                     client.max_despachos_pendientes = credit_limit
                     client.save()
+                    ClientService(self.current_user).set_active(
+                        client, bool(self.active_combo.currentData())
+                    )
                     self.saved_record = client
                 else:
                     client = Client.get_by_id(self.record_id)
@@ -120,6 +132,9 @@ def install_client_payment_term_extension() -> None:
                     client.dias_plazo_pago = payment_term_days
                     client.max_despachos_pendientes = credit_limit
                     client.save()
+                    ClientService(self.current_user).set_active(
+                        client, bool(self.active_combo.currentData())
+                    )
                     self.saved_record = client
                 self.accept()
             except Exception as exc:

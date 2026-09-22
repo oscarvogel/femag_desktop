@@ -6,6 +6,7 @@ from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderPro
 from app.models.masters import Client, Product
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
+from app.services.client_service import ClientService
 
 
 class BudgetService:
@@ -113,6 +114,8 @@ class BudgetService:
         issue_date: date | None = None,
         observations: str | None = None,
     ) -> Budget:
+        client = Client.get_by_id(client.id)
+        ClientService.ensure_active(client)
         from app.models.accounting import ClientAccountMovement
 
         client = Client.get_by_id(client.id)

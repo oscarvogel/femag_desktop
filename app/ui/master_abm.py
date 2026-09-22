@@ -354,6 +354,11 @@ class ClientEntryDialog(QDialog):
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("clientPhoneInput")
         self.price_list_combo = _combo("clientPriceListInput", _price_list_options(), include_empty=False)
+        self.active_combo = _combo(
+            "clientActiveInput",
+            [(True, "Activo"), (False, "Inactivo")],
+            include_empty=False,
+        )
         form.addWidget(QLabel("Nombre"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("CUIT"), 1, 0)
@@ -364,6 +369,8 @@ class ClientEntryDialog(QDialog):
         form.addWidget(self.phone_input, 3, 1)
         form.addWidget(QLabel("Lista de precios"), 4, 0)
         form.addWidget(self.price_list_combo, 4, 1)
+        form.addWidget(QLabel("Estado"), 5, 0)
+        form.addWidget(self.active_combo, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveClientButton", self._save)
@@ -378,6 +385,7 @@ class ClientEntryDialog(QDialog):
         self.iva_input.setText(client.iva_condition)
         self.phone_input.setText(client.phone or "")
         _set_combo(self.price_list_combo, client.lista_precios)
+        _set_combo(self.active_combo, bool(client.active))
 
     def _save(self) -> None:
         name = self.name_input.text().strip()
@@ -409,7 +417,9 @@ class ClientEntryDialog(QDialog):
                 client.iva_condition = iva
                 client.phone = self.phone_input.text().strip() or None
                 client.lista_precios = int(self.price_list_combo.currentData() or 1)
+                requested_active = bool(self.active_combo.currentData())
                 client.save()
+                ClientService(self.current_user).set_active(client, requested_active)
                 self.saved_record = client
             self.accept()
         except Exception as exc:
