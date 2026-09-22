@@ -20,7 +20,7 @@ from app.models.load_orders import (
 from app.models.masters import Client, Product
 
 
-DEFAULT_EFFECTIVE_ORDER_STATUSES = (LoadOrder.STATUS_CLOSED,)
+DEFAULT_EFFECTIVE_ORDER_STATUSES = (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED)
 DEFAULT_CURRENCY = "ARS"
 
 
@@ -93,10 +93,12 @@ class ManagerialSnapshot:
 class ManagerialDashboardService:
     """Central source of truth for the first managerial dashboard.
 
-    V1 considers only closed load orders as effective dispatches by default.
-    Physical pallet/loose allocations are the primary source for dispatched
-    kilos. Any quantity not physically allocated falls back to the product's
-    configured unit weight, so partial preparation is not double counted.
+    Issued and closed load orders are effective dispatches by default.
+    In FEMAG, an issued order already represents merchandise dispatched;
+    pending orders are not yet effective dispatches. Physical pallet/loose
+    allocations are the primary source for dispatched kilos. Any quantity not
+    physically allocated falls back to the product's configured unit weight,
+    so partial preparation is not double counted.
     """
 
     def __init__(
