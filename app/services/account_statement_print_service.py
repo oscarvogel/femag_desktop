@@ -42,11 +42,11 @@ MOVEMENT_TYPE_LABELS = {
     ClientAccountMovement.TYPE_PAYMENT: "Pago",
     ClientAccountMovement.TYPE_PAYMENT_REVERSAL: "Anulación de pago",
     ClientAccountMovement.TYPE_MANUAL_DEBIT: "Débito manual",
-    ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL: "Reverso de débito",
+    ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL: "Reverso débito manual",
     ClientAccountMovement.TYPE_MANUAL_CREDIT: "Crédito manual",
-    ClientAccountMovement.TYPE_MANUAL_CREDIT_REVERSAL: "Reverso de crédito",
+    ClientAccountMovement.TYPE_MANUAL_CREDIT_REVERSAL: "Reverso crédito manual",
     ClientAccountMovement.TYPE_RETURN_CREDIT: "Nota de crédito por devolución",
-    ClientAccountMovement.TYPE_RETURN_CREDIT_REVERSAL: "Reverso de nota de crédito",
+    ClientAccountMovement.TYPE_RETURN_CREDIT_REVERSAL: "Reverso nota de crédito por devolución",
 }
 
 
