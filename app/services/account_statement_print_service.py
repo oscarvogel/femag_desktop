@@ -99,6 +99,17 @@ def _canvas_factory(generated_at: datetime):
     return _factory
 
 
+def _safe_filename_component(value: str | None, *, fallback: str = "cliente") -> str:
+    """Devuelve un componente de archivo válido también en Windows."""
+    text = _INVALID_FILENAME_CHARS.sub("_", (value or "").strip())
+    text = re.sub(r"\\s+", "_", text)
+    text = re.sub(r"_+", "_", text)
+    text = text.strip(" ._")
+    if not text:
+        text = fallback
+    return text[:100].rstrip(" .") or fallback
+
+
 def _money_decimal(value) -> Decimal:
     return Decimal(str(value or 0)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
@@ -186,7 +197,7 @@ def _financial_summary(
 def export_account_statement(client: Client, output_dir: str | Path) -> Path:
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
-    safe_name = client.name.replace(" ", "_").replace("/", "-")
+    safe_name = _safe_filename_component(client.name)
     target = path / f"extracto_{safe_name}.pdf"
 
     generated_at = datetime.now()
