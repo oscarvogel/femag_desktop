@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
 
 from app.models.masters import Client
 from app.models.payments import ClientPayment
+from app.services.client_service import ClientService
 from app.services.client_payment_service import (
     ClientPaymentError,
     ClientPaymentService,
@@ -59,7 +60,7 @@ class ClientPaymentDialog(QDialog):
         self.client_combo = QComboBox()
         self.client_combo.setObjectName("clientPaymentClientCombo")
         enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
-        for client in Client.select().order_by(Client.name):
+        for client in ClientService.active_clients_query():
             self.client_combo.addItem(client.name, client.id)
         if preset_client is not None:
             idx = self.client_combo.findData(preset_client.id)
