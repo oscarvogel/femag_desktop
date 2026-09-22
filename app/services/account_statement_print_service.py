@@ -31,6 +31,7 @@ WHITE = colors.white
 
 MONEY_QUANTUM = Decimal("0.01")
 _CURRENCY_TOKEN = re.compile(r"\$\s*(-?\d[\d,]*\.\d{2})")
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 MOVEMENT_TYPE_LABELS = {
@@ -102,7 +103,7 @@ def _canvas_factory(generated_at: datetime):
 def _safe_filename_component(value: str | None, *, fallback: str = "cliente") -> str:
     """Devuelve un componente de archivo válido también en Windows."""
     text = _INVALID_FILENAME_CHARS.sub("_", (value or "").strip())
-    text = re.sub(r"\\s+", "_", text)
+    text = re.sub(r"\s+", "_", text)
     text = re.sub(r"_+", "_", text)
     text = text.strip(" ._")
     if not text:
