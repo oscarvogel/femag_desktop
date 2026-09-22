@@ -197,7 +197,7 @@ def test_export_account_statement_includes_manual_debit_and_reversal(db, tmp_pat
     text = _pdf_text(pdf_path)
 
     assert "Débito manual" in text
-    assert "Reverso de débito" in text
+    assert "Reverso débito" in text
     assert "ND-PDF-217" in text
     assert "Interés por mora" in text
     assert "5.000,00" in text
