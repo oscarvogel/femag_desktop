@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def destination_label_with_observation(label: str, observations: str | None) -> str:
-    """Append the client/destination load observation to the load-order banner."""
+    """Append the client/destination observation to the load-order banner."""
 
     observation = (observations or "").strip()
     if not observation:
@@ -10,13 +10,39 @@ def destination_label_with_observation(label: str, observations: str | None) -> 
     return f"{label} | Observación: {observation}"
 
 
-def install_load_order_instructions_extension() -> None:
-    """Show per-client load observations only on the printed load order.
+def _budget_observation_for_destination(order, destination) -> str | None:
+    """Return the persisted budget observation for this order/client, if any."""
 
-    LoadOrderDestination.observations is an operational loading instruction for a
-    specific client/destination. Issue #454 requires it to be visible next to that
-    client in the load order, while it must not be exposed in the client budget.
-    No persistence changes are required.
+    from app.models.budgets import Budget
+
+    budget = Budget.get_or_none(
+        (Budget.load_order == order)
+        & (Budget.client == destination.client)
+        & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+    )
+    if budget is None:
+        return None
+    observation = (budget.observations or "").strip()
+    return observation or None
+
+
+def _load_order_destination_observation(order, destination) -> str | None:
+    """Use the budget observation when available, preserving legacy fallback."""
+
+    budget_observation = _budget_observation_for_destination(order, destination)
+    if budget_observation:
+        return budget_observation
+    observation = (destination.observations or "").strip()
+    return observation or None
+
+
+def install_load_order_instructions_extension() -> None:
+    """Show each client's relevant observation next to it on the printed load order.
+
+    Issue #454 introduced per-destination operational observations in the load-order
+    banner. Issue #520 requires the observation that is actually persisted on the
+    associated numbered budget to be the source shown there when available.
+    Destination observations remain as a fallback for legacy orders/budgets.
     """
 
     from app.services import load_order_print_service
@@ -31,13 +57,13 @@ def install_load_order_instructions_extension() -> None:
         block = base_destination_detail_block(self, order, destination)
         block["destination"] = destination_label_with_observation(
             str(block.get("destination") or ""),
-            destination.observations,
+            _load_order_destination_observation(order, destination),
         )
         return block
 
     def budget_observations_without_load_instructions(self, order, *, client=None, destination=None):
-        # Destination observations are operational loading instructions and are
-        # intentionally omitted from customer-facing budgets.
+        # The legacy budget renderer must not leak operational destination notes.
+        # Numbered budgets use BudgetPrintService and persist their own observations.
         return []
 
     service_class._destination_detail_block = destination_detail_block_with_observation
