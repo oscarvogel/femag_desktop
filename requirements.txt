@@ -10,3 +10,5 @@ pypdf>=5.0
 dbfread>=2.0
 cryptography>=43.0
 openpyxl>=3.1
+
+truststore>=0.10,<1.0

@@ -4,12 +4,15 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+import truststore
 
 
 LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/oscarvogel/vogel-releases/main/apps/femag/latest.json"
@@ -73,6 +76,31 @@ def _is_https(url: str) -> bool:
     return urllib.parse.urlparse(url).scheme.lower() == "https"
 
 
+def _verified_ssl_context() -> ssl.SSLContext:
+    """Usa el almacén de confianza nativo del SO sin relajar TLS."""
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    return context
+
+
+def _open_verified_url(
+    request: urllib.request.Request,
+    *,
+    timeout: int,
+    opener: Callable[..., object] | None = None,
+):
+    # Los openers inyectados se reservan para tests. En runtime siempre
+    # entregamos a urllib un SSLContext respaldado por el trust store del SO.
+    if opener is not None:
+        return opener(request, timeout=timeout)
+    return urllib.request.urlopen(
+        request,
+        timeout=timeout,
+        context=_verified_ssl_context(),
+    )
+
+
 def fetch_update_info(
     current_version: str,
     *,
@@ -88,12 +116,11 @@ def fetch_update_info(
     if not _is_https(manifest_url):
         raise ValueError("El manifest de actualizacion debe usar HTTPS.")
 
-    open_url = opener or urllib.request.urlopen
     request = urllib.request.Request(
         manifest_url,
         headers={"User-Agent": "FEMAG-Desktop-Updater/1"},
     )
-    with open_url(request, timeout=timeout) as response:  # type: ignore[misc]
+    with _open_verified_url(request, timeout=timeout, opener=opener) as response:  # type: ignore[misc]
         raw = response.read()
 
     if raw.startswith(b"\xef\xbb\xbf"):
@@ -192,14 +219,13 @@ def download_installer(
     partial = target.with_suffix(".exe.part")
     partial.unlink(missing_ok=True)
 
-    open_url = opener or urllib.request.urlopen
     request = urllib.request.Request(
         update.download_url,
         headers={"User-Agent": "FEMAG-Desktop-Updater/1"},
     )
     digest = hashlib.sha256()
     try:
-        with open_url(request, timeout=timeout) as response, partial.open("wb") as handle:  # type: ignore[misc]
+        with _open_verified_url(request, timeout=timeout, opener=opener) as response, partial.open("wb") as handle:  # type: ignore[misc]
             total_bytes: int | None = None
             getheader = getattr(response, "getheader", None)
             if callable(getheader):
