@@ -7,8 +7,18 @@ def test_managerial_summary_reuses_dashboard_and_account_risk(db):
     summary = ManagerialSummaryService().build(as_of=date(2026, 9, 20))
 
     assert summary.as_of == date(2026, 9, 20)
+    from app.models.load_orders import LoadOrder
+
     assert summary.today_snapshot.period.start == date(2026, 9, 20)
     assert summary.month_snapshot.period.start == date(2026, 9, 1)
+    assert summary.today_snapshot.effective_statuses == (
+        LoadOrder.STATUS_ISSUED,
+        LoadOrder.STATUS_CLOSED,
+    )
+    assert summary.month_snapshot.effective_statuses == (
+        LoadOrder.STATUS_ISSUED,
+        LoadOrder.STATUS_CLOSED,
+    )
     assert summary.risk_result.filters.as_of == date(2026, 9, 20)
 
 
