@@ -25,6 +25,8 @@ if (-not (Test-Path -LiteralPath $Python)) {
 }
 
 $OutputExe = Join-Path $RepoRoot "dist\FEMAG_Managerial_Summary.exe"
+$EnvExampleSource = Join-Path $RepoRoot "installer\managerial_summary.env.example"
+$EnvExampleOutput = Join-Path $RepoRoot "dist\managerial_summary.env.example"
 
 Push-Location $RepoRoot
 try {
@@ -41,6 +43,7 @@ try {
 
     Remove-Item -Recurse -Force "build\FEMAG_Managerial_Summary" -ErrorAction SilentlyContinue
     Remove-Item -Force $OutputExe -ErrorAction SilentlyContinue
+    Remove-Item -Force $EnvExampleOutput -ErrorAction SilentlyContinue
 
     Write-Host "Generando FEMAG_Managerial_Summary.exe..." -ForegroundColor Cyan
 
@@ -57,6 +60,8 @@ try {
         throw "PyInstaller termino pero no se encontro $OutputExe"
     }
 
+    Copy-Item -LiteralPath $EnvExampleSource -Destination $EnvExampleOutput -Force
+
     Write-Host "Verificando arranque del ejecutable..." -ForegroundColor Cyan
     Invoke-Native -Command $OutputExe `
         -Arguments @("--help") `
@@ -66,6 +71,7 @@ try {
     Write-Host ""
     Write-Host "EXE GERENCIAL GENERADO OK" -ForegroundColor Green
     Write-Host "Ruta: $($file.FullName)" -ForegroundColor Green
+    Write-Host "Config ejemplo: $EnvExampleOutput" -ForegroundColor Green
     Write-Host ("Tamano: {0:N2} MB" -f ($file.Length / 1MB)) -ForegroundColor Green
     Write-Host ""
     Write-Host "Pruebas recomendadas en el Windows Server:" -ForegroundColor Yellow
