@@ -177,9 +177,7 @@ def health_check() -> dict[str, str]:
                 result["whatsapp"] = "failed: falta FEMAG_MANAGERIAL_WHATSAPP_INSTANCE"
             else:
                 try:
-                    from app.services.whatsapp_api_client import WhatsAppApiClient
-
-                    status = WhatsAppApiClient().get_instance_status(
+                    status = config.whatsapp_client().get_instance_status(
                         config.whatsapp_instance_id
                     )
                     state = (
