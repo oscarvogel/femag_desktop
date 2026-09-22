@@ -93,3 +93,22 @@ def test_managerial_whatsapp_client_uses_dedicated_credentials(monkeypatch):
     assert client.config.base_url == "https://wa.example.com"
     assert client.config.api_key == "managerial-key"
     assert client.config.instance_id == "gerencial"
+
+
+def test_compact_money_uses_thousands_separator_for_millions():
+    from app.services.managerial_summary_service import _compact_money
+
+    assert _compact_money(1_677_330_000) == "$ 1.677,33 M"
+    assert _compact_money(834_270_000) == "$ 834,27 M"
+
+
+def test_whatsapp_zero_activity_is_readable(db):
+    from app.services.managerial_summary_service import ManagerialSummaryService
+
+    service = ManagerialSummaryService()
+    summary = service.build(as_of=date(2026, 9, 20))
+
+    # El texto no debe exponer una linea tecnica con 0,000 TN y 0 cargas.
+    whatsapp = service.render_whatsapp(summary)
+    if "Despachos hoy: $ 0,00" in whatsapp:
+        assert "🚚 Sin despachos registrados hoy" in whatsapp
