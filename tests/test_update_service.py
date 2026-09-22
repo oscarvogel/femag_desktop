@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import ssl
 
 import pytest
 
@@ -68,6 +69,54 @@ def test_unknown_channel_falls_back_to_latest(monkeypatch):
     monkeypatch.setenv("FEMAG_UPDATE_CHANNEL", "anything-else")
     assert get_update_channel() == LATEST_CHANNEL
     assert manifest_url_for_channel() == LATEST_MANIFEST_URL
+
+
+def test_runtime_https_uses_verified_system_trust_context(monkeypatch):
+    from app.services import update_service
+
+    captured = {}
+
+    def fake_urlopen(_request, timeout=None, context=None):
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return _Response(_manifest())
+
+    monkeypatch.setattr(update_service.urllib.request, "urlopen", fake_urlopen)
+
+    info = fetch_update_info("2026.08.27.10.00.00")
+
+    assert info is not None
+    context = captured["context"]
+    assert context is not None
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+
+
+def test_runtime_installer_download_uses_verified_system_trust_context(tmp_path, monkeypatch):
+    from app.services import update_service
+
+    monkeypatch.setenv("FEMAG_RUNTIME_DIR", str(tmp_path / "runtime"))
+    body = b"trusted-system-store-installer"
+    captured = {}
+
+    def fake_urlopen(_request, timeout=None, context=None):
+        captured["context"] = context
+        return _Response(body)
+
+    monkeypatch.setattr(update_service.urllib.request, "urlopen", fake_urlopen)
+    info = UpdateInfo(
+        version="2026.08.28.10.00.00",
+        download_url="https://example.invalid/setup.exe",
+        sha256=hashlib.sha256(body).hexdigest(),
+    )
+
+    path = download_installer(info, destination_dir=tmp_path)
+
+    assert path.exists()
+    context = captured["context"]
+    assert context is not None
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
 
 
 def test_fetch_update_info_returns_newer_valid_manifest():
