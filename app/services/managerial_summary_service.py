@@ -18,12 +18,21 @@ def _money(value: float) -> str:
     return f"$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _localized_number(value: float, decimals: int = 2) -> str:
+    return (
+        f"{float(value or 0):,.{decimals}f}"
+        .replace(",", "X")
+        .replace(".", ",")
+        .replace("X", ".")
+    )
+
+
 def _compact_money(value: float) -> str:
     amount = float(value or 0)
     if abs(amount) >= 1_000_000:
-        return f"$ {amount / 1_000_000:.2f} M".replace(".", ",")
+        return f"$ {_localized_number(amount / 1_000_000, 2)} M"
     if abs(amount) >= 1_000:
-        return f"$ {amount / 1_000:.1f} mil".replace(".", ",")
+        return f"$ {_localized_number(amount / 1_000, 1)} mil"
     return _money(amount)
 
 
@@ -141,14 +150,22 @@ class ManagerialSummaryService:
         t = summary.today_snapshot
         m = summary.month_snapshot
         r = summary.risk_result.totals
+        activity_line = (
+            "🚚 Sin despachos registrados hoy"
+            if float(t.tonnes.current or 0) == 0 and int(t.orders.current or 0) == 0
+            else (
+                f"🚚 Hoy: {_localized_number(t.tonnes.current, 3)} TN · "
+                f"{int(t.orders.current)} carga(s)"
+            )
+        )
         lines = [
             "📊 *FEMAG · Resumen gerencial*",
             summary.as_of.strftime("%d/%m/%Y"),
             "",
             "*Actividad*",
             f"💰 Despachos hoy: {_compact_money(t.valued_dispatches.current)}",
-            f"📅 Acumulado mes: {_compact_money(m.valued_dispatches.current)}",
-            f"🚚 Hoy: {t.tonnes.current:,.3f} TN · {int(t.orders.current)} carga(s)".replace(",", "X").replace(".", ",").replace("X", "."),
+            f"📅 Acumulado del mes: {_compact_money(m.valued_dispatches.current)}",
+            activity_line,
             "",
             "*Cartera*",
             f"🧾 Saldo clientes: {_compact_money(r.balance)}",
