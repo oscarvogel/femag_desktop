@@ -35,8 +35,9 @@ def test_client_entry_dialog_edits_active_state(db):
     client = Client.create(name="Cliente UI 522", cuit="30700020522", iva_condition="RI")
 
     dialog = ClientEntryDialog(current_user="issue522_ui", record_id=client.id)
-    state = dialog.findChild(QComboBox, "clientActiveInput")
-    assert state is not None
+    state = dialog.active_combo
+    assert isinstance(state, QComboBox)
+    assert state.objectName() == "clientActiveInput"
     assert state.currentData() is True
 
     _set_combo_data(state, False)
@@ -46,7 +47,9 @@ def test_client_entry_dialog_edits_active_state(db):
     assert Client.get_by_id(client.id).active is False
 
     edit = ClientEntryDialog(current_user="issue522_ui", record_id=client.id)
-    state = edit.findChild(QComboBox, "clientActiveInput")
+    state = edit.active_combo
+    assert isinstance(state, QComboBox)
+    assert state.objectName() == "clientActiveInput"
     assert state.currentData() is False
     _set_combo_data(state, True)
     edit.findChild(QPushButton, "saveClientButton").click()
