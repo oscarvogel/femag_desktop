@@ -59,3 +59,23 @@ def test_managerial_delivery_config_reads_dedicated_environment(monkeypatch):
     assert config.phone == "5491112345678"
     assert config.whatsapp_instance_id == "vogel_consultoria"
     assert config.auto_enabled is True
+
+
+def test_managerial_summary_cli_modes():
+    from app.jobs.send_managerial_summary import build_parser
+
+    parser = build_parser()
+
+    assert parser.parse_args(["--health-check"]).health_check is True
+    assert parser.parse_args(["--send-now"]).send_now is True
+    assert parser.parse_args(["--daily"]).daily is True
+
+
+def test_managerial_summary_cli_rejects_multiple_modes():
+    import pytest
+
+    from app.jobs.send_managerial_summary import build_parser
+
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--send-now", "--daily"])
