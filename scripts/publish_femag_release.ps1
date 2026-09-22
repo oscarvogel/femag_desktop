@@ -131,6 +131,23 @@ function Set-CandidateBuildIdentity {
     Write-Host "Identidad candidate preparada: $BuildVersion"
 }
 
+function Sync-LocalDependencies {
+    $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
+    if (-not (Test-Path $python)) {
+        $python = 'python'
+    }
+
+    Write-Host 'Sincronizando dependencias locales del release...'
+    Invoke-Checked $python @(
+        '-m', 'pip', 'install',
+        '--disable-pip-version-check',
+        '--trusted-host', 'pypi.org',
+        '--trusted-host', 'files.pythonhosted.org',
+        '-r', (Join-Path $repoRoot 'requirements-build.txt')
+    )
+}
+
+
 function Invoke-LocalValidation {
     if ($SkipLocalValidation) {
         Write-Host 'Validación local omitida por -SkipLocalValidation.'
@@ -298,6 +315,7 @@ function Publish-Candidate {
     Assert-CleanWorkspace
     $candidateVersion = Get-Date -Format 'yyyy.MM.dd.HH.mm.ss'
     Set-CandidateBuildIdentity -BuildVersion $candidateVersion
+    Sync-LocalDependencies
     Invoke-LocalValidation
     $artifact = Invoke-ProductionBuild -BuildVersion $candidateVersion
     Write-Host "Versión local: $($artifact.Version)"
