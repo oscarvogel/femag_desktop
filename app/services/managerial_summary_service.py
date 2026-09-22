@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.reports.managerial_account_risk import AccountRiskFilters, ManagerialAccountRiskService
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
-from app.services.whatsapp_api_client import WhatsAppApiClient
+from app.services.whatsapp_api_client import WhatsAppApiClient, WhatsAppApiConfig
 
 
 def _money(value: float) -> str:
@@ -47,6 +47,9 @@ class ManagerialDeliveryConfig:
     email: str = ""
     phone: str = ""
     whatsapp_instance_id: str = ""
+    whatsapp_api_url: str = ""
+    whatsapp_api_key: str = ""
+    whatsapp_api_timeout: float = 15.0
     auto_enabled: bool = False
 
     @classmethod
@@ -54,11 +57,37 @@ class ManagerialDeliveryConfig:
         enabled = os.getenv("FEMAG_MANAGERIAL_AUTO_ENABLED", "false").strip().lower() in {
             "1", "true", "yes", "si", "sí", "on"
         }
+        try:
+            timeout = float(os.getenv("FEMAG_MANAGERIAL_WHATSAPP_API_TIMEOUT", "15"))
+        except ValueError as exc:
+            raise ValueError(
+                "FEMAG_MANAGERIAL_WHATSAPP_API_TIMEOUT debe ser un número válido."
+            ) from exc
         return cls(
             email=os.getenv("FEMAG_MANAGERIAL_EMAIL", "").strip(),
             phone=os.getenv("FEMAG_MANAGERIAL_WHATSAPP", "").strip(),
             whatsapp_instance_id=os.getenv("FEMAG_MANAGERIAL_WHATSAPP_INSTANCE", "").strip(),
+            whatsapp_api_url=os.getenv("FEMAG_MANAGERIAL_WHATSAPP_API_URL", "").strip().rstrip("/"),
+            whatsapp_api_key=os.getenv("FEMAG_MANAGERIAL_WHATSAPP_API_KEY", "").strip(),
+            whatsapp_api_timeout=timeout,
             auto_enabled=enabled,
+        )
+
+    def whatsapp_client(self) -> WhatsAppApiClient:
+        if not self.whatsapp_api_url:
+            raise ValueError("Falta FEMAG_MANAGERIAL_WHATSAPP_API_URL.")
+        if not self.whatsapp_api_key:
+            raise ValueError("Falta FEMAG_MANAGERIAL_WHATSAPP_API_KEY.")
+        if not self.whatsapp_instance_id:
+            raise ValueError("Falta FEMAG_MANAGERIAL_WHATSAPP_INSTANCE.")
+        return WhatsAppApiClient(
+            WhatsAppApiConfig(
+                base_url=self.whatsapp_api_url,
+                api_key=self.whatsapp_api_key,
+                instance_id=self.whatsapp_instance_id,
+                timeout_seconds=self.whatsapp_api_timeout,
+                enabled=True,
+            )
         )
 
 
@@ -264,7 +293,7 @@ class ManagerialSummaryService:
         resolved_instance = (instance_id or "").strip()
         if not resolved_instance:
             raise ValueError("Indique la instancia de WhatsApp gerencial.")
-        api = client or WhatsAppApiClient()
+        api = client or ManagerialDeliveryConfig.from_env().whatsapp_client()
         return api.send_text(
             phone=target_phone,
             message=self.render_whatsapp(summary),
