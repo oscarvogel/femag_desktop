@@ -79,3 +79,17 @@ def test_managerial_summary_cli_rejects_multiple_modes():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["--send-now", "--daily"])
+
+
+def test_managerial_whatsapp_client_uses_dedicated_credentials(monkeypatch):
+    from app.services.managerial_summary_service import ManagerialDeliveryConfig
+
+    monkeypatch.setenv("FEMAG_MANAGERIAL_WHATSAPP_INSTANCE", "gerencial")
+    monkeypatch.setenv("FEMAG_MANAGERIAL_WHATSAPP_API_URL", "https://wa.example.com/")
+    monkeypatch.setenv("FEMAG_MANAGERIAL_WHATSAPP_API_KEY", "managerial-key")
+
+    client = ManagerialDeliveryConfig.from_env().whatsapp_client()
+
+    assert client.config.base_url == "https://wa.example.com"
+    assert client.config.api_key == "managerial-key"
+    assert client.config.instance_id == "gerencial"
