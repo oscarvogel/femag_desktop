@@ -2,7 +2,7 @@ from app.models.audit import AuditLog
 from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
 from app.models.budgets import Budget, BudgetItem
 from app.models.accounting import ClientAccountMovement
-from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
+from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence, ManagerialSummaryDelivery
 from app.models.masters import (
     Carrier,
     Client,
@@ -72,6 +72,7 @@ ALL_MODELS = [
     AppParameter,
     NumberSequence,
     BackupLog,
+    ManagerialSummaryDelivery,
     AvisoLectura,
     WhatsAppEnvio,
 ]
