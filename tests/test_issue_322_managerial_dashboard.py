@@ -97,7 +97,7 @@ def test_report_period_rejects_inverted_dates():
         ReportPeriod(date(2026, 8, 22), date(2026, 8, 21))
 
 
-def test_dashboard_counts_only_closed_orders_by_default(db):
+def test_dashboard_counts_closed_orders_by_default_and_excludes_annulled(db):
     client = _client("Cliente Dashboard", "30700000322")
     product = Product.create(
         name="Fécula Dashboard",
@@ -211,10 +211,51 @@ def test_dashboard_effective_status_policy_is_injectable(db):
     )
     period = ReportPeriod(date(2026, 8, 1), date(2026, 8, 31))
 
-    assert ManagerialDashboardService()._period_metrics(period)["orders"] == 0
-    custom = ManagerialDashboardService(effective_statuses=(LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED))
-    assert custom._period_metrics(period)["orders"] == 1
-    assert custom._period_metrics(period)["tonnes"] == 1.0
+    default = ManagerialDashboardService()._period_metrics(period)
+    assert default["orders"] == 1
+    assert default["valued_dispatches"] == 50000
+    assert default["tonnes"] == 1.0
+
+    closed_only = ManagerialDashboardService(effective_statuses=(LoadOrder.STATUS_CLOSED,))
+    assert closed_only._period_metrics(period)["orders"] == 0
+
+
+def test_dashboard_pending_order_is_not_effective_dispatch_by_default(db):
+    client = _client("Cliente Pendiente", "30700000329")
+    product = Product.create(name="Producto Pendiente", unit="bolsa", peso_unitario_kg=25)
+    carrier, driver, truck = _transport_for_number(32229)
+    order = LoadOrder.create(
+        order_number=32229,
+        date=date(2026, 8, 16),
+        client=client,
+        delivery_address=client.addresses.get(),
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        status=LoadOrder.STATUS_PENDING,
+    )
+    destination = LoadOrderDestination.create(
+        order=order,
+        client=client,
+        delivery_address=client.addresses.get(),
+        sequence=1,
+    )
+    LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=product,
+        quantity=10,
+        unit="bolsa",
+        neto_subtotal=25000,
+        total=25000,
+    )
+    period = ReportPeriod(date(2026, 8, 1), date(2026, 8, 31))
+
+    metrics = ManagerialDashboardService()._period_metrics(period)
+
+    assert metrics["orders"] == 0
+    assert metrics["valued_dispatches"] == 0
+    assert metrics["tonnes"] == 0
 
 
 def test_receivables_and_overdue_are_capped_by_real_balance(db):
