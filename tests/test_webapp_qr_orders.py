@@ -1,5 +1,8 @@
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
+
+from PIL import Image
 
 from conftest import _master_data
 
@@ -172,7 +175,6 @@ def test_health_reports_database_connected(db):
     assert response.get_json() == {"database": True, "status": "ok"}
 
 
-
 def test_annulled_order_cannot_be_opened_from_qr(db):
     order, _ = _order_with_line()
     order.status = LoadOrder.STATUS_ANNULLED
@@ -198,3 +200,61 @@ def test_annulled_order_token_is_rejected_by_service(db):
         assert "anulada" in str(exc).lower()
     else:
         raise AssertionError("Una orden anulada no debe resolverse como operativa")
+
+
+def test_pwa_manifest_and_service_worker_are_available(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.mimetype == "application/manifest+json"
+    payload = manifest.get_json()
+    assert payload["name"] == "FEMAG · Despachos"
+    assert payload["display"] == "standalone"
+    assert payload["start_url"] == "/"
+    assert payload["icons"][0]["src"] == "/pwa/icon-192.png"
+    assert payload["icons"][0]["sizes"] == "192x192"
+    assert payload["icons"][1]["src"] == "/pwa/icon-512.png"
+    assert payload["icons"][1]["sizes"] == "512x512"
+
+    service_worker = client.get("/service-worker.js")
+    assert service_worker.status_code == 200
+    assert b"serviceWorker" not in service_worker.data
+    assert b"fetch" in service_worker.data
+
+    icon_192 = client.get("/pwa/icon-192.png")
+    assert icon_192.status_code == 200
+    assert icon_192.mimetype == "image/png"
+
+    icon_512 = client.get("/pwa/icon-512.png")
+    assert icon_512.status_code == 200
+    assert icon_512.mimetype == "image/png"
+
+    assert Image.open(BytesIO(icon_192.data)).size == (192, 192)
+    assert Image.open(BytesIO(icon_512.data)).size == (512, 512)
+
+
+def test_base_template_registers_pwa(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get("/")
+
+    assert b"manifest.webmanifest" in response.data
+    assert b"serviceWorker.register" in response.data
+    assert b"apple-mobile-web-app-capable" in response.data
+
+
+def test_home_exposes_direct_pwa_install_button(db):
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get("/")
+
+    assert response.status_code == 200
+    assert b"Instalar FEMAG" in response.data
+    assert b"beforeinstallprompt" in response.data
+    assert b"appinstalled" in response.data
+    assert b"Agregar a pantalla de inicio" in response.data

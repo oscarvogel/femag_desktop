@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from io import BytesIO
+from pathlib import Path
+
+from PIL import Image
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, url_for
 
 from app.config.database import database_proxy
 from webapp.order_service import (
@@ -18,6 +22,88 @@ from webapp.order_service import (
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = "femag-local-webapp"
+
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        response = jsonify(
+            {
+                "name": "FEMAG · Despachos",
+                "short_name": "FEMAG",
+                "description": "Lectura de órdenes QR y registro operativo de despacho FEMAG.",
+                "start_url": "/",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#f3f5f7",
+                "theme_color": "#17324d",
+                "icons": [
+                    {
+                        "src": "/pwa/icon-192.png",
+                        "sizes": "192x192",
+                        "type": "image/png",
+                        "purpose": "any",
+                    },
+                    {
+                        "src": "/pwa/icon-512.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                ],
+            }
+        )
+        response.mimetype = "application/manifest+json"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    def _pwa_icon_response(size: int):
+        icon_path = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "ui"
+            / "assets"
+            / "branding"
+            / "femag-logo-compact.png"
+        )
+        with Image.open(icon_path) as source:
+            icon = source.convert("RGBA")
+            icon.thumbnail((size, size), Image.Resampling.LANCZOS)
+            canvas = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+            x = (size - icon.width) // 2
+            y = (size - icon.height) // 2
+            canvas.alpha_composite(icon, (x, y))
+            output = BytesIO()
+            canvas.convert("RGB").save(output, format="PNG", optimize=True)
+            output.seek(0)
+        return send_file(
+            output,
+            mimetype="image/png",
+            max_age=86400,
+            download_name=f"femag-{size}.png",
+        )
+
+    @app.get("/pwa/icon-192.png")
+    def pwa_icon_192():
+        return _pwa_icon_response(192)
+
+    @app.get("/pwa/icon-512.png")
+    def pwa_icon_512():
+        return _pwa_icon_response(512)
+
+    @app.get("/service-worker.js")
+    def service_worker():
+        # La PWA es deliberadamente online-first: no se cachean órdenes ni
+        # respuestas operativas para evitar trabajar con información obsoleta.
+        script = """
+self.addEventListener("install", event => self.skipWaiting());
+self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", event => {
+  event.respondWith(fetch(event.request));
+});
+""".strip()
+        response = Response(script, mimetype="application/javascript")
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Service-Worker-Allowed"] = "/"
+        return response
 
     @app.get("/health")
     def health():
