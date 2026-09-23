@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('candidate', 'promote')]
+    [ValidateSet('candidate', 'promote', 'bootstrap')]
     [string]$Mode,
 
     [string]$Version,
@@ -311,6 +311,68 @@ function Commit-ReleasesRepository {
     }
 }
 
+
+function Publish-LegacyBootstrap {
+    Assert-CleanWorkspace
+
+    $installer = Join-Path $repoRoot 'installer\output\FEMAG_Desktop_Produccion_Setup.exe'
+    if (-not (Test-Path -LiteralPath $installer)) {
+        throw "No se encontró el instalador local: $installer"
+    }
+
+    $releasePath = Clone-ReleasesRepository
+    try {
+        $latestPath = Join-Path $releasePath "$releaseManifestRelativePath\latest.json"
+        $latest = Read-Manifest $latestPath
+        Assert-Manifest $latest 'latest'
+
+        $localSha = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($localSha -ne ([string]$latest.sha256).ToLowerInvariant()) {
+            throw "El instalador local no coincide con latest.json. Local=$localSha Latest=$($latest.sha256)"
+        }
+
+        $bootstrapRelative = "$releaseManifestRelativePath/bootstrap/$installerName"
+        $bootstrapPath = Join-Path $releasePath ($bootstrapRelative.Replace('/', '\'))
+        $bootstrapDir = Split-Path -Parent $bootstrapPath
+        New-Item -ItemType Directory -Force $bootstrapDir | Out-Null
+        Copy-Item -LiteralPath $installer -Destination $bootstrapPath -Force
+
+        $bootstrapUrl = "https://raw.githubusercontent.com/$ReleaseRepo/main/$bootstrapRelative"
+        $updated = Copy-Manifest $latest
+        $updated['download_url'] = $bootstrapUrl
+        $updated['bootstrap_transport'] = 'raw-github'
+        $updated['bootstrap_at'] = (Get-Date).ToUniversalTime().ToString('o')
+        Write-Utf8Json $latestPath $updated
+
+        Invoke-Checked 'git' @('-C', $releasePath, 'config', 'user.name', 'FEMAG local release')
+        Invoke-Checked 'git' @('-C', $releasePath, 'config', 'user.email', 'femag-release@users.noreply.github.com')
+        Invoke-Checked 'git' @('-C', $releasePath, 'add', '--', 'apps/femag/latest.json', $bootstrapRelative)
+
+        $unexpected = @(git -C $releasePath diff --cached --name-only | Where-Object {
+            $_ -notin @('apps/femag/latest.json', $bootstrapRelative)
+        })
+        if ($unexpected.Count -gt 0) {
+            throw "El bootstrap intentó modificar archivos inesperados: $($unexpected -join ', ')"
+        }
+
+        Invoke-Checked 'git' @(
+            '-C', $releasePath,
+            'commit',
+            '-m', "release(femag): legacy bootstrap $($latest.version)"
+        )
+        Invoke-Checked 'git' @('-C', $releasePath, 'push', 'origin', 'main')
+
+        Write-Host 'Bootstrap legado publicado.' -ForegroundColor Green
+        Write-Host "Versión: $($latest.version)"
+        Write-Host "SHA256: $localSha"
+        Write-Host "URL: $bootstrapUrl"
+        Write-Host 'Las instalaciones viejas podrán descargar este build reparador desde raw.githubusercontent.com.'
+    }
+    finally {
+        Remove-Item -LiteralPath $releasePath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Publish-Candidate {
     Assert-CleanWorkspace
     $candidateVersion = Get-Date -Format 'yyyy.MM.dd.HH.mm.ss'
@@ -432,6 +494,9 @@ New-Item -ItemType Directory -Force $tempRoot | Out-Null
 try {
     if ($Mode -eq 'candidate') {
         Publish-Candidate
+    }
+    elseif ($Mode -eq 'bootstrap') {
+        Publish-LegacyBootstrap
     }
     else {
         Promote-Candidate
