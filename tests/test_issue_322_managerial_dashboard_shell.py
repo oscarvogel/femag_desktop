@@ -23,15 +23,18 @@ def test_managerial_dashboard_opens_inside_grouped_desktop_shell_for_admin(db):
         app = QApplication.instance() or QApplication([])
         window = FemagDesktopWindow(user=admin, demo_mode=True)
 
+        # El Dashboard Gerencial vive dentro de un grupo colapsable.
+        # Navegar por ruta debe expandir el grupo y seleccionar el hijo correcto.
+        window._navigate_to_route("managerial_dashboard")
         row = next(
             index
             for index in range(window.nav.count())
             if window.nav.item(index).data(Qt.UserRole) == "managerial_dashboard"
         )
-        window._navigate(row)
 
         assert app is not None
         assert "managerial_dashboard" in window._route_indexes
+        assert window.nav.currentRow() == row
         assert window.nav.item(row).text().strip() == "Resumen gerencial"
         page = window.stack.widget(window._route_indexes["managerial_dashboard"])
         assert page.objectName() == "managerialDashboardPage"
