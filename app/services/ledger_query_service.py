@@ -3,8 +3,12 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
+from peewee import JOIN, fn
+
 from app.models.accounting import ClientAccountMovement
+from app.models.load_orders import LoadOrder
 from app.models.masters import Client
+from app.models.payments import ClientPayment
 
 
 _MONEY_QUANTUM = Decimal("0.01")
@@ -28,14 +32,34 @@ def _balance_from_movements(movements: Iterable[ClientAccountMovement]) -> Decim
 def client_balance(client: Client) -> float:
     """
     Return the client balance using the exact same movement stream used by the
-    detail grid. This is the single source of truth for account balances.
+    detail grid. This remains the reference implementation for callers that
+    need a single client balance.
     """
     return float(_balance_from_movements(movements_for_client(client)))
 
 
 def movements_for_client(client: Client) -> list[ClientAccountMovement]:
+    """
+    Load the chronological ledger once, including the relations needed by the
+    detail grid so rendering does not trigger one query per movement.
+    """
     return list(
-        ClientAccountMovement.select()
+        ClientAccountMovement.select(
+            ClientAccountMovement,
+            LoadOrder,
+            ClientPayment,
+        )
+        .join(
+            LoadOrder,
+            JOIN.LEFT_OUTER,
+            on=(ClientAccountMovement.load_order == LoadOrder.id),
+        )
+        .switch(ClientAccountMovement)
+        .join(
+            ClientPayment,
+            JOIN.LEFT_OUTER,
+            on=(ClientAccountMovement.payment == ClientPayment.id),
+        )
         .where(ClientAccountMovement.client == client)
         .order_by(
             ClientAccountMovement.movement_date,
@@ -47,50 +71,37 @@ def movements_for_client(client: Client) -> list[ClientAccountMovement]:
 
 def client_balances() -> list[dict]:
     """
-    Build the left-side client grid from the same movements and the same money
-    accumulator used by client_balance() and running_balance().
+    Build the left-side grid with one grouped SQL query.
 
-    Do not use SQL SUM() over FloatField here: MySQL can accumulate binary
-    floating-point error for large monetary values and make the grid/header
-    disagree with the movement detail.
+    Monetary totals are rounded per movement to cents before SUM(), matching
+    the Decimal/ROUND_HALF_UP accumulator used by the detail for values already
+    persisted at currency precision. This avoids materializing the complete
+    movement table in Python while keeping grid/header/detail aligned.
     """
-    movements = list(
-        ClientAccountMovement.select(ClientAccountMovement, Client)
-        .join(Client)
-        .order_by(
-            ClientAccountMovement.client,
-            ClientAccountMovement.movement_date,
-            ClientAccountMovement.created_at,
-            ClientAccountMovement.id,
+    rounded_amount = fn.ROUND(ClientAccountMovement.total_amount, 2)
+    rows = (
+        Client.select(
+            Client,
+            fn.ROUND(
+                fn.COALESCE(fn.SUM(rounded_amount), 0),
+                2,
+            ).alias("balance"),
+            fn.COUNT(ClientAccountMovement.id).alias("movements"),
         )
+        .join(
+            ClientAccountMovement,
+            on=(ClientAccountMovement.client == Client.id),
+        )
+        .group_by(Client)
     )
-
-    grouped: dict[int, dict] = {}
-    for movement in movements:
-        client = movement.client
-        entry = grouped.setdefault(
-            client.id,
-            {
-                "client": client,
-                "balance_decimal": Decimal("0.00"),
-                "movements": 0,
-            },
-        )
-        entry["balance_decimal"] += _movement_amount(movement)
-        entry["movements"] += 1
 
     result = [
         {
-            "client": entry["client"],
-            "balance": float(
-                entry["balance_decimal"].quantize(
-                    _MONEY_QUANTUM,
-                    rounding=ROUND_HALF_UP,
-                )
-            ),
-            "movements": entry["movements"],
+            "client": row,
+            "balance": float(_money(row.balance)),
+            "movements": int(row.movements or 0),
         }
-        for entry in grouped.values()
+        for row in rows
     ]
     result.sort(key=lambda entry: entry["balance"], reverse=True)
     return result
