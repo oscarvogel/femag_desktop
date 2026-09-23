@@ -12,7 +12,11 @@ from app.models.load_orders import (
 )
 from app.models.masters import PalletType
 from webapp import create_app
-from webapp.order_service import get_order_by_token, normalize_qr_token
+from webapp.order_service import (
+    OrderUnavailableError,
+    get_order_by_token,
+    normalize_qr_token,
+)
 
 
 def _order_with_line():
@@ -166,3 +170,31 @@ def test_health_reports_database_connected(db):
 
     assert response.status_code == 200
     assert response.get_json() == {"database": True, "status": "ok"}
+
+
+
+def test_annulled_order_cannot_be_opened_from_qr(db):
+    order, _ = _order_with_line()
+    order.status = LoadOrder.STATUS_ANNULLED
+    order.save(only=[LoadOrder.status])
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    response = app.test_client().get(f"/orden/{order.qr_token}")
+
+    assert response.status_code == 409
+    assert b"anulada" in response.data.lower()
+
+
+def test_annulled_order_token_is_rejected_by_service(db):
+    order, _ = _order_with_line()
+    order.status = LoadOrder.STATUS_ANNULLED
+    order.save(only=[LoadOrder.status])
+
+    try:
+        get_order_by_token(order.qr_token)
+    except OrderUnavailableError as exc:
+        assert "anulada" in str(exc).lower()
+    else:
+        raise AssertionError("Una orden anulada no debe resolverse como operativa")
