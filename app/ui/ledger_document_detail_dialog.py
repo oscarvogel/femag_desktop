@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 
 from app.models.accounting import ClientAccountMovement
 from app.models.budgets import Budget
-from app.models.load_orders import LoadOrder, LoadOrderProduct
+from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
 from app.models.payments import ClientPayment, ClientPaymentDetail
 
 
@@ -48,8 +48,8 @@ class LedgerDocumentDetailDialog(QDialog):
 
         if self.document_type == "budget":
             self._build_budget(layout, self.document)
-        elif self.document_type == "load_order":
-            self._build_load_order(layout, self.document)
+        elif self.document_type == "load_order_budget":
+            self._build_load_order_budget(layout, self.document)
         elif self.document_type == "payment_movement":
             self._build_payment_movement(layout, self.movement)
         else:
@@ -85,8 +85,6 @@ class LedgerDocumentDetailDialog(QDialog):
             return "budget", Budget.get_or_none(Budget.id == source.budget_id)
         if source.payment_id is not None:
             return "payment", ClientPayment.get_or_none(ClientPayment.id == source.payment_id)
-        if source.load_order_id is not None:
-            return "load_order", LoadOrder.get_or_none(LoadOrder.id == source.load_order_id)
 
         source_ref = str(source.source_ref or "")
         if source_ref.startswith("Budget:"):
@@ -99,6 +97,14 @@ class LedgerDocumentDetailDialog(QDialog):
                 if budget is not None:
                     return "budget", budget
 
+        if source.load_order_id is not None:
+            order = LoadOrder.get_or_none(LoadOrder.id == source.load_order_id)
+            if order is not None:
+                budget = cls._budget_for_load_order_client(order, source.client_id)
+                if budget is not None:
+                    return "budget", budget
+                return "load_order_budget", order
+
         reference = str(source.reference or "").strip()
         if reference.startswith("OC-"):
             try:
@@ -108,7 +114,10 @@ class LedgerDocumentDetailDialog(QDialog):
             if order_number is not None:
                 order = LoadOrder.get_or_none(LoadOrder.order_number == order_number)
                 if order is not None:
-                    return "load_order", order
+                    budget = cls._budget_for_load_order_client(order, source.client_id)
+                    if budget is not None:
+                        return "budget", budget
+                    return "load_order_budget", order
 
         if source.movement_type in (
             ClientAccountMovement.TYPE_PAYMENT,
@@ -119,6 +128,16 @@ class LedgerDocumentDetailDialog(QDialog):
                 return "payment", receipt
             return "payment_movement", source
         return None, None
+
+    @staticmethod
+    def _budget_for_load_order_client(order: LoadOrder, client_id: int | None) -> Budget | None:
+        if client_id is None:
+            return None
+        return Budget.get_or_none(
+            (Budget.load_order == order)
+            & (Budget.client == client_id)
+            & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+        )
 
     @classmethod
     def supports(cls, movement: ClientAccountMovement | None) -> bool:
@@ -218,67 +237,83 @@ class LedgerDocumentDetailDialog(QDialog):
                 self.detail_table.setItem(row, column, cell)
         layout.addWidget(self.detail_table, 1)
 
-    def _build_load_order(self, layout: QVBoxLayout, order: LoadOrder) -> None:
+    def _build_load_order_budget(self, layout: QVBoxLayout, order: LoadOrder) -> None:
+        source = self._source_movement(self.movement) or self.movement
+        client = source.client
         order_ref = f"OC-{order.order_number:06d}"
-        self.setWindowTitle(f"Detalle de orden de carga {order_ref}")
+        self.setWindowTitle(f"Detalle de presupuesto asociado a {order_ref}")
         title, subtitle = self._title(
-            f"Orden de carga {order_ref}",
-            "Detalle de la orden asociada al movimiento de cuenta corriente.",
+            f"Presupuesto histórico · {order_ref}",
+            "Vista comercial del movimiento para este cliente. "
+            "La orden es anterior al vínculo individual de números de presupuesto.",
         )
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
         card, form = self._info_card()
-        self._add_row(form, "Fecha", _date(order.date))
-        self._add_row(form, "Estado", order.status)
-        self._add_row(form, "Transportista", order.carrier.name if order.carrier_id else "—")
-        self._add_row(form, "Chofer", order.driver.name if order.driver_id else "—")
-        self._add_row(form, "Camión", order.truck.domain if order.truck_id else "—")
-        self._add_row(form, "Observaciones", order.observations or "—")
+        self._add_row(form, "Cliente", client.name)
+        self._add_row(form, "Fecha", _date(source.movement_date or order.date))
+        self._add_row(form, "Origen", "Orden de carga")
+        self.order_reference_label = self._add_row(form, "Orden asociada", order_ref)
+        self._add_row(form, "Neto", _money(source.net_amount))
+        self._add_row(form, "Descuento", _money(source.discount_amount))
+        self._add_row(form, "IVA", _money(source.vat_amount))
+        self.budget_total_label = self._add_row(form, "Total", _money(source.total_amount))
+        self._add_row(
+            form,
+            "Observaciones",
+            source.observations or order.observations or "—",
+        )
         layout.addWidget(card)
 
-        self.detail_table = QTableWidget(0, 5)
-        self.detail_table.setObjectName("ledgerLoadOrderDetailTable")
+        self.detail_table = QTableWidget(0, 8)
+        self.detail_table.setObjectName("ledgerLegacyBudgetDetailTable")
         self.detail_table.setHorizontalHeaderLabels(
-            ["Cliente", "Destino", "Producto", "Cantidad", "Unidad"]
+            ["Producto", "Cantidad", "Unidad", "P. unitario", "Desc.", "Neto", "IVA", "Total"]
         )
         self.detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.detail_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.detail_table.verticalHeader().setVisible(False)
         self.detail_table.setAlternatingRowColors(True)
         header = self.detail_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for column in range(1, 8):
+            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
 
         rows = list(
-            LoadOrderProduct.select()
-            .where(LoadOrderProduct.order == order)
+            LoadOrderProduct.select(LoadOrderProduct)
+            .join(LoadOrderDestination, on=LoadOrderProduct.destination)
+            .where(
+                (LoadOrderProduct.order == order)
+                & (LoadOrderDestination.client == client)
+            )
             .order_by(LoadOrderProduct.id)
         )
+        if not rows and order.client_id == client.id:
+            rows = list(
+                LoadOrderProduct.select()
+                .where(
+                    (LoadOrderProduct.order == order)
+                    & (LoadOrderProduct.destination.is_null(True))
+                )
+                .order_by(LoadOrderProduct.id)
+            )
+
         self.detail_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
-            destination = row.destination
-            client_name = (
-                destination.client.name
-                if destination is not None and destination.client_id is not None
-                else (order.client.name if order.client_id is not None else "")
-            )
-            address = ""
-            if destination is not None and destination.delivery_address_id is not None:
-                address = destination.delivery_address.address or ""
             values = (
-                client_name,
-                address,
                 row.product.name,
                 self._quantity(row.quantity),
                 row.unit or "",
+                _money(row.precio_neto_unitario),
+                f"{float(row.descuento_porcentaje or 0):.2f}%",
+                _money(row.neto_gravado),
+                _money(row.iva_importe),
+                _money(row.total),
             )
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if column == 3:
+                if column > 0:
                     cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 cell.setToolTip(value)
                 self.detail_table.setItem(row_index, column, cell)

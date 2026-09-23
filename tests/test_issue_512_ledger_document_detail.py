@@ -230,16 +230,18 @@ def test_issue_512_load_order_detail_resolves_from_movement_fk(db):
     )
 
     kind, document = LedgerDocumentDetailDialog.resolve_document(movement)
-    assert kind == "load_order"
+    assert kind == "load_order_budget"
     assert document.id == order.id
 
     dialog = LedgerDocumentDetailDialog(movement)
     app.processEvents()
 
     assert f"OC-{order.order_number:06d}" in dialog.windowTitle()
+    assert dialog.order_reference_label.text() == f"OC-{order.order_number:06d}"
     assert dialog.detail_table.rowCount() == 1
-    assert dialog.detail_table.item(0, 0).text() == client.name
-    assert dialog.detail_table.item(0, 2).text() == product.name
+    assert dialog.detail_table.item(0, 0).text() == product.name
+    assert dialog.detail_table.item(0, 1).text() == "15"
+    assert dialog.budget_total_label.text() == "$ 5,000.00"
 
 
 def test_issue_512_historical_payment_without_fk_has_read_only_detail(db):
@@ -277,3 +279,153 @@ def test_issue_512_historical_payment_without_fk_has_read_only_detail(db):
 
     assert "DEMO-PAGO-7" in dialog.windowTitle()
     assert dialog.payment_total_label.text() == "$ 100,955,352.96"
+
+
+def test_issue_462_legacy_load_order_detail_filters_rows_to_movement_client(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+
+    app = QApplication.instance() or QApplication([])
+    iva = TipoIVA.iva_default()
+    product_a = Product.create(
+        name="Producto cliente A #462",
+        unit="kg",
+        precio_neto_base=1000,
+        tipo_iva=iva,
+    )
+    product_b = Product.create(
+        name="Producto cliente B #462",
+        unit="kg",
+        precio_neto_base=2000,
+        tipo_iva=iva,
+    )
+    client_a = Client.create(name="Cliente A #462", cuit="30777779462", iva_condition="RI")
+    client_b = Client.create(name="Cliente B #462", cuit="30777779463", iva_condition="RI")
+    address_a = ClientAddress.create(
+        client=client_a,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Destino A",
+    )
+    address_b = ClientAddress.create(
+        client=client_b,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Destino B",
+    )
+    carrier = Carrier.create(name="Transportista #462")
+    driver = Driver.create(name="Chofer #462", carrier=carrier)
+    truck = Truck.create(domain="LEG462", carrier=carrier)
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client_a,
+                "delivery_address": address_a,
+                "products": [{"product": product_a, "quantity": 3}],
+            },
+            {
+                "client": client_b,
+                "delivery_address": address_b,
+                "products": [{"product": product_b, "quantity": 7}],
+            },
+        ],
+        pallets=[],
+    )
+    movement = ClientAccountMovement.create(
+        client=client_a,
+        load_order=order,
+        movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
+        total_amount=3630,
+        net_amount=3000,
+        discount_amount=0,
+        vat_amount=630,
+        currency="ARS",
+        movement_date=date(2026, 9, 17),
+        description="Movimiento legacy OC multi-cliente",
+        source_ref=f"LoadOrder:{order.id}",
+        reference=f"OC-{order.order_number:06d}",
+        created_by="admin",
+    )
+
+    dialog = LedgerDocumentDetailDialog(movement)
+    app.processEvents()
+
+    assert dialog.detail_table.rowCount() == 1
+    assert dialog.detail_table.item(0, 0).text() == product_a.name
+    assert product_b.name not in {
+        dialog.detail_table.item(row, 0).text()
+        for row in range(dialog.detail_table.rowCount())
+    }
+
+
+def test_issue_462_legacy_movement_prefers_persisted_budget_for_same_client(db):
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, TipoIVA, Truck
+    from app.services.budget_service import BudgetService
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+
+    iva = TipoIVA.iva_default()
+    product = Product.create(
+        name="Producto presupuesto persistido #462",
+        unit="kg",
+        precio_neto_base=1500,
+        tipo_iva=iva,
+    )
+    client = Client.create(name="Cliente presupuesto #462", cuit="30777779464", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Eldorado",
+        address="Destino presupuesto",
+    )
+    carrier = Carrier.create(name="Transportista presupuesto #462")
+    driver = Driver.create(name="Chofer presupuesto #462", carrier=carrier)
+    truck = Truck.create(domain="PRE462", carrier=carrier)
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=carrier,
+        driver=driver,
+        truck=truck,
+        destinations=[
+            {
+                "client": client,
+                "delivery_address": address,
+                "products": [{"product": product, "quantity": 4}],
+            }
+        ],
+        pallets=[],
+    )
+    budget = BudgetService("admin").ensure_for_load_order_client(order, client)
+    movement = ClientAccountMovement.create(
+        client=client,
+        load_order=order,
+        budget=None,
+        movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
+        total_amount=budget.total_amount,
+        net_amount=budget.net_amount,
+        discount_amount=budget.discount_amount,
+        vat_amount=budget.vat_amount,
+        currency="ARS",
+        movement_date=date(2026, 9, 17),
+        description="Movimiento legacy sin budget_id",
+        source_ref=f"LoadOrder:{order.id}",
+        reference=f"OC-{order.order_number:06d}",
+        created_by="admin",
+    )
+
+    kind, document = LedgerDocumentDetailDialog.resolve_document(movement)
+
+    assert kind == "budget"
+    assert document.id == budget.id
+    assert document.client_id == client.id
+    assert document.load_order_id == order.id
