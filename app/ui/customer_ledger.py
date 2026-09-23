@@ -105,6 +105,7 @@ class CustomerLedgerPage(QWidget):
         self._direct_client_id: int | None = None
         self._all_balances: list[dict] = []
         self._detail_client_id: int | None = None
+        self._detail_movements_cache: list[ClientAccountMovement] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 12, 18, 18)
@@ -544,6 +545,7 @@ class CustomerLedgerPage(QWidget):
         balances = running_balance(movements)
         total = balances[-1] if balances else 0.0
         self._detail_client_id = client_id
+        self._detail_movements_cache = movements
 
         self.detail_header.setText(client.name)
         self.detail_balance.setText(f"${total:,.2f}")
@@ -654,6 +656,7 @@ class CustomerLedgerPage(QWidget):
 
     def _clear_detail(self) -> None:
         self._detail_client_id = None
+        self._detail_movements_cache = []
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
         self.detail_balance.setText("$ 0,00")
         _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
