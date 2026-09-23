@@ -6,6 +6,7 @@ from app.config.database import database_proxy
 from webapp.order_service import (
     InvalidQrPayloadError,
     OrderNotFoundError,
+    OrderUnavailableError,
     get_order_by_token,
     normalize_qr_token,
     order_line_context,
@@ -38,7 +39,7 @@ def create_app() -> Flask:
                 token = normalize_qr_token(request.form.get("qr", ""))
                 get_order_by_token(token)
                 return redirect(url_for("order_detail", token=token))
-            except (InvalidQrPayloadError, OrderNotFoundError) as exc:
+            except (InvalidQrPayloadError, OrderNotFoundError, OrderUnavailableError) as exc:
                 flash(str(exc), "error")
         return render_template("home.html")
 
@@ -46,6 +47,8 @@ def create_app() -> Flask:
     def order_detail(token: str):
         try:
             order = get_order_by_token(token)
+        except OrderUnavailableError as exc:
+            return render_template("error.html", message=str(exc)), 409
         except (InvalidQrPayloadError, OrderNotFoundError) as exc:
             return render_template("error.html", message=str(exc)), 404
 
