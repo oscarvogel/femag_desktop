@@ -26,7 +26,6 @@ from app.models.payments import ClientPayment
 from app.ui.financial_history_dialog import FinancialHistoryDialog
 from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
 from app.services.ledger_query_service import (
-    client_balance,
     client_balances,
     movements_for_client,
     running_balance,
@@ -104,6 +103,9 @@ class CustomerLedgerPage(QWidget):
         self.reverse_manual_credit_callback = reverse_manual_credit_callback
         self.can_annul_payments = can_annul_payments
         self._direct_client_id: int | None = None
+        self._all_balances: list[dict] = []
+        self._detail_client_id: int | None = None
+        self._detail_movements_cache: list[ClientAccountMovement] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 12, 18, 18)
@@ -385,8 +387,17 @@ class CustomerLedgerPage(QWidget):
         layout.addWidget(self.empty_label)
         return panel
 
+    def _current_client_id(self) -> int | None:
+        current = self.clients_table.currentRow()
+        if current < 0:
+            return None
+        item = self.clients_table.item(current, 0)
+        return item.data(Qt.UserRole) if item is not None else None
+
     def _on_search_changed(self, *_args) -> None:
-        self.refresh()
+        # El filtro trabaja sobre el snapshot ya cargado. No recalcular saldos
+        # ni volver a MySQL por cada tecla.
+        self._render_clients(previous_id=self._current_client_id())
 
     def _filter_balances(self, balances: list[dict]) -> list[dict]:
         query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
@@ -401,14 +412,7 @@ class CustomerLedgerPage(QWidget):
         return filtered
 
     def refresh(self) -> None:
-        previous_id = None
-        current = self.clients_table.currentRow()
-        if current >= 0:
-            item = self.clients_table.item(current, 0)
-            if item is not None:
-                previous_id = item.data(Qt.UserRole)
-        self.clients_table.blockSignals(True)
-        self.clients_table.clearContents()
+        previous_id = self._current_client_id()
         all_balances = client_balances()
         known_client_ids = {entry["client"].id for entry in all_balances}
         for client in (
@@ -431,10 +435,20 @@ class CustomerLedgerPage(QWidget):
                     0,
                     {"client": direct_client, "balance": 0.0, "movements": 0},
                 )
-        balances = self._filter_balances(all_balances)
+
+        self._all_balances = all_balances
+        # Un refresh completo significa que los movimientos pudieron cambiar.
+        self._detail_client_id = None
+        self._render_clients(previous_id=previous_id)
+
+    def _render_clients(self, *, previous_id: int | None = None) -> None:
+        self.clients_table.blockSignals(True)
+        self.clients_table.clearContents()
+        balances = self._filter_balances(self._all_balances)
         self.clients_table.setRowCount(len(balances))
         total_to_collect = 0.0
         clients_with_balance = 0
+
         for row_index, entry in enumerate(balances):
             client = entry["client"]
             balance = entry["balance"]
@@ -460,10 +474,9 @@ class CustomerLedgerPage(QWidget):
             balance_cell.setToolTip(balance_text)
             self.clients_table.setItem(row_index, 1, balance_cell)
 
-        # Totals footer (sobre el conjunto filtrado para que coincida con la tabla)
         suffix = ""
-        if len(balances) != len(all_balances):
-            suffix = f"  ·  (de {len(all_balances)} totales)"
+        if len(balances) != len(self._all_balances):
+            suffix = f"  ·  (de {len(self._all_balances)} totales)"
         self.totals_label.setText(
             f"Total a cobrar: <b>${total_to_collect:,.2f}</b>  ·  "
             f"Clientes con saldo: <b>{clients_with_balance}</b>  ·  "
@@ -474,15 +487,24 @@ class CustomerLedgerPage(QWidget):
             target_row = 0
             if previous_id is not None:
                 for index in range(self.clients_table.rowCount()):
-                    if self.clients_table.item(index, 0).data(Qt.UserRole) == previous_id:
+                    item = self.clients_table.item(index, 0)
+                    if item is not None and item.data(Qt.UserRole) == previous_id:
                         target_row = index
                         break
             self.clients_table.setCurrentCell(target_row, 0)
+
         self.clients_table.blockSignals(False)
         if self.clients_table.currentRow() >= 0:
             self._on_client_selected(self.clients_table.currentRow(), 0, -1, -1)
         else:
             self._clear_detail()
+
+    def _client_from_cache(self, client_id: int) -> Client | None:
+        for entry in self._all_balances:
+            client = entry["client"]
+            if client.id == client_id:
+                return client
+        return None
 
     def select_client(self, client: Client) -> None:
         """Show a client immediately when navigation originates in Clientes."""
@@ -508,11 +530,24 @@ class CustomerLedgerPage(QWidget):
         if item is None:
             self._clear_detail()
             return
-        client = Client.get_by_id(item.data(Qt.UserRole))
+
+        client_id = item.data(Qt.UserRole)
+        # Filtrar/re-renderizar la lista no debe volver a cargar el detalle si
+        # el cliente seleccionado sigue siendo el mismo.
+        if self._detail_client_id == client_id:
+            return
+
+        client = self._client_from_cache(client_id)
+        if client is None:
+            client = Client.get_by_id(client_id)
+
         movements = movements_for_client(client)
         balances = running_balance(movements)
+        total = balances[-1] if balances else 0.0
+        self._detail_client_id = client_id
+        self._detail_movements_cache = movements
+
         self.detail_header.setText(client.name)
-        total = client_balance(client)
         self.detail_balance.setText(f"${total:,.2f}")
         _apply_color_to_label(self.detail_balance, _color_for_balance(total))
         movement_label = "movimiento" if len(movements) == 1 else "movimientos"
@@ -560,7 +595,6 @@ class CustomerLedgerPage(QWidget):
                     cell.setForeground(QBrush(SALDO_COLOR_CREDIT))
                 if column == 6:
                     cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
-                # Tooltip con texto completo para todas las celdas
                 cell.setToolTip(value)
                 if (
                     column == 0
@@ -590,13 +624,13 @@ class CustomerLedgerPage(QWidget):
         self._update_manual_credit_action()
 
     def _selected_client(self) -> Client | None:
-        current = self.clients_table.currentRow()
-        if current < 0:
+        client_id = self._current_client_id()
+        if client_id is None:
             return None
-        item = self.clients_table.item(current, 0)
-        if item is None:
-            return None
-        return Client.get_by_id(item.data(Qt.UserRole))
+        client = self._client_from_cache(client_id)
+        if client is not None:
+            return client
+        return Client.get_or_none(Client.id == client_id)
 
     def _on_print_statement(self) -> None:
         if self.print_statement_callback is None:
@@ -621,6 +655,8 @@ class CustomerLedgerPage(QWidget):
             self.email_statement_callback(client)
 
     def _clear_detail(self) -> None:
+        self._detail_client_id = None
+        self._detail_movements_cache = []
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
         self.detail_balance.setText("$ 0,00")
         _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
