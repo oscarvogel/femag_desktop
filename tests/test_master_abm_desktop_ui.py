@@ -331,8 +331,9 @@ def test_desktop_sidebar_groups_master_abms_without_breaking_routes(db):
     rows = [nav.item(row) for row in range(nav.count())]
     labels = [item.text().strip() for item in rows]
     masters_index = labels.index("Maestros")
-    assert labels[masters_index + 1 : masters_index + 8] == [
+    assert labels[masters_index + 1 : masters_index + 9] == [
         "Clientes",
+        "Vendedores",
         "Productos",
         "Precios por lista",
         "Tipos de IVA",
