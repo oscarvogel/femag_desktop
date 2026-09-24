@@ -142,6 +142,11 @@ def main() -> int:
     parser.add_argument("--user", default=None)
     parser.add_argument("--password", default=None)
     parser.add_argument(
+        "--allow-remote-performance-db",
+        action="store_true",
+        help="Permite sembrar una DB performance en un host no local.",
+    )
+    parser.add_argument(
         "--reset",
         action="store_true",
         help="Borra y recrea únicamente la DB de performance. Obligatorio.",
@@ -158,6 +163,14 @@ def main() -> int:
         password=args.password,
         database=args.db_name,
     )
+    local_hosts = {"127.0.0.1", "localhost", "::1"}
+    if config.host.lower() not in local_hosts and not args.allow_remote_performance_db:
+        parser.error(
+            "Por seguridad el seed destructivo solo corre en localhost. "
+            "Use --allow-remote-performance-db únicamente si el host remoto "
+            "es una instancia aislada de pruebas."
+        )
+
     total = args.clients * args.movements_per_client
     print(f"DB performance: {config.user}@{config.host}:{config.port}/{config.database}")
     print(
