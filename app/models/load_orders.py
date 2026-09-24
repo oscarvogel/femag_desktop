@@ -84,6 +84,9 @@ class LoadOrderProduct(BaseModel):
     destination = ForeignKeyField(LoadOrderDestination, backref="products", on_delete="CASCADE", null=True)
     product = ForeignKeyField(Product, backref="load_order_details")
     quantity = FloatField()
+    # Issue #553: cantidad ya documentada/facturada dentro del total comercial.
+    # NULL mantiene compatibilidad con órdenes legacy y equivale a "todo facturado".
+    cantidad_facturada = FloatField(null=True)
     unit = CharField()
     observations = TextField(null=True)
     precio_neto_unitario = FloatField(default=0.0)
