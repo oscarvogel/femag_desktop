@@ -104,6 +104,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.route_key for child in operations.children] == ["load_orders", "remittances", "placeholder"]
     assert [child.title for child in masters.children] == [
         "Clientes",
+        "Vendedores",
         "Productos",
         "Precios por lista",
         "Tipos de IVA",
@@ -113,6 +114,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     ]
     assert [child.route_key for child in masters.children] == [
         "clients",
+        "salespeople",
         "products",
         "product_price_bulk",
         "vat_types",
