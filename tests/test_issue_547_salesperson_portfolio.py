@@ -181,3 +181,55 @@ def test_portfolio_uses_grouped_queries_without_n_plus_one(db, monkeypatch):
     assert len(rows) == 20
     assert len(calls) <= 3
     assert any("GROUP BY" in sql.upper() for sql in calls)
+
+
+def test_customer_ledger_salesperson_filter_updates_portfolio_summary(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client, Salesperson
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    today = date.today()
+    luis = Salesperson.create(name="Luis UI 547")
+    pedro = Salesperson.create(name="Pedro UI 547")
+    client_luis = Client.create(
+        name="Cliente Luis UI 547",
+        cuit="30700060547",
+        iva_condition="RI",
+        salesperson=luis,
+    )
+    client_pedro = Client.create(
+        name="Cliente Pedro UI 547",
+        cuit="30700070547",
+        iva_condition="RI",
+        salesperson=pedro,
+    )
+    _movement(
+        client_luis,
+        1500,
+        due_date=today - timedelta(days=1),
+        ref="547:ui:luis",
+    )
+    _movement(
+        client_pedro,
+        2500,
+        due_date=today + timedelta(days=3),
+        ref="547:ui:pedro",
+    )
+
+    page = CustomerLedgerPage(current_user="issue547_ui")
+    app.processEvents()
+
+    assert page.salesperson_filter.findData("unassigned") >= 0
+    luis_index = page.salesperson_filter.findData(luis.id)
+    assert luis_index >= 0
+    page.salesperson_filter.setCurrentIndex(luis_index)
+    page._on_salesperson_changed()
+    app.processEvents()
+
+    assert page.clients_table.rowCount() == 1
+    assert "Cliente Luis UI 547" in page.clients_table.item(0, 0).text()
+    assert "Cartera: <b>$1,500.00</b>" in page.totals_label.text()
+    assert "Vencido: <b>$1,500.00</b>" in page.totals_label.text()
+    assert "Próx. 7 días: <b>$0.00</b>" in page.totals_label.text()
