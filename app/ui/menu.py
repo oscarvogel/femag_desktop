@@ -74,6 +74,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         item
         for item in (
             approved_item("Clientes"),
+            approved_item("Vendedores"),
             approved_item("Productos"),
             approved_item("Precios por lista", "Productos", route_key="product_price_bulk"),
             approved_item("Tipos de IVA"),
