@@ -165,6 +165,9 @@ class CustomerLedgerPage(QWidget):
         salesperson_row.addWidget(QLabel("Vendedor"))
         self.salesperson_filter = QComboBox()
         self.salesperson_filter.setObjectName("customerLedgerSalespersonFilter")
+        self.salesperson_filter.setToolTip(
+            "Filtra la cartera según el vendedor actualmente asignado al cliente."
+        )
         self.salesperson_filter.addItem("Todos", "all")
         self.salesperson_filter.addItem("Sin asignar", "unassigned")
         for salesperson in Salesperson.select().order_by(Salesperson.name):
