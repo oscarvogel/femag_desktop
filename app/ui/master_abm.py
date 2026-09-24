@@ -149,7 +149,7 @@ class MasterTableController:
         item = self.table.item(self.table.currentRow(), 0)
         return item.data(Qt.UserRole) if item is not None else None
 
-    def refresh(self) -> None:
+    def refresh(self, *_signal_args) -> None:
         selected_id = self.selected_id()
         rows = filter_and_sort_master_rows(
             list(self.rows_fn()),
@@ -1829,7 +1829,7 @@ def build_client_abm_page(
         rows_fn=filtered_client_rows,
     )
     client_salesperson_filter.currentIndexChanged.connect(
-        lambda *_: client_table_controller.refresh()
+        client_table_controller.refresh
     )
     places_table_controller = MasterTableController(
         table=places_table,
