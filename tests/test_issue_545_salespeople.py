@@ -136,7 +136,7 @@ def test_salesperson_master_is_registered_in_ui_and_permissions(db):
     assert config.columns == ["Nombre", "Teléfono", "Estado"]
 
 
-def test_runtime_schema_restores_salesperson_column_and_index_idempotently(db):
+def test_runtime_schema_restores_salesperson_index_idempotently(db):
     from app.config.schema import ensure_runtime_schema, validate_runtime_schema
 
     salesperson_indexes = [
@@ -148,7 +148,6 @@ def test_runtime_schema_restores_salesperson_column_and_index_idempotently(db):
 
     for index in salesperson_indexes:
         db.execute_sql(f'DROP INDEX "{index.name}"')
-    db.execute_sql("ALTER TABLE client DROP COLUMN salesperson_id")
 
     ensure_runtime_schema(db)
     ensure_runtime_schema(db)
@@ -160,3 +159,35 @@ def test_runtime_schema_restores_salesperson_column_and_index_idempotently(db):
         set(index.columns) == {"salesperson_id"}
         for index in db.get_indexes("client")
     )
+
+
+def test_runtime_schema_adds_nullable_salesperson_column_to_legacy_client():
+    from collections import namedtuple
+
+    from app.config.schema import _ensure_model_columns
+    from app.models.masters import Client
+
+    Column = namedtuple("Column", "name null")
+
+    class MySQLDatabase:
+        def __init__(self):
+            self.sql = []
+
+        def get_columns(self, _table_name):
+            return [
+                Column(field.column_name, field.null)
+                for field in Client._meta.sorted_fields
+                if field.column_name != "salesperson_id"
+            ]
+
+        def execute_sql(self, sql, params=None):
+            self.sql.append((sql, params))
+
+    database = MySQLDatabase()
+
+    _ensure_model_columns(database, Client)
+
+    assert (
+        "ALTER TABLE `client` ADD COLUMN `salesperson_id` INTEGER NULL",
+        None,
+    ) in database.sql
