@@ -63,6 +63,13 @@ class TipoIVA(BaseModel):
         return cls.get_or_create(nombre="IVA 21%", defaults={"porcentaje": 21.0, "activo": True})[0]
 
 
+class Salesperson(BaseModel):
+    name = CharField(unique=True)
+    phone = CharField(null=True)
+    observations = TextField(null=True)
+    active = BooleanField(default=True)
+
+
 class Client(BaseModel):
     name = CharField()
     cuit = CharField(unique=True)
@@ -70,6 +77,13 @@ class Client(BaseModel):
     phone = CharField(null=True)
     email = CharField(null=True)
     contact = CharField(null=True)
+    salesperson = ForeignKeyField(
+        Salesperson,
+        backref="clients",
+        null=True,
+        on_delete="SET NULL",
+        index=False,
+    )
     active = BooleanField(default=True)
     descuento_porcentaje = FloatField(default=0.0)
     lista_precios = IntegerField(default=1)
@@ -80,6 +94,9 @@ class Client(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_clients", null=True)
+
+    class Meta:
+        indexes = ((("salesperson",), False),)
 
 
 class ClientEmail(BaseModel):
