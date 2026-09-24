@@ -143,6 +143,7 @@ def ensure_runtime_schema(database) -> None:
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
+        _ensure_client_salesperson_index(database)
     _ensure_sqlite_index_integrity(database)
 
 
@@ -258,6 +259,17 @@ def _ensure_account_movement_source_index(database) -> None:
     database.execute_sql(
         "CREATE UNIQUE INDEX `clientaccountmovement_source_client_type_reversal` "
         "ON `clientaccountmovement` (`source_ref`, `client_id`, `movement_type`, `is_reversal`)"
+    )
+
+
+def _ensure_client_salesperson_index(database) -> None:
+    table_name = "client"
+    expected_columns = {"salesperson_id"}
+    indexes = database.get_indexes(table_name)
+    if any(set(index.columns) == expected_columns for index in indexes):
+        return
+    database.execute_sql(
+        "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
     )
 
 
