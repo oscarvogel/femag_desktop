@@ -23,10 +23,12 @@ from scripts.performance_mysql_common import (
 @contextmanager
 def _count_queries(database):
     original = database.execute_sql
-    counter = {"count": 0}
+    counter = {"count": 0, "sql": []}
 
     def counted(*args, **kwargs):
         counter["count"] += 1
+        if args:
+            counter["sql"].append(str(args[0]))
         return original(*args, **kwargs)
 
     database.execute_sql = counted
@@ -45,6 +47,7 @@ def _measure(database, label: str, callback):
         "label": label,
         "seconds": round(elapsed, 4),
         "queries": counter["count"],
+        "sql": counter["sql"],
     }
     print(f"{label:<38} {elapsed:>8.3f} s   SQL: {counter['count']}")
     return result, value
@@ -155,8 +158,21 @@ def main() -> int:
             failures.append(
                 f"snapshot ejecuto {snapshot_result['queries']} SQL; se esperaba 1"
             )
-        if filter_result["queries"] != 0 or all_filter_result["queries"] != 0:
-            failures.append("cambiar vendedor/Todos volvio a consultar MySQL")
+        filter_sql = "\n".join(filter_result["sql"]).upper()
+        all_filter_sql = "\n".join(all_filter_result["sql"]).upper()
+        if "GROUP BY" in filter_sql or "SUM(" in filter_sql:
+            failures.append("cambiar vendedor recalculo la cartera completa")
+        if "GROUP BY" in all_filter_sql or "SUM(" in all_filter_sql:
+            failures.append("volver a Todos recalculo la cartera completa")
+        if filter_result["queries"] > 1:
+            failures.append(
+                f"cambiar vendedor ejecuto {filter_result['queries']} SQL; "
+                "se esperaba solo el detalle del cliente seleccionado"
+            )
+        if all_filter_result["queries"] > 1:
+            failures.append(
+                f"volver a Todos ejecuto {all_filter_result['queries']} SQL"
+            )
 
         if args.assert_thresholds:
             if snapshot_result["seconds"] > args.max_snapshot_seconds:
