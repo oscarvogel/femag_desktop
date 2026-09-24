@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -21,12 +22,12 @@ from PyQt5.QtWidgets import (
 )
 
 from app.models.accounting import ClientAccountMovement
-from app.models.masters import Client
+from app.models.masters import Client, Salesperson
 from app.models.payments import ClientPayment
 from app.ui.financial_history_dialog import FinancialHistoryDialog
 from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
 from app.services.ledger_query_service import (
-    client_balances,
+    client_portfolio_rows,
     movements_for_client,
     running_balance,
 )
@@ -158,6 +159,24 @@ class CustomerLedgerPage(QWidget):
         self.only_with_balance.toggled.connect(self._on_search_changed)
         filters_row.addWidget(self.only_with_balance)
         layout.addLayout(filters_row)
+
+        salesperson_row = QHBoxLayout()
+        salesperson_row.setSpacing(8)
+        salesperson_row.addWidget(QLabel("Vendedor"))
+        self.salesperson_filter = QComboBox()
+        self.salesperson_filter.setObjectName("customerLedgerSalespersonFilter")
+        self.salesperson_filter.addItem("Todos", "all")
+        self.salesperson_filter.addItem("Sin asignar", "unassigned")
+        for salesperson in Salesperson.select().order_by(Salesperson.name):
+            label = (
+                salesperson.name
+                if salesperson.active
+                else f"{salesperson.name} (Inactivo)"
+            )
+            self.salesperson_filter.addItem(label, salesperson.id)
+        self.salesperson_filter.activated.connect(self._on_salesperson_changed)
+        salesperson_row.addWidget(self.salesperson_filter, 1)
+        layout.addLayout(salesperson_row)
 
         self.totals_label = QLabel("")
         self.totals_label.setObjectName("customerLedgerTotalsLabel")
@@ -399,6 +418,20 @@ class CustomerLedgerPage(QWidget):
         # ni volver a MySQL por cada tecla.
         self._render_clients(previous_id=self._current_client_id())
 
+    def _on_salesperson_changed(self, *_args) -> None:
+        self._direct_client_id = None
+        self.refresh()
+
+    def _salesperson_filter_values(self) -> tuple[int | None, bool]:
+        if not hasattr(self, "salesperson_filter"):
+            return None, False
+        value = self.salesperson_filter.currentData()
+        if value == "unassigned":
+            return None, True
+        if isinstance(value, int):
+            return value, False
+        return None, False
+
     def _filter_balances(self, balances: list[dict]) -> list[dict]:
         query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
         only_balance = self.only_with_balance.isChecked() if hasattr(self, "only_with_balance") else False
@@ -413,18 +446,11 @@ class CustomerLedgerPage(QWidget):
 
     def refresh(self) -> None:
         previous_id = self._current_client_id()
-        all_balances = client_balances()
-        known_client_ids = {entry["client"].id for entry in all_balances}
-        for client in (
-            Client.select()
-            .where(Client.active == True)  # noqa: E712
-            .order_by(Client.name)
-        ):
-            if client.id not in known_client_ids:
-                all_balances.append(
-                    {"client": client, "balance": 0.0, "movements": 0}
-                )
-                known_client_ids.add(client.id)
+        salesperson_id, unassigned = self._salesperson_filter_values()
+        all_balances = client_portfolio_rows(
+            salesperson_id=salesperson_id,
+            unassigned=unassigned,
+        )
 
         if self._direct_client_id is not None and not any(
             entry["client"].id == self._direct_client_id for entry in all_balances
@@ -433,7 +459,13 @@ class CustomerLedgerPage(QWidget):
             if direct_client is not None:
                 all_balances.insert(
                     0,
-                    {"client": direct_client, "balance": 0.0, "movements": 0},
+                    {
+                        "client": direct_client,
+                        "balance": 0.0,
+                        "movements": 0,
+                        "overdue": 0.0,
+                        "due_7": 0.0,
+                    },
                 )
 
         self._all_balances = all_balances
@@ -447,6 +479,8 @@ class CustomerLedgerPage(QWidget):
         balances = self._filter_balances(self._all_balances)
         self.clients_table.setRowCount(len(balances))
         total_to_collect = 0.0
+        total_overdue = 0.0
+        total_due_7 = 0.0
         clients_with_balance = 0
 
         for row_index, entry in enumerate(balances):
@@ -457,6 +491,8 @@ class CustomerLedgerPage(QWidget):
                 clients_with_balance += 1
             if balance > 0.01:
                 total_to_collect += balance
+            total_overdue += float(entry.get("overdue", 0.0) or 0.0)
+            total_due_7 += float(entry.get("due_7", 0.0) or 0.0)
 
             movement_label = "movimiento" if movements == 1 else "movimientos"
             name_cell = QTableWidgetItem(
@@ -478,7 +514,9 @@ class CustomerLedgerPage(QWidget):
         if len(balances) != len(self._all_balances):
             suffix = f"  ·  (de {len(self._all_balances)} totales)"
         self.totals_label.setText(
-            f"Total a cobrar: <b>${total_to_collect:,.2f}</b>  ·  "
+            f"Cartera: <b>${total_to_collect:,.2f}</b>  ·  "
+            f"Vencido: <b>${total_overdue:,.2f}</b>  ·  "
+            f"Próx. 7 días: <b>${total_due_7:,.2f}</b><br>"
             f"Clientes con saldo: <b>{clients_with_balance}</b>  ·  "
             f"Total clientes: <b>{len(balances)}</b>{suffix}"
         )
@@ -511,10 +549,13 @@ class CustomerLedgerPage(QWidget):
         self._direct_client_id = client.id
         self.search_input.blockSignals(True)
         self.only_with_balance.blockSignals(True)
+        self.salesperson_filter.blockSignals(True)
         self.search_input.clear()
         self.only_with_balance.setChecked(False)
+        self.salesperson_filter.setCurrentIndex(0)
         self.search_input.blockSignals(False)
         self.only_with_balance.blockSignals(False)
+        self.salesperson_filter.blockSignals(False)
         self.refresh()
         for row in range(self.clients_table.rowCount()):
             item = self.clients_table.item(row, 0)
