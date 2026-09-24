@@ -15,6 +15,7 @@ REAL_MODULES = {
     "Remitos": "remittances",
     "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
+    "Vendedores": "salespeople",
     "Domicilios": "addresses",
     "Productos": "products",
     "Precios por lista": "product_price_bulk",
