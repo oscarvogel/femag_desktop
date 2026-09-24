@@ -810,11 +810,23 @@ class LoadOrderService:
             quantity = item.get("quantity")
             if quantity is None or quantity <= 0:
                 raise ValueError("La cantidad de producto debe ser mayor a cero.")
+            cantidad_facturada = item.get("cantidad_facturada")
+            if cantidad_facturada is None:
+                cantidad_facturada = quantity
+            try:
+                cantidad_facturada = float(cantidad_facturada)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("La cantidad facturada debe ser un número válido.") from exc
+            if cantidad_facturada < 0:
+                raise ValueError("La cantidad facturada no puede ser negativa.")
+            if cantidad_facturada > float(quantity):
+                raise ValueError("La cantidad facturada no puede superar la cantidad total.")
             normalized.append(
                 {
                     **item,
                     "product": product,
                     "quantity": quantity,
+                    "cantidad_facturada": cantidad_facturada,
                 }
             )
         return normalized
@@ -968,7 +980,15 @@ class LoadOrderService:
                 "client": destination.client,
                 "delivery_address": destination.delivery_address,
                 "products": [
-                    {"product": product.product, "quantity": product.quantity}
+                    {
+                        "product": product.product,
+                        "quantity": product.quantity,
+                        "cantidad_facturada": (
+                            product.cantidad_facturada
+                            if product.cantidad_facturada is not None
+                            else product.quantity
+                        ),
+                    }
                     for product in destination.products
                 ],
             }
@@ -1215,6 +1235,7 @@ class LoadOrderService:
                     destination=destination,
                     product=product,
                     quantity=product_item["quantity"],
+                    cantidad_facturada=product_item.get("cantidad_facturada"),
                     unit=product_item.get("unit") or product.unit,
                     observations=product_item.get("observations"),
                     **prices,
