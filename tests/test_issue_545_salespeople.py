@@ -1,0 +1,162 @@
+import pytest
+
+
+def _set_combo_data(combo, value):
+    index = combo.findData(value)
+    assert index >= 0
+    combo.setCurrentIndex(index)
+
+
+def test_salesperson_master_and_client_assignment(db):
+    from app.models.masters import Client, Salesperson
+    from app.services.client_service import ClientService
+    from app.services.master_service import MasterService
+
+    master = MasterService("issue545")
+    luis = master.create_salesperson(
+        "Luis",
+        phone="+5493764000001",
+        observations="Cartera norte",
+    )
+    pedro = master.create_salesperson("Pedro")
+
+    client = ClientService("issue545").create_client(
+        "Cliente vendedor 545",
+        "30700000545",
+        "RI",
+        salesperson=luis,
+    )
+
+    assert client.salesperson == luis
+    assert luis.active is True
+    assert Salesperson.select().count() == 2
+
+    ClientService("issue545").set_salesperson(client, pedro)
+    client = Client.get_by_id(client.id)
+    assert client.salesperson == pedro
+
+    ClientService("issue545").set_salesperson(client, None)
+    assert Client.get_by_id(client.id).salesperson_id is None
+
+
+def test_inactive_salesperson_cannot_be_assigned_to_new_client(db):
+    from app.models.masters import Salesperson
+    from app.services.client_service import ClientService
+
+    inactive = Salesperson.create(name="Vendedor inactivo 545", active=False)
+
+    with pytest.raises(ValueError, match="inactivo"):
+        ClientService("issue545").create_client(
+            "Cliente bloqueado 545",
+            "30700010545",
+            "RI",
+            salesperson=inactive,
+        )
+
+
+def test_client_editor_only_offers_active_salespeople_but_preserves_current_inactive(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QPushButton
+
+    from app.models.masters import Client, Salesperson
+    from app.ui.master_abm import ClientEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    active = Salesperson.create(name="Luis activo 545")
+    inactive = Salesperson.create(name="Pedro inactivo 545", active=False)
+    client = Client.create(
+        name="Cliente UI vendedor 545",
+        cuit="30700020545",
+        iva_condition="RI",
+        salesperson=inactive,
+    )
+
+    new_dialog = ClientEntryDialog(current_user="issue545_ui")
+    new_combo = new_dialog.findChild(QComboBox, "clientSalespersonInput")
+    assert new_combo is not None
+    assert new_combo.findData(active.id) >= 0
+    assert new_combo.findData(inactive.id) == -1
+
+    edit_dialog = ClientEntryDialog(
+        current_user="issue545_ui",
+        record_id=client.id,
+    )
+    edit_combo = edit_dialog.findChild(QComboBox, "clientSalespersonInput")
+    assert edit_combo.findData(inactive.id) >= 0
+    assert "Inactivo" in edit_combo.itemText(edit_combo.findData(inactive.id))
+
+    _set_combo_data(edit_combo, active.id)
+    edit_dialog.findChild(QPushButton, "saveClientButton").click()
+    app.processEvents()
+
+    assert Client.get_by_id(client.id).salesperson == active
+
+
+def test_client_rows_filter_by_salesperson_and_unassigned(db):
+    from app.models.masters import Client, Salesperson
+    from app.ui.master_abm import _client_rows
+
+    luis = Salesperson.create(name="Luis filtro 545")
+    pedro = Salesperson.create(name="Pedro filtro 545")
+    Client.create(
+        name="Cliente Luis 545",
+        cuit="30700030545",
+        iva_condition="RI",
+        salesperson=luis,
+    )
+    Client.create(
+        name="Cliente Pedro 545",
+        cuit="30700040545",
+        iva_condition="RI",
+        salesperson=pedro,
+    )
+    Client.create(
+        name="Cliente sin vendedor 545",
+        cuit="30700050545",
+        iva_condition="RI",
+    )
+
+    luis_rows = _client_rows(luis.id)
+    assert [row[1] for row in luis_rows] == ["Cliente Luis 545"]
+    assert luis_rows[0][3] == "Luis filtro 545"
+
+    unassigned_rows = _client_rows("unassigned")
+    assert [row[1] for row in unassigned_rows] == ["Cliente sin vendedor 545"]
+    assert unassigned_rows[0][3] == "Sin asignar"
+
+
+def test_salesperson_master_is_registered_in_ui_and_permissions(db):
+    from app.services.permission_service import MENU
+    from app.services.menu_service import REAL_MODULES
+    from app.ui.master_abm import master_abm_configs
+
+    assert "Vendedores" in MENU["Maestros"]
+    assert REAL_MODULES["Vendedores"] == "salespeople"
+    config = master_abm_configs()["salespeople"]
+    assert config.title == "Vendedores"
+    assert config.columns == ["Nombre", "Teléfono", "Estado"]
+
+
+def test_runtime_schema_restores_salesperson_column_and_index_idempotently(db):
+    from app.config.schema import ensure_runtime_schema, validate_runtime_schema
+
+    salesperson_indexes = [
+        index
+        for index in db.get_indexes("client")
+        if set(index.columns) == {"salesperson_id"}
+    ]
+    assert salesperson_indexes
+
+    for index in salesperson_indexes:
+        db.execute_sql(f'DROP INDEX "{index.name}"')
+    db.execute_sql("ALTER TABLE client DROP COLUMN salesperson_id")
+
+    ensure_runtime_schema(db)
+    ensure_runtime_schema(db)
+    validate_runtime_schema(db)
+
+    columns = {column.name for column in db.get_columns("client")}
+    assert "salesperson_id" in columns
+    assert any(
+        set(index.columns) == {"salesperson_id"}
+        for index in db.get_indexes("client")
+    )
