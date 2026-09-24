@@ -3564,6 +3564,15 @@ class LoadOrderProductDialog(QDialog):
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
         self.quantity_input.setDecimals(2)
+        self.split_billing_check = QCheckBox("Distribuir facturación")
+        self.split_billing_check.setObjectName("productDialogSplitBillingCheck")
+        self.billed_quantity_input = QDoubleSpinBox()
+        self.billed_quantity_input.setObjectName("productDialogBilledQuantityInput")
+        self.billed_quantity_input.setRange(0, 999999)
+        self.billed_quantity_input.setDecimals(2)
+        self.billed_quantity_input.setEnabled(False)
+        self.pending_quantity_label = QLabel("0")
+        self.pending_quantity_label.setObjectName("productDialogPendingQuantity")
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setObjectName("productDialogPrecioInput")
         configure_money_input(self.precio_input)
@@ -3580,15 +3589,20 @@ class LoadOrderProductDialog(QDialog):
         self.iva_input.setEnabled(False)
 
         form.addWidget(QLabel("Producto"), 0, 0)
-        form.addWidget(self.product_combo, 0, 1, 1, 2)
-        form.addWidget(QLabel("Cantidad"), 1, 0)
-        form.addWidget(self.quantity_input, 1, 1, 1, 2)
-        form.addWidget(QLabel("Precio neto unitario"), 2, 0)
-        form.addWidget(self.precio_input, 2, 1, 1, 2)
-        form.addWidget(QLabel("Descuento"), 3, 0)
-        form.addWidget(self.descuento_input, 3, 1)
-        form.addWidget(QLabel("IVA"), 3, 2)
-        form.addWidget(self.iva_input, 3, 3)
+        form.addWidget(self.product_combo, 0, 1, 1, 3)
+        form.addWidget(QLabel("Cantidad total"), 1, 0)
+        form.addWidget(self.quantity_input, 1, 1, 1, 3)
+        form.addWidget(self.split_billing_check, 2, 0, 1, 4)
+        form.addWidget(QLabel("Cantidad facturada"), 3, 0)
+        form.addWidget(self.billed_quantity_input, 3, 1)
+        form.addWidget(QLabel("Cantidad pendiente"), 3, 2)
+        form.addWidget(self.pending_quantity_label, 3, 3)
+        form.addWidget(QLabel("Precio neto unitario"), 4, 0)
+        form.addWidget(self.precio_input, 4, 1, 1, 3)
+        form.addWidget(QLabel("Descuento"), 5, 0)
+        form.addWidget(self.descuento_input, 5, 1)
+        form.addWidget(QLabel("IVA"), 5, 2)
+        form.addWidget(self.iva_input, 5, 3)
         layout.addLayout(form)
 
         totals_grid = QGridLayout()
@@ -3604,6 +3618,10 @@ class LoadOrderProductDialog(QDialog):
         self.total_label = QLabel("$ 0.00")
         self.total_label.setObjectName("productDialogTotal")
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.billed_total_label = QLabel("$ 0.00")
+        self.billed_total_label.setObjectName("productDialogBilledTotal")
+        self.pending_total_label = QLabel("$ 0.00")
+        self.pending_total_label.setObjectName("productDialogPendingTotal")
 
         totals_grid.addWidget(QLabel("Neto subtotal:"), 0, 0)
         totals_grid.addWidget(self.neto_subtotal_label, 0, 1)
@@ -3613,8 +3631,12 @@ class LoadOrderProductDialog(QDialog):
         totals_grid.addWidget(self.neto_gravado_label, 2, 1)
         totals_grid.addWidget(QLabel("IVA:"), 3, 0)
         totals_grid.addWidget(self.iva_importe_label, 3, 1)
-        totals_grid.addWidget(QLabel("Total:"), 4, 0)
+        totals_grid.addWidget(QLabel("Total pedido:"), 4, 0)
         totals_grid.addWidget(self.total_label, 4, 1)
+        totals_grid.addWidget(QLabel("Importe facturado:"), 5, 0)
+        totals_grid.addWidget(self.billed_total_label, 5, 1)
+        totals_grid.addWidget(QLabel("Pendiente de facturación:"), 6, 0)
+        totals_grid.addWidget(self.pending_total_label, 6, 1)
         layout.addLayout(totals_grid)
 
         self.feedback = FormFeedback("productDialogFeedback")
@@ -3632,6 +3654,8 @@ class LoadOrderProductDialog(QDialog):
         _fill_combo(self.product_combo, _product_options())
         self.product_combo.currentIndexChanged.connect(self._on_product_changed)
         self.quantity_input.valueChanged.connect(self._recalculate)
+        self.split_billing_check.toggled.connect(self._on_split_billing_toggled)
+        self.billed_quantity_input.valueChanged.connect(self._recalculate)
         self.precio_input.valueChanged.connect(self._recalculate)
         self.descuento_input.valueChanged.connect(self._recalculate)
         cancel_button.clicked.connect(self.reject)
@@ -3639,6 +3663,8 @@ class LoadOrderProductDialog(QDialog):
         focus_chain = (
             self.product_combo,
             self.quantity_input,
+            self.split_billing_check,
+            self.billed_quantity_input,
             self.precio_input,
             self.descuento_input,
             self.add_button,
@@ -3655,6 +3681,13 @@ class LoadOrderProductDialog(QDialog):
             ),
         )
         self.product_combo.setFocus(Qt.TabFocusReason)
+
+    def _on_split_billing_toggled(self, enabled: bool) -> None:
+        self.billed_quantity_input.setEnabled(enabled)
+        if not enabled:
+            with QSignalBlocker(self.billed_quantity_input):
+                self.billed_quantity_input.setValue(self.quantity_input.value())
+        self._recalculate()
 
     def _on_product_changed(self) -> None:
         product_id = self.product_combo.currentData()
@@ -3675,6 +3708,13 @@ class LoadOrderProductDialog(QDialog):
 
     def _recalculate(self) -> None:
         quantity = self.quantity_input.value()
+        self.billed_quantity_input.setMaximum(quantity)
+        if not self.split_billing_check.isChecked():
+            with QSignalBlocker(self.billed_quantity_input):
+                self.billed_quantity_input.setValue(quantity)
+        billed_quantity = min(self.billed_quantity_input.value(), quantity)
+        pending_quantity = max(0.0, quantity - billed_quantity)
+        self.pending_quantity_label.setText(f"{pending_quantity:g}")
         precio = self.precio_input.value()
         descuento = self.descuento_input.value()
         iva_pct = self.iva_input.value()
@@ -3688,6 +3728,10 @@ class LoadOrderProductDialog(QDialog):
         self.neto_gravado_label.setText(f"$ {neto_gravado:,.2f}")
         self.iva_importe_label.setText(f"$ {iva_importe:,.2f}")
         self.total_label.setText(f"$ {total:,.2f}")
+        billed_total = total * billed_quantity / quantity if quantity > 0 else 0.0
+        pending_total = max(0.0, total - billed_total)
+        self.billed_total_label.setText(f"$ {billed_total:,.2f}")
+        self.pending_total_label.setText(f"$ {pending_total:,.2f}")
 
     def _accept_product(self) -> None:
         product_id = self.product_combo.currentData()
@@ -3702,11 +3746,23 @@ class LoadOrderProductDialog(QDialog):
                 "La cantidad debe ser mayor a cero.", focus_widget=self.quantity_input
             )
             return
+        billed_quantity = (
+            self.billed_quantity_input.value()
+            if self.split_billing_check.isChecked()
+            else quantity
+        )
+        if billed_quantity < 0 or billed_quantity > quantity:
+            self.feedback.show_warning(
+                "La cantidad facturada debe estar entre 0 y la cantidad total.",
+                focus_widget=self.billed_quantity_input,
+            )
+            return
         product = Product.get_by_id(product_id)
         self.product = {
             "product_id": product_id,
             "product_label": product.name,
             "quantity": quantity,
+            "cantidad_facturada": billed_quantity,
             "unit": product.unit,
             "precio_neto_unitario": self.precio_input.value(),
             "descuento_porcentaje": self.descuento_input.value(),
