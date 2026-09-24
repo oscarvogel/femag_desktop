@@ -9,6 +9,7 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    Salesperson,
     TipoIVA,
     Truck,
 )
@@ -190,6 +191,76 @@ class MasterService:
             query = query.where(TipoIVA.id != exclude_id)
         if query.exists():
             raise ValueError("Ya existe un tipo de IVA con ese nombre.")
+
+    def create_salesperson(
+        self,
+        name: str,
+        *,
+        phone: str | None = None,
+        observations: str | None = None,
+        active: bool = True,
+    ) -> Salesperson:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Complete el nombre del vendedor.")
+        if Salesperson.select().where(fn.LOWER(Salesperson.name) == name.lower()).exists():
+            raise ValueError("Ya existe un vendedor con ese nombre.")
+        row = Salesperson.create(
+            name=name,
+            phone=(phone or "").strip() or None,
+            observations=(observations or "").strip() or None,
+            active=bool(active),
+        )
+        self._record(
+            "Salesperson",
+            row,
+            {"name": name, "phone": row.phone, "active": row.active},
+        )
+        return row
+
+    def update_salesperson(
+        self,
+        salesperson: Salesperson,
+        name: str,
+        *,
+        phone: str | None = None,
+        observations: str | None = None,
+        active: bool = True,
+    ) -> Salesperson:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Complete el nombre del vendedor.")
+        duplicate = Salesperson.select().where(
+            (fn.LOWER(Salesperson.name) == name.lower())
+            & (Salesperson.id != salesperson.id)
+        )
+        if duplicate.exists():
+            raise ValueError("Ya existe un vendedor con ese nombre.")
+        old_value = {
+            "name": salesperson.name,
+            "phone": salesperson.phone,
+            "observations": salesperson.observations,
+            "active": salesperson.active,
+        }
+        salesperson.name = name
+        salesperson.phone = (phone or "").strip() or None
+        salesperson.observations = (observations or "").strip() or None
+        salesperson.active = bool(active)
+        salesperson.save()
+        self.audit_service.record(
+            user=self.current_user,
+            module="Maestros",
+            action="modificar",
+            record_ref=f"Salesperson:{salesperson.id}",
+            old_value=old_value,
+            new_value={
+                "name": salesperson.name,
+                "phone": salesperson.phone,
+                "observations": salesperson.observations,
+                "active": salesperson.active,
+            },
+        )
+        return salesperson
 
     def create_driver(
         self,

@@ -25,6 +25,7 @@ MENU = {
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
         "Clientes",
+        "Vendedores",
         "Domicilios",
         "Productos",
         "Tipos de IVA",

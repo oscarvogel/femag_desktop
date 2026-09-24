@@ -12,6 +12,7 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    Salesperson,
     TipoIVA,
     Truck,
 )
@@ -43,6 +44,7 @@ ALL_MODELS = [
     ClientPayment,
     ClientPaymentDetail,
     ImportBatch,
+    Salesperson,
     Client,
     ClientEmail,
     ClientAddress,

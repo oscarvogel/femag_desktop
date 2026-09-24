@@ -5,6 +5,7 @@ from app.models.masters import (
     CLIENT_ADDRESS_TYPE_SHARED,
     Client,
     ClientAddress,
+    Salesperson,
     client_address_has_delivery_function,
     client_address_has_fiscal_function,
 )
@@ -26,10 +27,13 @@ class ClientService:
         contact: str | None = None,
         lista_precios: int = 1,
         dias_plazo_pago: int = 0,
+        salesperson: Salesperson | None = None,
     ) -> Client:
         if lista_precios not in (1, 2, 3, 4):
             raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
         dias_plazo_pago = self.validate_payment_term_days(dias_plazo_pago)
+        if salesperson is not None and not bool(salesperson.active):
+            raise ValueError("El vendedor seleccionado está inactivo.")
         client = Client.create(
             name=name,
             cuit=cuit,
@@ -39,6 +43,7 @@ class ClientService:
             contact=contact,
             lista_precios=lista_precios,
             dias_plazo_pago=dias_plazo_pago,
+            salesperson=salesperson,
         )
         self.audit_service.record(
             user=self.current_user,
@@ -49,7 +54,31 @@ class ClientService:
                 "name": name,
                 "cuit": cuit,
                 "dias_plazo_pago": dias_plazo_pago,
+                "salesperson_id": salesperson.id if salesperson is not None else None,
             },
+        )
+        return client
+
+    def set_salesperson(
+        self,
+        client: Client,
+        salesperson: Salesperson | None,
+    ) -> Client:
+        new_id = salesperson.id if salesperson is not None else None
+        if client.salesperson_id == new_id:
+            return client
+        if salesperson is not None and not bool(salesperson.active):
+            raise ValueError("El vendedor seleccionado está inactivo.")
+        previous_id = client.salesperson_id
+        client.salesperson = salesperson
+        client.save(only=[Client.salesperson])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Clientes",
+            action="asignar vendedor",
+            record_ref=f"Client:{client.id}",
+            old_value={"salesperson_id": previous_id},
+            new_value={"salesperson_id": new_id},
         )
         return client
 

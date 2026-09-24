@@ -152,9 +152,9 @@ def test_issue_535_search_filters_cached_snapshot_without_requery(db):
 
     with patch.object(
         customer_ledger,
-        "client_balances",
-        wraps=ledger_query_service.client_balances,
-    ) as balances_mock, patch.object(
+        "client_portfolio_rows",
+        wraps=ledger_query_service.client_portfolio_rows,
+    ) as portfolio_mock, patch.object(
         customer_ledger,
         "movements_for_client",
         wraps=ledger_query_service.movements_for_client,
@@ -162,9 +162,9 @@ def test_issue_535_search_filters_cached_snapshot_without_requery(db):
         page = CustomerLedgerPage(current_user="admin")
         app.processEvents()
 
-        balance_calls = balances_mock.call_count
+        portfolio_calls = portfolio_mock.call_count
         movement_calls = movements_mock.call_count
-        assert balance_calls >= 1
+        assert portfolio_calls >= 1
         assert movement_calls >= 1
 
         page.search_input.setText("Cliente")
@@ -174,7 +174,7 @@ def test_issue_535_search_filters_cached_snapshot_without_requery(db):
         page.only_with_balance.setChecked(True)
         app.processEvents()
 
-        assert balances_mock.call_count == balance_calls
+        assert portfolio_mock.call_count == portfolio_calls
         assert movements_mock.call_count == movement_calls
         assert page.clients_table.rowCount() == 1
         assert page.detail_balance.text() == "$1,234.56"
