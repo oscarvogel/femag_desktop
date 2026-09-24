@@ -2892,9 +2892,11 @@ class LoadOrderEntryDialog(QDialog):
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
-        self.product_table = QTableWidget(0, 6)
+        self.product_table = QTableWidget(0, 8)
         self.product_table.setObjectName("loadOrderProductDraftTable")
-        self.product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad", "P.Unit", "Dto%", "Total"))
+        self.product_table.setHorizontalHeaderLabels(
+            ("Producto", "Cantidad", "Fact.", "Pend.", "Unidad", "P.Unit", "Dto%", "Total")
+        )
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -2917,10 +2919,10 @@ class LoadOrderEntryDialog(QDialog):
         preparation_hint.setObjectName("loadOrderPalletPreparationHint")
         preparation_hint.setWordWrap(True)
         review_layout.addWidget(preparation_hint)
-        self.review_table = QTableWidget(0, 7)
+        self.review_table = QTableWidget(0, 9)
         self.review_table.setObjectName("loadOrderReviewTable")
         self.review_table.setHorizontalHeaderLabels(
-            ("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total", "Descripción")
+            ("Cliente", "Destino", "Producto", "Cantidad", "Fact.", "Pend.", "Unidad", "Total", "Descripción")
         )
         self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.review_table.verticalHeader().setVisible(False)
@@ -2928,6 +2930,13 @@ class LoadOrderEntryDialog(QDialog):
         self.review_table.setFocusPolicy(Qt.NoFocus)
         self.review_table.setMinimumHeight(260)
         review_layout.addWidget(self.review_table)
+        self.billing_summary_label = QLabel(
+            "Total pedido: $ 0.00 | Facturado: $ 0.00 | Pendiente de facturación: $ 0.00"
+        )
+        self.billing_summary_label.setObjectName("loadOrderBillingSummary")
+        self.billing_summary_label.setStyleSheet("font-weight: bold;")
+        self.billing_summary_label.setWordWrap(True)
+        review_layout.addWidget(self.billing_summary_label)
         self.step_stack.addWidget(review)
 
         root.addWidget(body, 1)
@@ -3061,6 +3070,11 @@ class LoadOrderEntryDialog(QDialog):
                         "product_id": product.product.id,
                         "product_label": product.product.name,
                         "quantity": product.quantity,
+                        "cantidad_facturada": (
+                            product.cantidad_facturada
+                            if product.cantidad_facturada is not None
+                            else product.quantity
+                        ),
                         "unit": product.unit,
                         "precio_neto_unitario": product.precio_neto_unitario,
                         "descuento_porcentaje": product.descuento_porcentaje,
@@ -3318,9 +3332,15 @@ class LoadOrderEntryDialog(QDialog):
             precio = prod.get("precio_neto_unitario", 0.0)
             dto_pct = prod.get("descuento_porcentaje", 0.0)
             total = prod.get("total", 0.0)
+            quantity = float(prod.get("quantity") or 0)
+            billed = prod.get("cantidad_facturada")
+            billed = quantity if billed is None else float(billed)
+            pending = max(0.0, quantity - billed)
             values = (
                 prod["product_label"],
-                f"{prod['quantity']:g}",
+                f"{quantity:g}",
+                f"{billed:g}",
+                f"{pending:g}",
                 prod["unit"],
                 f"$ {precio:,.2f}",
                 f"{dto_pct:g}%",
@@ -3332,17 +3352,30 @@ class LoadOrderEntryDialog(QDialog):
 
     def _render_review(self) -> None:
         rows = []
+        total_order = 0.0
+        billed_total = 0.0
         for destination in self.destinations:
             products = destination["products"] or [{}]
             for product in products:
+                quantity = float(product.get("quantity") or 0)
+                billed = product.get("cantidad_facturada")
+                billed = quantity if billed is None else float(billed)
+                billed = max(0.0, min(billed, quantity))
+                pending = max(0.0, quantity - billed)
+                line_total = float(product.get("total") or 0.0)
+                line_billed = line_total * billed / quantity if quantity > 0 else 0.0
+                total_order += line_total
+                billed_total += line_billed
                 rows.append(
                     (
                         destination["client_label"],
                         destination["address_label"],
                         product.get("product_label", "-"),
-                        f"{product.get('quantity', 0):g}" if product.get("quantity") else "-",
+                        f"{quantity:g}" if quantity else "-",
+                        f"{billed:g}" if quantity else "-",
+                        f"{pending:g}" if quantity else "-",
                         product.get("unit", "-"),
-                        f"$ {product.get('total', 0.0):,.2f}" if product.get("total") else "-",
+                        f"$ {line_total:,.2f}" if line_total else "-",
                         destination.get("observations") or "-",
                     )
                 )
@@ -3350,6 +3383,12 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
+        pending_total = max(0.0, total_order - billed_total)
+        self.billing_summary_label.setText(
+            f"Total pedido: $ {total_order:,.2f} | "
+            f"Facturado: $ {billed_total:,.2f} | "
+            f"Pendiente de facturación: $ {pending_total:,.2f}"
+        )
         self._update_save_button_state()
 
     def _is_ready_to_save(self) -> bool:
@@ -3463,6 +3502,7 @@ class LoadOrderEntryDialog(QDialog):
                             {
                                 "product": Product.get_by_id(product["product_id"]),
                                 "quantity": product["quantity"],
+                                "cantidad_facturada": product.get("cantidad_facturada"),
                                 "precio_neto_unitario": product.get("precio_neto_unitario"),
                                 "descuento_porcentaje": product.get("descuento_porcentaje"),
                                 "iva_porcentaje": product.get("iva_porcentaje"),
