@@ -140,9 +140,7 @@ def install_client_payment_term_extension() -> None:
                     )
                     client.max_despachos_pendientes = credit_limit
                     client.save()
-                    service = ClientService(self.current_user)
-                    service.set_salesperson(client, salesperson)
-                    service.set_active(
+                    ClientService(self.current_user).set_active(
                         client, bool(self.active_combo.currentData())
                     )
                     self.saved_record = client
@@ -156,7 +154,9 @@ def install_client_payment_term_extension() -> None:
                     client.dias_plazo_pago = payment_term_days
                     client.max_despachos_pendientes = credit_limit
                     client.save()
-                    ClientService(self.current_user).set_active(
+                    service = ClientService(self.current_user)
+                    service.set_salesperson(client, salesperson)
+                    service.set_active(
                         client, bool(self.active_combo.currentData())
                     )
                     self.saved_record = client
