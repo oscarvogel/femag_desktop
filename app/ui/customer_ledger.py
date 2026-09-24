@@ -423,7 +423,9 @@ class CustomerLedgerPage(QWidget):
 
     def _on_salesperson_changed(self, *_args) -> None:
         self._direct_client_id = None
-        self.refresh()
+        # El vendedor filtra la fotografía de cartera ya cargada. No volver a
+        # ejecutar agregaciones sobre MySQL por cada cambio de vendedor.
+        self._render_clients(previous_id=self._current_client_id())
 
     def _salesperson_filter_values(self) -> tuple[int | None, bool]:
         if not hasattr(self, "salesperson_filter"):
@@ -438,8 +440,14 @@ class CustomerLedgerPage(QWidget):
     def _filter_balances(self, balances: list[dict]) -> list[dict]:
         query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
         only_balance = self.only_with_balance.isChecked() if hasattr(self, "only_with_balance") else False
+        salesperson_id, unassigned = self._salesperson_filter_values()
         filtered: list[dict] = []
         for entry in balances:
+            entry_salesperson_id = entry.get("salesperson_id")
+            if unassigned and entry_salesperson_id is not None:
+                continue
+            if salesperson_id is not None and entry_salesperson_id != salesperson_id:
+                continue
             if only_balance and abs(entry["balance"]) <= 0.01:
                 continue
             if query and query not in entry["client"].name.lower():
@@ -449,11 +457,10 @@ class CustomerLedgerPage(QWidget):
 
     def refresh(self) -> None:
         previous_id = self._current_client_id()
-        salesperson_id, unassigned = self._salesperson_filter_values()
-        all_balances = client_portfolio_rows(
-            salesperson_id=salesperson_id,
-            unassigned=unassigned,
-        )
+        # Una sola fotografía completa: vendedor/búsqueda/saldo se filtran
+        # después en memoria. Refresh queda reservado para cambios reales de
+        # movimientos o clientes.
+        all_balances = client_portfolio_rows()
 
         if self._direct_client_id is not None and not any(
             entry["client"].id == self._direct_client_id for entry in all_balances
@@ -464,6 +471,7 @@ class CustomerLedgerPage(QWidget):
                     0,
                     {
                         "client": direct_client,
+                        "salesperson_id": direct_client.salesperson_id,
                         "balance": 0.0,
                         "movements": 0,
                         "overdue": 0.0,

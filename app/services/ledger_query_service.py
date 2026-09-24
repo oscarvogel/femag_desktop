@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable
 
-from peewee import JOIN, fn
+from peewee import JOIN, Case, fn
 
 from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder
@@ -76,16 +76,43 @@ def client_portfolio_rows(
     unassigned: bool = False,
     as_of: date | None = None,
 ) -> list[dict]:
-    """Return the current client portfolio in three grouped queries at most.
+    """Return the current client portfolio with one grouped movement query.
 
-    The seller filter is applied in SQL before materializing rows. Payments are
-    not allocated to documents in FEMAG, so overdue and next-7-day exposure use
-    the same conservative rule as the managerial dashboard: positive documents
-    consume the client's current positive balance from oldest buckets first.
+    Balance, overdue exposure and next-7-day exposure are aggregated together.
+    This keeps the currency semantics used by the existing ledger while avoiding
+    multiple full scans of ClientAccountMovement for the same snapshot.
     """
 
     reference_date = as_of or date.today()
+    due_7_limit = reference_date + timedelta(days=7)
     rounded_amount = fn.ROUND(ClientAccountMovement.total_amount, 2)
+
+    overdue_amount = Case(
+        None,
+        (
+            (
+                (ClientAccountMovement.total_amount > 0)
+                & ClientAccountMovement.due_date.is_null(False)
+                & (ClientAccountMovement.due_date < reference_date),
+                ClientAccountMovement.total_amount,
+            ),
+        ),
+        0,
+    )
+    due_7_amount = Case(
+        None,
+        (
+            (
+                (ClientAccountMovement.total_amount > 0)
+                & ClientAccountMovement.due_date.is_null(False)
+                & (ClientAccountMovement.due_date >= reference_date)
+                & (ClientAccountMovement.due_date <= due_7_limit),
+                ClientAccountMovement.total_amount,
+            ),
+        ),
+        0,
+    )
+
     rows_query = (
         Client.select(
             Client,
@@ -94,6 +121,14 @@ def client_portfolio_rows(
                 2,
             ).alias("balance"),
             fn.COUNT(ClientAccountMovement.id).alias("movements"),
+            fn.ROUND(
+                fn.COALESCE(fn.SUM(overdue_amount), 0),
+                2,
+            ).alias("overdue_total"),
+            fn.ROUND(
+                fn.COALESCE(fn.SUM(due_7_amount), 0),
+                2,
+            ).alias("due_7_total"),
         )
         .join(
             ClientAccountMovement,
@@ -112,45 +147,29 @@ def client_portfolio_rows(
         unassigned=unassigned,
     )
 
-    result = [
-        {
-            "client": row,
-            "balance": float(_money(row.balance)),
-            "movements": int(row.movements or 0),
-            "overdue": 0.0,
-            "due_7": 0.0,
-        }
-        for row in rows_query
-    ]
-    if not result:
-        return []
-
-    overdue = _positive_due_totals(
-        due_before=reference_date,
-        salesperson_id=salesperson_id,
-        unassigned=unassigned,
-    )
-    due_7 = _positive_due_totals(
-        due_from=reference_date,
-        due_to=reference_date + timedelta(days=7),
-        salesperson_id=salesperson_id,
-        unassigned=unassigned,
-    )
-
-    for entry in result:
-        client_id = int(entry["client"].id)
-        positive_balance = max(float(entry["balance"]), 0.0)
+    result: list[dict] = []
+    for row in rows_query:
+        balance = float(_money(row.balance))
+        positive_balance = max(balance, 0.0)
         overdue_exposure = min(
             positive_balance,
-            max(float(overdue.get(client_id, 0.0)), 0.0),
+            max(float(_money(row.overdue_total)), 0.0),
         )
         remaining = max(positive_balance - overdue_exposure, 0.0)
         due_7_exposure = min(
             remaining,
-            max(float(due_7.get(client_id, 0.0)), 0.0),
+            max(float(_money(row.due_7_total)), 0.0),
         )
-        entry["overdue"] = round(overdue_exposure, 2)
-        entry["due_7"] = round(due_7_exposure, 2)
+        result.append(
+            {
+                "client": row,
+                "salesperson_id": row.salesperson_id,
+                "balance": balance,
+                "movements": int(row.movements or 0),
+                "overdue": round(overdue_exposure, 2),
+                "due_7": round(due_7_exposure, 2),
+            }
+        )
 
     result.sort(key=lambda entry: entry["balance"], reverse=True)
     return result
@@ -167,46 +186,6 @@ def _filter_clients_by_salesperson(
     if salesperson_id is not None:
         return query.where(Client.salesperson == salesperson_id)
     return query
-
-
-def _positive_due_totals(
-    *,
-    due_before: date | None = None,
-    due_from: date | None = None,
-    due_to: date | None = None,
-    salesperson_id: int | None = None,
-    unassigned: bool = False,
-) -> dict[int, float]:
-    query = (
-        ClientAccountMovement.select(
-            ClientAccountMovement.client.alias("client_id"),
-            fn.ROUND(
-                fn.COALESCE(fn.SUM(ClientAccountMovement.total_amount), 0),
-                2,
-            ).alias("total"),
-        )
-        .join(Client)
-        .where(
-            ClientAccountMovement.total_amount > 0,
-            ClientAccountMovement.due_date.is_null(False),
-        )
-    )
-    if due_before is not None:
-        query = query.where(ClientAccountMovement.due_date < due_before)
-    if due_from is not None:
-        query = query.where(ClientAccountMovement.due_date >= due_from)
-    if due_to is not None:
-        query = query.where(ClientAccountMovement.due_date <= due_to)
-    query = _filter_clients_by_salesperson(
-        query,
-        salesperson_id=salesperson_id,
-        unassigned=unassigned,
-    )
-    query = query.group_by(ClientAccountMovement.client).dicts()
-    return {
-        int(row["client_id"]): float(_money(row["total"]))
-        for row in query
-    }
 
 
 def client_balances() -> list[dict]:
