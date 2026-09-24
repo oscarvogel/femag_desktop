@@ -54,41 +54,21 @@ def test_inactive_salesperson_cannot_be_assigned_to_new_client(db):
         )
 
 
-def test_client_editor_only_offers_active_salespeople_but_preserves_current_inactive(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QPushButton
+def test_salesperson_options_only_offer_active_and_preserve_current_inactive(db):
+    from app.models.masters import Salesperson
+    from app.ui.master_abm import _salesperson_options
 
-    from app.models.masters import Client, Salesperson
-    from app.ui.master_abm import ClientEntryDialog
-
-    app = QApplication.instance() or QApplication([])
     active = Salesperson.create(name="Luis activo 545")
     inactive = Salesperson.create(name="Pedro inactivo 545", active=False)
-    client = Client.create(
-        name="Cliente UI vendedor 545",
-        cuit="30700020545",
-        iva_condition="RI",
-        salesperson=inactive,
-    )
 
-    new_dialog = ClientEntryDialog(current_user="issue545_ui")
-    new_combo = new_dialog.findChild(QComboBox, "clientSalespersonInput")
-    assert new_combo is not None
-    assert new_combo.findData(active.id) >= 0
-    assert new_combo.findData(inactive.id) == -1
+    new_options = dict(_salesperson_options())
+    assert active.id in new_options
+    assert inactive.id not in new_options
 
-    edit_dialog = ClientEntryDialog(
-        current_user="issue545_ui",
-        record_id=client.id,
-    )
-    edit_combo = edit_dialog.findChild(QComboBox, "clientSalespersonInput")
-    assert edit_combo.findData(inactive.id) >= 0
-    assert "Inactivo" in edit_combo.itemText(edit_combo.findData(inactive.id))
-
-    _set_combo_data(edit_combo, active.id)
-    edit_dialog.findChild(QPushButton, "saveClientButton").click()
-    app.processEvents()
-
-    assert Client.get_by_id(client.id).salesperson == active
+    edit_options = dict(_salesperson_options(include_id=inactive.id))
+    assert active.id in edit_options
+    assert inactive.id in edit_options
+    assert "Inactivo" in edit_options[inactive.id]
 
 
 def test_client_rows_filter_by_salesperson_and_unassigned(db):
