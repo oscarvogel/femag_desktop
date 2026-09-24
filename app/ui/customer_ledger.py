@@ -626,3 +626,337 @@ class CustomerLedgerPage(QWidget):
             debit = amount if amount > 0 else 0.0
             credit = abs(amount) if amount < 0 else 0.0
             debit_text = f"${debit:,.2f}" if debit else ""
+            credit_text = f"${credit:,.2f}" if credit else ""
+            saldo_text = f"${balances[row_index]:,.2f}"
+            values = (
+                _display_movement_date(movement),
+                type_label,
+                reference,
+                _display_description(movement),
+                debit_text,
+                credit_text,
+                saldo_text,
+            )
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column in (4, 5, 6):
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if column == 4 and debit:
+                    cell.setForeground(QBrush(SALDO_COLOR_OWES))
+                if column == 5 and credit:
+                    cell.setForeground(QBrush(SALDO_COLOR_CREDIT))
+                if column == 6:
+                    cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
+                cell.setToolTip(value)
+                if (
+                    column == 0
+                    and movement.movement_type == "payment"
+                    and movement.payment is not None
+                ):
+                    cell.setData(Qt.UserRole, movement.payment.id)
+                if column == 0:
+                    cell.setData(Qt.UserRole + 1, movement.id)
+                self.movements_table.setItem(row_index, column, cell)
+        self.register_payment_button.setEnabled(self.register_payment_callback is not None)
+        self.create_manual_budget_button.setEnabled(
+            self.create_manual_budget_callback is not None
+        )
+        self.register_manual_debit_button.setEnabled(
+            self.register_manual_debit_callback is not None
+        )
+        self.register_manual_credit_button.setEnabled(
+            self.register_manual_credit_callback is not None
+        )
+        self.print_statement_button.setEnabled(self.print_statement_callback is not None)
+        self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
+        self.email_statement_button.setEnabled(self.email_statement_callback is not None)
+        self._sync_more_actions()
+        self._update_payment_actions()
+        self._update_manual_debit_action()
+        self._update_manual_credit_action()
+
+    def _selected_client(self) -> Client | None:
+        client_id = self._current_client_id()
+        if client_id is None:
+            return None
+        client = self._client_from_cache(client_id)
+        if client is not None:
+            return client
+        return Client.get_or_none(Client.id == client_id)
+
+    def _on_print_statement(self) -> None:
+        if self.print_statement_callback is None:
+            return
+        client = self._selected_client()
+        if client is None:
+            return
+        self.print_statement_callback(client)
+
+    def _on_whatsapp_statement(self) -> None:
+        if self.whatsapp_statement_callback is None:
+            return
+        client = self._selected_client()
+        if client is not None:
+            self.whatsapp_statement_callback(client)
+
+    def _on_email_statement(self) -> None:
+        if self.email_statement_callback is None:
+            return
+        client = self._selected_client()
+        if client is not None:
+            self.email_statement_callback(client)
+
+    def _clear_detail(self) -> None:
+        self._detail_client_id = None
+        self._detail_movements_cache = []
+        self.detail_header.setText("Seleccione un cliente de la izquierda.")
+        self.detail_balance.setText("$ 0,00")
+        _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
+        self.detail_movements.setText("0 movimientos")
+        self.movements_table.setRowCount(0)
+        self.empty_label.hide()
+        self.register_payment_button.setEnabled(False)
+        self.create_manual_budget_button.setEnabled(False)
+        self.register_manual_debit_button.setEnabled(
+            self.register_manual_debit_callback is not None
+        )
+        self.register_manual_credit_button.setEnabled(
+            self.register_manual_credit_callback is not None
+        )
+        self.print_statement_button.setEnabled(False)
+        self.whatsapp_statement_button.setEnabled(False)
+        self.email_statement_button.setEnabled(False)
+        self.print_receipt_button.setEnabled(False)
+        self.annul_payment_button.setEnabled(False)
+        self.reverse_manual_debit_button.setEnabled(False)
+        self.reverse_manual_credit_button.setEnabled(False)
+        self.view_detail_button.setEnabled(False)
+        self._sync_more_actions()
+
+    def _sync_more_actions(self) -> None:
+        if not hasattr(self, "more_actions_button"):
+            return
+        has_client = self._selected_client() is not None
+        self.print_statement_action.setEnabled(
+            has_client and self.print_statement_callback is not None
+        )
+        self.whatsapp_statement_action.setEnabled(
+            has_client and self.whatsapp_statement_callback is not None
+        )
+        self.email_statement_action.setEnabled(
+            has_client and self.email_statement_callback is not None
+        )
+        movement = self._selected_movement()
+        can_resolve_budget = (
+            movement is not None
+            and not movement.is_reversal
+            and (
+                movement.budget_id is not None
+                or movement.load_order_id is not None
+                or str(movement.source_ref or "").startswith("Budget:")
+            )
+        )
+        can_view_document = LedgerDocumentDetailDialog.supports(movement)
+        self.view_detail_button.setEnabled(can_view_document)
+        self.document_detail_action.setEnabled(can_view_document)
+        self.history_action.setEnabled(
+            FinancialHistoryDialog.supports(movement)
+        )
+        self.whatsapp_budget_action.setEnabled(
+            can_resolve_budget and self.whatsapp_budget_callback is not None
+        )
+        self.print_receipt_action.setEnabled(self.print_receipt_button.isEnabled())
+        self.annul_payment_action.setVisible(self.can_annul_payments)
+        self.annul_payment_action.setEnabled(self.annul_payment_button.isEnabled())
+        self.reverse_manual_debit_action.setEnabled(
+            self.reverse_manual_debit_button.isEnabled()
+        )
+        self.reverse_manual_credit_action.setEnabled(
+            self.reverse_manual_credit_button.isEnabled()
+        )
+
+    def _on_register_payment(self) -> None:
+        if self.register_payment_callback is None:
+            return
+        client = self._selected_client()
+        if client is None:
+            return
+        self.register_payment_callback(client)
+        self.refresh()
+
+    def _on_create_manual_budget(self) -> None:
+        if self.create_manual_budget_callback is None:
+            return
+        client = self._selected_client()
+        if client is None:
+            return
+        self.create_manual_budget_callback(client)
+        self.refresh()
+
+    def _on_register_manual_debit(self) -> None:
+        if self.register_manual_debit_callback is None:
+            return
+        client = self._selected_client()
+        self.register_manual_debit_callback(client)
+        self.refresh()
+
+    def _on_register_manual_credit(self) -> None:
+        if self.register_manual_credit_callback is None:
+            return
+        client = self._selected_client()
+        self.register_manual_credit_callback(client)
+        self.refresh()
+
+    def _selected_payment(self) -> ClientPayment | None:
+        current = self.movements_table.currentRow()
+        if current < 0:
+            return None
+        item = self.movements_table.item(current, 0)
+        payment_id = item.data(Qt.UserRole) if item is not None else None
+        if payment_id is None:
+            return None
+        return ClientPayment.get_or_none(ClientPayment.id == payment_id)
+
+    def _on_movement_selected(self, *_args) -> None:
+        self._update_payment_actions()
+        self._update_manual_debit_action()
+        self._update_manual_credit_action()
+
+    def _selected_movement(self) -> ClientAccountMovement | None:
+        current = self.movements_table.currentRow()
+        if current < 0:
+            return None
+        item = self.movements_table.item(current, 0)
+        movement_id = item.data(Qt.UserRole + 1) if item is not None else None
+        if movement_id is None:
+            return None
+        return ClientAccountMovement.get_or_none(ClientAccountMovement.id == movement_id)
+
+    def _update_manual_debit_action(self) -> None:
+        movement = self._selected_movement()
+        has_reversal = False
+        if movement is not None:
+            has_reversal = (
+                ClientAccountMovement.select()
+                .where(
+                    ClientAccountMovement.reverses == movement,
+                    ClientAccountMovement.movement_type
+                    == ClientAccountMovement.TYPE_MANUAL_DEBIT_REVERSAL,
+                )
+                .exists()
+            )
+        self.reverse_manual_debit_button.setEnabled(
+            movement is not None
+            and movement.movement_type == ClientAccountMovement.TYPE_MANUAL_DEBIT
+            and not movement.is_reversal
+            and not has_reversal
+            and self.reverse_manual_debit_callback is not None
+        )
+        self._sync_more_actions()
+
+    def _update_manual_credit_action(self) -> None:
+        movement = self._selected_movement()
+        has_reversal = False
+        if movement is not None:
+            has_reversal = (
+                ClientAccountMovement.select()
+                .where(
+                    ClientAccountMovement.reverses == movement,
+                    ClientAccountMovement.movement_type
+                    == ClientAccountMovement.TYPE_MANUAL_CREDIT_REVERSAL,
+                )
+                .exists()
+            )
+        self.reverse_manual_credit_button.setEnabled(
+            movement is not None
+            and movement.movement_type == ClientAccountMovement.TYPE_MANUAL_CREDIT
+            and not movement.is_reversal
+            and not has_reversal
+            and self.reverse_manual_credit_callback is not None
+        )
+        self._sync_more_actions()
+
+    def _update_payment_actions(self) -> None:
+        payment = self._selected_payment()
+        self.print_receipt_button.setEnabled(
+            payment is not None and self.print_receipt_callback is not None
+        )
+        self.annul_payment_button.setEnabled(
+            payment is not None
+            and payment.status == ClientPayment.STATUS_ACTIVE
+            and self.can_annul_payments
+            and self.annul_payment_callback is not None
+        )
+        self._sync_more_actions()
+
+    def _on_open_document_detail(self, *_args) -> None:
+        movement = self._selected_movement()
+        if not LedgerDocumentDetailDialog.supports(movement):
+            return
+        LedgerDocumentDetailDialog(movement, self).exec_()
+
+    def _on_history(self) -> None:
+        movement = self._selected_movement()
+        if not FinancialHistoryDialog.supports(movement):
+            return
+        FinancialHistoryDialog(movement, self).exec_()
+
+    def _on_whatsapp_budget(self) -> None:
+        if self.whatsapp_budget_callback is None:
+            return
+        movement = self._selected_movement()
+        if movement is None or movement.is_reversal:
+            return
+        self.whatsapp_budget_callback(movement)
+
+    def _on_print_receipt(self) -> None:
+        payment = self._selected_payment()
+        if payment is not None and self.print_receipt_callback is not None:
+            self.print_receipt_callback(payment)
+
+    def _on_annul_payment(self) -> None:
+        payment = self._selected_payment()
+        if payment is None or self.annul_payment_callback is None:
+            return
+        self.annul_payment_callback(payment)
+        self.refresh()
+
+    def _on_reverse_manual_debit(self) -> None:
+        movement = self._selected_movement()
+        if movement is None or self.reverse_manual_debit_callback is None:
+            return
+        try:
+            self.reverse_manual_debit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar débito", str(exc))
+            return
+        self.refresh()
+
+    def _on_reverse_manual_credit(self) -> None:
+        movement = self._selected_movement()
+        if movement is None or self.reverse_manual_credit_callback is None:
+            return
+        try:
+            self.reverse_manual_credit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar crédito", str(exc))
+            return
+        self.refresh()
+
+
+def _display_datetime(value) -> str:
+    if value.tzinfo is not None:
+        value = value.astimezone()
+    return value.strftime("%d/%m/%Y %H:%M")
+
+
+def _display_movement_date(movement: ClientAccountMovement) -> str:
+    if movement.movement_date is not None:
+        return movement.movement_date.strftime("%d/%m/%Y")
+    return _display_datetime(movement.created_at)
+
+
+def _display_description(movement: ClientAccountMovement) -> str:
+    if movement.observations:
+        return f"{movement.description} — {movement.observations}"
+    return movement.description
