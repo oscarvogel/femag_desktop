@@ -1828,9 +1828,9 @@ def build_client_abm_page(
         search_feedback=client_search_feedback,
         rows_fn=filtered_client_rows,
     )
-    client_salesperson_filter.currentIndexChanged.connect(
-        client_table_controller.refresh
-    )
+    # `activated` reacts to the user's choice without firing again while Qt
+    # tears down the combo model at application shutdown.
+    client_salesperson_filter.activated.connect(client_table_controller.refresh)
     places_table_controller = MasterTableController(
         table=places_table,
         search_input=places_search_input,
