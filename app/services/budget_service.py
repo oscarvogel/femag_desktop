@@ -92,6 +92,11 @@ class BudgetService:
                     product=row.product,
                     source_order_product=row,
                     quantity=float(row.quantity),
+                    cantidad_facturada=(
+                        float(row.cantidad_facturada)
+                        if row.cantidad_facturada is not None
+                        else float(row.quantity)
+                    ),
                     unit=row.unit,
                     unit_price=float(row.precio_neto_unitario or 0),
                     discount_percentage=float(row.descuento_porcentaje or 0),

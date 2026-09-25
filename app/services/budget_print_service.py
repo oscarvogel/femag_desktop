@@ -95,8 +95,15 @@ class BudgetPrintService:
             Spacer(1, 6 * mm),
             self._items_table(budget),
             Spacer(1, 5 * mm),
-            self._totals_table(budget),
         ]
+        if budget.load_order_id:
+            story.extend(
+                [
+                    self._billing_split_table(budget),
+                    Spacer(1, 4 * mm),
+                ]
+            )
+        story.append(self._totals_table(budget))
         if budget.observations:
             story.extend(
                 [
@@ -186,6 +193,43 @@ class BudgetPrintService:
             )
         )
         return table
+
+    def _billing_split_table(self, budget: Budget) -> Table:
+        totals = self._billing_split_totals(budget)
+        rows = [
+            ["Importe facturado", self._money(totals["facturado"])],
+            ["Pendiente de facturación", self._money(totals["pendiente"])],
+            ["TOTAL DEL PEDIDO", self._money(totals["total"])],
+        ]
+        table = Table(rows, colWidths=[55 * mm, 40 * mm], hAlign="RIGHT")
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                    ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        return table
+
+    @staticmethod
+    def _billing_split_totals(budget: Budget) -> dict[str, float]:
+        total = round(float(budget.total_amount or 0), 2)
+        facturado = 0.0
+        for item in budget.items.order_by():
+            quantity = float(item.quantity or 0)
+            billed = quantity if item.cantidad_facturada is None else float(item.cantidad_facturada)
+            billed = max(0.0, min(billed, quantity))
+            ratio = billed / quantity if quantity > 0 else 0.0
+            facturado += round(float(item.total or 0) * ratio, 2)
+        facturado = round(facturado, 2)
+        pendiente = round(total - facturado, 2)
+        return {"facturado": facturado, "pendiente": pendiente, "total": total}
 
     def _totals_table(self, budget: Budget) -> Table:
         rows = [

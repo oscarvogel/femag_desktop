@@ -51,6 +51,9 @@ class BudgetItem(BaseModel):
         on_delete="SET NULL",
     )
     quantity = FloatField()
+    # Snapshot documental de la distribución definida en la Orden de Carga.
+    # NULL en presupuestos legacy/manuales equivale a la cantidad completa.
+    cantidad_facturada = FloatField(null=True)
     unit = CharField()
     unit_price = FloatField(default=0.0)
     discount_percentage = FloatField(default=0.0)

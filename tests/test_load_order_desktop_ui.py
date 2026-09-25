@@ -2151,6 +2151,8 @@ def test_product_dialog_tab_and_enter_follow_manual_input_order(db):
     QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
     assert_focus_inside(dialog.quantity_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert app.focusWidget() is dialog.split_billing_check
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
     assert_focus_inside(dialog.precio_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert_focus_inside(dialog.descuento_input)
