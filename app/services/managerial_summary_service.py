@@ -142,7 +142,7 @@ class ManagerialSummaryService:
             today_snapshot=today,
             month_snapshot=month,
             risk_result=risk,
-            overdue_top=tuple(overdue_rows[:5]),
+            overdue_top=tuple(overdue_rows[:10]),
             attention_lines=tuple(attention),
         )
 
