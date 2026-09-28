@@ -228,13 +228,23 @@ class ManagerialSummaryService:
 {metric("Ticket promedio mes", _money(m.average_ticket.current))}
 {metric("Saldo clientes", _money(r.balance))}
 {metric("Saldo vencido", _money(r.overdue))}
-{metric("Vence en 7 días", _money(r.due_7))}
+{metric("Cartera vencida", f"{summary.overdue_ratio:.1f}%")}
 </tr></table>
 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:18px;margin-top:12px">
-<h2 style="font-size:17px;margin:0 0 10px">Cartera y vencimientos</h2>
-<p>Vencido sobre saldo total: <strong>{summary.overdue_ratio:.1f}%</strong></p>
+<h2 style="font-size:17px;margin:0 0 10px">Cuenta corriente y deuda vencida</h2>
+<p style="color:#64748b;margin-top:0">Fecha de corte: <strong>{summary.as_of:%d/%m/%Y}</strong></p>
+<table role="presentation" width="100%" style="border-spacing:4px;margin:0 0 12px"><tr>
+{metric("Clientes con deuda", str(int(r.clients_with_debt)))}
+{metric("Clientes vencidos", str(int(r.clients_overdue)))}
+{metric("Vence en 7 días", _money(r.due_7))}
+{metric("Vence en 15 días", _money(r.due_15))}
+</tr><tr>
+{metric("Vence en 30 días", _money(r.due_30))}
+<td colspan="3"></td>
+</tr></table>
+<h3 style="font-size:14px;margin:14px 0 8px">10 mayores deudas vencidas</h3>
 <table width="100%" style="border-collapse:collapse;font-size:13px">
-<thead><tr><th style="text-align:left;padding:8px">Cliente</th><th style="text-align:right;padding:8px">Vencido</th><th style="text-align:right;padding:8px">Atraso máx.</th></tr></thead>
+<thead><tr><th style="text-align:left;padding:8px">Cliente</th><th style="text-align:right;padding:8px">Saldo</th><th style="text-align:right;padding:8px">Vencido</th><th style="text-align:right;padding:8px">A vencer</th><th style="text-align:right;padding:8px">Días atraso</th><th style="text-align:right;padding:8px">Venc. más antiguo</th></tr></thead>
 <tbody>{top_rows}</tbody></table>
 </div>
 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:18px;margin-top:12px">
