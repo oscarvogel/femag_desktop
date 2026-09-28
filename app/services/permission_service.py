@@ -20,7 +20,7 @@ ACTIONS = [
 
 
 MENU = {
-    "Inicio": ["Dashboard", "Dashboard Gerencial", "Pendientes", "Accesos rápidos"],
+    "Inicio": ["Dashboard", "Dashboard Gerencial", "Rentabilidad por producto", "Pendientes", "Accesos rápidos"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
