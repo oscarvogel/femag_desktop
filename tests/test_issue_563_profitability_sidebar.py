@@ -1,5 +1,6 @@
 from app.models.security import User, UserProfile
 from app.services.permission_service import PermissionService
+from app.services.menu_service import set_managerial_dashboard_menu_enabled
 from app.ui.menu import build_sidebar_tree_spec
 
 
@@ -16,6 +17,7 @@ def _managerial_children(spec):
 def test_admin_sidebar_contains_profitability_route(db):
     admin = _user("admin-sidebar-profit", "Administrador")
     PermissionService().seed_defaults()
+    set_managerial_dashboard_menu_enabled(True)
     children = _managerial_children(build_sidebar_tree_spec(admin))
     assert children["Rentabilidad por producto"] == "product_profitability"
 
@@ -23,6 +25,7 @@ def test_admin_sidebar_contains_profitability_route(db):
 def test_non_admin_sidebar_does_not_contain_profitability(db):
     operator = _user("operator-sidebar-profit", "Administración")
     PermissionService().seed_defaults()
+    set_managerial_dashboard_menu_enabled(True)
     spec = build_sidebar_tree_spec(operator)
     titles = [item.title for section in spec.sections for item in section.items]
     if "Dashboard Gerencial" in titles:
