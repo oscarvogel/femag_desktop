@@ -1,9 +1,10 @@
 from datetime import date
 
 from PyQt5.QtCore import QDate
-from PyQt5.QtWidgets import QDateEdit, QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QDateEdit, QGridLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from app.reports.product_profitability import ProductProfitabilityService
+from app.reports.product_profitability_export import export_profitability_csv, export_profitability_xlsx
 from app.services.permission_service import PermissionService
 
 
@@ -28,8 +29,10 @@ class ProductProfitabilityPage(QWidget):
         self.date_to = QDateEdit(QDate(today.year, today.month, today.day))
         self.date_to.setCalendarPopup(True); self.date_to.setDisplayFormat("dd/MM/yyyy")
         refresh = QPushButton("Actualizar"); refresh.clicked.connect(self.refresh)
+        excel = QPushButton("Excel"); excel.clicked.connect(self.export_excel)
+        csv_button = QPushButton("CSV para IA"); csv_button.clicked.connect(self.export_csv)
         header.addWidget(QLabel("Desde")); header.addWidget(self.date_from)
-        header.addWidget(QLabel("Hasta")); header.addWidget(self.date_to); header.addWidget(refresh)
+        header.addWidget(QLabel("Hasta")); header.addWidget(self.date_to); header.addWidget(refresh); header.addWidget(excel); header.addWidget(csv_button)
         root.addLayout(header)
         self.coverage = QLabel(); self.coverage.setObjectName("profitabilityCoverageLabel"); root.addWidget(self.coverage)
         cards = QGridLayout()
@@ -58,11 +61,31 @@ class ProductProfitabilityPage(QWidget):
         self.table=QTableWidget(0,len(headers)); self.table.setObjectName("profitabilityDetailTable"); self.table.setHorizontalHeaderLabels(headers)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers); self.table.setAlternatingRowColors(True); self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True); root.addWidget(self.table,1)
+        self._snapshot = None
         self.refresh()
+
+    def _period(self):
+        a=self.date_from.date(); b=self.date_to.date()
+        return date(a.year(),a.month(),a.day()),date(b.year(),b.month(),b.day())
+
+    def export_excel(self):
+        start,end=self._period()
+        path,_=QFileDialog.getSaveFileName(self,"Exportar rentabilidad a Excel",f"rentabilidad_{start:%Y%m%d}_{end:%Y%m%d}.xlsx","Excel (*.xlsx)")
+        if path:
+            export_profitability_xlsx(self._snapshot,path,start=start,end=end)
+            QMessageBox.information(self,"Exportación","Excel generado correctamente.")
+
+    def export_csv(self):
+        start,end=self._period()
+        path,_=QFileDialog.getSaveFileName(self,"Exportar detalle para IA",f"rentabilidad_detalle_{start:%Y%m%d}_{end:%Y%m%d}.csv","CSV (*.csv)")
+        if path:
+            export_profitability_csv(self._snapshot,path)
+            QMessageBox.information(self,"Exportación","CSV generado correctamente.")
 
     def refresh(self):
         a=self.date_from.date(); b=self.date_to.date()
         snap=self.service.snapshot(date(a.year(),a.month(),a.day()),date(b.year(),b.month(),b.day()))
+        self._snapshot=snap
         self.sales.setText(_money(snap.sales)); self.cost.setText(_money(snap.cost)); self.profit.setText(_money(snap.gross_profit))
         self.margin.setText("-" if snap.margin_percent is None else f"{snap.margin_percent:.2f}%")
         self.coverage.setText(f"Cobertura de costos: {snap.cost_coverage_percent:.2f}% de las ventas. Los costos no informados no se consideran costo cero.")
