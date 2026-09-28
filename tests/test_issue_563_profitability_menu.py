@@ -11,7 +11,7 @@ def _user(name, profile_name):
 def test_profitability_menu_is_visible_only_to_administrator(db):
     admin = _user("admin-profit-menu", "Administrador")
     operator = _user("operator-profit-menu", "Administración")
-    PermissionService().ensure_defaults()
+    PermissionService().seed_defaults()
 
     def titles(user):
         return [child.title for section in MenuService().get_menu_tree_for_user(user) for child in section.children]
