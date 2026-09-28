@@ -35,6 +35,7 @@ from app.models.masters import (
     ClientEmail,
     Driver,
     Product,
+    ProductCostHistory,
     Salesperson,
     TipoIVA,
     Truck,
@@ -215,6 +216,10 @@ def build_master_abm_page(
         edit_button.setToolTip("El perfil actual no permite modificar este maestro.")
     actions.addWidget(new_button)
     actions.addWidget(edit_button)
+    cost_button = None
+    if config.title == "Productos" and PermissionService().is_administrator(user):
+        cost_button = _action_button("productCostButton", "Costo / historial", secondary=True)
+        actions.addWidget(cost_button)
     actions.addStretch(1)
     layout.addLayout(actions)
     table = QTableWidget(0, len(config.columns))
@@ -258,6 +263,21 @@ def build_master_abm_page(
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
+    if cost_button is not None:
+        def open_cost() -> None:
+            row_id = table_controller.selected_id()
+            if row_id is None:
+                feedback.show_warning("Seleccione un producto para cargar su costo.", focus_widget=table)
+                return
+            dialog = ProductCostDialog(
+                user=user,
+                product_id=row_id,
+                current_user=current_user,
+                parent=parent,
+            )
+            if dialog.exec_() == QDialog.Accepted:
+                feedback.show_success("Costo actualizado y registrado en el historial.")
+        cost_button.clicked.connect(open_cost)
     page.master_table_controller = table_controller
     page.refresh = table_controller.refresh
     table_controller.refresh()
@@ -1152,6 +1172,95 @@ class TruckEntryDialog(QDialog):
                 truck.active = bool(self.active_combo.currentData())
                 truck.save()
                 self.saved_record = truck
+            self.accept()
+        except Exception as exc:
+            self.feedback.show_error(str(exc))
+
+
+class ProductCostDialog(QDialog):
+    def __init__(self, *, user, product_id: int, current_user: str, parent=None):
+        super().__init__(parent)
+        PermissionService().require_administrator(user)
+        self.user = user
+        self.product = Product.get_by_id(product_id)
+        self.current_user = current_user
+        self.setObjectName("productCostDialog")
+        self.setWindowTitle("Costo del producto")
+        layout = _entry_layout(self, f"Costo · {self.product.name}")
+        form = QGridLayout()
+        current = QLabel(
+            _money_text(float(self.product.costo_unitario))
+            if self.product.costo_unitario is not None
+            else "Costo no informado"
+        )
+        current.setObjectName("productCurrentCostLabel")
+        self.cost_input = QLineEdit()
+        self.cost_input.setObjectName("productCostInput")
+        self.cost_input.setPlaceholderText("Ej.: 1180,5000")
+        if self.product.costo_unitario is not None:
+            self.cost_input.setText(str(self.product.costo_unitario))
+        self.reason_input = QLineEdit()
+        self.reason_input.setObjectName("productCostReasonInput")
+        self.reason_input.setPlaceholderText("Motivo / referencia del cambio")
+        form.addWidget(QLabel("Costo vigente"), 0, 0)
+        form.addWidget(current, 0, 1)
+        form.addWidget(QLabel("Nuevo costo"), 1, 0)
+        form.addWidget(self.cost_input, 1, 1)
+        form.addWidget(QLabel("Motivo"), 2, 0)
+        form.addWidget(self.reason_input, 2, 1)
+        layout.addLayout(form)
+
+        history_title = QLabel("Historial de costos")
+        history_title.setObjectName("sectionTitle")
+        layout.addWidget(history_title)
+        self.history_table = QTableWidget(0, 4)
+        self.history_table.setObjectName("productCostHistoryTable")
+        self.history_table.setHorizontalHeaderLabels(["Fecha", "Costo anterior", "Costo nuevo", "Usuario"])
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.history_table.verticalHeader().setVisible(False)
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.history_table)
+        self._load_history()
+
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveProductCostButton", self._save)
+
+    @staticmethod
+    def _cost_text(value) -> str:
+        return "No informado" if value is None else str(value)
+
+    def _load_history(self) -> None:
+        rows = list(
+            ProductCostHistory.select()
+            .where(ProductCostHistory.product == self.product)
+            .order_by(ProductCostHistory.created_at.desc(), ProductCostHistory.id.desc())
+        )
+        self.history_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = [
+                row.created_at.strftime("%d/%m/%Y %H:%M"),
+                self._cost_text(row.previous_cost),
+                self._cost_text(row.new_cost),
+                row.changed_by,
+            ]
+            for column, value in enumerate(values):
+                self.history_table.setItem(row_index, column, QTableWidgetItem(value))
+
+    def _save(self) -> None:
+        value = self.cost_input.text().strip()
+        if not value:
+            self.feedback.show_warning(
+                "Ingrese el nuevo costo. El costo desconocido se conserva como 'no informado'.",
+                focus_widget=self.cost_input,
+            )
+            return
+        try:
+            MasterService(self.current_user).update_product_cost(
+                self.product,
+                value,
+                actor=self.user,
+                reason=self.reason_input.text(),
+            )
             self.accept()
         except Exception as exc:
             self.feedback.show_error(str(exc))
