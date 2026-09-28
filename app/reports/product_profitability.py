@@ -23,8 +23,22 @@ class ProfitabilityLine:
 
 
 @dataclass(frozen=True)
+class ProductProfitabilitySummary:
+    product: str
+    quantity: float
+    unit: str
+    sales: float
+    known_cost_sales: float
+    cost: float
+    gross_profit: float
+    margin_percent: float | None
+    cost_coverage_percent: float
+
+
+@dataclass(frozen=True)
 class ProfitabilitySnapshot:
     lines: tuple[ProfitabilityLine, ...]
+    products: tuple[ProductProfitabilitySummary, ...]
     sales: float
     known_cost_sales: float
     cost: float
@@ -72,8 +86,33 @@ class ProductProfitabilityService:
                 sale_unit_price=unit_price, applied_unit_cost=float(applied) if applied is not None else None,
                 sale_amount=sale, cost_amount=line_cost, gross_profit=line_profit, margin_percent=margin,
             ))
+        grouped = {}
+        for row in rows:
+            key = (row.product, row.unit)
+            item = grouped.setdefault(key, {
+                "quantity": 0.0, "sales": 0.0, "known_sales": 0.0,
+                "cost": 0.0, "profit": 0.0,
+            })
+            item["quantity"] += row.quantity
+            item["sales"] += row.sale_amount
+            if row.cost_amount is not None:
+                item["known_sales"] += row.sale_amount
+                item["cost"] += row.cost_amount
+                item["profit"] += row.gross_profit or 0.0
+        products = []
+        for (product, unit), item in grouped.items():
+            known = item["known_sales"]
+            total_sales = item["sales"]
+            products.append(ProductProfitabilitySummary(
+                product=product, quantity=round(item["quantity"], 4), unit=unit,
+                sales=round(total_sales, 2), known_cost_sales=round(known, 2),
+                cost=round(item["cost"], 2), gross_profit=round(item["profit"], 2),
+                margin_percent=round(item["profit"] / known * 100, 2) if known else None,
+                cost_coverage_percent=round(known / total_sales * 100, 2) if total_sales else 100.0,
+            ))
+        products.sort(key=lambda item: item.sales, reverse=True)
         return ProfitabilitySnapshot(
-            lines=tuple(rows), sales=round(sales, 2), known_cost_sales=round(known_sales, 2),
+            lines=tuple(rows), products=tuple(products), sales=round(sales, 2), known_cost_sales=round(known_sales, 2),
             cost=round(cost, 2), gross_profit=round(profit, 2),
             margin_percent=round(profit / known_sales * 100, 2) if known_sales else None,
             cost_coverage_percent=round(known_sales / sales * 100, 2) if sales else 100.0,
