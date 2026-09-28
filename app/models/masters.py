@@ -134,6 +134,7 @@ class Product(BaseModel):
     review_required = BooleanField(default=True)
     active = BooleanField(default=True)
     precio_neto_base = FloatField(default=0.0)
+    costo_unitario = DecimalField(max_digits=14, decimal_places=4, null=True)
     precio_lista_1 = FloatField(default=0.0)
     precio_lista_2 = FloatField(default=0.0)
     precio_lista_3 = FloatField(default=0.0)
@@ -144,6 +145,17 @@ class Product(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_products", null=True)
+
+
+class ProductCostHistory(BaseModel):
+    product = ForeignKeyField(Product, backref="cost_history", on_delete="CASCADE")
+    previous_cost = DecimalField(max_digits=14, decimal_places=4, null=True)
+    new_cost = DecimalField(max_digits=14, decimal_places=4, null=True)
+    changed_by = CharField()
+    reason = TextField(null=True)
+
+    class Meta:
+        indexes = ((("product", "created_at"), False),)
 
 
 class Carrier(BaseModel):

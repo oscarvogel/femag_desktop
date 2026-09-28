@@ -10,6 +10,7 @@ _MANAGERIAL_DASHBOARD_MENU_ENABLED = False
 REAL_MODULES = {
     "Dashboard": "dashboard",
     "Dashboard Gerencial": "managerial_dashboard",
+    "Rentabilidad por producto": "product_profitability",
     "Pendientes": "pending",
     "Órdenes de carga": "load_orders",
     "Remitos": "remittances",
@@ -81,6 +82,9 @@ class MenuService:
         )
 
     def _can_view(self, user: User, section: str, title: str) -> bool:
+        if title == "Rentabilidad por producto":
+            from app.services.permission_service import PermissionService
+            return PermissionService().is_administrator(user)
         if title == "Dashboard Gerencial" and not managerial_dashboard_menu_enabled():
             return False
         return (
