@@ -34,7 +34,7 @@ def test_regular_detail_prints_physical_pallet_and_rowspans_all_its_articles():
 
     assert rows[0] == ["Producto / detalle", "Cantidad total", "Pallet", "Lote", "Elab."]
     assert rows[2][1] == "30 BOLSAS"
-    assert rows[2][2] == "1"
+    assert rows[2][2] == "1 pallet"
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert rows[5][2] == ""
@@ -161,3 +161,32 @@ def test_issue_473_loose_merchandise_stays_separate_from_pallets():
 
     assert rows[2][2] == "1 pallet"
     assert rows[3][2] == "SUELTO"
+
+
+def test_issue_urgent_mixed_pallet_sequence_19_prints_one_physical_pallet():
+    service = _service()
+    block = {
+        "destination": "CARDOZO MAURICIO GUSTAVO - CORRIENTES",
+        "pallet_blocks": [
+            {
+                "label": "19",
+                "rows": [
+                    {"product": "BOLSAS DE FECULA NATIVA", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                    {"product": "PACK 10 UNID. FECULA X 1 KG", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                    {"product": "PACK 10 UNID. ALM. MAIZ X 1/2 KG", "unit": "UNIDAD", "quantity": 10, "lote": "", "elab": ""},
+                    {"product": "PACXX 10 UNID. BOLSAS X 1/2 KG.", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                ],
+            }
+        ],
+        "loose_block": None,
+        "unassigned_block": None,
+    }
+
+    table = service._destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert rows[2][2] == "1 pallet"
+    assert rows[3][2] == ""
+    assert rows[4][2] == ""
+    assert rows[5][2] == ""
+    assert ("SPAN", (2, 2), (2, 5)) in table._spanCmds
