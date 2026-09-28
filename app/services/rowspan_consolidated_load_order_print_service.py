@@ -213,7 +213,8 @@ class ConsolidatedLoadOrderPrintService(BaseConsolidatedLoadOrderPrintService):
 
             has_rows = True
             start_row = table_row
-            label = str(sub_block.get("label") or "-")
+            raw_label = str(sub_block.get("label") or "-").strip()
+            label = self._pallet_label(1) if raw_label.isdigit() else (raw_label or "-")
 
             for index, row in enumerate(physical_rows):
                 rows.append(
