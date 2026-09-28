@@ -129,7 +129,7 @@ def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
     assert [rows[index][0] for index in (2, 3, 4)] == ["PRODUCTO A", "PRODUCTO B", "PRODUCTO C"]
-    assert rows[2][2] == "2"
+    assert rows[2][2] == "1 pallet"
     assert rows[3][2] == ""
     assert rows[4][2] == ""
     assert ("SPAN", (2, 2), (2, 4)) in table._spanCmds
