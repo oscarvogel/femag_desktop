@@ -9,11 +9,13 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    ProductCostHistory,
     Salesperson,
     TipoIVA,
     Truck,
 )
 from app.services.audit_service import AuditService
+from app.services.permission_service import PermissionService
 
 
 class MasterService:
@@ -396,3 +398,49 @@ class MasterService:
         row = OperationalService.create(name=name)
         self._record("OperationalService", row, {"name": name})
         return row
+
+
+    def update_product_cost(
+        self,
+        product: Product,
+        new_cost,
+        *,
+        actor,
+        reason: str | None = None,
+    ) -> Product:
+        """Update confidential product cost with administrator enforcement and history."""
+        PermissionService().require_administrator(actor)
+        if new_cost is None or str(new_cost).strip() == "":
+            parsed = None
+        else:
+            try:
+                parsed = Decimal(str(new_cost).strip().replace(",", ".")).quantize(Decimal("0.0001"))
+            except Exception as exc:
+                raise ValueError("El costo debe ser un número válido.") from exc
+            if parsed < 0:
+                raise ValueError("El costo no puede ser negativo.")
+
+        previous = product.costo_unitario
+        if previous == parsed:
+            return product
+
+        database = Product._meta.database
+        with database.atomic():
+            product.costo_unitario = parsed
+            product.save(only=[Product.costo_unitario])
+            ProductCostHistory.create(
+                product=product,
+                previous_cost=previous,
+                new_cost=parsed,
+                changed_by=actor.username,
+                reason=(reason or "").strip() or None,
+            )
+            self.audit_service.record(
+                user=actor.username,
+                module="Maestros",
+                action="modificar costo producto",
+                record_ref=f"Product:{product.id}",
+                old_value={"costo_unitario": str(previous) if previous is not None else None},
+                new_value={"costo_unitario": str(parsed) if parsed is not None else None},
+            )
+        return product
