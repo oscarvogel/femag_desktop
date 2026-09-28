@@ -123,6 +123,18 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
                         action_key=managerial_dashboard.action_key,
                         route_key="managerial_clients",
                     ),
+                    *(
+                        [
+                            MenuItemView(
+                                title="Rentabilidad por producto",
+                                placeholder=False,
+                                action_key=menu_items["Rentabilidad por producto"].action_key,
+                                route_key="product_profitability",
+                            )
+                        ]
+                        if "Rentabilidad por producto" in menu_items
+                        else []
+                    ),
                 ],
             )
         )
