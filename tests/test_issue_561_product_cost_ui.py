@@ -42,7 +42,7 @@ def test_admin_can_update_cost_and_see_history(db):
     reopened = ProductCostDialog(user=admin, product_id=product.id, current_user=admin.username)
     table = reopened.findChild(QTableWidget, "productCostHistoryTable")
     assert table.rowCount() == 1
-    assert table.item(0, 2).text() == "1180.5000"
+    assert Decimal(table.item(0, 2).text()) == Decimal("1180.5000")
 
 
 def test_cost_button_exists_only_for_admin(db):

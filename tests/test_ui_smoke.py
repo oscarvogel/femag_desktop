@@ -230,6 +230,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Cuenta corriente y deuda vencida",
             "Cobranzas y movimientos",
             "Clientes",
+            "Rentabilidad por producto",
         ]
         assert [child.route_key for child in managerial.children] == [
             "managerial_dashboard",
@@ -237,6 +238,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "managerial_account_risk",
             "daily_collections",
             "managerial_clients",
+            "product_profitability",
         ]
         informes = next(item for item in principal.items if item.title == "Informes")
         assert [child.title for child in informes.children] == [

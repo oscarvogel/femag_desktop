@@ -1,19 +1,25 @@
 from decimal import Decimal
 
 from app.models.load_orders import LoadOrder, LoadOrderProduct
-from app.models.masters import Product
+from app.models.masters import Carrier, Client, Driver, Product, Truck
 from app.services.load_order_service import LoadOrderService
 
 
 def _existing_order(db):
-    order = LoadOrder.select().order_by(LoadOrder.id).first()
-    assert order is not None, "El fixture debe proveer una orden"
-    return order
+    suffix = LoadOrder.select().count() + 1
+    client = Client.create(name=f"Cliente snapshot {suffix}", cuit=f"307562{suffix:05d}", iva_condition="RI")
+    carrier = Carrier.create(name=f"Transporte snapshot {suffix}", cuit=f"306562{suffix:05d}")
+    driver = Driver.create(name=f"Chofer snapshot {suffix}", carrier=carrier, document=f"562-{suffix}")
+    truck = Truck.create(domain=f"S{suffix:06d}", carrier=carrier)
+    return LoadOrder.create(
+        order_number=562000 + suffix, client=client, carrier=carrier, driver=driver,
+        truck=truck, created_by="snapshot-fixture", updated_by="snapshot-fixture",
+    )
 
 
 def test_cost_snapshot_is_frozen_on_first_issue(db):
     order = _existing_order(db)
-    product = Product.select().order_by(Product.id).first()
+    product = Product.create(name="Producto snapshot frozen", unit="kg")
     product.costo_unitario = Decimal("15000.0000")
     product.save()
     line = LoadOrderProduct.create(
@@ -33,7 +39,7 @@ def test_cost_snapshot_is_frozen_on_first_issue(db):
 
 def test_unknown_cost_stays_unknown_after_issue(db):
     order = _existing_order(db)
-    product = Product.select().order_by(Product.id).first()
+    product = Product.create(name="Producto snapshot unknown", unit="kg")
     product.costo_unitario = None
     product.save()
     line = LoadOrderProduct.create(
@@ -48,7 +54,7 @@ def test_unknown_cost_stays_unknown_after_issue(db):
 
 def test_second_dispatch_uses_new_product_cost(db):
     first = _existing_order(db)
-    product = Product.select().order_by(Product.id).first()
+    product = Product.create(name="Producto snapshot second", unit="kg")
     product.costo_unitario = Decimal("15000.0000")
     product.save()
     first_line = LoadOrderProduct.create(
