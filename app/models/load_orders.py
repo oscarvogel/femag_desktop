@@ -87,6 +87,7 @@ class LoadOrderProduct(BaseModel):
     unit = CharField()
     observations = TextField(null=True)
     precio_neto_unitario = FloatField(default=0.0)
+    costo_unitario_aplicado = DecimalField(max_digits=14, decimal_places=4, null=True)
     descuento_porcentaje = FloatField(default=0.0)
     neto_subtotal = FloatField(default=0.0)
     descuento_importe = FloatField(default=0.0)

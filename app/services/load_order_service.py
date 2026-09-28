@@ -236,6 +236,8 @@ class LoadOrderService:
         order.status = status
         order.updated_by = self.current_user
         order.save()
+        if status in (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED):
+            self._snapshot_product_costs(order)
         LoadOrderStatusHistory.create(
             order=order,
             old_status=old_status,
@@ -256,6 +258,27 @@ class LoadOrderService:
             new_value={"status": status, "reason": reason},
         )
         return order
+
+    def _snapshot_product_costs(self, order: LoadOrder) -> int:
+        """Freeze current product costs once when an order becomes an effective dispatch."""
+        updated = 0
+        lines = (
+            LoadOrderProduct.select(LoadOrderProduct, Product)
+            .join(Product)
+            .where(
+                (LoadOrderProduct.order == order)
+                & LoadOrderProduct.costo_unitario_aplicado.is_null(True)
+            )
+        )
+        for line in lines:
+            current_cost = line.product.costo_unitario
+            if current_cost is None:
+                # Unknown stays NULL. A later close/reopen must not invent a historical cost.
+                continue
+            line.costo_unitario_aplicado = current_cost
+            line.save(only=[LoadOrderProduct.costo_unitario_aplicado])
+            updated += 1
+        return updated
 
     def annul_order(self, order: LoadOrder, *, can_annul: bool, reason: str | None = None) -> LoadOrder:
         if not can_annul:
