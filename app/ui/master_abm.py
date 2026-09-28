@@ -1186,6 +1186,8 @@ class ProductCostDialog(QDialog):
         self.current_user = current_user
         self.setObjectName("productCostDialog")
         self.setWindowTitle("Costo del producto")
+        self.setMinimumSize(720, 520)
+        self.resize(820, 600)
         layout = _entry_layout(self, f"Costo · {self.product.name}")
         form = QGridLayout()
         current = QLabel(
@@ -1219,7 +1221,13 @@ class ProductCostDialog(QDialog):
         self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.history_table.verticalHeader().setVisible(False)
         self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.history_table)
+        self.history_table.setMinimumHeight(220)
+        history_header = self.history_table.horizontalHeader()
+        history_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        history_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        history_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        history_header.setSectionResizeMode(3, QHeaderView.Stretch)
+        layout.addWidget(self.history_table, 1)
         self._load_history()
 
         self.feedback = _entry_feedback(layout)
