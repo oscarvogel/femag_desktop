@@ -49,7 +49,9 @@ class ProductProfitabilityService:
         rows = []
         sales = known_sales = cost = profit = 0.0
         for line in query:
-            # Rentabilidad compara costo contra venta neta gravada, sin IVA.\n            # `total` incluye IVA y sobreestimaría utilidad/margen.\n            sale = round(float(line.neto_gravado or 0), 2)
+            # Rentabilidad compara costo contra venta neta gravada, sin IVA.
+            # El total incluye IVA y sobreestimaria utilidad y margen.
+            sale = round(float(line.neto_gravado or 0), 2)
             qty = float(line.quantity or 0)
             unit_price = float(line.precio_neto_unitario or 0)
             client = line.destination.client.name if line.destination_id else (line.order.client.name if line.order.client_id else "-")
