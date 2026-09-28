@@ -35,6 +35,12 @@ def test_managerial_summary_email_and_whatsapp_are_executive_and_consistent(db):
     assert "Despachos hoy" in email
     assert "Saldo clientes" in email
     assert "Vence en 7 días" in email
+    assert "Cuenta corriente y deuda vencida" in email
+    assert "Clientes con deuda" in email
+    assert "Clientes vencidos" in email
+    assert "Vence en 15 días" in email
+    assert "Vence en 30 días" in email
+    assert "10 mayores deudas vencidas" in email
     assert "FEMAG · Resumen gerencial" in whatsapp
     assert "*Actividad*" in whatsapp
     assert "*Cartera*" in whatsapp
