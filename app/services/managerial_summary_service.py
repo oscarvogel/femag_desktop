@@ -201,11 +201,14 @@ class ManagerialSummaryService:
         top_rows = "".join(
             "<tr>"
             f"<td style='padding:8px;border-bottom:1px solid #e2e8f0'>{html.escape(str(row['client_name']))}</td>"
+            f"<td style='padding:8px;text-align:right;border-bottom:1px solid #e2e8f0'>{html.escape(_money(row['balance']))}</td>"
             f"<td style='padding:8px;text-align:right;border-bottom:1px solid #e2e8f0'>{html.escape(_money(row['overdue']))}</td>"
+            f"<td style='padding:8px;text-align:right;border-bottom:1px solid #e2e8f0'>{html.escape(_money(row['due_future']))}</td>"
             f"<td style='padding:8px;text-align:right;border-bottom:1px solid #e2e8f0'>{int(row['max_days_overdue'] or 0)} días</td>"
+            f"<td style='padding:8px;text-align:right;border-bottom:1px solid #e2e8f0'>{row['oldest_unpaid_due'].strftime('%d/%m/%Y') if row.get('oldest_unpaid_due') else '—'}</td>"
             "</tr>"
             for row in summary.overdue_top
-        ) or "<tr><td colspan='3' style='padding:12px;color:#64748b'>Sin deuda vencida.</td></tr>"
+        ) or "<tr><td colspan='6' style='padding:12px;color:#64748b'>Sin deuda vencida.</td></tr>"
         attention = "".join(
             f"<li style='margin:6px 0'>{html.escape(line)}</li>" for line in summary.attention_lines
         )
