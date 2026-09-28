@@ -6,12 +6,12 @@ from app.models.masters import Carrier, Client, Driver, Product, Truck
 from app.reports.product_profitability import ProductProfitabilityService
 
 
-def _data():
-    client = Client.create(name="Cliente rentabilidad", cuit="30700000001", iva_condition="RI")
-    carrier = Carrier.create(name="Transporte rentabilidad", cuit="30700000002")
-    driver = Driver.create(name="Chofer rentabilidad", carrier=carrier, document="563")
-    truck = Truck.create(domain="RT563AA", carrier=carrier)
-    product = Product.create(name="Producto rentabilidad", unit="kg")
+def _data(suffix):
+    client = Client.create(name=f"Cliente rentabilidad {suffix}", cuit=f"3070000{suffix:04d}", iva_condition="RI")
+    carrier = Carrier.create(name=f"Transporte rentabilidad {suffix}", cuit=f"3060000{suffix:04d}")
+    driver = Driver.create(name=f"Chofer rentabilidad {suffix}", carrier=carrier, document=f"563{suffix}")
+    truck = Truck.create(domain=f"R{suffix:05d}", carrier=carrier)
+    product = Product.create(name=f"Producto rentabilidad {suffix}", unit="kg")
     return client, carrier, driver, truck, product
 
 
@@ -24,7 +24,7 @@ def _order(number, *, client, carrier, driver, truck):
 
 
 def test_profitability_preserves_two_historical_costs(db):
-    client, carrier, driver, truck, product = _data()
+    client, carrier, driver, truck, product = _data(1)
     first = _order(563001, client=client, carrier=carrier, driver=driver, truck=truck)
     second = _order(563002, client=client, carrier=carrier, driver=driver, truck=truck)
     LoadOrderProduct.create(order=first, product=product, quantity=10, unit="kg", precio_neto_unitario=20000, neto_subtotal=200000, neto_gravado=200000, iva_importe=42000, total=242000, costo_unitario_aplicado=Decimal("15000"))
@@ -39,7 +39,7 @@ def test_profitability_preserves_two_historical_costs(db):
 
 
 def test_unknown_cost_is_not_zero(db):
-    client, carrier, driver, truck, product = _data()
+    client, carrier, driver, truck, product = _data(2)
     known = _order(563003, client=client, carrier=carrier, driver=driver, truck=truck)
     unknown = _order(563004, client=client, carrier=carrier, driver=driver, truck=truck)
     LoadOrderProduct.create(order=known, product=product, quantity=1, unit="kg", precio_neto_unitario=100, neto_subtotal=100, neto_gravado=100, iva_importe=21, total=121, costo_unitario_aplicado=Decimal("60"))
@@ -57,7 +57,7 @@ def test_unknown_cost_is_not_zero(db):
 
 
 def test_profitability_excludes_vat_from_sale_and_margin(db):
-    client, carrier, driver, truck, product = _data()
+    client, carrier, driver, truck, product = _data(3)
     order = _order(563005, client=client, carrier=carrier, driver=driver, truck=truck)
     LoadOrderProduct.create(
         order=order, product=product, quantity=1500, unit="kg",
