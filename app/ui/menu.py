@@ -85,6 +85,14 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         if item.route_key != "placeholder" or item.action_key is not None
     ]
 
+    production_children = [
+        item
+        for item in (
+            approved_item("Recepciones de materia prima"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
     principal_items = [approved_item("Dashboard")]
 
     managerial_dashboard = approved_item("Dashboard Gerencial")
@@ -139,6 +147,8 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             )
         )
 
+    if production_children:
+        principal_items.append(MenuItemView(title="Producción", children=production_children))
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
     if informes_children:
