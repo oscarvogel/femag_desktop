@@ -2156,3 +2156,82 @@ def test_product_dialog_tab_and_enter_follow_manual_input_order(db):
     assert_focus_inside(dialog.descuento_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert app.focusWidget() is dialog.add_button
+
+
+def test_issue_568_product_dialog_prefills_existing_line_for_edit(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.desktop_app import LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    draft = {
+        "product_id": data["product"].id,
+        "product_label": data["product"].name,
+        "quantity": 12.5,
+        "unit": data["product"].unit,
+        "precio_neto_unitario": 9500.0,
+        "descuento_porcentaje": 5.0,
+        "iva_porcentaje": 21.0,
+    }
+
+    dialog = LoadOrderProductDialog(client=data["client"], product=draft)
+    app.processEvents()
+
+    assert dialog.windowTitle() == "Editar producto"
+    assert dialog.product_combo.currentData() == data["product"].id
+    assert dialog.quantity_input.value() == 12.5
+    assert dialog.precio_input.value() == 9500.0
+    assert dialog.descuento_input.value() == 5.0
+    assert dialog.iva_input.value() == 21.0
+    assert dialog.add_button.text() == "Guardar cambios"
+
+
+def test_issue_568_edit_product_replaces_draft_and_recalculates(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QDialog
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui import desktop_app
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="issue568"), "issue568")
+    dialog.destinations = [{
+        "client_id": data["client"].id,
+        "client_label": data["client"].name,
+        "address_id": data["address"].id,
+        "address_label": data["address"].address,
+        "observations": None,
+        "products": [{
+            "product_id": data["product"].id,
+            "product_label": data["product"].name,
+            "quantity": 10.0,
+            "unit": data["product"].unit,
+            "precio_neto_unitario": 100.0,
+            "descuento_porcentaje": 0.0,
+            "iva_porcentaje": 21.0,
+            "total": 1210.0,
+        }],
+    }]
+    dialog._render_destinations()
+    dialog.destination_table.setCurrentCell(0, 0)
+    dialog.product_table.setCurrentCell(0, 0)
+
+    class FakeProductDialog:
+        def __init__(self, parent=None, *, client=None, product=None):
+            assert product["quantity"] == 10.0
+            self.product = dict(product)
+            self.product["quantity"] = 15.0
+            self.product["total"] = 1815.0
+
+        def exec_(self):
+            return QDialog.Accepted
+
+    monkeypatch.setattr(desktop_app, "LoadOrderProductDialog", FakeProductDialog)
+    dialog._edit_product()
+    app.processEvents()
+
+    assert dialog.destinations[0]["products"][0]["quantity"] == 15.0
+    assert dialog.product_table.item(0, 1).text() == "15"
+    assert "1,815.00" in dialog.product_table.item(0, 5).text()
