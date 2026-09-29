@@ -146,6 +146,8 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
     if master_children:
         principal_items.append(MenuItemView(title="Maestros", children=master_children))
 
+    principal_items.append(MenuItemView(title="Producción", children=[MenuItemView(title="Importar recepciones", placeholder=False, action_key="load_orders.view", route_key="raw_material_receipts")]))
+
     principal_items.append(approved_item("Cuenta corriente", route_key="customer_ledger"))
 
     system_children = [
