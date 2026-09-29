@@ -2886,9 +2886,14 @@ class LoadOrderEntryDialog(QDialog):
         self.add_product_button = _action_button(
             "addLoadOrderProductButton", "Agregar producto"
         )
+        self.edit_product_button = _action_button(
+            "editLoadOrderProductButton", "Editar producto", secondary=True
+        )
+        self.edit_product_button.setFocusPolicy(Qt.NoFocus)
         remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
         remove_product_button.setFocusPolicy(Qt.NoFocus)
         product_actions.addWidget(self.add_product_button)
+        product_actions.addWidget(self.edit_product_button)
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
@@ -2954,6 +2959,10 @@ class LoadOrderEntryDialog(QDialog):
         self.add_destination_button.clicked.connect(self._add_destination)
         remove_destination_button.clicked.connect(self._remove_destination)
         self.add_product_button.clicked.connect(self._open_product_dialog)
+        self.edit_product_button.clicked.connect(self._edit_product)
+        self.product_table.cellDoubleClicked.connect(
+            lambda _row, _column: self._edit_product()
+        )
         remove_product_button.clicked.connect(self._remove_product)
         self.save_button.clicked.connect(self._save)
         cancel_button.clicked.connect(self.reject)
@@ -3252,6 +3261,55 @@ class LoadOrderEntryDialog(QDialog):
         self.add_product_button.setFocus(Qt.TabFocusReason)
         self._update_save_button_state()
 
+    def _edit_product(self) -> None:
+        destination_row = self.destination_table.currentRow()
+        product_row = self.product_table.currentRow()
+        if destination_row < 0 or destination_row >= len(self.destinations):
+            self.feedback.show_warning(
+                "Seleccione un cliente/destino.", focus_widget=self.destination_table
+            )
+            return
+        products = self.destinations[destination_row]["products"]
+        if product_row < 0 or product_row >= len(products):
+            self.feedback.show_warning(
+                "Seleccione un producto para editar.", focus_widget=self.product_table
+            )
+            return
+
+        dest = self.destinations[destination_row]
+        client = None
+        if dest.get("client_id"):
+            try:
+                client = Client.get_by_id(dest["client_id"])
+            except Client.DoesNotExist:
+                pass
+
+        dialog = LoadOrderProductDialog(
+            self,
+            client=client,
+            product=products[product_row],
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.product is None:
+            return
+
+        edited_product_id = dialog.product.get("product_id")
+        for index, product in enumerate(products):
+            if index != product_row and product.get("product_id") == edited_product_id:
+                self.feedback.show_error(
+                    f"El articulo {product['product_label']} ya esta cargado para "
+                    f"{dest['client_label']} / {dest['address_label']}.",
+                    focus_widget=self.product_table,
+                )
+                return
+
+        products[product_row] = dialog.product
+        self._render_products(destination_row)
+        self._render_destinations()
+        self.destination_table.setCurrentCell(destination_row, 0)
+        self.product_table.setCurrentCell(product_row, 0)
+        self.feedback.show_success("Producto actualizado.")
+        self._update_save_button_state()
+
     def _remove_product(self) -> None:
         destination_row = self.destination_table.currentRow()
         product_row = self.product_table.currentRow()
@@ -3499,17 +3557,24 @@ class LoadOrderEntryDialog(QDialog):
 
 
 class LoadOrderProductDialog(QDialog):
-    def __init__(self, parent=None, *, client: Client | None = None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        client: Client | None = None,
+        product: dict | None = None,
+    ):
         super().__init__(parent)
         self.product: dict | None = None
         self.client = client
+        self._initial_product = product
         self.setObjectName("loadOrderProductDialog")
-        self.setWindowTitle("Agregar producto")
+        self.setWindowTitle("Editar producto" if product is not None else "Agregar producto")
         self.resize(500, 420)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 14)
         layout.setSpacing(10)
-        title = QLabel("Agregar producto")
+        title = QLabel("Editar producto" if product is not None else "Agregar producto")
         title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
@@ -3584,7 +3649,10 @@ class LoadOrderProductDialog(QDialog):
         footer.addStretch(1)
         cancel_button = _action_button("cancelProductButton", "Cancelar", secondary=True)
         cancel_button.setFocusPolicy(Qt.NoFocus)
-        self.add_button = _action_button("confirmProductButton", "Agregar")
+        self.add_button = _action_button(
+            "confirmProductButton",
+            "Guardar cambios" if product is not None else "Agregar",
+        )
         footer.addWidget(cancel_button)
         footer.addWidget(self.add_button)
         layout.addLayout(footer)
@@ -3614,7 +3682,21 @@ class LoadOrderProductDialog(QDialog):
                 self.descuento_input,
             ),
         )
+        if product is not None:
+            self._load_product(product)
         self.product_combo.setFocus(Qt.TabFocusReason)
+
+    def _load_product(self, product: dict) -> None:
+        product_id = product.get("product_id")
+        index = self.product_combo.findData(product_id)
+        if index >= 0:
+            with QSignalBlocker(self.product_combo):
+                self.product_combo.setCurrentIndex(index)
+        self.quantity_input.setValue(float(product.get("quantity") or 0.0))
+        self.precio_input.setValue(float(product.get("precio_neto_unitario") or 0.0))
+        self.descuento_input.setValue(float(product.get("descuento_porcentaje") or 0.0))
+        self.iva_input.setValue(float(product.get("iva_porcentaje") or 0.0))
+        self._recalculate()
 
     def _on_product_changed(self) -> None:
         product_id = self.product_combo.currentData()
