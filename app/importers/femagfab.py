@@ -10,6 +10,7 @@ import os
 import pymysql
 
 from app.config.database import resolve_mysql_host_ipv4
+from app.config.settings import load_settings
 
 
 TWOPLACES = Decimal("0.01")
@@ -73,11 +74,15 @@ class FemagFabSource:
     """Consulta femagfab exclusivamente con sentencias SELECT."""
 
     def __init__(self, *, host=None, port=None, database=None, user=None, password=None, instance=None):
-        self.host = host or os.getenv("FEMAGFAB_DB_HOST") or os.getenv("DB_HOST", "127.0.0.1")
-        self.port = int(port or os.getenv("FEMAGFAB_DB_PORT") or os.getenv("DB_PORT", "3306"))
+        # femagfab vive en el mismo servidor que FEMAG Desktop. Reutilizamos la
+        # conexión runtime (incluida la credencial segura/DPAPI en producción) y
+        # cambiamos únicamente el schema de origen.
+        settings = load_settings()
+        self.host = host or settings.db_host
+        self.port = int(port or settings.db_port)
         self.database = database or os.getenv("FEMAGFAB_DB_NAME", "femagfab")
-        self.user = user or os.getenv("FEMAGFAB_DB_USER") or os.getenv("DB_USER", "")
-        self.password = password if password is not None else os.getenv("FEMAGFAB_DB_PASSWORD", "")
+        self.user = user or settings.db_user
+        self.password = settings.db_password if password is None else password
         self.instance = instance or os.getenv("FEMAGFAB_SOURCE_INSTANCE", "femagfab")
 
     @property
@@ -89,7 +94,7 @@ class FemagFabSource:
 
     def _connect(self):
         if not self.configured:
-            raise RuntimeError("Configure FEMAGFAB_DB_HOST/DB_USER/DB_PASSWORD para importar recepciones.")
+            raise RuntimeError("La conexión principal de FEMAG no está configurada para acceder a femagfab.")
         return pymysql.connect(
             host=resolve_mysql_host_ipv4(self.host), port=self.port, user=self.user,
             password=self.password, database=self.database, charset="utf8mb4",
