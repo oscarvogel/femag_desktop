@@ -1,4 +1,6 @@
-from peewee import CharField, DateTimeField, DecimalField, TextField
+from decimal import Decimal
+
+from peewee import CharField, DateField, DateTimeField, DecimalField, TextField
 
 from app.models.base import BaseModel, utc_now
 
@@ -35,3 +37,26 @@ class RawMaterialReceipt(BaseModel):
     class Meta:
         table_name = "raw_material_receipt"
         indexes = ((("received_at",), False), (("source_comp",), False))
+
+
+class ProductionPart(BaseModel):
+    """Parte simple de producción real por fecha y turno."""
+
+    production_date = DateField()
+    shift = CharField(max_length=40)
+    cassava_processed_kg = DecimalField(max_digits=12, decimal_places=2)
+    starch_produced_kg = DecimalField(max_digits=12, decimal_places=2)
+    observations = TextField(null=True)
+    created_at = DateTimeField(default=utc_now)
+
+    @property
+    def real_yield(self) -> Decimal:
+        processed = Decimal(str(self.cassava_processed_kg or 0))
+        if processed <= 0:
+            return Decimal("0.00")
+        produced = Decimal(str(self.starch_produced_kg or 0))
+        return (produced * Decimal("100") / processed).quantize(Decimal("0.01"))
+
+    class Meta:
+        table_name = "production_part"
+        indexes = ((("production_date", "shift"), False),)

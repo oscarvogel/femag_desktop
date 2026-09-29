@@ -90,7 +90,10 @@ def test_production_menu_group_exposes_receipt_import_route(db):
     titles = [item.title for item in principal.items]
     produccion = next(item for item in principal.items if item.title == "Producción")
 
-    assert [child.title for child in produccion.children] == ["Recepciones de materia prima"]
+    assert [child.title for child in produccion.children] == [
+        "Recepciones de materia prima",
+        "Partes de producción",
+    ]
     child = produccion.children[0]
     assert child.route_key == "raw_material_receipts"
     assert child.placeholder is False
