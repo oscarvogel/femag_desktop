@@ -113,6 +113,7 @@ from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
 from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
+from app.ui.production_parts import ProductionPartPage
 from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
 
@@ -363,6 +364,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("raw_material_receipts", RawMaterialReceiptImportPage(parent=self))
+        self._add_page("production_parts", ProductionPartPage(parent=self))
         self._add_page(
             "whatsapp_configuration",
             WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),
