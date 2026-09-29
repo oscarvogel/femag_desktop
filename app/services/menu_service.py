@@ -15,6 +15,7 @@ REAL_MODULES = {
     "Órdenes de carga": "load_orders",
     "Remitos": "remittances",
     "Recepciones de materia prima": "raw_material_receipts",
+    "Partes de producción": "production_parts",
     "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
     "Vendedores": "salespeople",
