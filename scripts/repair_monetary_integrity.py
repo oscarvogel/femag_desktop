@@ -73,6 +73,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable, Sequence
 
+from peewee import MySQLDatabase
+
+from app.config.database import database_proxy
 from app.services.money import money_sum, money_to_float, quantize_money
 from app.services.monetary_audit import (
     BUDGET_HEADER_MISMATCH,
@@ -119,6 +122,127 @@ class RepairAborted(Exception):
 REPAIRABLE = "REPAIRABLE"
 ALREADY_CONSISTENT = "ALREADY_CONSISTENT"
 REFUSED = "REFUSED"
+
+
+# ---------------------------------------------------------------------------
+# Representabilidad: el importe destino tiene que caber en la columna
+# ---------------------------------------------------------------------------
+
+#: Tipo declarado en el DDL real de MySQL para las columnas monetarias de FEMAG.
+#: ``float`` en MySQL es de UNA sola precisión (~7 dígitos significativos): por
+#: encima de 2^25 los enteros dejan de ser exactos. La docstring de money.py
+#: afirma "MySQL DOUBLE", pero el esquema real dice FLOAT.
+MYSQL_SINGLE_PRECISION_TYPES = frozenset({"float"})
+
+
+def unrepresentable_amounts(
+    columns: dict[str, float],
+    *,
+    probe,
+) -> list[tuple[str, float, float]]:
+    """Columnas cuyo importe NO sobreviviría al tipo real de la columna.
+
+    ``probe`` es el servidor: recibe un importe y devuelve lo que MySQL
+    almacenaría de verdad (``SELECT CAST(%s AS FLOAT)``). La comparación se
+    hace sobre el importe cuantizado a moneda, nunca sobre el float crudo.
+
+    Esto NO relaja la postcondición: la postcondición sigue exigiendo igualdad
+    exacta. Lo que evita es abrir una transacción para escribir algo que la base
+    no puede guardar, y explicarlo con nombre y número en vez de fallar después.
+    """
+    fallos = []
+    for columna, valor in columns.items():
+        cuantizado = float(quantize_money(valor))
+        persistido = float(quantize_money(probe(cuantizado)))
+        if persistido != cuantizado:
+            fallos.append((columna, cuantizado, persistido))
+    return fallos
+
+
+def money_column_types(database, tables_and_columns) -> dict[str, str]:
+    """Tipo declarado de cada columna monetaria. Sólo SELECT.
+
+    Sólo MySQL tiene ``information_schema`` y una restricción de precisión
+   Declarada. En SQLite las columnas ``REAL`` son de 8 bytes (doble precisión)
+    y no imponen este límite, así que se devuelve vacío y la puerta no aplica.
+    """
+    if not isinstance(database, MySQLDatabase):
+        return {}
+    tipos: dict[str, str] = {}
+    for tabla, columnas in tables_and_columns.items():
+        # pymysql usa marcadores de formato %s, no el qmark de sqlite3.
+        filas = database.execute_sql(
+            "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+            (tabla,),
+        ).fetchall()
+        por_nombre = {str(f[0]).lower(): str(f[1]).lower() for f in filas}
+        for columna in columnas:
+            tipo = por_nombre.get(columna.lower())
+            if tipo:
+                tipos[f"{tabla}.{columna}"] = tipo
+    return tipos
+
+
+def _mysql_float_probe(database):
+    """Pregunta al servidor qué guardaría realmente en una columna FLOAT."""
+
+    def _probe(valor: float) -> float:
+        fila = database.execute_sql("SELECT CAST(%s AS FLOAT)", (valor,)).fetchone()
+        return fila[0] if fila else valor
+
+    return _probe
+
+
+def assert_persistable(columns: dict[str, float], *, database) -> None:
+    """Aborta si algún importe destino no cabe exactamente en su columna.
+
+    Corre ANTES de abrir la transacción y es de sólo lectura
+    (information_schema + ``CAST``).
+    """
+    tables_and_columns: dict[str, list[str]] = {}
+    for columna in columns:
+        tabla, _, nombre = columna.partition(".")
+        tables_and_columns.setdefault(tabla, []).append(nombre)
+    tipos = money_column_types(database, tables_and_columns)
+
+    single_precision = {
+        columna: valor
+        for columna, valor in columns.items()
+        if tipos.get(columna) in MYSQL_SINGLE_PRECISION_TYPES
+    }
+    if not single_precision:
+        return
+
+    fallos = unrepresentable_amounts(
+        single_precision, probe=_mysql_float_probe(database)
+    )
+    if not fallos:
+        return
+    detalle = "; ".join(
+        f"{columna}: se intentaría guardar {valor:,.2f} "
+        f"y la base guardaría {persistido:,.2f}"
+        for columna, valor, persistido in fallos
+    )
+    raise RepairAborted(
+        "El importe destino no es representable en el tipo real de la columna "
+        f"({detalle}). Las columnas monetarias están declaradas 'float' en MySQL, "
+        "que es de una sola precisión (~7 dígitos significativos): por encima de "
+        "2^25 = 33.554.432 los enteros no son exactos, así que la escritura se "
+        "pierde en silencio y la postcondición vuelve a leer el valor viejo. "
+        "Pasar las columnas a DOUBLE requiere una migración de esquema, fuera "
+        "del alcance de esta herramienta. No se modificó nada."
+    )
+
+
+def plan_columns(plan: "RepairPlan") -> dict[str, float]:
+    """Columnas exactas que la reparación pretende escribir, con sus valores."""
+    columnas: dict[str, float] = {}
+    for campo, valor in _amounts_to_columns(plan.after_budget).items():
+        columnas[f"budget.{campo}"] = valor
+    for campo, valor in _amounts_to_columns(plan.after_movement).items():
+        columnas[f"clientaccountmovement.{campo}"] = valor
+    return columnas
 
 
 @dataclass(frozen=True)
@@ -373,19 +497,50 @@ def verify_postconditions(budget_id: int, movement_id: int) -> list[str]:
     return violations
 
 
+def _connection_id(database) -> int:
+    """Identidad del socket vivo. Cambia ⇒ la postcondición leería otra base."""
+    return id(database._state.conn)
+
+
+def _assert_wiring(database, *, momento: str) -> None:
+    """Prueba que los modelos, el proxy y la transacción son el mismo objeto.
+
+    Defensa explícita contra el modo de fallo "escribí con una conexión y
+    verifiqué con otra": si ``Budget`` resolviera a un objeto distinto del que
+    abrió la transacción, se aborta en vez de comparar dos bases distintas.
+    """
+    from app.models.budgets import Budget
+
+    if database_proxy.obj is not database:
+        raise RepairAborted(
+            f"Conexión divergente ({momento}): la transacción está sobre un "
+            f"objeto y los modelos resuelven a otro. Se aborta sin escribir."
+        )
+    if Budget._meta.database is not database_proxy:
+        raise RepairAborted(
+            f"Conexión divergente ({momento}): Budget no está enlazado al proxy."
+        )
+    if database.transaction_depth() < 1:
+        raise RepairAborted(
+            f"La postcondición se está evaluando fuera de la transacción ({momento})."
+        )
+
+
 def apply_plan(plan: RepairPlan, *, user: str, reason: str = REASON_REPAIR) -> None:
     """Aplica la reparación en UNA sola transacción.
 
     Secuencia dentro de la transacción:
 
-    1. actualizar sólo los campos monetarios de ``Budget``;
-    2. actualizar sólo los campos monetarios del movimiento original;
-    3. verificar las invariantes; si fallan, se aborta;
-    4. registrar el ``AuditLog`` con el mecanismo del proyecto.
+    1. actualizar sólo los campos monetarios de ``Budget`` y comprobar que la
+       sentencia afectó exactamente una fila;
+    2. lo mismo con el movimiento original;
+    3. probar que proxy, modelos y transacción siguen siendo el mismo objeto y
+       que la conexión no cambió;
+    4. verificar las invariantes; si fallan, se aborta;
+    5. registrar el ``AuditLog`` con el mecanismo del proyecto.
 
     Cualquier excepción revierte todo, incluida la auditoría.
     """
-    from app.config.database import database_proxy
     from app.models.accounting import ClientAccountMovement
     from app.models.budgets import Budget
     from app.services.audit_service import AuditService
@@ -398,15 +553,35 @@ def apply_plan(plan: RepairPlan, *, user: str, reason: str = REASON_REPAIR) -> N
     columnas_movimiento = _amounts_to_columns(plan.after_movement)
 
     with database.atomic():
+        _assert_wiring(database, momento="inicio de transacción")
+        conexion = _connection_id(database)
+
         budget = Budget.get_by_id(plan.budget_id)
         for campo, valor in columnas_budget.items():
             setattr(budget, campo, valor)
-        budget.save(only=list(BUDGET_MONEY_FIELDS))
+        filas = budget.save(only=list(BUDGET_MONEY_FIELDS))
+        if filas != 1:
+            raise RepairAborted(
+                f"La actualización de Budget {plan.budget_id} afectó {filas} "
+                "filas; se esperaba 1. Se revierte todo."
+            )
 
         movement = ClientAccountMovement.get_by_id(plan.movement_id)
         for campo, valor in columnas_movimiento.items():
             setattr(movement, campo, valor)
-        movement.save(only=list(MOVEMENT_MONEY_FIELDS))
+        filas = movement.save(only=list(MOVEMENT_MONEY_FIELDS))
+        if filas != 1:
+            raise RepairAborted(
+                f"La actualización del movimiento {plan.movement_id} afectó "
+                f"{filas} filas; se esperaba 1. Se revierte todo."
+            )
+
+        _assert_wiring(database, momento="postcondición")
+        if _connection_id(database) != conexion:
+            raise RepairAborted(
+                "La conexión cambió dentro de la transacción; la postcondición "
+                "leería otra base. Se revierte todo."
+            )
 
         violations = verify_postconditions(plan.budget_id, plan.movement_id)
         if violations:
@@ -660,6 +835,23 @@ def run_repair(argv: Sequence[str] | None = None) -> int:
             raise RepairAborted(verdict.reason or "Condiciones no cumplidas.")
 
         plan = build_plan(audit)
+
+        # Puerta previa, SOLO LECTURA y antes de abrir cualquier transacción:
+        # si el importe destino no entra exacto en la columna, la escritura se
+        # perdería en silencio y la postcondición releería el valor viejo.
+        # Se informa igual en dry-run para que el operador no lo descubra al
+        # aplicar.
+        try:
+            assert_persistable(plan_columns(plan), database=database)
+        except RepairAborted as bloqueo:
+            if not args.apply:
+                print("DRY-RUN: no se modificó nada.")
+                print(render_plan(plan))
+                print("")
+                print("BLOQUEO:")
+                print(str(bloqueo))
+                return EXIT_ABORTED
+            raise
 
         if not args.apply:
             print("DRY-RUN: no se modificó nada.")
