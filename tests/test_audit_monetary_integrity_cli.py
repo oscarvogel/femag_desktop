@@ -74,11 +74,23 @@ CSV_COLUMNS = [
 
 @pytest.fixture()
 def populated_db(tmp_path, monkeypatch):
-    """Base con el caso 000073 persistido y lista para el CLI."""
+    """Base con el caso 000073 persistido y lista para el CLI.
+
+    Se declara explícitamente que este puesto NO tiene configuración segura
+    (DPAPI), porque si la tuviera la resolución efectiva de FEMAG sería MySQL y
+    el auditor se negaría a auditar esta SQLite.
+    """
+    from app.config import secure_credentials
     from app.config.database import bind_database
     from app.models.accounting import ClientAccountMovement
     from app.models.budgets import Budget, BudgetItem
     from app.models.masters import Client, Product
+
+    monkeypatch.setattr(
+        secure_credentials, "has_runtime_configuration", lambda config_dir=None: False
+    )
+    monkeypatch.setenv("FEMAG_DEMO", "0")
+    monkeypatch.setenv("FEMAG_SECURE_CONFIG", "0")
 
     path = tmp_path / "cli_audit.sqlite3"
     writable = SqliteDatabase(str(path))

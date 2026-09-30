@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -57,8 +58,10 @@ from app.services.monetary_audit import (
     potential_financial_difference,
 )
 from app.services.monetary_audit_readonly import (
+    AuditDatabaseTarget,
     MonetaryIntegrityAuditor,
-    open_readonly_database,
+    open_audit_database,
+    resolve_audit_database,
 )
 
 SUMMARY_TITLE = "MONETARY INTEGRITY AUDIT"
@@ -199,7 +202,6 @@ def render_summary(
     summary: AuditSummary,
     *,
     protections: Iterable[str] = (),
-    database_label: str = "",
 ) -> str:
     """Reporte general: conteos y diferencia financiera potencial."""
     lines = [SUMMARY_TITLE, "=" * len(SUMMARY_TITLE), ""]
@@ -223,8 +225,6 @@ def render_summary(
     if protections:
         lines.append("")
         lines.append(f"READ-ONLY protections: {', '.join(protections)}")
-    if database_label:
-        lines.append(f"Database: {database_label}")
     return "\n".join(lines)
 
 
@@ -465,30 +465,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _database_label(handle) -> str:
-    database = handle.database
-    engine = type(database).__name__
-    name = getattr(database, "database", "?")
-    return f"{engine} {name}"
+def _print_connection(target: AuditDatabaseTarget) -> None:
+    """Informa a qué base se audita. Nunca imprime la contraseña."""
+    for line in target.header_lines():
+        print(line)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    handle = open_readonly_database(database_name=args.db)
     try:
+        target = resolve_audit_database(database_name=args.db)
+    except Exception as exc:
+        print(
+            f"ERROR: no se pudo resolver la conexion de FEMAG: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+
+    _print_connection(target)
+
+    try:
+        handle = open_audit_database(target=target)
+    except Exception as exc:
+        print(f"READ-ONLY protections: no aplicadas", file=sys.stderr)
+        print(
+            f"ERROR: no se pudo abrir la base en modo READ-ONLY: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        print(
+            "El auditor no cae a SQLite ni a otra base: se corrige la conexion y "
+            "se vuelve a ejecutar.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        print(f"READ-ONLY protections: {', '.join(handle.protections)}")
         audits = MonetaryIntegrityAuditor(handle.database).run(
             budget_id=args.budget,
             budget_number=args.budget_number,
         )
         summary = summarize(audits)
-        print(
-            render_summary(
-                summary,
-                protections=handle.protections,
-                database_label=_database_label(handle),
-            )
-        )
+        print()
+        print(render_summary(summary))
         if audits:
             print()
         for audit in audits:

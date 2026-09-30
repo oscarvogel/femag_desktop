@@ -1,4 +1,5 @@
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,50 @@ def _optional_path(value: str | None) -> Path | None:
 
 def _flag_enabled(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+
+
+def resolve_effective_connection_settings(
+    *,
+    demo_mode: bool = False,
+    configure: bool = False,
+    packaged_app: bool | None = None,
+) -> bool:
+    """Decide si la ejecución usa la configuración segura del puesto y la exige.
+
+    Es el preámbulo de conexión de FEMAG. Todo lo que abre la base en este
+    proyecto pasa por acá: si existe configuración segura guardada (DPAPI en
+    ``%LOCALAPPDATA%\\FEMAG Desktop``), se fuerza MySQL **pese a lo que diga
+    el ``.env``**, para que un ``.env`` de demo heredado no redirija la
+    aplicación a SQLite por accidente.
+
+    Ajusta sólo variables del proceso actual (no toca disco ni base) y devuelve
+    ``True`` cuando la conexión debe venir de la configuración segura.
+
+    ``packaged_app`` detecta la app congelada de producción; se puede pasar
+    explícitamente para no depender de esa detección.
+    """
+    from app.config.secure_credentials import has_runtime_configuration
+
+    if packaged_app is None:
+        packaged_app = bool(getattr(sys, "frozen", False))
+    saved_runtime_config = has_runtime_configuration()
+    use_secure_config = bool(
+        not demo_mode
+        and (
+            configure
+            or packaged_app
+            or saved_runtime_config
+            or os.getenv("FEMAG_SECURE_CONFIG") == "1"
+        )
+    )
+    if use_secure_config:
+        # Toda ejecución normal (EXE o source) usa la configuración segura
+        # del puesto cuando existe. Así evitamos que .env o variables viejas
+        # de demo redirijan FEMAG a SQLite por accidente.
+        os.environ["FEMAG_SECURE_CONFIG"] = "1"
+        os.environ["FEMAG_DEMO"] = "0"
+        os.environ["FEMAG_DB_ENGINE"] = "mysql"
+    return use_secure_config
 
 
 def load_settings() -> Settings:

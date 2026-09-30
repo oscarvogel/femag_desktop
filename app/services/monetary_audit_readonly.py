@@ -96,6 +96,16 @@ class ReadOnlyViolation(RuntimeError):
     """Se intentó una escritura sobre la conexión del auditor."""
 
 
+class EffectiveConfigurationError(RuntimeError):
+    """La configuración efectiva de FEMAG no se puede usar para auditar.
+
+    Se lanza, entre otros casos, cuando la configuración segura del puesto está
+    activa pero la resolución no termina en MySQL. El auditor nunca degrada a
+    SQLite para "seguir adelante": auditar otra base que la que usa la aplicación
+    produciría un informe falso.
+    """
+
+
 def assert_read_only_sql(sql: str) -> str:
     """Valida que ``sql`` sea una sentencia de lectura. Devuelve el texto limpio.
 
@@ -227,27 +237,125 @@ def open_readonly_mysql(
     return ReadOnlyHandle(database=engine, protections=tuple(protections))
 
 
-def open_readonly_database(settings=None, *, database_name: str | None = None) -> ReadOnlyHandle:
-    """Abre la base configurada del puesto en modo solo lectura.
+@dataclass(frozen=True)
+class AuditDatabaseTarget:
+    """Conexión que el auditor va a leer, ya resuelta desde la config de FEMAG.
 
-    Reutiliza ``load_settings()`` para no duplicar la resolución de credenciales
-    (incluido el almacén seguro por DPAPI), pero no reutiliza
-    ``initialize_runtime_database()`` porque esa ruta construye el conector que
-    migra el esquema al conectar.
+    Es el resultado de :func:`resolve_audit_database`: la resolución es una
+    etapa separada de la apertura para poder informar a qué base se audita sin
+    haber conectado todavía.
     """
-    if settings is None:
-        from app.config.settings import load_settings
 
-        settings = load_settings()
-    if settings.db_engine == "sqlite":
-        return open_readonly_sqlite(settings.sqlite_path)
-    return open_readonly_mysql(
-        host=settings.db_host,
-        port=settings.db_port,
-        user=settings.db_user,
-        password=settings.db_password,
-        database=(database_name or settings.db_name),
+    engine: str
+    sqlite_path: Path | None = None
+    host: str | None = None
+    port: int | None = None
+    database: str | None = None
+    user: str | None = None
+    password: str = ""
+    secure_config: bool = False
+
+    def __repr__(self) -> str:
+        """Oculta la contraseña para que no pueda filtrarse por accidente."""
+        return (
+            f"AuditDatabaseTarget(engine={self.engine!r}, host={self.host!r}, "
+            f"port={self.port!r}, database={self.database!r}, user={self.user!r}, "
+            f"sqlite_path={str(self.sqlite_path)!r}, secure_config={self.secure_config!r}, "
+            f"password=<oculta>)"
+        )
+
+    __str__ = __repr__
+
+    def header_lines(self) -> list[str]:
+        """Encabezado del informe: qué base se audita. **Nunca** la contraseña."""
+        lineas = [f"Database engine: {'MySQL' if self.engine == 'mysql' else 'SQLite'}"]
+        if self.engine == "mysql":
+            lineas.append(f"Host: {self.host}")
+            lineas.append(f"Port: {self.port}")
+            lineas.append(f"Database: {self.database}")
+            lineas.append(f"User: {self.user}")
+        else:
+            lineas.append(f"SQLite path: {self.sqlite_path}")
+        lineas.append(
+            f"Connection source: {'configuracion segura del puesto (DPAPI)' if self.secure_config else 'configuracion efectiva (env / .env)'}"
+        )
+        return lineas
+
+
+def resolve_audit_database(
+    *,
+    demo_mode: bool = False,
+    database_name: str | None = None,
+    settings=None,
+) -> AuditDatabaseTarget:
+    """Resuelve la conexión efectiva de FEMAG. No abre nada y no escribe nada.
+
+    Reutiliza el preámbulo de conexión del proyecto
+    (``app.config.settings.resolve_effective_connection_settings``), el mismo
+    que aplica ``app.main.run_ui()`` antes de leer los settings. Por eso el
+    auditor conecta a la misma base que la aplicación aunque el ``.env`` del
+    repositorio todavía apunte a la demo SQLite.
+
+    Si la configuración normal de FEMAG es MySQL y no se puede resolver o
+    abrir, esta función propaga el error: **no** hay fallback a SQLite.
+    ``database_name`` permite apuntar a otra base del mismo servidor, que es lo
+    que se usa para auditar una copia local de producción.
+    """
+    from app.config.settings import (
+        load_settings,
+        resolve_effective_connection_settings,
     )
+
+    secure_config = resolve_effective_connection_settings(demo_mode=demo_mode)
+    resolved = load_settings() if settings is None else settings
+
+    if secure_config and resolved.db_engine != "mysql":
+        raise EffectiveConfigurationError(
+            "FEMAG tiene configuracion segura del puesto, que exige MySQL, pero la "
+            f"configuracion efectiva resolveria {resolved.db_engine!r}. No se audita "
+            "otra base para no entregar un informe falso."
+        )
+    if resolved.db_engine == "sqlite":
+        return AuditDatabaseTarget(
+            engine="sqlite",
+            sqlite_path=resolved.sqlite_path,
+            secure_config=False,
+        )
+    return AuditDatabaseTarget(
+        engine="mysql",
+        host=resolved.db_host,
+        port=resolved.db_port,
+        database=(database_name or resolved.db_name),
+        user=resolved.db_user,
+        password=resolved.db_password,
+        secure_config=secure_config,
+    )
+
+
+def open_audit_database(
+    *,
+    demo_mode: bool = False,
+    database_name: str | None = None,
+    target: AuditDatabaseTarget | None = None,
+) -> ReadOnlyHandle:
+    """Abre la conexión resuelta en modo READ-ONLY.
+
+    MySQL se abre con :class:`ReadOnlyMySQLDatabase`, nunca con
+    ``FemagMySQLDatabase`` (cuyo ``connect()`` migra el esquema y siembra datos).
+    Si MySQL no abre, el error sube: no hay degradación silenciosa a SQLite.
+    """
+    resolved = target or resolve_audit_database(
+        demo_mode=demo_mode, database_name=database_name
+    )
+    if resolved.engine == "mysql":
+        return open_readonly_mysql(
+            host=resolved.host,
+            port=resolved.port,
+            user=resolved.user,
+            password=resolved.password,
+            database=resolved.database,
+        )
+    return open_readonly_sqlite(resolved.sqlite_path)
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +447,7 @@ class MonetaryIntegrityAuditor:
         else:
             raise RuntimeError(
                 "La auditoría necesita una conexión READ-ONLY. Usar "
-                "open_readonly_sqlite() u open_readonly_database()."
+                "resolve_audit_database() y open_audit_database()."
             )
 
     # -- carga ---------------------------------------------------------------
