@@ -159,21 +159,174 @@ def test_budget_000073_cada_renglon_es_consistente_con_cantidad_y_precio(db):
         assert Decimal(str(item.total)) == Decimal(shown_total)
 
 
-def test_budget_000073_no_puede_imprimirse_si_el_total_no_cierra(db, tmp_path):
-    """Si cabecera y detalle no coinciden, NO se emite un documento incorrecto."""
+def _presupuesto_historico_inconsistente(db):
+    """Reproduce el presupuesto 000073 ya persistido e inconsistente.
+
+    Cabecera almacenada 37.511.800,00 contra un detalle que suma
+    37.511.775,00. La inconsistencia queda en la base: la impresión no debe
+    corregirla, solo dejar de bloquearla.
+    """
+    order, client = _order_000073()
+    AccountLedgerService(current_user="admin").generate_for_load_order(order)
+    budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
+
+    budget.total_amount = float(TOTAL_IMPRESO_000073)
+    budget.net_amount = float(TOTAL_IMPRESO_000073)
+    budget.save(only=[Budget.total_amount, Budget.net_amount])
+    return order, client, Budget.get_by_id(budget.id)
+
+
+def test_historico_inconsistente_se_imprime_con_totales_del_detalle(db, tmp_path):
+    """Un presupuesto histórico inconsistente DEBE poder imprimirse.
+
+    El PDF usa como fuente de verdad los BudgetItem que se imprimen, así que
+    el TOTAL visible es la suma exacta del detalle, no la cabecera almacenada.
+    """
+    _order, _client, budget = _presupuesto_historico_inconsistente(db)
+
+    path = BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+
+    assert path.exists(), "El presupuesto histórico no debe quedar bloqueado"
+    assert path.stat().st_size > 0
+
+
+def _pdf_text(path) -> str:
+    """Extrae el texto visible del PDF.
+
+    ReportLab comprime y codifica los streams, así que no alcanza con buscar
+    bytes crudos. Se decodifica ASCII85 y luego FlateDecode para leer los
+    operandos de texto reales que se imprimen.
+    """
+    import base64
+    import re
+    import zlib
+
+    raw = path.read_bytes()
+    chunks = []
+    for match in re.finditer(rb"stream\r?\n(.*?)endstream", raw, re.S):
+        payload = match.group(1).strip()
+        decoded = None
+        for decoder in (
+            lambda data: zlib.decompress(base64.a85decode(data, adobe=True)),
+            lambda data: zlib.decompress(data),
+            lambda data: base64.a85decode(data, adobe=True),
+        ):
+            try:
+                decoded = decoder(payload)
+                break
+            except Exception:
+                continue
+        chunks.append(
+            (decoded if decoded is not None else payload).decode("latin-1", errors="ignore")
+        )
+    return "\n".join(chunks)
+
+
+def test_historico_inconsistente_muestra_total_del_detalle_en_el_pdf(db, tmp_path):
+    """El TOTAL del PDF debe ser 37.511.775,00 y no 37.511.800,00."""
+    _order, _client, budget = _presupuesto_historico_inconsistente(db)
+
+    path = BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+    contenido = _pdf_text(path)
+
+    assert "37,511,775.00" in contenido, f"No se encontró el total del detalle: {contenido}"
+    assert "37,511,800.00" not in contenido, "No debe imprimirse la cabecera inconsistente"
+
+
+def test_historico_inconsistente_no_modifica_la_base(db, tmp_path):
+    """Imprimir un histórico no debe repararlo ni alterar la cuenta corriente."""
+    order, client, budget = _presupuesto_historico_inconsistente(db)
+    movimiento = ClientAccountMovement.get(ClientAccountMovement.budget == budget)
+    total_movimiento = movimiento.total_amount
+    saldo = client_balance(client)
+
+    BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+
+    budget_reload = Budget.get_by_id(budget.id)
+    assert budget_reload.total_amount == approx(float(TOTAL_IMPRESO_000073), abs=0.005)
+    assert budget_reload.net_amount == approx(float(TOTAL_IMPRESO_000073), abs=0.005)
+
+    movimiento_reload = ClientAccountMovement.get(ClientAccountMovement.budget == budget)
+    assert movimiento_reload.total_amount == approx(total_movimiento, abs=0.0001)
+    assert client_balance(client) == approx(saldo, abs=0.0001)
+
+    # El detalle tampoco se toca.
+    assert float(_sum_item_totals(budget_reload)) == approx(
+        float(SUMA_DETALLE_000073), abs=0.005
+    )
+
+
+def test_historico_inconsistente_registra_auditoria_con_diagnostico(db, tmp_path):
+    """La impresión tolerada deja rastro con los importes de la diferencia."""
+    from app.models.audit import AuditLog
+
+    order, _client, budget = _presupuesto_historico_inconsistente(db)
+
+    BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Budget:{budget.id}")
+        .where(AuditLog.action == "imprimir_historico_inconsistente")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro is not None
+    assert "Presupuesto histórico inconsistente impreso usando totales derivados del detalle" in (
+        registro.observation or ""
+    )
+    nuevo = registro.new_value or {}
+    assert nuevo["budget_number"] == budget.budget_number
+    assert nuevo["stored_total"] == approx(float(TOTAL_IMPRESO_000073), abs=0.005)
+    assert nuevo["detail_total"] == approx(float(SUMA_DETALLE_000073), abs=0.005)
+    # diferencia = detalle - almacenado = 37511775 - 37511800 = -25
+    assert nuevo["difference"] == approx(-25.0, abs=0.005)
+    assert nuevo["order_number"] == order.order_number
+
+
+def test_historico_inconsistente_se_imprime_tambien_en_el_lote(db, tmp_path):
+    """El bundle por orden tampoco debe bloquearse por un histórico inconsistente."""
+    order, _client, budget = _presupuesto_historico_inconsistente(db)
+
+    target = BudgetPrintService(current_user="admin").export_bundle_for_load_order(
+        order, tmp_path
+    )
+
+    assert target.exists()
+    assert target.stat().st_size > 0
+    contenido = target.read_bytes().decode("latin-1", errors="ignore")
+    assert "37511800" not in contenido
+
+
+def test_guard_de_dominio_sigue_bloqueando_la_emision_de_datos_nuevos(db):
+    """El guard NO se toca: sigue rechazando datos nuevos inconsistentes."""
     order, _client = _order_000073()
     budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
 
-    # Inyectamos la inconsistencia histórica: cabecera + $25.
     budget.total_amount = float(TOTAL_IMPRESO_000073)
     budget.save(only=[Budget.total_amount])
 
-    with pytest.raises(MonetaryIntegrityError) as excinfo:
-        BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+    with pytest.raises(MonetaryIntegrityError):
+        BudgetService(current_user="admin").assert_monetary_integrity(budget)
 
-    mensaje = str(excinfo.value)
-    assert str(budget.budget_number) in mensaje
-    assert not list(tmp_path.glob("*.pdf"))
+
+def test_presupuesto_nuevo_consistente_se_imprime_sin_auditoria_de_historico(db, tmp_path):
+    """Un presupuesto nuevo y consistente se imprime normal, sin marcarlo histórico."""
+    from app.models.audit import AuditLog
+
+    order, _client = _order_000073()
+    budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
+
+    path = BudgetPrintService(current_user="admin").export_pdf(budget, tmp_path)
+
+    assert path.exists()
+    marcados = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Budget:{budget.id}")
+        .where(AuditLog.action == "imprimir_historico_inconsistente")
+        .count()
+    )
+    assert marcados == 0
 
 
 # ---------------------------------------------------------------------------

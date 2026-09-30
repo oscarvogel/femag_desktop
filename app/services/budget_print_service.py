@@ -10,7 +10,17 @@ from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.services.audit_service import AuditService
 from app.services.budget_service import BudgetService
-from app.services.money import quantize_money, to_decimal
+from app.services.money import (
+    BudgetTotals,
+    MonetaryIntegrityError,
+    quantize_money,
+    to_decimal,
+    totals_from_persisted_items,
+)
+
+AVISO_HISTORICO_INCONSISTENTE = (
+    "Presupuesto histórico inconsistente impreso usando totales derivados del detalle"
+)
 
 
 class BudgetPrintService:
@@ -19,6 +29,48 @@ class BudgetPrintService:
         self.audit_service = audit_service or AuditService()
         self.budget_service = BudgetService(current_user, self.audit_service)
         self.styles = getSampleStyleSheet()
+
+    def _totals_for_document(self, budget: Budget) -> BudgetTotals:
+        """Totales del documento, derivados de los items que se van a imprimir.
+
+        Para impresión la fuente de verdad son exactamente los ``BudgetItem``
+        que se muestran: el PDF debe ser internamente coherente aunque la
+        cabecera almacenada de un presupuesto histórico no lo sea.
+
+        Se mantiene el guard de integridad del dominio
+        (``assert_monetary_integrity``) para creación y emisión de datos
+        nuevos. Acá solo se degrada a warning: se registra la inconsistencia
+        y se continúa, sin modificar Budget, BudgetItem ni cuenta corriente.
+        """
+        items = list(budget.items)
+        detail_totals = totals_from_persisted_items(items)
+        if not items:
+            return detail_totals
+        try:
+            self.budget_service.assert_monetary_integrity(budget)
+        except MonetaryIntegrityError:
+            self._record_historical_inconsistency(budget, detail_totals)
+        return detail_totals
+
+    def _record_historical_inconsistency(
+        self, budget: Budget, detail_totals: BudgetTotals
+    ) -> None:
+        stored_total = to_decimal(budget.total_amount)
+        self.audit_service.record(
+            user=self.current_user,
+            module="Presupuestos",
+            action="imprimir_historico_inconsistente",
+            record_ref=f"Budget:{budget.id}",
+            new_value={
+                "budget_number": budget.budget_number,
+                "order_number": budget.load_order.order_number if budget.load_order_id else None,
+                "order_reference": budget.load_order_reference,
+                "stored_total": float(stored_total),
+                "detail_total": float(detail_totals.total_amount),
+                "difference": float(detail_totals.total_amount - stored_total),
+            },
+            observation=AVISO_HISTORICO_INCONSISTENTE,
+        )
 
     def export_for_load_order(self, order: LoadOrder, output_dir: str | Path) -> list[Path]:
         budgets = self.budget_service.ensure_for_load_order(order)
@@ -35,13 +87,14 @@ class BudgetPrintService:
         target = directory / f"presupuestos_OC-{order.order_number:06d}.pdf"
         doc = self._document(target, title=f"Presupuestos OC-{order.order_number:06d}")
         story = []
+        totals_by_budget = {}
         for index, budget in enumerate(budgets):
-            # Validación previa: sin esto el bundle emitiría páginas con
-            # total inconsistente sin avisar.
-            self.budget_service.assert_monetary_integrity(budget)
+            # Un histórico inconsistente no bloquea el lote: se avisa y se
+            # imprime con los totales de su propio detalle.
+            totals_by_budget[budget.id] = self._totals_for_document(budget)
             if index:
                 story.append(PageBreak())
-            story.extend(self._story(budget))
+            story.extend(self._story(budget, totals_by_budget[budget.id]))
         doc.build(story)
         self.audit_service.record(
             user=self.current_user,
@@ -58,13 +111,14 @@ class BudgetPrintService:
 
     def export_pdf(self, budget: Budget, output_dir: str | Path) -> Path:
         budget = Budget.get_by_id(budget.id)
-        # No se emite un documento cuyo detalle no sume su total general.
-        self.budget_service.assert_monetary_integrity(budget)
+        # Un histórico inconsistente no bloquea la impresión: se avisa por
+        # auditoría y el PDF se arma con los totales de su propio detalle.
+        totals = self._totals_for_document(budget)
         directory = Path(output_dir)
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"presupuesto_{budget.budget_number:06d}.pdf"
         doc = self._document(target, title=f"Presupuesto {budget.display_number}")
-        doc.build(self._story(budget))
+        doc.build(self._story(budget, totals))
         self.audit_service.record(
             user=self.current_user,
             module="Presupuestos",
@@ -91,7 +145,8 @@ class BudgetPrintService:
             title=title,
         )
 
-    def _story(self, budget: Budget) -> list:
+    def _story(self, budget: Budget, totals: BudgetTotals | None = None) -> list:
+        totals = totals if totals is not None else self._totals_for_document(budget)
         story = [
             Paragraph("PRESUPUESTO", self.styles["Title"]),
             Spacer(1, 3 * mm),
@@ -101,7 +156,7 @@ class BudgetPrintService:
             Spacer(1, 6 * mm),
             self._items_table(budget),
             Spacer(1, 5 * mm),
-            self._totals_table(budget),
+            self._totals_table(totals),
         ]
         if budget.observations:
             story.extend(
@@ -193,12 +248,19 @@ class BudgetPrintService:
         )
         return table
 
-    def _totals_table(self, budget: Budget) -> Table:
+    def _totals_table(self, totals: BudgetTotals) -> Table:
+        """Neto / Descuentos / IVA / TOTAL del documento.
+
+        Muestran los importes derivados de los BudgetItem impresos, de modo
+        que el bloque de totales siempre sume exactamente lo que se ve en el
+        detalle, aun cuando la cabecera almacenada de un histórico sea
+        inconsistente.
+        """
         rows = [
-            ["Neto", self._money(budget.net_amount)],
-            ["Descuentos", self._money(budget.discount_amount)],
-            ["IVA", self._money(budget.vat_amount)],
-            ["TOTAL", self._money(budget.total_amount)],
+            ["Neto", self._money(totals.net_amount)],
+            ["Descuentos", self._money(totals.discount_amount)],
+            ["IVA", self._money(totals.vat_amount)],
+            ["TOTAL", self._money(totals.total_amount)],
         ]
         table = Table(rows, colWidths=[45 * mm, 35 * mm], hAlign="RIGHT")
         table.setStyle(
