@@ -111,11 +111,23 @@ def money_sum(values: Iterable) -> Decimal:
 
 
 def money_to_float(value) -> float:
-    """Convierte un importe ya redondeado a ``float`` para persistirlo.
+    """Convierte un importe ya redondeado a ``float``.
 
-    Se llama únicamente en la frontera con la base, nunca para calcular.
+    **Sólo para presentation y cálculos no monetarios** (columnas de pesos,
+    porcentajes, márgenes). Para persistir dinero usar :func:`money_to_decimal`:
+    volver a ``float`` un importe reintroduce la pérdida de precisión que la
+    migración a DECIMAL elimina.
     """
     return float(quantize_money(value))
+
+
+def money_to_decimal(value) -> Decimal:
+    """Convierte un importe al ``Decimal`` exacto que se persiste.
+
+    Es el valor por defecto al escribir dinero: la columna es DECIMAL y
+    redondear a float aquí degradaría el importe antes de llegar a la base.
+    """
+    return quantize_money(value)
 
 
 class LineAmounts(NamedTuple):

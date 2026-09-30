@@ -139,11 +139,9 @@ def test_budget_000073_detalle_y_total_coinciden(db):
     order, _client = _order_000073()
     budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
 
-    assert _sum_item_totals(budget) == approx(
-        float(SUMA_DETALLE_000073), abs=0.005
-    )
-    assert budget.total_amount == approx(float(SUMA_DETALLE_000073), abs=0.005)
-    assert budget.total_amount != approx(float(TOTAL_IMPRESO_000073), abs=0.005)
+    assert _sum_item_totals(budget) == SUMA_DETALLE_000073
+    assert budget.total_amount == SUMA_DETALLE_000073
+    assert budget.total_amount != TOTAL_IMPRESO_000073
 
 
 def test_budget_000073_cada_renglon_es_consistente_con_cantidad_y_precio(db):
@@ -251,9 +249,7 @@ def test_historico_inconsistente_no_modifica_la_base(db, tmp_path):
     assert client_balance(client) == approx(saldo, abs=0.0001)
 
     # El detalle tampoco se toca.
-    assert float(_sum_item_totals(budget_reload)) == approx(
-        float(SUMA_DETALLE_000073), abs=0.005
-    )
+    assert _sum_item_totals(budget_reload) == SUMA_DETALLE_000073
 
 
 def test_historico_inconsistente_registra_auditoria_con_diagnostico(db, tmp_path):
@@ -380,13 +376,9 @@ def test_total_siempre_igual_a_suma_de_renglones(db, nombre, cantidad, precio, d
     )
     budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
 
-    assert float(_sum_item_totals(budget)) == approx(budget.total_amount, abs=0.005)
-    assert float(sum(item.net_subtotal for item in budget.items)) == approx(
-        budget.net_amount, abs=0.005
-    )
-    assert float(sum(item.vat_amount for item in budget.items)) == approx(
-        budget.vat_amount, abs=0.005
-    )
+    assert _sum_item_totals(budget) == budget.total_amount
+    assert sum((item.net_subtotal for item in budget.items), Decimal('0.00')) == budget.net_amount
+    assert sum((item.vat_amount for item in budget.items), Decimal('0.00')) == budget.vat_amount
 
 
 def test_multiples_renglones_con_precios_y_descuentos_distintos(db):
@@ -404,7 +396,7 @@ def test_multiples_renglones_con_precios_y_descuentos_distintos(db):
     budget = BudgetService(current_user="admin").ensure_for_load_order(order)[0]
 
     assert len(list(budget.items)) == 4
-    assert float(_sum_item_totals(budget)) == approx(budget.total_amount, abs=0.005)
+    assert _sum_item_totals(budget) == budget.total_amount
 
 
 # ---------------------------------------------------------------------------
@@ -421,10 +413,11 @@ def test_orden_presupuesto_y_cuenta_corriente_coinciden(db):
     budget = Budget.get(Budget.client == client)
     assert len(movements) == 1
     movement = movements[0]
-    assert movement.total_amount == approx(budget.total_amount, abs=0.005)
-    assert movement.net_amount == approx(budget.net_amount, abs=0.005)
-    assert movement.vat_amount == approx(budget.vat_amount, abs=0.005)
-    assert client_balance(client) == approx(budget.total_amount, abs=0.005)
+    # Con DECIMAL la comparación es exacta: no hace falta tolerancia.
+    assert movement.total_amount == budget.total_amount
+    assert movement.net_amount == budget.net_amount
+    assert movement.vat_amount == budget.vat_amount
+    assert client_balance(client) == approx(float(budget.total_amount), abs=0.005)
 
 
 def test_presupuesto_manual_respeta_la_invariante(db):
@@ -455,10 +448,10 @@ def test_presupuesto_manual_respeta_la_invariante(db):
         ],
     )
 
-    assert float(_sum_item_totals(budget)) == approx(budget.total_amount, abs=0.005)
+    assert float(_sum_item_totals(budget)) == approx(float(budget.total_amount), abs=0.005)
     movement = ClientAccountMovement.get(ClientAccountMovement.budget == budget)
-    assert movement.total_amount == approx(budget.total_amount, abs=0.005)
-    assert client_balance(client) == approx(budget.total_amount, abs=0.005)
+    assert movement.total_amount == budget.total_amount
+    assert client_balance(client) == approx(float(budget.total_amount), abs=0.005)
 
 
 # ---------------------------------------------------------------------------

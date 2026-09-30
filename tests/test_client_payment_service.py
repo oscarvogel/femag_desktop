@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from pytest import approx
@@ -184,6 +185,6 @@ def test_payment_preserves_cents_in_receipt_detail_and_ledger(db):
         ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT,
     )
 
-    assert payment.amount == approx(898220.62)
-    assert detail.amount == approx(898220.62)
-    assert movement.total_amount == approx(-898220.62)
+    assert Decimal(str(payment.amount)) == Decimal("898220.62")
+    assert Decimal(str(detail.amount)) == Decimal("898220.62")
+    assert Decimal(str(movement.total_amount)) == Decimal("-898220.62")

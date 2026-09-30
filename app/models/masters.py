@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from peewee import BooleanField, CharField, DateTimeField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
 
+from app.config.money_columns import COST_SPEC, money_field
 from app.models.base import BaseModel
 from app.models.system import ImportBatch
 
@@ -133,12 +134,12 @@ class Product(BaseModel):
     weight_source = CharField(null=True)
     review_required = BooleanField(default=True)
     active = BooleanField(default=True)
-    precio_neto_base = FloatField(default=0.0)
-    costo_unitario = DecimalField(max_digits=14, decimal_places=4, null=True)
-    precio_lista_1 = FloatField(default=0.0)
-    precio_lista_2 = FloatField(default=0.0)
-    precio_lista_3 = FloatField(default=0.0)
-    precio_lista_4 = FloatField(default=0.0)
+    precio_neto_base = money_field()
+    costo_unitario = DecimalField(max_digits=COST_SPEC[0], decimal_places=COST_SPEC[1], null=True)
+    precio_lista_1 = money_field()
+    precio_lista_2 = money_field()
+    precio_lista_3 = money_field()
+    precio_lista_4 = money_field()
     tipo_iva = ForeignKeyField(TipoIVA, backref="products", null=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
@@ -149,8 +150,8 @@ class Product(BaseModel):
 
 class ProductCostHistory(BaseModel):
     product = ForeignKeyField(Product, backref="cost_history", on_delete="CASCADE")
-    previous_cost = DecimalField(max_digits=14, decimal_places=4, null=True)
-    new_cost = DecimalField(max_digits=14, decimal_places=4, null=True)
+    previous_cost = DecimalField(max_digits=COST_SPEC[0], decimal_places=COST_SPEC[1], null=True)
+    new_cost = DecimalField(max_digits=COST_SPEC[0], decimal_places=COST_SPEC[1], null=True)
     changed_by = CharField()
     reason = TextField(null=True)
 

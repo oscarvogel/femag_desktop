@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from peewee import SqliteDatabase
 
 
@@ -618,6 +620,6 @@ def test_repair_payment_movement_restores_cents_from_receipt(db):
     _repair_payment_movement_amounts(db)
 
     movement = ClientAccountMovement.get_by_id(movement.id)
-    assert movement.amount == pytest.approx(-898220.62)
-    assert movement.net_amount == pytest.approx(-898220.62)
-    assert movement.total_amount == pytest.approx(-898220.62)
+    assert Decimal(str(movement.amount)) == Decimal("-898220.62")
+    assert Decimal(str(movement.net_amount)) == Decimal("-898220.62")
+    assert Decimal(str(movement.total_amount)) == Decimal("-898220.62")

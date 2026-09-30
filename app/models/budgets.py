@@ -2,6 +2,7 @@ from datetime import date
 
 from peewee import CharField, DateField, FloatField, ForeignKeyField, IntegerField, TextField
 
+from app.config.money_columns import money_field
 from app.models.base import BaseModel
 from app.models.load_orders import LoadOrder, LoadOrderProduct
 from app.models.masters import Client, Product
@@ -21,10 +22,12 @@ class Budget(BaseModel):
     issue_date = DateField(default=date.today)
     status = CharField(default=STATUS_ACTIVE)
     observations = TextField(null=True)
-    net_amount = FloatField(default=0.0)
-    discount_amount = FloatField(default=0.0)
-    vat_amount = FloatField(default=0.0)
-    total_amount = FloatField(default=0.0)
+    # Dinero en DECIMAL(18,2): el importe es parte de la identidad del
+    # documento y no puede depender de la precisión simple de FLOAT.
+    net_amount = money_field()
+    discount_amount = money_field()
+    vat_amount = money_field()
+    total_amount = money_field()
     created_by = CharField(null=True)
 
     @property
@@ -52,12 +55,12 @@ class BudgetItem(BaseModel):
     )
     quantity = FloatField()
     unit = CharField()
-    unit_price = FloatField(default=0.0)
+    unit_price = money_field()
     discount_percentage = FloatField(default=0.0)
-    net_subtotal = FloatField(default=0.0)
-    discount_amount = FloatField(default=0.0)
-    net_taxable = FloatField(default=0.0)
+    net_subtotal = money_field()
+    discount_amount = money_field()
+    net_taxable = money_field()
     vat_percentage = FloatField(default=21.0)
-    vat_amount = FloatField(default=0.0)
-    total = FloatField(default=0.0)
+    vat_amount = money_field()
+    total = money_field()
     observations = TextField(null=True)

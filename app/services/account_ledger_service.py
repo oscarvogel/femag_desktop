@@ -5,7 +5,7 @@ from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus
 from app.models.masters import Client
 from app.services.audit_service import AuditService
 from app.services.budget_service import BudgetService
-from app.services.money import money_to_float, totals_from_persisted_items
+from app.services.money import money_to_decimal, totals_from_persisted_items
 
 
 class AccountLedgerService:
@@ -108,10 +108,10 @@ class AccountLedgerService:
         else:
             totals = totals_from_persisted_items(items)
         return {
-            "neto_subtotal": money_to_float(totals.net_amount),
-            "descuento_importe": money_to_float(totals.discount_amount),
-            "iva_importe": money_to_float(totals.vat_amount),
-            "total": money_to_float(totals.total_amount),
+            "neto_subtotal": money_to_decimal(totals.net_amount),
+            "descuento_importe": money_to_decimal(totals.discount_amount),
+            "iva_importe": money_to_decimal(totals.vat_amount),
+            "total": money_to_decimal(totals.total_amount),
         }
 
     def _update_budget_status(self, order: LoadOrder, client: Client) -> None:

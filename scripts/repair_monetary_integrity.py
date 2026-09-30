@@ -76,6 +76,13 @@ from typing import Iterable, Sequence
 from peewee import MySQLDatabase
 
 from app.config.database import database_proxy
+from app.config.money_columns import (
+    MYSQL_SINGLE_PRECISION_TYPES,
+    MoneyMigrationAbort,
+    assert_persistable,
+    money_column_types,
+    unrepresentable_amounts,
+)
 from app.services.money import money_sum, money_to_float, quantize_money
 from app.services.monetary_audit import (
     BUDGET_HEADER_MISMATCH,
@@ -127,114 +134,6 @@ REFUSED = "REFUSED"
 # ---------------------------------------------------------------------------
 # Representabilidad: el importe destino tiene que caber en la columna
 # ---------------------------------------------------------------------------
-
-#: Tipo declarado en el DDL real de MySQL para las columnas monetarias de FEMAG.
-#: ``float`` en MySQL es de UNA sola precisión (~7 dígitos significativos): por
-#: encima de 2^25 los enteros dejan de ser exactos. La docstring de money.py
-#: afirma "MySQL DOUBLE", pero el esquema real dice FLOAT.
-MYSQL_SINGLE_PRECISION_TYPES = frozenset({"float"})
-
-
-def unrepresentable_amounts(
-    columns: dict[str, float],
-    *,
-    probe,
-) -> list[tuple[str, float, float]]:
-    """Columnas cuyo importe NO sobreviviría al tipo real de la columna.
-
-    ``probe`` es el servidor: recibe un importe y devuelve lo que MySQL
-    almacenaría de verdad (``SELECT CAST(%s AS FLOAT)``). La comparación se
-    hace sobre el importe cuantizado a moneda, nunca sobre el float crudo.
-
-    Esto NO relaja la postcondición: la postcondición sigue exigiendo igualdad
-    exacta. Lo que evita es abrir una transacción para escribir algo que la base
-    no puede guardar, y explicarlo con nombre y número en vez de fallar después.
-    """
-    fallos = []
-    for columna, valor in columns.items():
-        cuantizado = float(quantize_money(valor))
-        persistido = float(quantize_money(probe(cuantizado)))
-        if persistido != cuantizado:
-            fallos.append((columna, cuantizado, persistido))
-    return fallos
-
-
-def money_column_types(database, tables_and_columns) -> dict[str, str]:
-    """Tipo declarado de cada columna monetaria. Sólo SELECT.
-
-    Sólo MySQL tiene ``information_schema`` y una restricción de precisión
-   Declarada. En SQLite las columnas ``REAL`` son de 8 bytes (doble precisión)
-    y no imponen este límite, así que se devuelve vacío y la puerta no aplica.
-    """
-    if not isinstance(database, MySQLDatabase):
-        return {}
-    tipos: dict[str, str] = {}
-    for tabla, columnas in tables_and_columns.items():
-        # pymysql usa marcadores de formato %s, no el qmark de sqlite3.
-        filas = database.execute_sql(
-            "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
-            (tabla,),
-        ).fetchall()
-        por_nombre = {str(f[0]).lower(): str(f[1]).lower() for f in filas}
-        for columna in columnas:
-            tipo = por_nombre.get(columna.lower())
-            if tipo:
-                tipos[f"{tabla}.{columna}"] = tipo
-    return tipos
-
-
-def _mysql_float_probe(database):
-    """Pregunta al servidor qué guardaría realmente en una columna FLOAT."""
-
-    def _probe(valor: float) -> float:
-        fila = database.execute_sql("SELECT CAST(%s AS FLOAT)", (valor,)).fetchone()
-        return fila[0] if fila else valor
-
-    return _probe
-
-
-def assert_persistable(columns: dict[str, float], *, database) -> None:
-    """Aborta si algún importe destino no cabe exactamente en su columna.
-
-    Corre ANTES de abrir la transacción y es de sólo lectura
-    (information_schema + ``CAST``).
-    """
-    tables_and_columns: dict[str, list[str]] = {}
-    for columna in columns:
-        tabla, _, nombre = columna.partition(".")
-        tables_and_columns.setdefault(tabla, []).append(nombre)
-    tipos = money_column_types(database, tables_and_columns)
-
-    single_precision = {
-        columna: valor
-        for columna, valor in columns.items()
-        if tipos.get(columna) in MYSQL_SINGLE_PRECISION_TYPES
-    }
-    if not single_precision:
-        return
-
-    fallos = unrepresentable_amounts(
-        single_precision, probe=_mysql_float_probe(database)
-    )
-    if not fallos:
-        return
-    detalle = "; ".join(
-        f"{columna}: se intentaría guardar {valor:,.2f} "
-        f"y la base guardaría {persistido:,.2f}"
-        for columna, valor, persistido in fallos
-    )
-    raise RepairAborted(
-        "El importe destino no es representable en el tipo real de la columna "
-        f"({detalle}). Las columnas monetarias están declaradas 'float' en MySQL, "
-        "que es de una sola precisión (~7 dígitos significativos): por encima de "
-        "2^25 = 33.554.432 los enteros no son exactos, así que la escritura se "
-        "pierde en silencio y la postcondición vuelve a leer el valor viejo. "
-        "Pasar las columnas a DOUBLE requiere una migración de esquema, fuera "
-        "del alcance de esta herramienta. No se modificó nada."
-    )
-
-
 def plan_columns(plan: "RepairPlan") -> dict[str, float]:
     """Columnas exactas que la reparación pretende escribir, con sus valores."""
     columnas: dict[str, float] = {}

@@ -14,6 +14,7 @@ from peewee import (
     TextField,
 )
 
+from app.config.money_columns import COST_SPEC, money_field
 from app.models.base import BaseModel, utc_now
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 
@@ -86,15 +87,15 @@ class LoadOrderProduct(BaseModel):
     quantity = FloatField()
     unit = CharField()
     observations = TextField(null=True)
-    precio_neto_unitario = FloatField(default=0.0)
-    costo_unitario_aplicado = DecimalField(max_digits=14, decimal_places=4, null=True)
+    precio_neto_unitario = money_field()
+    costo_unitario_aplicado = DecimalField(max_digits=COST_SPEC[0], decimal_places=COST_SPEC[1], null=True)
     descuento_porcentaje = FloatField(default=0.0)
-    neto_subtotal = FloatField(default=0.0)
-    descuento_importe = FloatField(default=0.0)
-    neto_gravado = FloatField(default=0.0)
+    neto_subtotal = money_field()
+    descuento_importe = money_field()
+    neto_gravado = money_field()
     iva_porcentaje = FloatField(default=21.0)
-    iva_importe = FloatField(default=0.0)
-    total = FloatField(default=0.0)
+    iva_importe = money_field()
+    total = money_field()
     lote = CharField(null=True)
     fecha_elaboracion = DateField(null=True)
 
@@ -194,8 +195,8 @@ class LoadOrderReturnLine(BaseModel):
     client = ForeignKeyField(Client, backref="load_order_return_lines")
     quantity = FloatField()
     reason = TextField()
-    unit_price = FloatField(default=0.0)
-    credit_amount = FloatField(default=0.0)
+    unit_price = money_field()
+    credit_amount = money_field()
     created_by = CharField(null=True)
 
     class Meta:

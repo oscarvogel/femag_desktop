@@ -1,17 +1,17 @@
-from datetime import date
+﻿from datetime import date
 
 from peewee import (
     BooleanField,
     CharField,
     DateField,
     DateTimeField,
-    FloatField,
     ForeignKeyField,
     IntegerField,
     TextField,
 )
 
-from app.models.base import BaseModel
+from app.config.money_columns import money_field
+from app.models.base import BaseModel, utc_now
 from app.models.load_orders import LoadOrderClosure
 from app.models.masters import Client
 
@@ -48,8 +48,8 @@ class ClientPayment(BaseModel):
     client = ForeignKeyField(Client, backref="payments")
     closure = ForeignKeyField(LoadOrderClosure, backref="payments", null=True)
     payment_date = DateField(default=date.today)
-    amount = FloatField()
-    # Campos legacy: se mantienen para pagos históricos y compatibilidad.
+    amount = money_field()
+    # Campos legacy: se mantienen para pagos histÃ³ricos y compatibilidad.
     # En pagos compuestos guardan el primer medio y su referencia cuando corresponde.
     method = CharField()
     reference = CharField(null=True)
@@ -64,7 +64,7 @@ class ClientPayment(BaseModel):
 class ClientPaymentDetail(BaseModel):
     payment = ForeignKeyField(ClientPayment, backref="details", on_delete="CASCADE")
     payment_method = ForeignKeyField(PaymentMethod, backref="payment_details")
-    amount = FloatField()
+    amount = money_field()
     reference = CharField(null=True)
     observations = TextField(null=True)
     sequence = IntegerField(default=1)

@@ -1,3 +1,5 @@
+import logging
+
 from peewee import (
     BooleanField,
     CharField,
@@ -14,6 +16,7 @@ from peewee import (
 from playhouse.migrate import SqliteMigrator, migrate
 
 from app.models import ALL_MODELS
+from app.services.money import MONEY_TOLERANCE, quantize_money
 
 
 class SchemaValidationError(RuntimeError):
@@ -134,6 +137,7 @@ def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    _migrate_money_columns(database)
     if hasattr(database, "atomic"):
         _backfill_client_emails(database)
         _backfill_product_classification(database)
@@ -145,6 +149,44 @@ def ensure_runtime_schema(database) -> None:
         _ensure_account_movement_source_index(database)
         _ensure_client_salesperson_index(database)
     _ensure_sqlite_index_integrity(database)
+
+
+def _migrate_money_columns(database) -> None:
+    """Pasa las columnas monetarias de FLOAT/DOUBLE a DECIMAL exacto.
+
+    Es el mismo camino que el resto del esquema (se ejecuta al abrir la app) y
+    es idempotente: una columna ya en DECIMAL(18,2) no se toca.
+
+    Antes de alterar cualquier columna se corre el diagnóstico previo, que aborta
+    si algún valor no entra en el DECIMAL destino. No se recalcula nada: el
+    ALTER es una conversión de tipo, así que el importe histórico que ya estaba
+    redondeado por la precisión simple sigue igual de redondeado. La reparación
+    de cada caso se hace después, con la herramienta de reparación y uno por uno.
+    """
+    from app.config.money_columns import (
+        MoneyMigrationAbort,
+        migrate_money_columns_to_decimal,
+        precheck_money_columns,
+    )
+
+    # A diferencia del resto del esquema, un ALTER monetario no se juega con
+    # dobles de test: exige un MySQLDatabase real de peewee, no una clase que
+    # sólo se llame "MySQLDatabase".
+    if not isinstance(database, MySQLDatabase):
+        return
+    try:
+        precheck_money_columns(database)
+    except MoneyMigrationAbort:
+        # Abortar el esquema entero dejaría la app sin abrir. Se levanta el
+        # aviso y el resto del esquema sigue; la migración de dinero no se
+        # aplica hasta que el operador revise el diagnóstico.
+        logger = logging.getLogger("femag.schema")
+        logger.exception(
+            "Migración de columnas monetarias abortada: hay valores que no "
+            "entran en DECIMAL(18,2). Revise scripts/precheck_money_columns.py."
+        )
+        return
+    migrate_money_columns_to_decimal(database)
 
 
 def _backfill_product_classification(database) -> None:
@@ -370,12 +412,15 @@ def _repair_payment_movement_amounts(database) -> None:
     )
     with database.atomic():
         for movement in query:
+            # El importe se mantiene en Decimal de punta a punta: convertir a
+            # float aquí degradaría el DECIMAL justo antes de escribirlo.
+            importe = quantize_money(movement.payment.amount)
             expected = (
-                -float(movement.payment.amount)
+                -importe
                 if movement.movement_type == ClientAccountMovement.TYPE_PAYMENT
-                else float(movement.payment.amount)
+                else importe
             )
-            if abs(float(movement.total_amount or 0) - expected) < 0.005:
+            if abs(quantize_money(movement.total_amount or 0) - expected) < MONEY_TOLERANCE:
                 continue
             movement.amount = expected
             movement.net_amount = expected

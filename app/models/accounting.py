@@ -1,5 +1,6 @@
-from peewee import BooleanField, CharField, DateField, FloatField, ForeignKeyField, TextField
+from peewee import BooleanField, CharField, DateField, ForeignKeyField, TextField
 
+from app.config.money_columns import money_field
 from app.models.base import BaseModel
 from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
@@ -27,11 +28,12 @@ class ClientAccountMovement(BaseModel):
     budget = ForeignKeyField(Budget, backref="account_movements", null=True)
     payment = ForeignKeyField(ClientPayment, backref="account_movements", null=True)
     movement_type = CharField()
-    amount = FloatField(default=0)
-    net_amount = FloatField(default=0)
-    discount_amount = FloatField(default=0)
-    vat_amount = FloatField(default=0)
-    total_amount = FloatField(default=0)
+    # Todo importe de la cuenta corriente es dinero en DECIMAL(18,2).
+    amount = money_field()
+    net_amount = money_field()
+    discount_amount = money_field()
+    vat_amount = money_field()
+    total_amount = money_field()
     currency = CharField(default="ARS")
     movement_date = DateField(null=True)
     due_date = DateField(null=True)
