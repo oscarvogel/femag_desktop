@@ -10,6 +10,7 @@ from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.services.audit_service import AuditService
 from app.services.budget_service import BudgetService
+from app.services.money import quantize_money, to_decimal
 
 
 class BudgetPrintService:
@@ -35,6 +36,9 @@ class BudgetPrintService:
         doc = self._document(target, title=f"Presupuestos OC-{order.order_number:06d}")
         story = []
         for index, budget in enumerate(budgets):
+            # Validación previa: sin esto el bundle emitiría páginas con
+            # total inconsistente sin avisar.
+            self.budget_service.assert_monetary_integrity(budget)
             if index:
                 story.append(PageBreak())
             story.extend(self._story(budget))
@@ -54,6 +58,8 @@ class BudgetPrintService:
 
     def export_pdf(self, budget: Budget, output_dir: str | Path) -> Path:
         budget = Budget.get_by_id(budget.id)
+        # No se emite un documento cuyo detalle no sume su total general.
+        self.budget_service.assert_monetary_integrity(budget)
         directory = Path(output_dir)
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"presupuesto_{budget.budget_number:06d}.pdf"
@@ -209,9 +215,12 @@ class BudgetPrintService:
 
     @staticmethod
     def _money(value: float) -> str:
-        return f"$ {float(value or 0):,.2f}"
+        """Formatea un importe ya redondeado sin reintroducir error de float."""
+        return f"$ {quantize_money(value):,.2f}"
 
     @staticmethod
     def _quantity(value: float) -> str:
-        value = float(value or 0)
-        return f"{value:.0f}" if value.is_integer() else f"{value:.3f}".rstrip("0").rstrip(".")
+        value = to_decimal(value)
+        if value == value.to_integral_value():
+            return f"{int(value)}"
+        return f"{value.normalize():f}"
