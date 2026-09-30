@@ -20,6 +20,7 @@ from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.driver_availability_service import DriverAvailabilityService
 from app.services.master_service import MasterService
+from app.services.money import compute_line_amounts, money_to_float
 from app.services.pallet_composition_service import (
     AllocationDraft,
     LooseAllocationDraft,
@@ -1180,6 +1181,13 @@ class LoadOrderService:
             )
 
     def _calculate_product_prices(self, product_item: dict, destination_client: Client) -> dict:
+        """Calcula los importes del renglón con la rutina monetaria única.
+
+        Delega en ``compute_line_amounts`` para que la orden de carga, el
+        presupuesto y la cuenta corriente compartan exactamente la misma
+        aritmética y el mismo redondeo. Los importes se redondean a 2
+        decimales con ROUND_HALF_UP y recién al persistir pasan a float.
+        """
         product = product_item["product"]
         quantity = product_item["quantity"]
         precio = product_item.get("precio_neto_unitario")
@@ -1192,20 +1200,22 @@ class LoadOrderService:
         if iva_porcentaje is None:
             tipo_iva = product.tipo_iva
             iva_porcentaje = tipo_iva.porcentaje if tipo_iva else TipoIVA.iva_default().porcentaje
-        neto_subtotal = quantity * precio
-        descuento_importe = neto_subtotal * descuento / 100.0
-        neto_gravado = neto_subtotal - descuento_importe
-        iva_importe = neto_gravado * iva_porcentaje / 100.0
-        total = neto_gravado + iva_importe
+
+        amounts = compute_line_amounts(
+            quantity=quantity,
+            unit_price=precio,
+            discount_percentage=descuento,
+            vat_percentage=iva_porcentaje,
+        )
         return {
-            "precio_neto_unitario": precio,
-            "descuento_porcentaje": descuento,
-            "neto_subtotal": neto_subtotal,
-            "descuento_importe": descuento_importe,
-            "neto_gravado": neto_gravado,
-            "iva_porcentaje": iva_porcentaje,
-            "iva_importe": iva_importe,
-            "total": total,
+            "precio_neto_unitario": money_to_float(amounts.unit_price),
+            "descuento_porcentaje": money_to_float(amounts.discount_percentage),
+            "neto_subtotal": money_to_float(amounts.net_subtotal),
+            "descuento_importe": money_to_float(amounts.discount_amount),
+            "neto_gravado": money_to_float(amounts.net_taxable),
+            "iva_porcentaje": money_to_float(amounts.vat_percentage),
+            "iva_importe": money_to_float(amounts.vat_amount),
+            "total": money_to_float(amounts.total),
         }
 
     def _price_for_client_list(self, product: Product, client: Client) -> float:

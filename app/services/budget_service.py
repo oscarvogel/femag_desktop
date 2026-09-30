@@ -7,6 +7,17 @@ from app.models.masters import Client, Product
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.client_service import ClientService
+from app.services.money import (
+    BudgetTotals,
+    LineAmounts,
+    assert_totals_match_items,
+    compute_line_amounts,
+    compute_totals,
+    money_to_float,
+    quantize_money,
+    totals_from_persisted_items,
+    to_decimal,
+)
 
 
 class BudgetService:
@@ -70,7 +81,13 @@ class BudgetService:
         rows = self._load_order_rows_for_client(order, client)
         if not rows:
             raise ValueError("El cliente no tiene mercadería en la orden de carga.")
-        totals = self._totals_from_order_rows(rows)
+
+        # Los importes de cada renglón se recalculan con la rutina monetaria
+        # única y se persisten a partir de ese mismo resultado. Los totales de
+        # cabecera se derivan de esos renglones, nunca de otra suma: por
+        # construcción, SUM(renglones) == total general.
+        lines = [self._line_amounts_from_order_row(row) for row in rows]
+        totals = compute_totals(lines)
 
         with database_proxy.atomic():
             budget = Budget.create(
@@ -80,30 +97,31 @@ class BudgetService:
                 origin=Budget.ORIGIN_LOAD_ORDER,
                 issue_date=order.date,
                 observations=self._observations_for_order_client(order, client),
-                net_amount=totals["net_amount"],
-                discount_amount=totals["discount_amount"],
-                vat_amount=totals["vat_amount"],
-                total_amount=totals["total_amount"],
+                net_amount=money_to_float(totals.net_amount),
+                discount_amount=money_to_float(totals.discount_amount),
+                vat_amount=money_to_float(totals.vat_amount),
+                total_amount=money_to_float(totals.total_amount),
                 created_by=self.current_user,
             )
-            for row in rows:
+            for row, amounts in zip(rows, lines):
                 BudgetItem.create(
                     budget=budget,
                     product=row.product,
                     source_order_product=row,
-                    quantity=float(row.quantity),
-                    unit=row.unit,
-                    unit_price=float(row.precio_neto_unitario or 0),
-                    discount_percentage=float(row.descuento_porcentaje or 0),
-                    net_subtotal=float(row.neto_subtotal or 0),
-                    discount_amount=float(row.descuento_importe or 0),
-                    net_taxable=float(row.neto_gravado or 0),
-                    vat_percentage=float(row.iva_porcentaje or 0),
-                    vat_amount=float(row.iva_importe or 0),
-                    total=float(row.total or 0),
+                    quantity=money_to_float(amounts.quantity),
+                    unit=str(row.unit or ""),
+                    unit_price=money_to_float(amounts.unit_price),
+                    discount_percentage=money_to_float(amounts.discount_percentage),
+                    net_subtotal=money_to_float(amounts.net_subtotal),
+                    discount_amount=money_to_float(amounts.discount_amount),
+                    net_taxable=money_to_float(amounts.net_taxable),
+                    vat_percentage=money_to_float(amounts.vat_percentage),
+                    vat_amount=money_to_float(amounts.vat_amount),
+                    total=money_to_float(amounts.total),
                     observations=row.observations,
                 )
             self._record("crear_desde_orden", budget)
+        self.assert_monetary_integrity(budget)
         return budget
 
     def create_manual(
@@ -122,7 +140,7 @@ class BudgetService:
         normalized_items = [self._normalize_manual_item(item) for item in items]
         if not normalized_items:
             raise ValueError("El presupuesto debe tener al menos un producto.")
-        totals = self._totals_from_manual_items(normalized_items)
+        totals = self._totals_from_normalized_items(normalized_items)
         movement_date = issue_date or date.today()
         due_date = movement_date + timedelta(days=max(int(client.dias_plazo_pago or 0), 0))
 
@@ -134,10 +152,10 @@ class BudgetService:
                 origin=Budget.ORIGIN_MANUAL,
                 issue_date=movement_date,
                 observations=observations,
-                net_amount=totals["net_amount"],
-                discount_amount=totals["discount_amount"],
-                vat_amount=totals["vat_amount"],
-                total_amount=totals["total_amount"],
+                net_amount=money_to_float(totals.net_amount),
+                discount_amount=money_to_float(totals.discount_amount),
+                vat_amount=money_to_float(totals.vat_amount),
+                total_amount=money_to_float(totals.total_amount),
                 created_by=self.current_user,
             )
             for item in normalized_items:
@@ -164,6 +182,7 @@ class BudgetService:
                 created_by=self.current_user,
             )
             self._record("crear_manual", budget, movement=movement)
+        self.assert_monetary_integrity(budget)
         return budget
 
     def annul_manual(self, budget: Budget, *, reason: str | None = None) -> Budget:
@@ -248,56 +267,109 @@ class BudgetService:
             clients.append(order.client)
         return clients
 
-    @staticmethod
-    def _totals_from_order_rows(rows: list[LoadOrderProduct]) -> dict[str, float]:
-        return {
-            "net_amount": round(sum(float(row.neto_subtotal or 0) for row in rows), 2),
-            "discount_amount": round(sum(float(row.descuento_importe or 0) for row in rows), 2),
-            "vat_amount": round(sum(float(row.iva_importe or 0) for row in rows), 2),
-            "total_amount": round(sum(float(row.total or 0) for row in rows), 2),
-        }
+    def _line_amounts_from_order_row(self, row: LoadOrderProduct) -> LineAmounts:
+        """Recalcula los importes de un renglón de orden con la rutina única.
+
+        Se usan cantidad, precio, descuento e IVA del renglón y se recalcula el
+        resto, de modo que el presupuesto no herede totales calculados con
+        otra aritmética.
+        """
+        return compute_line_amounts(
+            quantity=row.quantity,
+            unit_price=row.precio_neto_unitario,
+            discount_percentage=row.descuento_porcentaje,
+            vat_percentage=row.iva_porcentaje,
+        )
+
+    def totals_for_order_rows(self, order: LoadOrder, client: Client) -> BudgetTotals:
+        """Totales derivados de los renglones de la orden, sin persistir.
+
+        Usa la misma rutina de cálculo que la emisión del presupuesto para que
+        ningún consumidor pueda obtener un importe por otra vía.
+        """
+        rows = self._load_order_rows_for_client(order, client)
+        return compute_totals(self._line_amounts_from_order_row(row) for row in rows)
+
+    def assert_monetary_integrity(self, budget: Budget) -> None:
+        """Verifica que el detalle de un presupuesto sume su total general.
+
+        Se invoca antes de emitir o imprimir. Si no coincide al centavo, lanza
+        ``MonetaryIntegrityError`` con presupuesto, orden, cliente y ambos
+        importes para que no se genere un documento con importes contradictorios.
+        """
+        items = list(budget.items)
+        if not items:
+            return
+        assert_totals_match_items(
+            items_totals=totals_from_persisted_items(items),
+            header_totals=BudgetTotals(
+                net_amount=quantize_money(budget.net_amount),
+                discount_amount=quantize_money(budget.discount_amount),
+                vat_amount=quantize_money(budget.vat_amount),
+                total_amount=quantize_money(budget.total_amount),
+            ),
+            document_reference=f"{budget.budget_number:06d}",
+            order_reference=budget.load_order_reference,
+            client_name=budget.client.name if budget.client_id else None,
+        )
 
     def _normalize_manual_item(self, item: dict) -> dict:
         product = item.get("product")
         if not isinstance(product, Product):
             raise ValueError("Producto inválido en presupuesto manual.")
-        quantity = float(item.get("quantity") or 0)
+        quantity = to_decimal(item.get("quantity"))
         if quantity <= 0:
             raise ValueError("La cantidad del presupuesto debe ser mayor a cero.")
-        unit_price = float(item.get("unit_price", item.get("precio_neto_unitario", 0)) or 0)
+        unit_price = to_decimal(
+            item.get("unit_price", item.get("precio_neto_unitario"))
+        )
         if unit_price < 0:
             raise ValueError("El precio unitario no puede ser negativo.")
-        discount_percentage = float(item.get("discount_percentage", item.get("descuento_porcentaje", 0)) or 0)
-        vat_percentage = float(item.get("vat_percentage", item.get("iva_porcentaje", 21)) or 0)
-        net_subtotal = round(quantity * unit_price, 2)
-        discount_amount = round(net_subtotal * discount_percentage / 100, 2)
-        net_taxable = round(net_subtotal - discount_amount, 2)
-        vat_amount = round(net_taxable * vat_percentage / 100, 2)
-        total = round(net_taxable + vat_amount, 2)
+        discount_percentage = to_decimal(
+            item.get("discount_percentage", item.get("descuento_porcentaje"))
+        )
+        vat_percentage = item.get(
+            "vat_percentage", item.get("iva_porcentaje", 21)
+        )
+        amounts = compute_line_amounts(
+            quantity=quantity,
+            unit_price=unit_price,
+            discount_percentage=discount_percentage,
+            vat_percentage=vat_percentage,
+        )
         return {
             "product": product,
             "source_order_product": None,
-            "quantity": quantity,
+            "quantity": money_to_float(amounts.quantity),
             "unit": str(item.get("unit") or "UN"),
-            "unit_price": unit_price,
-            "discount_percentage": discount_percentage,
-            "net_subtotal": net_subtotal,
-            "discount_amount": discount_amount,
-            "net_taxable": net_taxable,
-            "vat_percentage": vat_percentage,
-            "vat_amount": vat_amount,
-            "total": total,
+            "unit_price": money_to_float(amounts.unit_price),
+            "discount_percentage": money_to_float(amounts.discount_percentage),
+            "net_subtotal": money_to_float(amounts.net_subtotal),
+            "discount_amount": money_to_float(amounts.discount_amount),
+            "net_taxable": money_to_float(amounts.net_taxable),
+            "vat_percentage": money_to_float(amounts.vat_percentage),
+            "vat_amount": money_to_float(amounts.vat_amount),
+            "total": money_to_float(amounts.total),
             "observations": item.get("observations"),
         }
 
     @staticmethod
-    def _totals_from_manual_items(items: list[dict]) -> dict[str, float]:
-        return {
-            "net_amount": round(sum(item["net_subtotal"] for item in items), 2),
-            "discount_amount": round(sum(item["discount_amount"] for item in items), 2),
-            "vat_amount": round(sum(item["vat_amount"] for item in items), 2),
-            "total_amount": round(sum(item["total"] for item in items), 2),
-        }
+    def _totals_from_normalized_items(items: list[dict]) -> BudgetTotals:
+        """Totales de cabecera derivados de los renglones ya calculados."""
+        return compute_totals(
+            LineAmounts(
+                quantity=to_decimal(item["quantity"]),
+                unit_price=to_decimal(item["unit_price"]),
+                discount_percentage=to_decimal(item["discount_percentage"]),
+                net_subtotal=to_decimal(item["net_subtotal"]),
+                discount_amount=to_decimal(item["discount_amount"]),
+                net_taxable=to_decimal(item["net_taxable"]),
+                vat_percentage=to_decimal(item["vat_percentage"]),
+                vat_amount=to_decimal(item["vat_amount"]),
+                total=to_decimal(item["total"]),
+            )
+            for item in items
+        )
 
     def _record(
         self,

@@ -1,10 +1,11 @@
 from datetime import timedelta
 
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus, LoadOrderDestination, LoadOrderProduct
+from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus
 from app.models.masters import Client
 from app.services.audit_service import AuditService
 from app.services.budget_service import BudgetService
+from app.services.money import money_to_float, totals_from_persisted_items
 
 
 class AccountLedgerService:
@@ -92,28 +93,25 @@ class AccountLedgerService:
         return reversals
 
     def _load_order_totals_for_client(self, order: LoadOrder, client: Client) -> dict:
-        from peewee import fn
+        """Totales del renglón tomados del presupuesto ya emitido.
 
-        totals = (
-            LoadOrderProduct.select(
-                fn.COALESCE(fn.SUM(LoadOrderProduct.neto_subtotal), 0).alias("neto_subtotal"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.descuento_importe), 0).alias("descuento_importe"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.iva_importe), 0).alias("iva_importe"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.total), 0).alias("total"),
-            )
-            .join(LoadOrderDestination, on=LoadOrderProduct.destination)
-            .where(
-                (LoadOrderProduct.order == order)
-                & (LoadOrderDestination.client == client)
-            )
-            .dicts()
-            .first()
-        )
+        Antes se recalculaban con un ``SUM`` en SQL sobre los renglones de la
+        orden, por lo que la cuenta corriente podía persistir un importe
+        distinto del presupuesto impreso si la orden cambiaba después. Ahora la
+        cuenta corriente usa el presupuesto como única fuente, de modo que lo
+        cobrado sea exactamente lo impreso.
+        """
+        budget = self.budget_service.ensure_for_load_order_client(order, client)
+        items = list(budget.items)
+        if not items:
+            totals = self.budget_service.totals_for_order_rows(order, client)
+        else:
+            totals = totals_from_persisted_items(items)
         return {
-            "neto_subtotal": round(totals["neto_subtotal"], 2),
-            "descuento_importe": round(totals["descuento_importe"], 2),
-            "iva_importe": round(totals["iva_importe"], 2),
-            "total": round(totals["total"], 2),
+            "neto_subtotal": money_to_float(totals.net_amount),
+            "descuento_importe": money_to_float(totals.discount_amount),
+            "iva_importe": money_to_float(totals.vat_amount),
+            "total": money_to_float(totals.total_amount),
         }
 
     def _update_budget_status(self, order: LoadOrder, client: Client) -> None:
