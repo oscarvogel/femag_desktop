@@ -546,10 +546,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _parse_single_identifier(argv: Sequence[str] | None) -> tuple[argparse.Namespace, int]:
-    """Exige exactamente un identificador explícito. Sin lote, sin comodines."""
+    """Exige exactamente un identificador explícito. Sin lote, sin comodines.
+
+    ``argv=None`` significa "tomá ``sys.argv[1:]``", que es lo que recibe el
+    entrypoint real del módulo (``python -m scripts.repair_monetary_integrity
+    --budget 73`` llama a ``main()`` sin argumentos). Convertir ese ``None`` en
+    una lista vacía hacía que argparse no viera ningún argumento y rechazara
+    siempre la invocación, por válida que fuera.
+    """
     parser = build_parser()
     try:
-        args = parser.parse_args(list(argv if argv is not None else []))
+        # argparse interpreta ``None`` como ``sys.argv[1:]``. Hay que pasarlo
+        # tal cual: una lista vacía explícita parsea cero argumentos.
+        args = parser.parse_args(argv)
     except SystemExit as exc:
         raise RepairAborted(
             "Argumentos inválidos. Use exactamente un identificador: "
@@ -569,10 +578,7 @@ def _parse_single_identifier(argv: Sequence[str] | None) -> tuple[argparse.Names
         raise RepairAborted(
             f"El identificador {valor!r} no es un entero positivo válido."
         )
-    identificador = int(valor)
-    if args.budget is not None:
-        return args, identificador
-    return args, identificador
+    return args, int(valor)
 
 
 def audit_budget(*, budget_id: int | None = None, budget_number: int | None = None):
