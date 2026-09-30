@@ -48,6 +48,7 @@ vuelve a ejecutarse: terminarla es volver a correr el comando.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from peewee import MySQLDatabase
@@ -170,6 +171,17 @@ def verify_migrated(database) -> tuple[int, int]:
     return pendientes, exactas
 
 
+def verify_payload(database) -> dict:
+    """Payload JSON de verificación, para orquestadores."""
+    pendientes, exactas = verify_migrated(database)
+    return {
+        "columns_registered": len(MONEY_COLUMNS),
+        "columns_to_migrate": pendientes,
+        "columns_exact_decimal": exactas,
+        "migrated": pendientes == 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -191,21 +203,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--db", metavar="NOMBRE", help="Migrar otra base del mismo servidor."
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Salida JSON para orquestadores (no imprime el plan).",
+    )
     return parser
 
 
-def run_migration(argv=None, *, open_database=None) -> int:
+def run_migration(argv=None, *, open_database=None, quiet=False) -> int:
     """Ejecuta el comando. ``open_database`` se inyecta para poder testearlo."""
     args = build_parser().parse_args(argv)
+
+    def _echo(linea=""):
+        if not quiet:
+            print(linea)
 
     try:
         target = resolve_audit_database(database_name=args.db)
     except Exception as exc:
-        print(
-            f"ERROR: no se pudo resolver la conexión de FEMAG: "
-            f"{type(exc).__name__}: {exc}",
-            file=sys.stderr,
+        mensaje = (
+            f"no se pudo resolver la conexión de FEMAG: {type(exc).__name__}: {exc}"
         )
+        if args.json:
+            print(json.dumps({"ok": False, "error": mensaje}, ensure_ascii=False))
+        else:
+            print(f"ERROR: {mensaje}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
     etiqueta = f"{target.host}:{target.port}/{target.database} (user {target.user})"
@@ -216,64 +239,105 @@ def run_migration(argv=None, *, open_database=None) -> int:
     try:
         database = open_database(target)
     except MoneyMigrationAbort as exc:
-        print(f"ABORTED: {exc}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"ABORTED: {exc}", file=sys.stderr)
         return EXIT_ABORTED
     except Exception as exc:
-        print(
-            f"ERROR: no se pudo abrir la conexión: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-        )
+        mensaje = f"no se pudo abrir la conexión: {type(exc).__name__}: {exc}"
+        if args.json:
+            print(json.dumps({"ok": False, "error": mensaje}, ensure_ascii=False))
+        else:
+            print(f"ERROR: {mensaje}", file=sys.stderr)
         return EXIT_CONFIG_ERROR
 
     try:
         try:
             stats = precheck_money_columns(database)
         except MoneyMigrationAbort as exc:
-            print(f"ABORTED: {exc}", file=sys.stderr)
-            print("No se ejecutó ningún ALTER.", file=sys.stderr)
+            if args.json:
+                print(
+                    json.dumps(
+                        {"ok": False, "aborted": True, "error": str(exc)},
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                print(f"ABORTED: {exc}", file=sys.stderr)
+                print("No se ejecutó ningún ALTER.", file=sys.stderr)
             return EXIT_ABORTED
 
-        print(render_plan(stats, database_label=etiqueta))
-        print()
+        pendientes, _exactas = verify_migrated(database)
 
         if not args.apply:
-            pendientes, exactas = verify_migrated(database)
-            print(f"Pendientes de migrar: {pendientes}")
-            print(f"Ya en DECIMAL exacto  : {exactas}")
-            print()
-            print("PRECHECK ONLY: no se modificó nada.")
-            print(
-                "Para migrar, revisá el plan y volvé a ejecutar con --apply."
-            )
+            payload = verify_payload(database)
+            if args.json:
+                print(json.dumps({"ok": True, "applied": False, **payload}, ensure_ascii=False))
+                return EXIT_OK
+            _echo(render_plan(stats, database_label=etiqueta))
+            _echo()
+            _echo(f"Pendientes de migrar: {pendientes}")
+            _echo(f"Ya en DECIMAL exacto  : {_exactas}")
+            _echo()
+            _echo("PRECHECK ONLY: no se modificó nada.")
+            _echo("Para migrar, revisá el plan y volvé a ejecutar con --apply.")
             return EXIT_OK
 
-        pendientes, _exactas = verify_migrated(database)
         if pendientes == 0:
-            print(ALREADY_MIGRATED)
-            print("No se ejecutó ningún ALTER.")
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "applied": False,
+                            "already_migrated": True,
+                            **verify_payload(database),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                _echo(ALREADY_MIGRATED)
+                _echo("No se ejecutó ningún ALTER.")
             return EXIT_NOTHING_TO_DO
 
-        print(f"Ejecutando {pendientes} ALTER TABLE ... MODIFY COLUMN ...")
+        _echo(f"Ejecutando {pendientes} ALTER TABLE ... MODIFY COLUMN ...")
         alteradas = migrate_money_columns_to_decimal(database)
         for tabla, columna, cambio in alteradas:
-            print(f"  {tabla}.{columna}: {cambio}")
-        print()
-        print(f"Columnas alteradas: {len(alteradas)}")
-        print()
+            _echo(f"  {tabla}.{columna}: {cambio}")
 
-        pendientes, exactas = verify_migrated(database)
-        print("VERIFY (information_schema)")
-        print(f"  Columnas a migrar      : {pendientes}")
-        print(f"  DECIMAL exacto         : {exactas}")
-        if pendientes:
+        pendientes_final, exactas_final = verify_migrated(database)
+        if args.json:
             print(
+                json.dumps(
+                    {
+                        "ok": pendientes_final == 0,
+                        "applied": True,
+                        "altered": len(alteradas),
+                        "columns_to_migrate": pendientes_final,
+                        "columns_exact_decimal": exactas_final,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return EXIT_OK if pendientes_final == 0 else EXIT_ABORTED
+
+        _echo()
+        _echo(f"Columnas alteradas: {len(alteradas)}")
+        _echo()
+        _echo("VERIFY (information_schema)")
+        _echo(f"  Columnas a migrar      : {pendientes_final}")
+        _echo(f"  DECIMAL exacto         : {exactas_final}")
+        if pendientes_final:
+            _echo(
                 "  Quedan columnas pendientes: volvé a ejecutar el comando para "
                 "terminar."
             )
             return EXIT_ABORTED
-        print()
-        print("MIGRATED")
-        print(
+        _echo()
+        _echo("MIGRATED")
+        _echo(
             "Los históricos NO se alteraron. La reparación de cada caso se hace "
             "con\npy -m scripts.repair_monetary_integrity --budget-number <n> "
             "--apply, uno por uno."

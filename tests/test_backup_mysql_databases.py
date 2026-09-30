@@ -6,6 +6,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.config.secure_credentials import RuntimeConnection
+from app.services import mysql_dump
+
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "backup_mysql_databases.py"
 SPEC = importlib.util.spec_from_file_location("backup_mysql_databases", SCRIPT_PATH)
@@ -118,11 +121,14 @@ def test_dump_database_keeps_failed_dump_out_of_backup_directory(monkeypatch, tm
         captured["environment"] = kwargs["env"]
         return Completed()
 
-    monkeypatch.setattr(backup_mysql_databases.subprocess, "run", fake_run)
+    # ``dump_database`` vive ahora en app.services.mysql_dump (para que la app
+    # congelada pueda respaldar sin este repositorio), así que el proceso se
+    # parchea en su nuevo hogar.
+    monkeypatch.setattr(mysql_dump.subprocess, "run", fake_run)
     destination = tmp_path / "femag.sql"
 
-    result = backup_mysql_databases.dump_database(
-        backup_mysql_databases.RuntimeConnection("server", 3306, "femag", "user", "secret"),
+    result = mysql_dump.dump_database(
+        RuntimeConnection("server", 3306, "femag", "user", "secret"),
         "femag",
         destination,
         mysqldump_path="mysqldump.exe",

@@ -57,6 +57,60 @@ def _show_fatal_error(log_path: Path, exc: BaseException) -> None:
         pass
 
 
+def _run_money_schema_task(runtime_dir: Path, log_path: Path) -> int:
+    """Ejecuta la migración monetaria de esquema antes de abrir la aplicación.
+
+    Es un bloqueo de arranque: si la migración no puede completarse, FEMAG no
+    abre para operar con una base cuyo esquema de importes no soporta los
+    valores correctos.
+
+    La tarea es idempotente y su autoridad es el estado real del esquema, así
+    que en un puesto ya migrado no hace absolutely nada. NO repara documentos
+    históricos: la migración de esquema y la reparación de presupuestos son
+    cosas distintas.
+    """
+    logger = logging.getLogger("femag.money_schema")
+    logger.info("Comprobando esquema de columnas monetarias...")
+    try:
+        from app.services.money_schema_migration import (
+            STATUS_ABORTED,
+            STATUS_FAILED,
+            ensure_money_schema_migrated,
+        )
+
+        report = ensure_money_schema_migrated(
+            runtime_dir=runtime_dir,
+            build_version=os.getenv("FEMAG_BUILD_VERSION", "produccion"),
+            logger=logger,
+        )
+    except Exception as exc:  # pragma: no cover - red de seguridad
+        logger.exception("La tarea de esquema monetario fallo: %s", exc)
+        _show_fatal_error(
+            log_path,
+            RuntimeError(
+                "No se pudo comprobar el esquema de importes de FEMAG. "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+        return 1
+
+    for line in report.summary_lines():
+        logger.info(line)
+
+    if report.status in (STATUS_ABORTED, STATUS_FAILED):
+        _show_fatal_error(
+            log_path,
+            RuntimeError(
+                "FEMAG no puede operar con el esquema monetario actual.\n\n"
+                + "\n".join(report.summary_lines())
+                + "\n\nNo se modificó ningún documento. Corregí la causa y volvé "
+                "a abrir FEMAG."
+            ),
+        )
+        return 1
+    return 0
+
+
 def run() -> int:
     runtime_dir = configure_production_runtime()
     args = sys.argv[1:]
@@ -71,6 +125,14 @@ def run() -> int:
         # Import deliberadamente dentro del bloque protegido: cualquier error de
         # PyInstaller/dependencias debe quedar registrado en startup.log.
         from app.main import main
+
+        # La migración monetaria corre antes de abrir la ventana y antes de
+        # delegar en main(), para que nadie pueda operar con importes que la
+        # base no puede representar.
+        if "--skip-money-schema-task" not in args:
+            codigo = _run_money_schema_task(runtime_dir, log_path)
+            if codigo != 0:
+                return codigo
 
         args = args or ["--ui"]
         result = main(args)

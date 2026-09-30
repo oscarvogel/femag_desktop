@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -31,7 +32,6 @@ from app.config.money_columns import (
     precheck_money_columns,
 )
 from app.services.monetary_audit_readonly import (
-    MonetaryIntegrityAuditor,
     open_audit_database,
     resolve_audit_database,
 )
@@ -136,7 +136,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--db", metavar="NOMBRE", help="Otra base del mismo servidor.")
     parser.add_argument("--csv", metavar="RUTA", help="Exportar el diagnóstico a CSV.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Salida JSON para orquestadores (no imprime la tabla).",
+    )
     return parser
+
+
+def summary_payload(stats) -> dict:
+    """Resumen numérico para verificación automática."""
+    pendientes = [
+        s
+        for s in stats
+        if s.actual_type and needs_decimal_migration(s.actual_type, s.column)
+    ]
+    return {
+        "columns_registered": len(stats),
+        "columns_to_migrate": len(pendientes),
+        "columns_already_decimal": len(stats) - len(pendientes),
+        "values_out_of_range": sum(s.out_of_range for s in stats),
+        "values_to_quantize": sum(s.off_scale for s in stats),
+        "rows_total": sum(s.rows for s in stats),
+        "nulls_total": sum(s.nulls for s in stats),
+        "all_fit": all(s.fits for s in stats),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -155,11 +179,19 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         stats = precheck_money_columns(handle.database)
+        payload = summary_payload(stats)
     except MoneyMigrationAbort as exc:
-        print(f"ABORTED: {exc}", file=sys.stderr)
-        return EXIT_ABORTED
-    finally:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"ABORTED: {exc}", file=sys.stderr)
         handle.close()
+        return EXIT_ABORTED
+
+    if args.json:
+        print(json.dumps({"ok": True, **payload}, ensure_ascii=False))
+        handle.close()
+        return EXIT_OK
 
     print()
     print(render(stats))
@@ -167,14 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         destino = write_csv(stats, args.csv)
         print()
         print(f"Diagnóstico exportado: {destino}")
-
-    # Prueba de que el importe del incidente entra una vez migrado.
-    print()
-    auditor = MonetaryIntegrityAuditor(handle.database)
-    print(
-        "Nota: el guard de representabilidad de la herramienta de reparación "
-        "seguirá bloqueando\nhasta que la migración se aplique en esta base."
-    )
+    handle.close()
     return EXIT_OK
 
 
