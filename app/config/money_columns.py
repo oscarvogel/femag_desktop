@@ -350,7 +350,9 @@ def current_column_type(database, table: str, column: str) -> str | None:
         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
         (table, column),
     ).fetchone()
-    return str(row[0]).lower() if row else None
+    if not row or not row[0]:
+        return None
+    return str(row[0]).lower()
 
 
 _NEEDS_DECIMAL = re.compile(r"^(float|double|real)\b|^(decimal|numeric)\((\d+)\s*,\s*(\d+)\)$")
