@@ -155,15 +155,23 @@ def _write_receipt(path: Path, report: MoneyMigrationReport, version: str) -> No
 
 
 def _open_writable(target):
-    """MySQL escribible sin preparar el esquema.
+    """Abre la base escribible y **enlaza el proxy de modelos**.
+
+    El enlace no es opcional. Todos los modelos de FEMAG declaran
+    ``Meta.database = database_proxy`` (``app/models/base.py``), así que cualquier
+    consulta por modelos sin proxy inicializado lanza
+    ``AttributeError: Cannot use uninitialized Proxy``. Esto pasaba porque la
+    tarea corre antes de que ``main()`` inicialice la base.
+
+    Enlazar aquí además garantiza una sola conexión para toda la tarea: el SQL
+    crudo del precheck, los ALTER y el conteo de históricos usan el mismo objeto.
 
     Deliberadamente NO se usa ``FemagMySQLDatabase``: su ``connect()`` corre la
-    preparación idempotente del esquema. Esta tarea ya controla el orden de los
-    pasos y no quiere arrastrar esa consecuencia.
+    preparación idempotente del esquema. Esta tarea ya controla el orden.
     """
     from peewee import MySQLDatabase
 
-    from app.config.database import resolve_mysql_host_ipv4
+    from app.config.database import bind_database, resolve_mysql_host_ipv4
 
     database = MySQLDatabase(
         target.database,
@@ -173,6 +181,8 @@ def _open_writable(target):
         password=target.password,
         charset="utf8mb4",
     )
+    # Orden correcto: primero el proxy, después la conexión.
+    bind_database(database)
     database.connect(reuse_if_open=True)
     return database
 
