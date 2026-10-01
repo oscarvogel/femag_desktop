@@ -245,11 +245,10 @@ mandar solo el de la parte facturada.
 
 ## Riesgos
 
-1. **Devoluciones sobre un renglón partido.** `LoadOrderReturnLine`
-   (`app/models/load_orders.py:189`) y el servicio de nota de crédito trabajan contra
-   `order_product` con una cantidad única. Hay que decidir y validar el reparto proporcional
-   entre las dos partes, y qué pasa si la devolución supera lo ya facturado. Es el riesgo más
-   probable de romper algo.
+1. **Devoluciones sobre un renglón partido.** Resuelto por regla de negocio: una
+   devolución **solo consume la parte que estaba a facturar después** y nunca cruza a la
+   parte ya facturada. El caso no necesita reparto entre las dos partes, sino un límite
+   duro. Ver la sección "Regla de devoluciones".
 2. **Integidad monetaria.** Cada presupuesto tiene que cuadrar por separado y los dos juntos
    tienen que cuadrar contra el renglón. Hay que apoyarse en `assert_monetary_integrity` y no
    en sumas propias.
@@ -261,11 +260,37 @@ mandar solo el de la parte facturada.
 5. **Puertas de línea Log en `desktop_app.py`.** Es un archivo grande; el cambio tiene que ser
    quirúrgico y no mezclar el refactor con la funcionalidad.
 
+## Regla de devoluciones
+
+Decidido con el operador: una devolución **solo consume mercadería de la parte a facturar
+después**. Nunca cruza a la parte ya facturada.
+
+- **Efecto en la cuenta corriente:** la devolución genera la nota de crédito de siempre,
+  pero aplicada contra el presupuesto diferido. La deuda del cliente baja por el importe
+  devuelto y el movimiento queda identificado como devolución sobre la parte que estaba a
+  facturar después.
+- **Límite duro:** la cantidad devuelta no puede superar la cantidad diferida del renglón.
+  Si la supera, la operación se rechaza con un mensaje claro al operador.
+
+Consecuencias para la implementación:
+
+- No hace falta repartir proporcionalmente una devolución entre dos presupuestos, que era
+  el punto más delicado del diseño original.
+- El precio unitario no cambia: las dos partes comparten el precio del renglón, así que
+  el cálculo de `unit_price` que hoy hace `load_order_closure_service.py:311` sirve igual.
+  Lo que cambia es contra qué cantidad se limita la devolución.
+- La validación del límite va en el servicio de cierre, antes de crear el
+  `LoadOrderReturnLine`, con su propio test.
+- La agrupación por cliente de `LoadOrderReturnCreditService` se mantiene; lo que se
+  identifica es contra qué presupuesto se aplica el crédito.
+
 ## Pendientes y decisiones abiertas
 
 - **Política de precio de la parte diferida.** En el esquema A queda congelada al día del
   despacho. Si mañana se quiere repacturar, hace falta un segundo precio unitario en el renglón.
-- **Regla de reparto de devoluciones.** Definir antes del PR 4.
+- **Devoluciones sobre mercadería ya facturada.** No existe el flujo: por regla, una
+  devolución solo consume la parte diferida. Si algún día hace falta, es un flujo nuevo
+  con nota de crédito clásica, no una extensión del actual.
 - **Comportamiento al editar una orden ya emitida con presupuesto diferido emitido.** Definir
   si se bloquea el campo o se permite con aviso.
 - **Si el reparto de dos partes y un mismo cliente necesita otro eje** (por ejemplo, facturar a
