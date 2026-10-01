@@ -79,6 +79,7 @@ class CustomerLedgerPage(QWidget):
         print_statement_callback=None,
         whatsapp_statement_callback=None,
         whatsapp_budget_callback=None,
+        print_budget_callback=None,
         email_statement_callback=None,
         print_receipt_callback=None,
         annul_payment_callback=None,
@@ -97,6 +98,7 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_callback = print_statement_callback
         self.whatsapp_statement_callback = whatsapp_statement_callback
         self.whatsapp_budget_callback = whatsapp_budget_callback
+        self.print_budget_callback = print_budget_callback
         self.email_statement_callback = email_statement_callback
         self.print_receipt_callback = print_receipt_callback
         self.annul_payment_callback = annul_payment_callback
@@ -296,6 +298,7 @@ class CustomerLedgerPage(QWidget):
         self.whatsapp_budget_action = self.more_actions_menu.addAction(
             "Enviar presupuesto por WhatsApp"
         )
+        self.print_budget_action = self.more_actions_menu.addAction("Reimprimir presupuesto")
         self.print_receipt_action = self.more_actions_menu.addAction("Imprimir recibo")
         self.annul_payment_action = self.more_actions_menu.addAction("Anular pago")
         self.reverse_manual_debit_action = self.more_actions_menu.addAction("Reversar débito")
@@ -306,6 +309,7 @@ class CustomerLedgerPage(QWidget):
         self.document_detail_action.triggered.connect(self._on_open_document_detail)
         self.history_action.triggered.connect(self._on_history)
         self.whatsapp_budget_action.triggered.connect(self._on_whatsapp_budget)
+        self.print_budget_action.triggered.connect(self._on_print_budget)
         self.print_receipt_action.triggered.connect(self._on_print_receipt)
         self.annul_payment_action.triggered.connect(self._on_annul_payment)
         self.reverse_manual_debit_action.triggered.connect(self._on_reverse_manual_debit)
@@ -765,6 +769,9 @@ class CustomerLedgerPage(QWidget):
         self.whatsapp_budget_action.setEnabled(
             can_resolve_budget and self.whatsapp_budget_callback is not None
         )
+        self.print_budget_action.setEnabled(
+            can_resolve_budget and self.print_budget_callback is not None
+        )
         self.print_receipt_action.setEnabled(self.print_receipt_button.isEnabled())
         self.annul_payment_action.setVisible(self.can_annul_payments)
         self.annul_payment_action.setEnabled(self.annul_payment_button.isEnabled())
@@ -908,6 +915,14 @@ class CustomerLedgerPage(QWidget):
         if movement is None or movement.is_reversal:
             return
         self.whatsapp_budget_callback(movement)
+
+    def _on_print_budget(self) -> None:
+        if self.print_budget_callback is None:
+            return
+        movement = self._selected_movement()
+        if movement is None or movement.is_reversal:
+            return
+        self.print_budget_callback(movement)
 
     def _on_print_receipt(self) -> None:
         payment = self._selected_payment()

@@ -753,6 +753,7 @@ class FemagDesktopWindow(QMainWindow):
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
             whatsapp_budget_callback=self._share_budget_whatsapp,
+            print_budget_callback=self._print_budget_for_movement,
             email_statement_callback=self._email_account_statement,
             print_receipt_callback=(
                 self._print_payment_receipt
@@ -983,6 +984,29 @@ class FemagDesktopWindow(QMainWindow):
         worker.signals.failed.connect(_failed)
         worker.signals.finished.connect(_finished)
         QThreadPool.globalInstance().start(worker)
+
+    def _print_budget_for_movement(self, movement) -> None:
+        """Reimprime el presupuesto ya persistido del movimiento, sin volver a
+        impactar la cuenta corriente (#452)."""
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
+
+        try:
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Presupuesto", f"No se pudo generar el presupuesto: {exc}"
+            )
+            return
+        _open_print_output(pdf_path)
 
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
