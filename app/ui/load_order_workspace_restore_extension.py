@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -28,6 +29,64 @@ from app.services.load_order_service import LoadOrderService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
 import app.ui.desktop_app as desktop
+
+
+class _BudgetSendChoiceDialog(QDialog):
+    """Permite enviar solo una de las dos partes de la facturacion.
+
+    Solo se muestra cuando la orden esta partida. Sin reparto hay un solo
+    presupuesto y no hay nada que elegir, asi que no se agrega un paso extra al
+    caso comun.
+    """
+
+    def __init__(self, order_number: int, parent=None):
+        super().__init__(parent)
+        from app.models.budgets import Budget
+
+        self.setObjectName("budgetSendChoiceDialog")
+        self.setWindowTitle("Enviar presupuestos")
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            f"La OC-{order_number:06d} esta partida en dos presupuestos. "
+            "Elija cuales quiere generar ahora."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.inmediato_check = QCheckBox("Facturado ahora")
+        self.inmediato_check.setObjectName("budgetSendInmediatoCheck")
+        self.inmediato_check.setChecked(True)
+        self.diferido_check = QCheckBox("A facturar después")
+        self.diferido_check.setObjectName("budgetSendDiferidoCheck")
+        self.diferido_check.setChecked(True)
+        layout.addWidget(self.inmediato_check)
+        layout.addWidget(self.diferido_check)
+        botones = QHBoxLayout()
+        botones.addStretch(1)
+        cancelar = QPushButton("Cancelar")
+        cancelar.setObjectName("budgetSendCancelButton")
+        self.confirm_button = QPushButton("Generar")
+        self.confirm_button.setObjectName("budgetSendConfirmButton")
+        self.confirm_button.setDefault(True)
+        botones.addWidget(cancelar)
+        botones.addWidget(self.confirm_button)
+        layout.addLayout(botones)
+        cancelar.clicked.connect(self.reject)
+        self.confirm_button.clicked.connect(self._validate_and_accept)
+        self._timings = (Budget.TIMING_IMMEDIATE, Budget.TIMING_DEFERRED)
+
+    def _validate_and_accept(self) -> None:
+        if not self.selected_timings():
+            return
+        self.accept()
+
+    def selected_timings(self) -> list[str]:
+        chosen = []
+        if self.inmediato_check.isChecked():
+            chosen.append(self._timings[0])
+        if self.diferido_check.isChecked():
+            chosen.append(self._timings[1])
+        return chosen
 
 
 _INSTALLED = False
@@ -552,15 +611,25 @@ def _restored_load_order_page(self):
             feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
             return
         try:
-            paths = operation_service.export_budgets(order)
+            timing = None
+            if len(operation_service.budget_timings_for_order(order)) > 1:
+                dialog = _BudgetSendChoiceDialog(order.order_number, table)
+                if dialog.exec_() != QDialog.Accepted:
+                    return
+                elegidas = dialog.selected_timings()
+                timing = elegidas[0] if len(elegidas) == 1 else None
+            paths = operation_service.export_budgets(order, timing=timing)
             if not paths:
                 feedback.show_warning(
                     "La orden no tiene presupuestos para generar.", focus_widget=table
                 )
                 return
             resolved_paths = [Path(path).resolve() for path in paths]
+            partes = {path.stem for path in resolved_paths}
             feedback.show_success(
-                f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
+                f"Se generaron {len(resolved_paths)} presupuesto(s): "
+                + ", ".join(sorted(partes))
+                + "."
             )
             for resolved in resolved_paths:
                 try:
