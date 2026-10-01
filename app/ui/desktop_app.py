@@ -3733,6 +3733,9 @@ class LoadOrderEntryDialog(QDialog):
                             {
                                 "product": Product.get_by_id(product["product_id"]),
                                 "quantity": product["quantity"],
+                                "cantidad_facturar_ahora": product.get(
+                                    "cantidad_facturar_ahora"
+                                ),
                                 "precio_neto_unitario": product.get("precio_neto_unitario"),
                                 "descuento_porcentaje": product.get("descuento_porcentaje"),
                                 "iva_porcentaje": product.get("iva_porcentaje"),

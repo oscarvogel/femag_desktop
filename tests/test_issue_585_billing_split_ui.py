@@ -309,6 +309,96 @@ def test_editar_una_orden_sin_reparto_no_marca_reparto(db):
     assert dialog.product_table.item(0, 3).text() == "0"
 
 
+def test_el_reparto_sobrevive_al_ciclo_completo_de_edicion(db):
+    """Reabrir y guardar una orden no puede perder el reparto.
+
+    El dialogo arma el payload de guardado con una lista explicita de campos. Si el
+    reparto no esta en esa lista, la orden se guarda igual y el reparto se pierde sin
+    ningun error: por eso esta prueba va del alta a la reapertura y al guardado.
+    """
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    order = _create_order(_master_data(), cantidad_ahora=800.0)
+    service = LoadOrderService(current_user="issue585")
+
+    dialog = LoadOrderEntryDialog(service, "issue585", order=order)
+    app.processEvents()
+
+    dialog._save()
+    app.processEvents()
+
+    line = LoadOrder.get_by_id(order.id).products[0]
+    assert line.quantity == 1200.0
+    assert line.cantidad_facturar_ahora == 800.0
+
+
+def test_guardar_sin_reparto_no_deja_partido_el_renglon(db):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    order = _create_order(_master_data())
+    service = LoadOrderService(current_user="issue585")
+
+    dialog = LoadOrderEntryDialog(service, "issue585", order=order)
+    app.processEvents()
+    dialog._save()
+    app.processEvents()
+
+    line = LoadOrder.get_by_id(order.id).products[0]
+    assert line.cantidad_facturar_ahora is None
+    assert line.tiene_reparto_facturacion is False
+
+
+def test_el_reparto_sobrevive_al_ciclo_completo_de_edicion(db):
+    """Reabrir y guardar una orden no puede perder el reparto.
+
+    El dialogo arma el payload de guardado con una lista explicita de campos. Si el
+    reparto no esta en esa lista, la orden se guarda igual y el reparto se pierde sin
+    ningun error: por eso esta prueba va del alta a la reapertura y al guardado.
+    """
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    order = _create_order(_master_data(), cantidad_ahora=800.0)
+    service = LoadOrderService(current_user="issue585")
+
+    dialog = LoadOrderEntryDialog(service, "issue585", order=order)
+    app.processEvents()
+
+    dialog._save()
+    app.processEvents()
+
+    line = LoadOrder.get_by_id(order.id).products[0]
+    assert line.quantity == 1200.0
+    assert line.cantidad_facturar_ahora == 800.0
+
+
+def test_guardar_sin_reparto_no_deja_partido_el_renglon(db):
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    order = _create_order(_master_data())
+    service = LoadOrderService(current_user="issue585")
+
+    dialog = LoadOrderEntryDialog(service, "issue585", order=order)
+    app.processEvents()
+    dialog._save()
+    app.processEvents()
+
+    line = LoadOrder.get_by_id(order.id).products[0]
+    assert line.cantidad_facturar_ahora is None
+    assert line.tiene_reparto_facturacion is False
+
+
 def test_billing_split_values_por_defecto_y_con_reparto():
     from app.ui.desktop_app import _billing_split_values
 
