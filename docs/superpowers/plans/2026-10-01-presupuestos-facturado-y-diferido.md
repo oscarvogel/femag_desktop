@@ -254,11 +254,32 @@ mandar solo el de la parte facturada.
    en sumas propias.
 3. **Índices en bases instaladas.** El índice único viejo tiene que caer de verdad; si queda, el
    segundo presupuesto falla en tiempo de ejecución y no en desarrollo.
-4. **Edición posterior a emitir.** Si el reparto se cambia con la orden ya emitida, el
-   presupuesto diferido ya no se recalcula. Tiene que quedar explícito en pantalla para el
-   operador, no ser una sorpresa.
+4. **El reparto no se puede cambiar después de emitir.** El servicio ya lo bloquea
+   (`app/services/load_order_service.py:124`), así que hoy no es un riesgo de diseño. El
+   riesgo real es de regresión: si alguien relaja ese guard, los presupuestos ya emitidos
+   quedarían desincronizados de la orden sin que nada lo avise. Por eso el test que fija
+   esta regla es obligatorio y no opcional.
 5. **Puertas de línea Log en `desktop_app.py`.** Es un archivo grande; el cambio tiene que ser
    quirúrgico y no mezclar el refactor con la funcionalidad.
+
+## Regla de edición
+
+Decidido con el operador: **una orden emitida no se puede editar más**.
+
+La regla ya está garantizada por el código existente, en dos capas:
+
+- `LoadOrderService.update_order` rechaza destinos, pallets y mercadería suelta cuando la
+  orden no está pendiente (`app/services/load_order_service.py:124`, `:146` y `:156`).
+- La pantalla deshabilita el botón Editar cuando la orden no está pendiente
+  (`app/ui/load_order_workspace_restore_extension.py:341`).
+
+Como el reparto `cantidad_facturar_ahora` viaja dentro de `destinations`, queda cubierto por
+el mismo guard: no hay forma de cambiar el reparto con la orden emitida, y no hace falta
+trabajo nuevo para impedirlo.
+
+Lo que sí hay que agregar es el **test que fije el comportamiento**, porque hoy nada
+obliga a que ese guard siga existiendo. El test debe comprobar que `update_order` rechaza
+un cambio de cantidad o de reparto en el renglón de una orden ya emitida.
 
 ## Regla de devoluciones
 
@@ -291,7 +312,7 @@ Consecuencias para la implementación:
 - **Devoluciones sobre mercadería ya facturada.** No existe el flujo: por regla, una
   devolución solo consume la parte diferida. Si algún día hace falta, es un flujo nuevo
   con nota de crédito clásica, no una extensión del actual.
-- **Comportamiento al editar una orden ya emitida con presupuesto diferido emitido.** Definir
-  si se bloquea el campo o se permite con aviso.
+- **Test que fije la regla de edición.** El guard ya existe pero no está cubierto por un test
+  del reparto. Hay que agregarlo.
 - **Si el reparto de dos partes y un mismo cliente necesita otro eje** (por ejemplo, facturar a
   dos sucursales distintas). Fuera de alcance actual.
