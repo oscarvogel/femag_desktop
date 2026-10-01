@@ -1,8 +1,15 @@
-from decimal import Decimal
-
-from peewee import CharField, DateField, DateTimeField, DecimalField, TextField
+from peewee import (
+    CharField,
+    DateField,
+    DateTimeField,
+    DecimalField,
+    ForeignKeyField,
+    IntegerField,
+    TextField,
+)
 
 from app.models.base import BaseModel, utc_now
+from app.models.masters import Product
 
 
 class RawMaterialReceipt(BaseModel):
@@ -40,23 +47,36 @@ class RawMaterialReceipt(BaseModel):
 
 
 class ProductionPart(BaseModel):
-    """Parte simple de producción real por fecha y turno."""
+    """Parte de embolsado por fecha y turno.
+
+    A partir de #580 el parte ya no pide kg de mandioca procesada ni de fécula
+    producida: en planta esos datos no se pueden medir. Lo que se registra es
+    cuántas bolsas de cada producto se embolsaron, en :class:`ProductionBag`.
+    """
 
     production_date = DateField()
     shift = CharField(max_length=40)
-    cassava_processed_kg = DecimalField(max_digits=12, decimal_places=2)
-    starch_produced_kg = DecimalField(max_digits=12, decimal_places=2)
     observations = TextField(null=True)
-    created_at = DateTimeField(default=utc_now)
-
-    @property
-    def real_yield(self) -> Decimal:
-        processed = Decimal(str(self.cassava_processed_kg or 0))
-        if processed <= 0:
-            return Decimal("0.00")
-        produced = Decimal(str(self.starch_produced_kg or 0))
-        return (produced * Decimal("100") / processed).quantize(Decimal("0.01"))
 
     class Meta:
         table_name = "production_part"
         indexes = ((("production_date", "shift"), False),)
+
+
+class ProductionBag(BaseModel):
+    """Bolsas embolsadas de un producto terminado dentro de un turno.
+
+    ``unit_weight_kg`` es una copia del peso del producto al momento del
+    registro: si despues se corrige el maestro, la produccion ya registrada
+    no debe cambiar. ``kg`` queda congelado por el mismo motivo.
+    """
+
+    part = ForeignKeyField(ProductionPart, backref="bags", on_delete="CASCADE")
+    product = ForeignKeyField(Product, backref="production_bags", on_delete="RESTRICT")
+    bags = IntegerField()
+    unit_weight_kg = DecimalField(max_digits=12, decimal_places=3)
+    kg = DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        table_name = "production_bag"
+        indexes = ((("part",), False), (("product",), False))
