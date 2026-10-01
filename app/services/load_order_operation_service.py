@@ -103,10 +103,30 @@ class LoadOrderOperationService:
         self.account_ledger.reverse_for_load_order(annulled)
         return annulled
 
-    def export_budgets(self, order: LoadOrder) -> list[Path]:
-        """Generate one persistent, numbered budget PDF per client in the load order."""
+    def budget_timings_for_order(self, order: LoadOrder) -> list[str]:
+        """Momentos de facturacion que tienen presupuesto en esta orden.
+
+        Una orden sin reparto tiene una sola parte, y en ese caso no hay nada
+        que elegir al enviar.
+        """
         order = LoadOrder.get_by_id(order.id)
-        return self.budget_prints.export_for_load_order(order, self.prints_dir)
+        budgets = self.budget_prints.budget_service.ensure_for_load_order(order)
+        timings: list[str] = []
+        for budget in budgets:
+            if budget.timing not in timings:
+                timings.append(budget.timing)
+        return timings
+
+    def export_budgets(self, order: LoadOrder, timing: str | None = None) -> list[Path]:
+        """Generate one persistent, numbered budget PDF per client in the load order.
+
+        ``timing`` filtra por la parte de facturacion, para poder enviar una sola
+        de las dos sin generar la otra.
+        """
+        order = LoadOrder.get_by_id(order.id)
+        return self.budget_prints.export_for_load_order(
+            order, self.prints_dir, timing=timing
+        )
 
     def export_combined_budget(self, order: LoadOrder) -> Path:
         """UI-compatible printable bundle: one numbered budget per client/page."""

@@ -57,7 +57,13 @@ class CollectionDueReportService:
 
         today = today or date.today()
         query = ClientAccountMovement.select().where(
-            ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER,
+            # Las dos partes vencen por separado y hay que cobranzas las dos.
+            ClientAccountMovement.movement_type.in_(
+                (
+                    ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+                    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
+                )
+            ),
             ClientAccountMovement.is_reversal == False,  # noqa: E712
             ClientAccountMovement.due_date.is_null(False),
         )

@@ -36,8 +36,10 @@ _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 MOVEMENT_TYPE_LABELS = {
     ClientAccountMovement.TYPE_OPENING_BALANCE: "Saldo inicial",
-    ClientAccountMovement.TYPE_LOAD_ORDER: "Orden de carga",
+    ClientAccountMovement.TYPE_LOAD_ORDER: "Orden de carga (facturado hoy)",
+    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED: "Orden de carga (a facturar después)",
     ClientAccountMovement.TYPE_LOAD_ORDER_REVERSAL: "Reverso de orden",
+    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED_REVERSAL: "Reverso de orden diferida",
     ClientAccountMovement.TYPE_BUDGET_MANUAL: "Presupuesto",
     ClientAccountMovement.TYPE_BUDGET_MANUAL_REVERSAL: "Anulación de presupuesto",
     ClientAccountMovement.TYPE_PAYMENT: "Pago",

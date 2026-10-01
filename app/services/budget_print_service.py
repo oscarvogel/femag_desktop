@@ -72,8 +72,21 @@ class BudgetPrintService:
             observation=AVISO_HISTORICO_INCONSISTENTE,
         )
 
-    def export_for_load_order(self, order: LoadOrder, output_dir: str | Path) -> list[Path]:
+    def export_for_load_order(
+        self,
+        order: LoadOrder,
+        output_dir: str | Path,
+        timing: str | None = None,
+    ) -> list[Path]:
+        """Genera un PDF numerado por presupuesto.
+
+        ``timing`` filtra por la parte de facturacion, para poder enviar solo la
+        que el cliente recibio hoy y dejar la diferida para despues. Sin filtro
+        genera las dos.
+        """
         budgets = self.budget_service.ensure_for_load_order(order)
+        if timing is not None:
+            budgets = [budget for budget in budgets if budget.timing == timing]
         return [self.export_pdf(budget, output_dir) for budget in budgets]
 
     def export_bundle_for_load_order(self, order: LoadOrder, output_dir: str | Path) -> Path:
