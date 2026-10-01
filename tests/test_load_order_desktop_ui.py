@@ -2151,6 +2151,8 @@ def test_product_dialog_tab_and_enter_follow_manual_input_order(db):
     QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
     assert_focus_inside(dialog.quantity_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert_focus_inside(dialog.cantidad_despues_input)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert_focus_inside(dialog.precio_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert_focus_inside(dialog.descuento_input)
@@ -2234,4 +2236,6 @@ def test_issue_568_edit_product_replaces_draft_and_recalculates(db, monkeypatch)
 
     assert dialog.destinations[0]["products"][0]["quantity"] == 15.0
     assert dialog.product_table.item(0, 1).text() == "15"
-    assert "1,815.00" in dialog.product_table.item(0, 5).text()
+    assert dialog.product_table.item(0, 2).text() == "15"
+    assert dialog.product_table.item(0, 3).text() == "0"
+    assert "1,815.00" in dialog.product_table.item(0, 7).text()

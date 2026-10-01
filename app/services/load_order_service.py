@@ -839,9 +839,34 @@ class LoadOrderService:
                     **item,
                     "product": product,
                     "quantity": quantity,
+                    "cantidad_facturar_ahora": self._normalize_billing_split(
+                        item.get("cantidad_facturar_ahora"), quantity
+                    ),
                 }
             )
         return normalized
+
+    @staticmethod
+    def _normalize_billing_split(value, quantity) -> float | None:
+        """Normaliza la parte de la cantidad que se factura al contado.
+
+        Sin reparto explicito devuelve ``None``, que es el estado historico de las
+        ordenes ya emitidas: toda la cantidad se factura de una vez. Si el operador
+        carga la cantidad completa de forma explicita tambien se guarda como
+        ``None``, para no marcar como partido un renglon que no esta partido.
+        """
+        if value is None:
+            return None
+        cantidad = float(value)
+        if cantidad < 0:
+            raise ValueError("La cantidad a facturar ahora no puede ser negativa.")
+        if cantidad > float(quantity):
+            raise ValueError(
+                "La cantidad a facturar ahora no puede superar la cantidad total del renglon."
+            )
+        if cantidad == float(quantity):
+            return None
+        return cantidad
 
     def _validate_pallets(
         self,
@@ -992,7 +1017,11 @@ class LoadOrderService:
                 "client": destination.client,
                 "delivery_address": destination.delivery_address,
                 "products": [
-                    {"product": product.product, "quantity": product.quantity}
+                    {
+                        "product": product.product,
+                        "quantity": product.quantity,
+                        "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
+                    }
                     for product in destination.products
                 ],
             }
@@ -1248,6 +1277,7 @@ class LoadOrderService:
                     destination=destination,
                     product=product,
                     quantity=product_item["quantity"],
+                    cantidad_facturar_ahora=product_item.get("cantidad_facturar_ahora"),
                     unit=product_item.get("unit") or product.unit,
                     observations=product_item.get("observations"),
                     **prices,
