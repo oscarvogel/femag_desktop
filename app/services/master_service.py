@@ -15,6 +15,7 @@ from app.models.masters import (
     Truck,
 )
 from app.services.audit_service import AuditService
+from app.services.client_email_service import ClientEmailService
 from app.services.permission_service import PermissionService
 
 
@@ -194,11 +195,22 @@ class MasterService:
         if query.exists():
             raise ValueError("Ya existe un tipo de IVA con ese nombre.")
 
+    @staticmethod
+    def _normalize_salesperson_email(email: str | None) -> str | None:
+        """Normaliza el email del vendedor reutilizando el criterio de los clientes."""
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return None
+        if not ClientEmailService.EMAIL_PATTERN.fullmatch(normalized):
+            raise ValueError("Ingrese un email valido.")
+        return normalized
+
     def create_salesperson(
         self,
         name: str,
         *,
         phone: str | None = None,
+        email: str | None = None,
         observations: str | None = None,
         active: bool = True,
     ) -> Salesperson:
@@ -210,13 +222,14 @@ class MasterService:
         row = Salesperson.create(
             name=name,
             phone=(phone or "").strip() or None,
+            email=self._normalize_salesperson_email(email),
             observations=(observations or "").strip() or None,
             active=bool(active),
         )
         self._record(
             "Salesperson",
             row,
-            {"name": name, "phone": row.phone, "active": row.active},
+            {"name": name, "phone": row.phone, "email": row.email, "active": row.active},
         )
         return row
 
@@ -226,6 +239,7 @@ class MasterService:
         name: str,
         *,
         phone: str | None = None,
+        email: str | None = None,
         observations: str | None = None,
         active: bool = True,
     ) -> Salesperson:
@@ -241,11 +255,13 @@ class MasterService:
         old_value = {
             "name": salesperson.name,
             "phone": salesperson.phone,
+            "email": salesperson.email,
             "observations": salesperson.observations,
             "active": salesperson.active,
         }
         salesperson.name = name
         salesperson.phone = (phone or "").strip() or None
+        salesperson.email = self._normalize_salesperson_email(email)
         salesperson.observations = (observations or "").strip() or None
         salesperson.active = bool(active)
         salesperson.save()
@@ -258,6 +274,7 @@ class MasterService:
             new_value={
                 "name": salesperson.name,
                 "phone": salesperson.phone,
+                "email": salesperson.email,
                 "observations": salesperson.observations,
                 "active": salesperson.active,
             },

@@ -113,7 +113,7 @@ def test_salesperson_master_is_registered_in_ui_and_permissions(db):
     assert REAL_MODULES["Vendedores"] == "salespeople"
     config = master_abm_configs()["salespeople"]
     assert config.title == "Vendedores"
-    assert config.columns == ["Nombre", "Teléfono", "Estado"]
+    assert config.columns == ["Nombre", "Teléfono", "Email", "Estado"]
 
 
 def test_runtime_schema_restores_salesperson_index_idempotently(db):

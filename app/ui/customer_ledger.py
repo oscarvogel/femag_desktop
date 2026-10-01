@@ -81,6 +81,9 @@ class CustomerLedgerPage(QWidget):
         whatsapp_budget_callback=None,
         print_budget_callback=None,
         email_statement_callback=None,
+        portfolio_print_callback=None,
+        portfolio_whatsapp_callback=None,
+        portfolio_email_callback=None,
         print_receipt_callback=None,
         annul_payment_callback=None,
         reverse_manual_debit_callback=None,
@@ -100,6 +103,9 @@ class CustomerLedgerPage(QWidget):
         self.whatsapp_budget_callback = whatsapp_budget_callback
         self.print_budget_callback = print_budget_callback
         self.email_statement_callback = email_statement_callback
+        self.portfolio_print_callback = portfolio_print_callback
+        self.portfolio_whatsapp_callback = portfolio_whatsapp_callback
+        self.portfolio_email_callback = portfolio_email_callback
         self.print_receipt_callback = print_receipt_callback
         self.annul_payment_callback = annul_payment_callback
         self.reverse_manual_debit_callback = reverse_manual_debit_callback
@@ -292,6 +298,18 @@ class CustomerLedgerPage(QWidget):
         self.email_statement_action = self.more_actions_menu.addAction("Enviar por correo")
 
         self.more_actions_menu.addSeparator()
+        self.more_actions_menu.addSection("Resumen del vendedor")
+        self.portfolio_print_action = self.more_actions_menu.addAction(
+            "Resumen de cartera (PDF)"
+        )
+        self.portfolio_whatsapp_action = self.more_actions_menu.addAction(
+            "Enviar resumen por WhatsApp"
+        )
+        self.portfolio_email_action = self.more_actions_menu.addAction(
+            "Enviar resumen por correo"
+        )
+
+        self.more_actions_menu.addSeparator()
         self.more_actions_menu.addSection("Movimiento seleccionado")
         self.document_detail_action = self.more_actions_menu.addAction("Ver detalle")
         self.history_action = self.more_actions_menu.addAction("Ver historial")
@@ -306,6 +324,9 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_action.triggered.connect(self._on_print_statement)
         self.whatsapp_statement_action.triggered.connect(self._on_whatsapp_statement)
         self.email_statement_action.triggered.connect(self._on_email_statement)
+        self.portfolio_print_action.triggered.connect(self._on_portfolio_print)
+        self.portfolio_whatsapp_action.triggered.connect(self._on_portfolio_whatsapp)
+        self.portfolio_email_action.triggered.connect(self._on_portfolio_email)
         self.document_detail_action.triggered.connect(self._on_open_document_detail)
         self.history_action.triggered.connect(self._on_history)
         self.whatsapp_budget_action.triggered.connect(self._on_whatsapp_budget)
@@ -430,6 +451,8 @@ class CustomerLedgerPage(QWidget):
         # El vendedor filtra la fotografía de cartera ya cargada. No volver a
         # ejecutar agregaciones sobre MySQL por cada cambio de vendedor.
         self._render_clients(previous_id=self._current_client_id())
+        # El resumen se habilita o se bloquea segun el vendedor del filtro.
+        self._sync_more_actions()
 
     def _salesperson_filter_values(self) -> tuple[int | None, bool]:
         if not hasattr(self, "salesperson_filter"):
@@ -710,6 +733,58 @@ class CustomerLedgerPage(QWidget):
         if client is not None:
             self.email_statement_callback(client)
 
+    def portfolio_summary(self) -> dict | None:
+        """Datos del resumen de cartera tal como se ven en pantalla.
+
+        Reutiliza la fotografía ya cargada y los filtros visibles (búsqueda,
+        "Solo con saldo" y vendedor) para que el PDF respete lo que el usuario
+        está viendo sin volver a agregar saldos.
+        """
+        if not hasattr(self, "salesperson_filter"):
+            return None
+        current = self.salesperson_filter.currentData()
+        if current is None:
+            return None
+        salesperson_id, unassigned = self._salesperson_filter_values()
+        salesperson = None
+        if salesperson_id is not None:
+            salesperson = Salesperson.get_or_none(Salesperson.id == salesperson_id)
+            if salesperson is None:
+                return None
+        if unassigned:
+            label, slug = "Sin asignar", "sin_asignar"
+        elif salesperson is not None:
+            label, slug = salesperson.name or "Vendedor", None
+        else:
+            label, slug = "Todos los vendedores", "todos"
+        return {
+            "salesperson": salesperson,
+            "rows": self._filter_balances(self._all_balances),
+            "label": label,
+            "slug": slug,
+        }
+
+    def _on_portfolio_print(self) -> None:
+        if self.portfolio_print_callback is None:
+            return
+        summary = self.portfolio_summary()
+        if summary is not None:
+            self.portfolio_print_callback(summary)
+
+    def _on_portfolio_whatsapp(self) -> None:
+        if self.portfolio_whatsapp_callback is None:
+            return
+        summary = self.portfolio_summary()
+        if summary is not None and summary["salesperson"] is not None:
+            self.portfolio_whatsapp_callback(summary)
+
+    def _on_portfolio_email(self) -> None:
+        if self.portfolio_email_callback is None:
+            return
+        summary = self.portfolio_summary()
+        if summary is not None and summary["salesperson"] is not None:
+            self.portfolio_email_callback(summary)
+
     def _clear_detail(self) -> None:
         self._detail_client_id = None
         self._detail_movements_cache = []
@@ -749,6 +824,17 @@ class CustomerLedgerPage(QWidget):
         )
         self.email_statement_action.setEnabled(
             has_client and self.email_statement_callback is not None
+        )
+        summary = self.portfolio_summary() if hasattr(self, "salesperson_filter") else None
+        salesperson = summary["salesperson"] if summary is not None else None
+        can_export_summary = summary is not None and self.portfolio_print_callback is not None
+        self.portfolio_print_action.setEnabled(can_export_summary)
+        # Sin un vendedor unico no hay destinatario: se puede imprimir, no enviar.
+        self.portfolio_whatsapp_action.setEnabled(
+            salesperson is not None and self.portfolio_whatsapp_callback is not None
+        )
+        self.portfolio_email_action.setEnabled(
+            salesperson is not None and self.portfolio_email_callback is not None
         )
         movement = self._selected_movement()
         can_resolve_budget = (

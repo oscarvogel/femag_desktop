@@ -147,6 +147,8 @@ def test_email_handler_confirms_and_sends_pdf(monkeypatch, tmp_path):
             "recipients": ("cliente@example.com",),
             "subject": "Extracto de cuenta corriente - Cliente Uno",
             "pdf_path": pdf_path,
+            # Sin cuerpo propio: el extracto de cliente mantiene su texto original.
+            "body": None,
         }
     ]
     assert "enviado" in messages[-1].lower()

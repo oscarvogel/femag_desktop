@@ -59,6 +59,14 @@ class SmtpSettings:
         )
 
 
+def default_account_statement_body(client_name: str) -> str:
+    return (
+        f"Hola {client_name},\n\n"
+        "Adjuntamos su extracto de cuenta corriente.\n\n"
+        "Saludos.\nGRAEF HERMANOS S.R.L."
+    )
+
+
 def build_account_statement_message(
     *,
     client_name: str,
@@ -67,6 +75,7 @@ def build_account_statement_message(
     sender: str,
     pdf_path: str | Path,
     subject: str | None = None,
+    body: str | None = None,
 ) -> EmailMessage:
     addresses = _normalize_recipients(recipient=recipient, recipients=recipients)
     if not addresses:
@@ -80,9 +89,7 @@ def build_account_statement_message(
     message["From"] = sender
     message["To"] = ", ".join(addresses)
     message.set_content(
-        f"Hola {client_name},\n\n"
-        "Adjuntamos su extracto de cuenta corriente.\n\n"
-        "Saludos.\nGRAEF HERMANOS S.R.L."
+        (body or "").strip() or default_account_statement_body(client_name)
     )
     message.add_attachment(
         path.read_bytes(),
@@ -100,6 +107,7 @@ def send_account_statement(
     recipients: Iterable[str] | None = None,
     pdf_path: str | Path,
     subject: str | None = None,
+    body: str | None = None,
     settings: SmtpSettings | None = None,
     smtp_factory=smtplib.SMTP,
 ) -> None:
@@ -111,6 +119,7 @@ def send_account_statement(
         sender=config.sender,
         pdf_path=pdf_path,
         subject=subject,
+        body=body,
     )
     try:
         with smtp_factory(config.host, config.port, timeout=20) as smtp:

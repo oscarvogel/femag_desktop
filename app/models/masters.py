@@ -66,6 +66,7 @@ class TipoIVA(BaseModel):
 class Salesperson(BaseModel):
     name = CharField(unique=True)
     phone = CharField(null=True)
+    email = CharField(null=True)
     observations = TextField(null=True)
     active = BooleanField(default=True)
 
