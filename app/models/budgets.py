@@ -3,13 +3,21 @@ from datetime import date
 from peewee import CharField, DateField, FloatField, ForeignKeyField, IntegerField, TextField
 
 from app.models.base import BaseModel
-from app.models.load_orders import LoadOrder, LoadOrderProduct
+from app.models.load_orders import (
+    BILLING_TIMING_DEFERRED,
+    BILLING_TIMING_IMMEDIATE,
+    LoadOrder,
+    LoadOrderProduct,
+)
 from app.models.masters import Client, Product
 
 
 class Budget(BaseModel):
     ORIGIN_LOAD_ORDER = "load_order"
     ORIGIN_MANUAL = "manual"
+
+    TIMING_IMMEDIATE = BILLING_TIMING_IMMEDIATE
+    TIMING_DEFERRED = BILLING_TIMING_DEFERRED
 
     STATUS_ACTIVE = "active"
     STATUS_ANNULLED = "annulled"
@@ -18,6 +26,9 @@ class Budget(BaseModel):
     client = ForeignKeyField(Client, backref="budgets")
     load_order = ForeignKeyField(LoadOrder, backref="budgets", null=True)
     origin = CharField()
+    # Momento de facturación. Una orden puede emitir un presupuesto por
+    # cliente para cada parte, y el índice único de abajo los distingue.
+    timing = CharField(default=TIMING_IMMEDIATE)
     issue_date = DateField(default=date.today)
     status = CharField(default=STATUS_ACTIVE)
     observations = TextField(null=True)
@@ -37,8 +48,12 @@ class Budget(BaseModel):
             return None
         return f"OC-{self.load_order.order_number:06d}"
 
+    @property
+    def timing_label(self) -> str:
+        return "Facturado ahora" if self.timing == self.TIMING_IMMEDIATE else "A facturar después"
+
     class Meta:
-        indexes = ((("load_order", "client", "origin"), True),)
+        indexes = ((("load_order", "client", "origin", "timing"), True),)
 
 
 class BudgetItem(BaseModel):

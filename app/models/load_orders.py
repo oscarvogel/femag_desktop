@@ -17,6 +17,13 @@ from peewee import (
 from app.models.base import BaseModel, utc_now
 from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
 
+# Momento de facturación de una parte del renglón. Una orden puede repartir la
+# cantidad de un renglón entre las dos partes, y cada parte se factura como un
+# presupuesto independiente con su propio número y su propio vencimiento.
+BILLING_TIMING_IMMEDIATE = "immediate"
+BILLING_TIMING_DEFERRED = "deferred"
+BILLING_TIMINGS = (BILLING_TIMING_IMMEDIATE, BILLING_TIMING_DEFERRED)
+
 
 def generate_load_order_qr_token() -> str:
     """Generate an opaque token suitable for identifying a load order from a QR."""
@@ -83,7 +90,13 @@ class LoadOrderProduct(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="products", on_delete="CASCADE")
     destination = ForeignKeyField(LoadOrderDestination, backref="products", on_delete="CASCADE", null=True)
     product = ForeignKeyField(Product, backref="load_order_details")
+    # Cantidad total despachada. No se toca: logística, remito, pallets y
+    # liberación de costos siguen usando este valor.
     quantity = FloatField()
+    # Parte de la cantidad que se factura al contado. ``None`` significa "sin
+    # reparto explícito" y equivale a facturar la cantidad completa de una vez,
+    # que es el comportamiento histórico de las órdenes ya emitidas.
+    cantidad_facturar_ahora = FloatField(null=True)
     unit = CharField()
     observations = TextField(null=True)
     precio_neto_unitario = FloatField(default=0.0)
@@ -97,6 +110,27 @@ class LoadOrderProduct(BaseModel):
     total = FloatField(default=0.0)
     lote = CharField(null=True)
     fecha_elaboracion = DateField(null=True)
+
+    @property
+    def tiene_reparto_facturacion(self) -> bool:
+        """Indica si el renglón tiene un reparto explícito entre las dos partes."""
+        return self.cantidad_facturar_ahora is not None
+
+    @property
+    def cantidad_facturacion_inmediata(self) -> float:
+        """Cantidad de la parte facturada al contado.
+
+        Sin reparto explícito la parte inmediata es la cantidad completa, que es
+        el comportamiento histórico de la orden de carga.
+        """
+        if self.cantidad_facturar_ahora is None:
+            return self.quantity
+        return self.cantidad_facturar_ahora
+
+    @property
+    def cantidad_facturacion_diferida(self) -> float:
+        """Cantidad de la parte pendiente de facturación."""
+        return max(self.quantity - self.cantidad_facturacion_inmediata, 0.0)
 
 
 class LoadOrderPallet(BaseModel):
@@ -211,4 +245,7 @@ class LoadOrderBudgetStatus(BaseModel):
 
     order = ForeignKeyField(LoadOrder, backref="budget_statuses", on_delete="CASCADE")
     client = ForeignKeyField(Client, backref="budget_statuses")
+    # El estado se lleva por parte para que la parte facturada al contado y la
+    # diferida puedan seguir caminos distintos dentro de la misma orden.
+    timing = CharField(default=BILLING_TIMING_IMMEDIATE)
     status = CharField(default=STATUS_PENDING)

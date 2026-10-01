@@ -9,8 +9,14 @@ from app.models.payments import ClientPayment
 
 class ClientAccountMovement(BaseModel):
     TYPE_OPENING_BALANCE = "opening_balance"
+    # La parte facturada al contado reutiliza el tipo histórico para no tocar
+    # los movimientos ya emitidos.
     TYPE_LOAD_ORDER = "load_order_documental"
+    TYPE_LOAD_ORDER_IMMEDIATE = TYPE_LOAD_ORDER
     TYPE_LOAD_ORDER_REVERSAL = "load_order_documental_reversal"
+    TYPE_LOAD_ORDER_IMMEDIATE_REVERSAL = TYPE_LOAD_ORDER_REVERSAL
+    TYPE_LOAD_ORDER_DEFERRED = "load_order_documental_deferred"
+    TYPE_LOAD_ORDER_DEFERRED_REVERSAL = "load_order_documental_deferred_reversal"
     TYPE_BUDGET_MANUAL = "budget_manual"
     TYPE_BUDGET_MANUAL_REVERSAL = "budget_manual_reversal"
     TYPE_PAYMENT = "payment"
