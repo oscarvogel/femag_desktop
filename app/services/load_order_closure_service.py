@@ -323,15 +323,26 @@ class LoadOrderClosureService:
         return normalized
 
     def _order_totals_by_client(self, order: LoadOrder) -> dict[int, float]:
+        # Se suman las dos partes de la facturacion. Filtrar solo por el tipo
+        # historico dejaba fuera la parte diferida y hacia que una orden con la
+        # mitad pendiente se reportara cobrada.
         movements = ClientAccountMovement.select().where(
             (ClientAccountMovement.load_order == order)
-            & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER)
+            & (
+                ClientAccountMovement.movement_type.in_(
+                    (
+                        ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+                        ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
+                    )
+                )
+            )
             & (ClientAccountMovement.is_reversal == False)  # noqa: E712
         )
-        totals = {
-            movement.client_id: round(float(movement.total_amount), 2)
-            for movement in movements
-        }
+        totals: dict[int, float] = {}
+        for movement in movements:
+            totals[movement.client_id] = round(
+                totals.get(movement.client_id, 0.0) + float(movement.total_amount), 2
+            )
         if not totals:
             for line in order.products:
                 client_id = (
