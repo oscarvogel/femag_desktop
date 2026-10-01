@@ -86,6 +86,26 @@ def test_totals_sum_net_amounts_and_count_clients(db):
     assert totals["clients_with_balance"] == 2
 
 
+def test_collectable_total_ignores_credit_balances_like_the_sidebar(db):
+    """El "DEUDA" del PDF debe ser el mismo numero que la "Cartera" de pantalla."""
+    from app.models.masters import Client
+    from app.services.salesperson_portfolio_print_service import portfolio_totals
+
+    rows = [
+        _row(Client.create(name="Deudor", cuit="30700000031", iva_condition="RI"), 1000.0),
+        _row(
+            Client.create(name="Con Saldo a Favor", cuit="30700000032", iva_condition="RI"),
+            -400.0,
+        ),
+    ]
+
+    totals = portfolio_totals(rows)
+
+    # La barra lateral solo suma saldos positivos (customer_ledger._render_clients).
+    assert totals["collectable"] == Decimal("1000.00")
+    assert totals["balance"] == Decimal("600.00")
+
+
 def test_export_writes_one_row_per_client_sorted_by_balance(db, tmp_path):
     from app.models.masters import Client
     from app.services import salesperson_portfolio_print_service
@@ -113,7 +133,7 @@ def test_export_writes_one_row_per_client_sorted_by_balance(db, tmp_path):
     # El mas alto de saldos va primero.
     assert text.index("Cliente Grande") < text.index("Cliente Chico")
     assert "79.009.859,57" in text
-    assert "TOTAL CARTERA" in text
+    assert "TOTAL NETO" in text
     assert "79.010.359,57" in text
 
 

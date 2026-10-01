@@ -67,15 +67,30 @@ def portfolio_filename(
 
 
 def portfolio_totals(rows: list[dict]) -> dict[str, Decimal]:
-    """Suma neta de las filas incluidas en el resumen."""
+    """Suma neta de las filas incluidas en el resumen.
+
+    Se informan dos cifras porque no son lo mismo y la pantalla las separa:
+    - `balance`: suma neta, incluye los saldos a favor del cliente.
+    - `collectable`: solo saldos positivos, que es el "Cartera" de la barra
+      lateral de Cuenta Corriente.
+    """
     balance = sum((_money_decimal(row.get("balance")) for row in rows), Decimal("0.00"))
     overdue = sum((_money_decimal(row.get("overdue")) for row in rows), Decimal("0.00"))
     due_7 = sum((_money_decimal(row.get("due_7")) for row in rows), Decimal("0.00"))
+    collectable = sum(
+        (
+            amount
+            for amount in (_money_decimal(row.get("balance")) for row in rows)
+            if amount > 0
+        ),
+        Decimal("0.00"),
+    )
     with_balance = sum(
         1 for row in rows if _money_decimal(row.get("balance")) != Decimal("0.00")
     )
     return {
         "balance": balance,
+        "collectable": collectable,
         "overdue": overdue,
         "due_7": due_7,
         "clients": len(rows),
@@ -229,25 +244,24 @@ def _document_header(
 
 
 def _summary_table(totals: dict[str, Decimal], styles: dict) -> Table:
-    labels = ["CLIENTES", "CON SALDO", "VENCIDO", "PROX. 7 DIAS", "TOTAL CARTERA"]
+    labels = ["CLIENTES", "CON SALDO", "DEUDA", "VENCIDO", "PROX. 7 DIAS", "TOTAL NETO"]
     values = [
         str(totals["clients"]),
         str(totals["clients_with_balance"]),
+        _format_money(totals["collectable"]),
         _format_money(totals["overdue"]),
         _format_money(totals["due_7"]),
         _format_money(totals["balance"]),
     ]
-    cells: list[list] = []
-    for index, (label, value) in enumerate(zip(labels, values)):
-        cells.append(
-            [
-                Paragraph(label, styles["summary_label"]),
-                Paragraph(value, styles["summary_value"]),
-            ]
-        )
+    cards = [
+        [Paragraph(label, styles["summary_label"]), Paragraph(value, styles["summary_value"])]
+        for label, value in zip(labels, values)
+    ]
+    # Tres columnas por fila: con seis, los importes grandes se parten en dos lineas.
+    rows = [cards[0:3], cards[3:6]]
     table = Table(
-        [cells],
-        colWidths=[35.2 * mm] * len(cells),
+        rows,
+        colWidths=[60.6 * mm, 60.6 * mm, 60.6 * mm],
     )
     table.setStyle(
         TableStyle(
@@ -286,7 +300,7 @@ def _clients_table(rows: list[dict], styles: dict) -> Table:
     total = sum((_money_decimal(row.get("balance")) for row in rows), Decimal("0.00"))
     data.append(
         [
-            Paragraph("TOTAL CARTERA", styles["table_header"]),
+            Paragraph("TOTAL NETO", styles["table_header"]),
             "",
             Paragraph(_format_money(total), styles["table_header_right"]),
         ]

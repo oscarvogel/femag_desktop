@@ -34,10 +34,19 @@ Con **Vendedor = Luis** la pantalla mostraba correctamente sus clientes con sald
 
 Acción **“Resumen del vendedor”** en el menú **Acciones** de Cuenta Corriente, independiente de la selección de cliente:
 
-1. Genera un **PDF** con una fila por cliente (**nombre, CUIT, saldo**) y el **total de la cartera**, más un bloque de resumen (clientes, clientes con saldo, vencido, próximos 7 días, total).
-2. **Respeta los filtros visibles** (búsqueda, “Solo con saldo”, vendedor): lo que se ve es lo que se imprime, y el total es la **suma neta** de las filas incluidas.
+1. Genera un **PDF** con una fila por cliente (**nombre, CUIT, saldo**) y el **total neto**, más un bloque de resumen (clientes, clientes con saldo, **deuda**, vencido, próximos 7 días y total neto).
+2. **Respeta los filtros visibles** (búsqueda, “Solo con saldo”, vendedor): lo que se ve es lo que se imprime.
 3. Se puede **generar/imprimir**, **enviar por WhatsApp como documento adjunto** y **enviar por correo**.
 4. Envía al **vendedor destinatario**, que es externo y no usa el sistema. El que genera y envía es un usuario de la empresa.
+
+### Dos totales, y por qué
+
+El PDF informa **dos cifras** a propósito, porque la pantalla también las separa:
+
+- **DEUDA** — solo saldos positivos. Es el mismo número que la barra lateral muestra como “Cartera” (`customer_ledger.py:530` suma únicamente `balance > 0.01`).
+- **TOTAL NETO** — suma de todas las filas, incluidos los saldos a favor del cliente.
+
+Sin esto, un vendedor con clientes en saldo a favor veía en el PDF un número que no coincidía con el de su pantalla. Se detectó probando contra la salida real con la captura de pantalla, no leyendo el código.
 
 ## Decisiones tomadas
 
@@ -77,7 +86,8 @@ Acción **“Resumen del vendedor”** en el menú **Acciones** de Cuenta Corrie
 - [x] Con **Vendedor = Luis**, la acción genera un PDF con una fila por cliente (nombre, CUIT, saldo) y el total, ordenado de mayor a menor saldo.
 - [x] El archivo se llama `resumen_cuenta_corriente_luis_20261001.pdf`, con nombre sanitizado para Windows y fecha `AAAAMMDD`. Con **Todos** usa `_todos_` y con **Sin asignar** `_sin_asignar_`.
 - [x] El PDF respeta los filtros visibles de búsqueda, “Solo con saldo” y vendedor.
-- [x] El total impreso es exactamente la suma de las filas impresas.
+- [x] El **total neto** impreso es exactamente la suma de las filas impresas, incluidos los saldos negativos.
+- [x] La **DEUDA** del PDF coincide con la “Cartera” de la barra lateral cuando hay saldos a favor.
 - [x] Los saldos negativos se imprimen con signo y se incluyen en el total.
 - [x] La acción no requiere cliente seleccionado.
 - [x] **WhatsApp** manda el PDF como **documento adjunto** y registra el intento como `resumen_cuenta_vendedor`.
@@ -171,6 +181,9 @@ Generado 01/10/2026 13:59 · FEMAG · Vogel Consultoría   Página 1 de 1
 | 2026-10-01 | 27 tests nuevos del #581, todos en verde. |
 | 2026-10-01 | Validación contra salida real: PDF generado y migración de columna verificada sobre una copia de la base demo. |
 | 2026-10-01 | Identificado y documentado un fallo de test preexistente en `main`, no causado por este cambio. |
+| 2026-10-01 | `main` avanzó con el #452, que tocaba los mismos dos archivos de UI. Merge automático sin conflictos; verificado que conviven las tres secciones del menú. |
+| 2026-10-01 | **Desfase detectado contra la salida real:** el PDF sumaba la neta mientras la barra lateral suma solo positivos. Se agregó la cifra **DEUDA** al PDF para que coincidan, y se renombró el total a **TOTAL NETO**. |
+| 2026-10-01 | Agregado `scripts/generate_issue_581_screenshot.py` para capturar la evidencia de UX con datos sintéticos. |
 
 ## Bugs y hallazgos relevantes
 
