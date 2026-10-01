@@ -3268,6 +3268,7 @@ class LoadOrderEntryDialog(QDialog):
                         "unit": product.unit,
                         "precio_neto_unitario": product.precio_neto_unitario,
                         "descuento_porcentaje": product.descuento_porcentaje,
+                        "iva_porcentaje": product.iva_porcentaje,
                         "total": product.total,
                     }
                     for product in destination.products

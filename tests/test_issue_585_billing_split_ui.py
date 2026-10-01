@@ -399,6 +399,48 @@ def test_guardar_sin_reparto_no_deja_partido_el_renglon(db):
     assert line.tiene_reparto_facturacion is False
 
 
+def test_editar_un_producto_no_deja_el_iva_en_cero(db):
+    """Editar una linea de una orden existente no puede perder el IVA.
+
+    El payload de carga no traia el IVA, el dialogo lo mostraba en 0 y lo guardaba
+    en 0. Como el servicio solo recalcula el IVA cuando el valor es None, la linea
+    se persistia sin impuesto y su total perdia el IVA entero.
+    """
+    from app.models.load_orders import LoadOrder
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog, LoadOrderProductDialog
+
+    app = _app()
+    data = _master_data()
+    order = _create_order(data)
+    service = LoadOrderService(current_user="issue585")
+    before = LoadOrder.get_by_id(order.id).products[0]
+    assert before.iva_porcentaje == 21.0
+    total_esperado = before.total
+
+    dialog = LoadOrderEntryDialog(service, "issue585", order=order)
+    app.processEvents()
+
+    borrador = dialog.destinations[0]["products"][0]
+    assert borrador["iva_porcentaje"] == 21.0
+
+    # El operador edita la linea y toca el reparto de paso.
+    editor = LoadOrderProductDialog(dialog, client=data["client"], product=borrador)
+    editor.findChild(QDoubleSpinBox, "productDialogCantidadFacturarDespuesInput").setValue(400.0)
+    editor.findChild(QPushButton, "confirmProductButton").click()
+    app.processEvents()
+    assert editor.product["iva_porcentaje"] == 21.0
+
+    dialog.destinations[0]["products"][0] = editor.product
+    dialog._save()
+    app.processEvents()
+
+    after = LoadOrder.get_by_id(order.id).products[0]
+    assert after.iva_porcentaje == 21.0
+    assert after.total == total_esperado
+    assert after.cantidad_facturar_ahora == 800.0
+
+
 def test_billing_split_values_por_defecto_y_con_reparto():
     from app.ui.desktop_app import _billing_split_values
 
