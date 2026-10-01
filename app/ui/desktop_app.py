@@ -3264,6 +3264,7 @@ class LoadOrderEntryDialog(QDialog):
                         "product_id": product.product.id,
                         "product_label": product.product.name,
                         "quantity": product.quantity,
+                        "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
                         "unit": product.unit,
                         "precio_neto_unitario": product.precio_neto_unitario,
                         "descuento_porcentaje": product.descuento_porcentaje,

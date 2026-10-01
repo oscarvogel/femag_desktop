@@ -265,6 +265,50 @@ def test_grillas_muestran_las_dos_columnas(db):
     assert "A facturar después" in review_headers
 
 
+def test_editar_la_orden_conserva_el_reparto_en_pantalla(db):
+    """El reparto tiene que sobrevivir a la reapertura de la orden.
+
+    El dialogo de edicion reconstruye los borradores por su cuenta. Si ese payload
+    no trae el reparto, al reabrir una orden guardada el operador ve la parte
+    pendiente en cero, y al guardar de nuevo el reparto se pierde en silencio.
+    """
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    data = _master_data()
+    order = _create_order(data, cantidad_ahora=800.0)
+
+    dialog = LoadOrderEntryDialog(
+        LoadOrderService(current_user="issue585"), "issue585", order=order
+    )
+    app.processEvents()
+
+    draft = dialog.destinations[0]["products"][0]
+    assert draft["cantidad_facturar_ahora"] == 800.0
+
+    # Y la grilla del paso Productos tiene que mostrar las dos partes.
+    assert dialog.product_table.item(0, 2).text() == "800"
+    assert dialog.product_table.item(0, 3).text() == "400"
+
+
+def test_editar_una_orden_sin_reparto_no_marca_reparto(db):
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = _app()
+    order = _create_order(_master_data())
+
+    dialog = LoadOrderEntryDialog(
+        LoadOrderService(current_user="issue585"), "issue585", order=order
+    )
+    app.processEvents()
+
+    assert dialog.destinations[0]["products"][0]["cantidad_facturar_ahora"] is None
+    assert dialog.product_table.item(0, 2).text() == "1200"
+    assert dialog.product_table.item(0, 3).text() == "0"
+
+
 def test_billing_split_values_por_defecto_y_con_reparto():
     from app.ui.desktop_app import _billing_split_values
 
