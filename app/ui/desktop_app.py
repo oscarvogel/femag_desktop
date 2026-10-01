@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 import webbrowser
 
@@ -84,6 +85,7 @@ from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
+from app.services import salesperson_portfolio_print_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
@@ -134,12 +136,14 @@ class _AccountStatementMailWorker(QRunnable):
         recipients: tuple[str, ...],
         subject: str,
         pdf_path: Path,
+        body: str | None = None,
     ):
         super().__init__()
         self.client_name = client_name
         self.recipients = recipients
         self.subject = subject
         self.pdf_path = pdf_path
+        self.body = body
         self.signals = _AccountStatementMailSignals()
 
     def run(self) -> None:
@@ -149,6 +153,7 @@ class _AccountStatementMailWorker(QRunnable):
                 recipients=self.recipients,
                 subject=self.subject,
                 pdf_path=self.pdf_path,
+                body=self.body,
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
@@ -755,6 +760,9 @@ class FemagDesktopWindow(QMainWindow):
             whatsapp_budget_callback=self._share_budget_whatsapp,
             print_budget_callback=self._print_budget_for_movement,
             email_statement_callback=self._email_account_statement,
+            portfolio_print_callback=self._print_salesperson_portfolio,
+            portfolio_whatsapp_callback=self._share_salesperson_portfolio_whatsapp,
+            portfolio_email_callback=self._email_salesperson_portfolio,
             print_receipt_callback=(
                 self._print_payment_receipt
                 if _can_print_payment_receipts(self.user)
@@ -776,6 +784,139 @@ class FemagDesktopWindow(QMainWindow):
             QMessageBox.warning(self, "Extracto", f"No se pudo generar el extracto: {exc}")
             return
         _open_print_output(pdf_path)
+
+    def _export_salesperson_portfolio(self, summary: dict) -> Path | None:
+        """Genera el PDF del resumen y lo deja en la carpeta de impresión."""
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            return salesperson_portfolio_print_service.export_salesperson_portfolio(
+                salesperson=summary.get("salesperson"),
+                rows=summary.get("rows") or [],
+                output_dir=self._print_output_dir,
+                label=summary.get("label"),
+                slug=summary.get("slug"),
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Resumen de cartera", f"No se pudo generar el resumen: {exc}"
+            )
+            return None
+
+    def _print_salesperson_portfolio(self, summary: dict) -> None:
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is not None:
+            _open_print_output(pdf_path)
+
+    def _share_salesperson_portfolio_whatsapp(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.phone or "").strip():
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"El vendedor {salesperson.name} no tiene un telefono cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        dialog = WhatsAppSendDialog(
+            client_name=salesperson.name,
+            phone=salesperson.phone,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = self._export_salesperson_portfolio(summary)
+            if pdf_path is None:
+                return
+            envio = service.create_attempt(
+                tipo_documento="resumen_cuenta_vendedor",
+                documento_id=str(salesperson.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        workers = getattr(self, "_account_statement_whatsapp_workers", set())
+        self._account_statement_whatsapp_workers = workers
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda result: QMessageBox.information(
+                self, "WhatsApp", f"El resumen fue enviado correctamente a {result}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(
+                self, "WhatsApp", f"No se pudo enviar el resumen: {message}"
+            )
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        QThreadPool.globalInstance().start(worker)
+
+    def _email_salesperson_portfolio(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.email or "").strip():
+            QMessageBox.warning(
+                self,
+                "Correo",
+                f"El vendedor {salesperson.name} no tiene un correo cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is None:
+            return
+
+        label = summary.get("label") or salesperson.name
+        totals = salesperson_portfolio_print_service.portfolio_totals(
+            summary.get("rows") or []
+        )
+        subject = f"Resumen de cuenta corriente - {label} - {date.today():%d/%m/%Y}"
+        body = (
+            f"Hola {salesperson.name},\n\n"
+            f"Adjuntamos el resumen de cuenta corriente de {label}: "
+            f"{totals['clients_with_balance']} clientes con saldo sobre "
+            f"{totals['clients']} de la cartera.\n\n"
+            "Saludos.\nGRAEF HERMANOS S.R.L."
+        )
+        recipients = (salesperson.email.strip().lower(),)
+        worker = _AccountStatementMailWorker(
+            client_name=salesperson.name,
+            recipients=recipients,
+            subject=subject,
+            pdf_path=pdf_path,
+            body=body,
+        )
+        workers = getattr(self, "_account_statement_mail_workers", set())
+        self._account_statement_mail_workers = workers
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda address: QMessageBox.information(
+                self, "Correo", f"El resumen fue enviado correctamente a {address}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(self, "Correo", message)
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        _start_mail_worker(worker)
 
     def _share_account_statement_whatsapp(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
