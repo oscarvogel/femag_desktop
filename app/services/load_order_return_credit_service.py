@@ -6,6 +6,7 @@ from datetime import date
 from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrderClosure, LoadOrderReturnLine
 from app.services.audit_service import AuditService
+from app.utils.datetime_utils import as_datetime
 
 
 class LoadOrderReturnCreditError(ValueError):
@@ -66,7 +67,11 @@ class LoadOrderReturnCreditService:
                 vat_amount=0.0,
                 total_amount=-amount,
                 currency=self.CURRENCY,
-                movement_date=(closure.closed_at.date() if closure.closed_at else date.today()),
+                movement_date=(
+                    as_datetime(closure.closed_at).date()
+                    if closure.closed_at
+                    else date.today()
+                ),
                 due_date=None,
                 description=(
                     f"Nota de crédito por devolución OC-{order.order_number:06d}"
