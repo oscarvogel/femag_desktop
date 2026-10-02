@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import date
 
 from app.models.accounting import ClientAccountMovement
+from app.models.budgets import Budget
 from app.models.load_orders import LoadOrderClosure, LoadOrderReturnLine
 from app.services.audit_service import AuditService
 from app.utils.datetime_utils import as_datetime
@@ -24,16 +25,25 @@ class LoadOrderReturnCreditService:
 
     def generate_for_closure(self, closure: LoadOrderClosure) -> list[ClientAccountMovement]:
         closure = self._require_closure(closure)
-        grouped: dict[int, list[LoadOrderReturnLine]] = defaultdict(list)
+        # Un movimiento por presupuesto, no uno por cliente: las dos partes son
+        # deudas distintas con vencimientos distintos y acreditarlas juntas
+        # distorsionaria el reporte de cobranza.
+        grouped: dict[tuple[int, str], list[LoadOrderReturnLine]] = defaultdict(list)
         for row in closure.return_lines:
-            grouped[row.client_id].append(row)
+            grouped[(row.client_id, row.timing)].append(row)
 
         movements: list[ClientAccountMovement] = []
-        for client_id, rows in grouped.items():
+        for (client_id, timing), rows in grouped.items():
             amount = round(sum(float(row.credit_amount) for row in rows), 2)
             if amount <= 0:
                 continue
-            source_ref = self._source_ref(closure, client_id)
+            source_ref = self._source_ref(closure, client_id, timing)
+            budget = Budget.get_or_none(
+                (Budget.load_order == closure.order)
+                & (Budget.client == client_id)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+                & (Budget.timing == timing)
+            )
             existing = (
                 ClientAccountMovement.select()
                 .where(
@@ -59,6 +69,7 @@ class LoadOrderReturnCreditService:
             movement = ClientAccountMovement.create(
                 client=client_id,
                 load_order=order,
+                budget=budget,
                 payment=None,
                 movement_type=ClientAccountMovement.TYPE_RETURN_CREDIT,
                 amount=-amount,
@@ -74,7 +85,8 @@ class LoadOrderReturnCreditService:
                 ),
                 due_date=None,
                 description=(
-                    f"Nota de crédito por devolución OC-{order.order_number:06d}"
+                    f"Nota de crédito por devolución OC-{order.order_number:06d} "
+                    f"({'facturado hoy' if timing == 'immediate' else 'a facturar despues'})"
                 ),
                 observations=details or None,
                 source_ref=source_ref,
@@ -159,8 +171,10 @@ class LoadOrderReturnCreditService:
         return reversals
 
     @staticmethod
-    def _source_ref(closure: LoadOrderClosure, client_id: int) -> str:
-        return f"LoadOrderClosure:{closure.id}:ReturnCredit:{client_id}"
+    def _source_ref(closure: LoadOrderClosure, client_id: int, timing: str) -> str:
+        # El prefijo se conserva para que la busqueda por prefijo al revertir
+        # siga encontrando los creditos de las dos partes.
+        return f"LoadOrderClosure:{closure.id}:ReturnCredit:{client_id}:{timing}"
 
     @staticmethod
     def _require_closure(closure: LoadOrderClosure) -> LoadOrderClosure:
