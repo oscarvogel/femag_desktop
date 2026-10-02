@@ -790,7 +790,8 @@ class FemagDesktopWindow(QMainWindow):
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
         try:
-            return salesperson_portfolio_print_service.export_salesperson_portfolio(
+            return salesperson_portfolio_print_service.export_salesperson_portfolio_report(
+                report_type=summary.get("report_type"),
                 salesperson=summary.get("salesperson"),
                 rows=summary.get("rows") or [],
                 output_dir=self._print_output_dir,
@@ -888,7 +889,15 @@ class FemagDesktopWindow(QMainWindow):
         totals = salesperson_portfolio_print_service.portfolio_totals(
             summary.get("rows") or []
         )
-        subject = f"Resumen de cuenta corriente - {label} - {date.today():%d/%m/%Y}"
+        is_detailed = (
+            summary.get("report_type")
+            == salesperson_portfolio_print_service.REPORT_TYPE_DETAIL
+        )
+        # El resumen conserva el asunto actual; el detallado lo aclara.
+        kind = " (detallado)" if is_detailed else ""
+        subject = (
+            f"Resumen de cuenta corriente{kind} - {label} - {date.today():%d/%m/%Y}"
+        )
         body = (
             f"Hola {salesperson.name},\n\n"
             f"Adjuntamos el resumen de cuenta corriente de {label}: "

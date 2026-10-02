@@ -40,6 +40,58 @@ from app.services.account_statement_print_service import (
 FILENAME_PREFIX = "resumen_cuenta_corriente"
 ALL_SELLERS_SLUG = "todos"
 
+# Tipos de reporte que puede elegir el operador (#609).
+REPORT_TYPE_SUMMARY = "resumido"
+REPORT_TYPE_DETAIL = "detallado"
+REPORT_TYPE_LABELS = {
+    REPORT_TYPE_SUMMARY: "Resumido",
+    REPORT_TYPE_DETAIL: "Detallado",
+}
+REPORT_TYPE_CHOICES = [
+    REPORT_TYPE_LABELS[REPORT_TYPE_SUMMARY],
+    REPORT_TYPE_LABELS[REPORT_TYPE_DETAIL],
+]
+REPORT_TYPE_BY_LABEL = {label: value for value, label in REPORT_TYPE_LABELS.items()}
+
+
+def export_salesperson_portfolio_report(
+    *,
+    report_type: str | None,
+    salesperson: Salesperson | None,
+    rows: list[dict],
+    output_dir: str | Path,
+    generated_at: datetime | None = None,
+    label: str | None = None,
+    slug: str | None = None,
+) -> Path:
+    """Punto de entrada unico del reporte: elige resumen o detalle.
+
+    El resumen es el camino existente y no cambia; el detallado agrega la
+    composicion del saldo de cada cliente.
+    """
+    if report_type == REPORT_TYPE_DETAIL:
+        # Import local: el servicio detallado se apoya en las reglas de este.
+        from app.services.salesperson_portfolio_detail_service import (
+            export_salesperson_portfolio_detailed,
+        )
+
+        return export_salesperson_portfolio_detailed(
+            salesperson=salesperson,
+            rows=rows,
+            output_dir=output_dir,
+            generated_at=generated_at,
+            label=label,
+            slug=slug,
+        )
+    return export_salesperson_portfolio(
+        salesperson=salesperson,
+        rows=rows,
+        output_dir=output_dir,
+        generated_at=generated_at,
+        label=label,
+        slug=slug,
+    )
+
 
 def portfolio_label(salesperson: Salesperson | None, *, label: str | None = None) -> str:
     """Titular del reporte: el vendedor, o el texto del filtro activo."""

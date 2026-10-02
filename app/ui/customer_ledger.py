@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -34,6 +35,11 @@ from app.services.ledger_query_service import (
     client_portfolio_rows,
     movements_for_client,
     running_balance,
+)
+from app.services.salesperson_portfolio_print_service import (
+    REPORT_TYPE_BY_LABEL,
+    REPORT_TYPE_CHOICES,
+    REPORT_TYPE_SUMMARY,
 )
 
 
@@ -120,6 +126,9 @@ class CustomerLedgerPage(QWidget):
         self._detail_client_id: int | None = None
         self._detail_movements_cache: list[ClientAccountMovement] = []
         self._detail_balances_cache: list[float] = []
+        # Tipo de reporte elegido para "Resumen del vendedor" (#609). Arranca en
+        # el resumen, que es el reporte que ya existia.
+        self._portfolio_report_type: str = REPORT_TYPE_SUMMARY
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 12, 18, 18)
@@ -878,11 +887,30 @@ class CustomerLedgerPage(QWidget):
             "rows": self._filter_balances(self._all_balances),
             "label": label,
             "slug": slug,
+            "report_type": self._portfolio_report_type,
         }
+
+    def _ask_portfolio_report_type(self) -> str | None:
+        """Pregunta Resumido o Detallado. `None` si el operador cancela."""
+        choice, accepted = QInputDialog.getItem(
+            self,
+            "Tipo de reporte",
+            "Tipo de reporte:",
+            REPORT_TYPE_CHOICES,
+            0,
+            False,
+        )
+        if not accepted:
+            return None
+        return REPORT_TYPE_BY_LABEL.get(choice, REPORT_TYPE_SUMMARY)
 
     def _on_portfolio_print(self) -> None:
         if self.portfolio_print_callback is None:
             return
+        report_type = self._ask_portfolio_report_type()
+        if report_type is None:
+            return
+        self._portfolio_report_type = report_type
         summary = self.portfolio_summary()
         if summary is not None:
             self.portfolio_print_callback(summary)

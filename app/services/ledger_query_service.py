@@ -23,6 +23,25 @@ def _movement_amount(movement: ClientAccountMovement) -> Decimal:
     return _money(movement.total_amount)
 
 
+def money_decimal(value) -> Decimal:
+    """Redondeo monetario unico del proyecto (Decimal, ROUND_HALF_UP)."""
+    return _money(value)
+
+
+def movement_debit_credit(movement: ClientAccountMovement) -> tuple[Decimal, Decimal]:
+    """Separa debe/haber con la convencion de signo de la grilla de Cuenta Corriente.
+
+    Un importe positivo es debe y uno negativo es haber. Devuelve siempre
+    `Decimal`: el detalle del reporte por vendedor no puede sumar con `float`.
+    """
+    amount = _movement_amount(movement)
+    if amount > 0:
+        return amount, Decimal("0.00")
+    if amount < 0:
+        return Decimal("0.00"), abs(amount)
+    return Decimal("0.00"), Decimal("0.00")
+
+
 def _balance_from_movements(movements: Iterable[ClientAccountMovement]) -> Decimal:
     total = Decimal("0.00")
     for movement in movements:
@@ -226,11 +245,25 @@ def client_balances() -> list[dict]:
     return result
 
 
-def running_balance(movements: Iterable[ClientAccountMovement]) -> list[float]:
-    balances: list[float] = []
+def running_balance_decimals(movements: Iterable[ClientAccountMovement]) -> list[Decimal]:
+    """Saldo acumulado por movimiento, en Decimal.
+
+    Esta es la unica implementacion del saldo acumulado. `running_balance()`
+    convierte esta misma lista a `float` para la grilla, de modo que el detalle
+    del reporte y la pantalla parten literalmente del mismo calculo.
+    """
+    balances: list[Decimal] = []
     running = Decimal("0.00")
     for movement in movements:
         running += _movement_amount(movement)
         running = running.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-        balances.append(float(running))
+        balances.append(running)
     return balances
+
+
+def running_balance(movements: Iterable[ClientAccountMovement]) -> list[float]:
+    """Saldo acumulado en `float` para la grilla de Cuenta Corriente.
+
+    No recalcula nada: delega en `running_balance_decimals()`.
+    """
+    return [float(balance) for balance in running_balance_decimals(movements)]
