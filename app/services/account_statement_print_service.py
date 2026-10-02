@@ -407,10 +407,10 @@ def _movements_table(
     return table
 
 
-def _balance_block(balance: Decimal, styles: dict) -> Table:
+def _balance_block(balance: Decimal, styles: dict, *, label: str = "SALDO ACTUAL") -> Table:
     table = Table(
         [[
-            Paragraph("SALDO ACTUAL", styles["balance_label"]),
+            Paragraph(label, styles["balance_label"]),
             Paragraph(_format_money(balance), styles["balance_value"]),
         ]],
         colWidths=[55 * mm, 55 * mm],
