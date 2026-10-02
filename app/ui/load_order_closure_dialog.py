@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -58,27 +59,36 @@ class LoadOrderClosureDialog(QDialog):
 
         self.setWindowTitle(f"Cerrar entrega OC-{self.order.order_number:06d}")
         self.setModal(True)
-        self.resize(1050, 760)
+        self.resize(1240, 760)
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("Renglones emitidos y devoluciones"))
+        # Rotulos cortos: con nueve columnas los nombres largos se cortan y el
+        # selector quedaba con el texto a medias.
         headers = [
             "Cliente",
             "Producto",
             "Cantidad",
-            "Precio unitario",
+            "P. unitario",
             "Total",
         ]
         if self._split_enabled:
-            headers.append("Se descuenta de")
-        headers += ["Cant. devuelta", "Motivo devolución", "A acreditar"]
+            headers.append("Parte")
+        headers += ["Devuelve", "Motivo", "A acreditar"]
+        self._motivo_column = len(headers) - 2
         self.lines_table = QTableWidget(0, len(headers))
         self.lines_table.setObjectName("loadOrderClosureLinesTable")
         self.lines_table.setHorizontalHeaderLabels(headers)
         self.lines_table.setMinimumHeight(170)
-        self.lines_table.horizontalHeader().setStretchLastSection(True)
+        # Anchos fijos para las columnas de dato y el resto elastico. Con
+        # ResizeToContents la tabla se pasaba del ancho y aparecia scroll
+        # horizontal, que es peor que un rotulo corto.
+        header = self.lines_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(False)
         self._load_lines()
         layout.addWidget(self.lines_table)
+        self._apply_column_widths()
 
         payment_form = QFormLayout()
         self.client_combo = QComboBox()
@@ -226,6 +236,9 @@ class LoadOrderClosureDialog(QDialog):
                 timing_combo.setObjectName(f"loadOrderClosureReturnTiming_{line.id}")
                 timing_combo.addItem("Facturado hoy", "immediate")
                 timing_combo.addItem("A facturar después", "deferred")
+                # Sin ancho minimo el combo corta "Facturado hoy" a "Factura".
+                timing_combo.setMinimumWidth(150)
+                timing_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
                 self.lines_table.setCellWidget(row, column, timing_combo)
                 column += 1
 
@@ -258,6 +271,24 @@ class LoadOrderClosureDialog(QDialog):
                         self._refresh_return_summary(),
                     )
                 )
+
+    def _apply_column_widths(self) -> None:
+        """Ancho util por columna, con producto y motivo elasticos."""
+        table = self.lines_table
+        header = table.horizontalHeader()
+        total = table.columnCount()
+        motivo = self._motivo_column
+        widths = {0: 150, 2: 95, 3: 115, 4: 135}
+        if self._split_enabled:
+            widths[5] = 165
+        widths[total - 2] = 105   # devuelve
+        widths[total - 1] = 135   # a acreditar
+        for column, width in widths.items():
+            if column < total:
+                table.setColumnWidth(column, width)
+        for column in (1, motivo):
+            if column < total:
+                header.setSectionResizeMode(column, QHeaderView.Stretch)
 
     @staticmethod
     def _part_max(line, timing_combo) -> float:
