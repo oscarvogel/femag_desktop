@@ -79,4 +79,11 @@ class ProductionBag(BaseModel):
 
     class Meta:
         table_name = "production_bag"
-        indexes = ((("part",), False), (("product",), False))
+        # Sin indices declarados a proposito: `part` y `product` son claves
+        # foraneas y ya generan su propio indice. Declarar aqui un indice sobre
+        # esos mismos campos produce el MISMO nombre que el indice automatico de
+        # la FK (peewee deriva el nombre de la columna, que ya trae el sufijo
+        # _id) y MySQL responde 1061 Duplicate key name, con lo que
+        # create_tables() aborta y la app no arranca. SQLite tolera el nombre
+        # duplicado, por eso el choque solo aparece contra MySQL.
+        pass
