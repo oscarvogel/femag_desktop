@@ -205,7 +205,12 @@ class CustomerLedgerPage(QWidget):
         self.clients_table.setShowGrid(False)
         header_view = self.clients_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.Stretch)
-        header_view.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        # La columna Saldo lleva ancho fijo a proposito. Con ResizeToContents Qt
+        # mide el texto de cada celda en cada render para calcular el ancho: con la
+        # cartera completa (~872 clientes) la pantalla se bloqueaba casi 6 s.
+        # El ancho cubre importes de 10 o mas digitos sin truncar. Ver issue #602.
+        header_view.setSectionResizeMode(1, QHeaderView.Interactive)
+        self.clients_table.setColumnWidth(1, 150)
         self.clients_table.verticalHeader().setDefaultSectionSize(46)
         self.clients_table.currentCellChanged.connect(self._on_client_selected)
         layout.addWidget(self.clients_table, 1)
