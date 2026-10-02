@@ -105,16 +105,28 @@ class BudgetService:
             & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
             & (Budget.timing == timing)
         )
-        if existing is not None:
-            backfill = self._observations_for_order_client(order, client, timing)
-            if backfill and not (existing.observations or "").strip():
-                existing.observations = backfill
-                existing.save(only=[Budget.observations])
-            return existing
-
         rows = self._load_order_rows_for_client(order, client)
         if not rows:
             raise ValueError("El cliente no tiene mercadería en la orden de carga.")
+
+        if existing is not None:
+            if self._budget_matches_order(existing, rows, timing):
+                backfill = self._observations_for_order_client(order, client, timing)
+                if backfill and not (existing.observations or "").strip():
+                    existing.observations = backfill
+                    existing.save(only=[Budget.observations])
+                return existing
+            # El documento no refleja la mercaderia actual. Mientras la orden se
+            # puede editar se rehace con el mismo numero; una vez emitida no se
+            # toca, porque la orden tampoco cambia mas y no se puede avisar.
+            if not order.is_unissued:
+                raise ValueError(
+                    f"El presupuesto {existing.display_number} no coincide con la mercaderia "
+                    f"de la OC-{order.order_number:06d}. La orden ya esta emitida y no se puede "
+                    "corregir sola: anule la orden y genere una nueva."
+                )
+            self._regenerate_from_order(existing, order, rows, timing)
+            return existing
 
         # Los importes de cada renglón se recalculan con la rutina monetaria
         # única y se persisten a partir de ese mismo resultado. Los totales de
@@ -321,6 +333,93 @@ class BudgetService:
             discount_percentage=row.descuento_porcentaje,
             vat_percentage=row.iva_porcentaje,
         )
+
+    def _budget_matches_order(
+        self, budget: Budget, rows: list[LoadOrderProduct], timing: str
+    ) -> bool:
+        """Si el detalle del presupuesto sigue siendo el de la orden.
+
+        Se comparan cantidad e importe por renglon de origen. Si no coinciden, el
+        documento quedo viejo y sus importes no son los de la mercaderia.
+        """
+        expected = {}
+        for row in rows:
+            amounts = self._line_amounts_for_timing(row, timing)
+            if amounts is not None:
+                expected[row.id] = (
+                    quantize_money(amounts.quantity),
+                    quantize_money(amounts.total),
+                )
+        actual = {
+            item.source_order_product_id: (
+                quantize_money(item.quantity),
+                quantize_money(item.total),
+            )
+            for item in budget.items
+            if item.source_order_product_id is not None
+        }
+        if not expected:
+            # La parte ya no tiene mercaderia: el documento sobra.
+            return not actual
+        return expected == actual
+
+    def _regenerate_from_order(
+        self,
+        budget: Budget,
+        order: LoadOrder,
+        rows: list[LoadOrderProduct],
+        timing: str,
+    ) -> None:
+        """Rehace el detalle de un presupuesto con la mercaderia actual.
+
+        Solo se usa con la orden pendiente, donde todavia no se mando nada y el
+        numero del presupuesto se conserva. Si la parte quedo sin mercaderia, el
+        documento se anula en vez de quedar vacio.
+        """
+        BudgetItem.delete().where(BudgetItem.budget == budget).execute()
+        lines = []
+        for row in rows:
+            amounts = self._line_amounts_for_timing(row, timing)
+            if amounts is not None:
+                lines.append((row, amounts))
+        if not lines:
+            budget.status = Budget.STATUS_ANNULLED
+            budget.net_amount = 0.0
+            budget.discount_amount = 0.0
+            budget.vat_amount = 0.0
+            budget.total_amount = 0.0
+            budget.observations = self._observations_for_order_client(order, budget.client, timing)
+            budget.save()
+            self._record("anular_parte_sin_mercaderia", budget)
+            return
+
+        totals = compute_totals(amounts for _row, amounts in lines)
+        budget.net_amount = money_to_float(totals.net_amount)
+        budget.discount_amount = money_to_float(totals.discount_amount)
+        budget.vat_amount = money_to_float(totals.vat_amount)
+        budget.total_amount = money_to_float(totals.total_amount)
+        budget.status = Budget.STATUS_ACTIVE
+        budget.observations = self._observations_for_order_client(order, budget.client, timing)
+        budget.save()
+        for row, amounts in lines:
+            BudgetItem.create(
+                budget=budget,
+                product=row.product,
+                source_order_product=row,
+                quantity=money_to_float(amounts.quantity),
+                unit=str(row.unit or ""),
+                unit_price=money_to_float(amounts.unit_price),
+                discount_percentage=money_to_float(amounts.discount_percentage),
+                net_subtotal=money_to_float(amounts.net_subtotal),
+                discount_amount=money_to_float(amounts.discount_amount),
+                net_taxable=money_to_float(amounts.net_taxable),
+                vat_percentage=money_to_float(amounts.vat_percentage),
+                vat_amount=money_to_float(amounts.vat_amount),
+                total=money_to_float(amounts.total),
+                observations=row.observations,
+            )
+        self.assert_monetary_integrity(budget)
+        self._record("recalcular_desde_orden", budget)
 
     def has_deferred_portion(self, order: LoadOrder, client: Client) -> bool:
         """True si a ese cliente le queda mercaderia para facturar despues.
