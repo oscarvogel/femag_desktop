@@ -54,6 +54,7 @@ from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
+from app.utils.datetime_utils import as_datetime
 
 
 AUTO_ABM_TECHNICAL_DEBT = (
@@ -1253,7 +1254,7 @@ class ProductCostDialog(QDialog):
         self.history_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             values = [
-                row.created_at.strftime("%d/%m/%Y %H:%M"),
+                as_datetime(row.created_at).strftime("%d/%m/%Y %H:%M"),
                 self._cost_text(row.previous_cost),
                 self._cost_text(row.new_cost),
                 row.changed_by,

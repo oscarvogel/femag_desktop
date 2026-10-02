@@ -27,6 +27,7 @@ from app.models.masters import Client, Salesperson
 from app.models.payments import ClientPayment
 from app.ui.financial_history_dialog import FinancialHistoryDialog
 from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+from app.utils.datetime_utils import as_datetime
 from app.services.ledger_query_service import (
     client_portfolio_rows,
     movements_for_client,
@@ -1079,6 +1080,9 @@ class CustomerLedgerPage(QWidget):
 
 
 def _display_datetime(value) -> str:
+    value = as_datetime(value)
+    if value is None:
+        return ""
     if value.tzinfo is not None:
         value = value.astimezone()
     return value.strftime("%d/%m/%Y %H:%M")

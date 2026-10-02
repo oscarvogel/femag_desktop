@@ -18,6 +18,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.ledger_query_service import movements_for_client, running_balance
+from app.utils.datetime_utils import as_datetime
 
 
 BRAND_DARK = colors.HexColor("#16324A")
@@ -160,7 +161,8 @@ def _reference(movement: ClientAccountMovement) -> str:
 def _movement_date(movement: ClientAccountMovement) -> str:
     if movement.movement_date is not None:
         return movement.movement_date.strftime("%d/%m/%Y")
-    return movement.created_at.strftime("%d/%m/%Y")
+    # created_at puede volver como texto desde SQLite (#615).
+    return as_datetime(movement.created_at).strftime("%d/%m/%Y")
 
 
 def _description(movement: ClientAccountMovement) -> str:
