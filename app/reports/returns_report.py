@@ -13,6 +13,7 @@ from app.models.load_orders import (
     LoadOrderReturnLine,
 )
 from app.models.masters import Client, ClientAddress, Product
+from app.utils.datetime_utils import as_datetime
 from app.reports.managerial_sales_dispatch import (
     ManagerialSalesDispatchService,
     SalesDispatchFilters,
@@ -164,7 +165,9 @@ class ReturnsReportService:
                 destination_label = " · ".join(
                     part for part in (address.city, address.address) if (part or "").strip()
                 )
-            return_date = closure.closed_at.date() if closure.closed_at else order.date
+            return_date = (
+                as_datetime(closure.closed_at).date() if closure.closed_at else order.date
+            )
             weight = max(float(product.peso_unitario_kg or 0) if product else 0.0, 0.0)
             quantity = max(float(return_line.quantity or 0), 0.0)
             has_credit = (closure.id, return_line.client_id) in credit_by_closure_client
