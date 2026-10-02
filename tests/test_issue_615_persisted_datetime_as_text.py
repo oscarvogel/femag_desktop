@@ -142,7 +142,9 @@ def test_la_columna_fecha_de_cuenta_corriente_no_revienta(db):
             break
 
     assert page.movements_table.rowCount() == 1
-    assert page.movements_table.item(0, 0).text() == "15/06/2026 10:00"
+    # Solo la parte de fecha: con peewee 4 el valor llega como datetime *aware* y
+    # se convierte a hora local, que depende del TZ del runner.
+    assert "15/06/2026" in page.movements_table.item(0, 0).text()
 
 
 def test_la_ventana_de_auditoria_abre_y_muestra_la_fecha(db):
@@ -174,7 +176,10 @@ def test_el_diálogo_de_historial_financiero_abre(db):
     )
     # Releido de la base: created_at vuelve como texto.
     desde_base = ClientAccountMovement.get_by_id(movement.id)
-    assert isinstance(desde_base.created_at, str)
+    # No se asserts que venga como texto: eso depende de la version de peewee
+    # (3 devuelve texto, 4 parsea el offset). Se fuerza el texto para ejercitar
+    # el camino roto en las dos versiones.
+    desde_base.created_at = "2026-06-15 10:00:00+00:00"
 
     dialog = _widget("financial_history_dialog", "FinancialHistoryDialog", movement=desde_base)
     assert dialog is not None
@@ -183,7 +188,7 @@ def test_el_diálogo_de_historial_financiero_abre(db):
 def test_el_recibo_anulado_muestra_la_fecha(db):
     from app.services.payment_receipt_print_service import _display_datetime
 
-    # annulled_at releido de la base llega como texto con offset.
+    # annulled_at releido de la base llega como texto con offset en peewee 3.
     assert _display_datetime("2026-06-15 10:00:00+00:00") != ""
 
 
@@ -203,5 +208,8 @@ def test_el_extracto_de_cuenta_corriente_muestra_la_fecha(db):
         created_at="2026-06-15 10:00:00",
     )
     desde_base = ClientAccountMovement.get_by_id(movement.id)
+    # Se fuerza el texto para que el test ejercite el camino roto con cualquier
+    # version de peewee (la 3 devuelve texto; la 4 lo parsea).
+    desde_base.created_at = "2026-06-15 10:00:00+00:00"
 
     assert _movement_date(desde_base) == "15/06/2026"
