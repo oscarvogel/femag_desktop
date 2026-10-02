@@ -134,6 +134,7 @@ def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    _drop_legacy_production_kilos(database)
     if hasattr(database, "atomic"):
         _backfill_client_emails(database)
         _backfill_product_classification(database)
@@ -534,3 +535,55 @@ def _sqlite_drop_not_null(database, table_name: str, column_name: str) -> None:
     finally:
         if foreign_keys_were_enabled:
             database.execute_sql("PRAGMA foreign_keys = ON")
+
+
+def _sqlite_drop_column(database, table_name: str, column_name: str) -> None:
+    foreign_keys_were_enabled = bool(database.execute_sql("PRAGMA foreign_keys").fetchone()[0])
+    if foreign_keys_were_enabled:
+        database.execute_sql("PRAGMA foreign_keys = OFF")
+    try:
+        migrate(SqliteMigrator(database).drop_column(table_name, column_name))
+    finally:
+        if foreign_keys_were_enabled:
+            database.execute_sql("PRAGMA foreign_keys = ON")
+
+
+def _drop_legacy_production_kilos(database) -> None:
+    """Retira los kg por turno de produccion (#580).
+
+    En planta no se pueden medir los kg de mandioca procesada ni los de fecula
+    producida por turno, asi que la pantalla terminaba cargando numeros
+    inventados que despues alimentaban un rendimiento real engañoso. A pedido
+    del owner esos datos se descartan.
+
+    Primero se borran los partes que quedaron sin bolsas, porque sin lineas no
+    representan produccion. Despues se eliminan las columnas: ademas estaban
+    declaradas NOT NULL sin default, con lo cual impedirian registrar los
+    partes nuevos. La operacion es idempotente: si las columnas ya no existen,
+    no vuelve a hacer nada.
+    """
+    from app.models.production import ProductionBag, ProductionPart
+
+    table_name = ProductionPart._meta.table_name
+    if not hasattr(database, "get_tables") or table_name not in database.get_tables():
+        return
+    existing_columns = {column.name for column in database.get_columns(table_name)}
+    legacy_columns = ("cassava_processed_kg", "starch_produced_kg")
+    if not any(column in existing_columns for column in legacy_columns):
+        return
+
+    bagged_part_ids = {row[0] for row in ProductionBag.select(ProductionBag.part_id).tuples()}
+    for part in ProductionPart.select(ProductionPart.id, ProductionPart.shift):
+        if part.id not in bagged_part_ids:
+            ProductionPart.delete().where(ProductionPart.id == part.id).execute()
+
+    for column_name in legacy_columns:
+        if column_name not in existing_columns:
+            continue
+        if _is_mysql_database(database):
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"DROP COLUMN `{_escape_identifier(column_name)}`"
+            )
+        elif _is_sqlite_database(database):
+            _sqlite_drop_column(database, table_name, column_name)
