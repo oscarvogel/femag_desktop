@@ -6,6 +6,7 @@ from datetime import date
 
 from app.models.accounting import ClientAccountMovement
 from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
+from app.utils.datetime_utils import as_datetime
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,7 @@ class DailyCollectionsReportService:
             if filters.reversals_only:
                 if payment.status != ClientPayment.STATUS_ANNULLED or payment.annulled_at is None:
                     continue
-                annulled_date = payment.annulled_at.date()
+                annulled_date = as_datetime(payment.annulled_at).date()
                 if annulled_date < filters.start or annulled_date > filters.end:
                     continue
             order = payment.closure.order if payment.closure_id else None
@@ -116,7 +117,7 @@ class DailyCollectionsReportService:
                             order=order,
                             carrier=carrier,
                             report_date=(
-                                payment.annulled_at.date()
+                                as_datetime(payment.annulled_at).date()
                                 if filters.reversals_only and payment.annulled_at is not None
                                 else payment.payment_date
                             ),
@@ -137,7 +138,7 @@ class DailyCollectionsReportService:
                         order=order,
                         carrier=carrier,
                         report_date=(
-                            payment.annulled_at.date()
+                            as_datetime(payment.annulled_at).date()
                             if filters.reversals_only and payment.annulled_at is not None
                             else payment.payment_date
                         ),
@@ -274,7 +275,7 @@ class DailyCollectionsReportService:
             return movement.movement_date
         if movement.payment_id and movement.payment is not None:
             if movement.is_reversal and movement.payment.annulled_at is not None:
-                return movement.payment.annulled_at.date()
+                return as_datetime(movement.payment.annulled_at).date()
             return movement.payment.payment_date
         if movement.load_order_id and movement.load_order is not None:
             return movement.load_order.date
