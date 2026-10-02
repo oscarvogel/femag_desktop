@@ -231,9 +231,15 @@ class LoadOrderReturnLine(BaseModel):
     unit_price = FloatField(default=0.0)
     credit_amount = FloatField(default=0.0)
     created_by = CharField(null=True)
+    # De que parte de la facturacion sale la devolucion. Con una orden partida el
+    # operador lo indica, para que el credito caiga contra el presupuesto
+    # correcto: son dos deudas con vencimientos distintos.
+    timing = CharField(default=BILLING_TIMING_IMMEDIATE)
 
     class Meta:
-        indexes = ((("closure", "order_product"), True),)
+        # El indice incluye ``timing`` porque el mismo producto puede volver en el
+        # mismo cierre, parte de lo facturado hoy y parte de lo diferido.
+        indexes = ((("closure", "order_product", "timing"), True),)
 
 
 class LoadOrderBudgetStatus(BaseModel):
