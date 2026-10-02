@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-web.txt
 
+      - name: Show ORM version
+        run: python -c "import peewee; print('peewee', peewee.__version__)"
+
       - name: Check diff whitespace
         shell: bash
         run: |
