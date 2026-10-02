@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from datetime import date
+
+from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -122,6 +125,7 @@ class CustomerLedgerPage(QWidget):
         self._all_balances: list[dict] = []
         self._detail_client_id: int | None = None
         self._detail_movements_cache: list[ClientAccountMovement] = []
+        self._detail_balances_cache: list[float] = []
         # Tipo de reporte elegido para "Resumen del vendedor" (#609). Arranca en
         # el resumen, que es el reporte que ya existia.
         self._portfolio_report_type: str = REPORT_TYPE_SUMMARY
@@ -417,6 +421,48 @@ class CustomerLedgerPage(QWidget):
         legacy_layout.addLayout(payment_actions)
         layout.addWidget(legacy_actions)
 
+        # Filtro de periodo de los movimientos (#613). Mismo patron que las
+        # consultas de cobranzas/dashboard: checkbox que habilita cada fecha.
+        movements_filter = QHBoxLayout()
+        movements_filter.setContentsMargins(0, 4, 0, 0)
+        movements_filter.setSpacing(6)
+        movements_filter.addWidget(QLabel("Movimientos:"))
+
+        self.movement_date_from_enabled = QCheckBox("Desde")
+        self.movement_date_from_enabled.setObjectName("customerLedgerMovementsFromEnabled")
+        self.movement_date_from = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.movement_date_from.setObjectName("customerLedgerMovementsFrom")
+        self.movement_date_from.setCalendarPopup(True)
+        self.movement_date_from.setDisplayFormat("dd/MM/yyyy")
+        self.movement_date_from.setEnabled(False)
+
+        self.movement_date_to_enabled = QCheckBox("Hasta")
+        self.movement_date_to_enabled.setObjectName("customerLedgerMovementsToEnabled")
+        self.movement_date_to = QDateEdit(QDate.currentDate())
+        self.movement_date_to.setObjectName("customerLedgerMovementsTo")
+        self.movement_date_to.setCalendarPopup(True)
+        self.movement_date_to.setDisplayFormat("dd/MM/yyyy")
+        self.movement_date_to.setEnabled(False)
+
+        for widget in (
+            self.movement_date_from,
+            self.movement_date_to,
+        ):
+            # Ancho suficiente para "dd/MM/yyyy" mas el boton del calendario.
+            widget.setFixedWidth(126)
+
+        movements_filter.addWidget(self.movement_date_from_enabled)
+        movements_filter.addWidget(self.movement_date_from)
+        movements_filter.addWidget(self.movement_date_to_enabled)
+        movements_filter.addWidget(self.movement_date_to)
+        movements_filter.addStretch(1)
+        layout.addLayout(movements_filter)
+
+        self.movement_date_from_enabled.toggled.connect(self._on_movement_date_toggled)
+        self.movement_date_to_enabled.toggled.connect(self._on_movement_date_toggled)
+        self.movement_date_from.dateChanged.connect(self._on_movement_date_changed)
+        self.movement_date_to.dateChanged.connect(self._on_movement_date_changed)
+
         self.movements_table = QTableWidget(0, 7)
         self.movements_table.setObjectName("customerLedgerMovementsTable")
         self.movements_table.setHorizontalHeaderLabels(
@@ -460,6 +506,49 @@ class CustomerLedgerPage(QWidget):
         # El filtro trabaja sobre el snapshot ya cargado. No recalcular saldos
         # ni volver a MySQL por cada tecla.
         self._render_clients(previous_id=self._current_client_id())
+
+    def _on_movement_date_toggled(self, *_args) -> None:
+        """Habilita cada fecha cuando se marca su checkbox."""
+        self.movement_date_from.setEnabled(self.movement_date_from_enabled.isChecked())
+        self.movement_date_to.setEnabled(self.movement_date_to_enabled.isChecked())
+        self._render_movements()
+
+    def _on_movement_date_changed(self, *_args) -> None:
+        # Filtrar es repintar la grilla sobre el cache: no vuelve a la base,
+        # igual que la busqueda y el vendedor con la fotografia de cartera.
+        self._render_movements()
+
+    def _movement_date_bounds(self) -> tuple[date | None, date | None]:
+        """Periodo activo. `None` en cada lado cuando ese lado no filtra."""
+        if not hasattr(self, "movement_date_from_enabled"):
+            return None, None
+        lower = _py_date(self.movement_date_from) if self.movement_date_from_enabled.isChecked() else None
+        upper = _py_date(self.movement_date_to) if self.movement_date_to_enabled.isChecked() else None
+        return lower, upper
+
+    def _visible_movements(
+        self,
+        movements: list[ClientAccountMovement],
+    ) -> list[tuple[ClientAccountMovement, int]]:
+        """`(movimiento, indice_original)` de lo que entra en el filtro.
+
+        Se devuelve el indice original porque el saldo acumulado ya esta
+        calculado: filtrar no puede recalcularlo ni correrlo desde cero.
+        """
+        lower, upper = self._movement_date_bounds()
+        if lower is None and upper is None:
+            return [(movement, index) for index, movement in enumerate(movements)]
+        visible: list[tuple[ClientAccountMovement, int]] = []
+        for index, movement in enumerate(movements):
+            moment = _movement_date_for_filter(movement)
+            if moment is None:
+                continue
+            if lower is not None and moment < lower:
+                continue
+            if upper is not None and moment > upper:
+                continue
+            visible.append((movement, index))
+        return visible
 
     def _on_salesperson_changed(self, *_args) -> None:
         self._direct_client_id = None
@@ -640,16 +729,37 @@ class CustomerLedgerPage(QWidget):
         total = balances[-1] if balances else 0.0
         self._detail_client_id = client_id
         self._detail_movements_cache = movements
+        self._detail_balances_cache = balances
 
         self.detail_header.setText(client.name)
         self.detail_balance.setText(f"${total:,.2f}")
         _apply_color_to_label(self.detail_balance, _color_for_balance(total))
-        movement_label = "movimiento" if len(movements) == 1 else "movimientos"
-        self.detail_movements.setText(f"{len(movements)} {movement_label}")
-        self.movements_table.setRowCount(len(movements))
-        self.movements_table.setVisible(bool(movements))
-        self.empty_label.setVisible(not bool(movements))
-        for row_index, movement in enumerate(movements):
+        self._render_movements()
+
+    def _render_movements(self) -> None:
+        """Dibuja la grilla aplicando el filtro de periodo sobre lo ya cargado.
+
+        El filtro acota QUE FILAS se ven, nunca recalcula el saldo: la columna
+        Saldo de cada fila es el acumulado real del cliente desde su origen,
+        asi que el saldo del encabezado no se mueve al filtrar.
+        """
+        movements = self._detail_movements_cache
+        balances = self._detail_balances_cache
+        visible = self._visible_movements(movements)
+
+        if len(visible) == len(movements):
+            movement_label = "movimiento" if len(movements) == 1 else "movimientos"
+            self.detail_movements.setText(f"{len(movements)} {movement_label}")
+        else:
+            movement_label = "movimiento" if len(visible) == 1 else "movimientos"
+            self.detail_movements.setText(
+                f"{len(visible)} de {len(movements)} {movement_label}"
+            )
+        self.movements_table.setRowCount(len(visible))
+        self.movements_table.setVisible(bool(visible))
+        self.empty_label.setVisible(not bool(visible))
+        for row_index, (movement, movement_index) in enumerate(visible):
+            balance = balances[movement_index]
             type_label = MOVEMENT_TYPE_LABELS.get(movement.movement_type, movement.movement_type)
             if (
                 movement.movement_type == "payment"
@@ -669,7 +779,7 @@ class CustomerLedgerPage(QWidget):
             credit = abs(amount) if amount < 0 else 0.0
             debit_text = f"${debit:,.2f}" if debit else ""
             credit_text = f"${credit:,.2f}" if credit else ""
-            saldo_text = f"${balances[row_index]:,.2f}"
+            saldo_text = f"${balance:,.2f}"
             values = (
                 _display_movement_date(movement),
                 type_label,
@@ -688,7 +798,7 @@ class CustomerLedgerPage(QWidget):
                 if column == 5 and credit:
                     cell.setForeground(QBrush(SALDO_COLOR_CREDIT))
                 if column == 6:
-                    cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
+                    cell.setForeground(QBrush(_color_for_balance(balance)))
                 cell.setToolTip(value)
                 if (
                     column == 0
@@ -822,6 +932,7 @@ class CustomerLedgerPage(QWidget):
     def _clear_detail(self) -> None:
         self._detail_client_id = None
         self._detail_movements_cache = []
+        self._detail_balances_cache = []
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
         self.detail_balance.setText("$ 0,00")
         _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
@@ -1092,6 +1203,24 @@ def _display_movement_date(movement: ClientAccountMovement) -> str:
     if movement.movement_date is not None:
         return movement.movement_date.strftime("%d/%m/%Y")
     return _display_datetime(movement.created_at)
+
+
+def _movement_date_for_filter(movement: ClientAccountMovement) -> date | None:
+    """Fecha con la que se decide si un movimiento entra en el filtro (#613).
+
+    Usa la misma regla que la columna Fecha: si no hay `movement_date`, manda
+    `created_at`. Si el filtro usara otra regla, los movimientos sin fecha
+    desaparecerian de un periodo que si los contiene.
+    """
+    if movement.movement_date is not None:
+        return movement.movement_date
+    created_at = movement.created_at
+    return None if created_at is None else created_at.date()
+
+
+def _py_date(widget: QDateEdit) -> date:
+    value = widget.date()
+    return date(value.year(), value.month(), value.day())
 
 
 def _display_description(movement: ClientAccountMovement) -> str:
