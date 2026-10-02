@@ -439,7 +439,8 @@ class CustomerLedgerPage(QWidget):
             self.movement_date_from,
             self.movement_date_to,
         ):
-            widget.setFixedWidth(112)
+            # Ancho suficiente para "dd/MM/yyyy" mas el boton del calendario.
+            widget.setFixedWidth(126)
 
         movements_filter.addWidget(self.movement_date_from_enabled)
         movements_filter.addWidget(self.movement_date_from)
