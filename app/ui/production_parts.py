@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from app.models.masters import Product
+from app.models.masters import PRODUCT_KIND_PRODUCT, Product
 from app.services.production_part_service import ProductionPartService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
@@ -152,9 +152,16 @@ class ProductionPartPage(QWidget):
         layout.addWidget(self.feedback)
 
     def _load_products(self):
+        # Solo productos de venta: lo que se embolsa es lo que se despacha, no un
+        # servicio, un interno o un articulo todavia en revision. El mismo criterio
+        # que usa el maestro para marcar un producto como cargable.
         products = list(
             Product.select()
-            .where((Product.active == True) & (Product.peso_unitario_kg > 0))  # noqa: E712
+            .where(
+                (Product.active == True)  # noqa: E712
+                & (Product.peso_unitario_kg > 0)
+                & (Product.product_kind == PRODUCT_KIND_PRODUCT)
+            )
             .order_by(Product.name)
         )
         for product in products:
@@ -165,7 +172,11 @@ class ProductionPartPage(QWidget):
     def _sync_product_weight(self):
         product = self._current_product()
         if product is None:
-            self.weight_hint.setText("No hay productos activos con peso de bolsa cargado.")
+            self.weight_hint.setText(
+                "No hay productos de venta activos con peso de bolsa cargado. "
+                "Cargalo en Maestros > Productos, columna «Peso» (campo «Peso unitario» "
+                "del alta o la edicion) antes de registrar bolsas."
+            )
             return
         self.weight_hint.setText(
             f"Peso por bolsa de «{product.name}»: {product.peso_unitario_kg:,.3f} kg · "

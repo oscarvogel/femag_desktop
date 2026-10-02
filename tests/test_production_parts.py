@@ -3,7 +3,12 @@ from decimal import Decimal
 
 import pytest
 
-from app.models.masters import Product
+from app.models.masters import (
+    PRODUCT_KIND_INTERNAL,
+    PRODUCT_KIND_REVIEW,
+    PRODUCT_KIND_SERVICE,
+    Product,
+)
 from app.models.production import ProductionBag, ProductionPart
 from app.services.production_part_service import ProductionPartService
 
@@ -221,6 +226,48 @@ def test_production_page_only_offers_products_with_unit_weight(db):
 
     assert page.product_combo.count() == 2
     assert "Peso por bolsa" in page.weight_hint.text()
+
+
+def test_production_page_only_offers_sale_products(db):
+    """Lo que se embolsa es lo que se vende.
+
+    Un servicio, un interno o un articulo todavia en revision no se embolsan,
+    aunque tengan peso de bolsa cargado.
+    """
+    _bagged_product("Almidón de mandioca", "25.000")
+    Product.create(
+        name="Flete", unit="viaje", peso_unitario_kg=Decimal("1.000"),
+        active=True, product_kind=PRODUCT_KIND_SERVICE,
+    )
+    Product.create(
+        name="Merma de proceso", unit="kg", peso_unitario_kg=Decimal("5.000"),
+        active=True, product_kind=PRODUCT_KIND_INTERNAL,
+    )
+    Product.create(
+        name="Fecula nueva presentacion", unit="bolsa", peso_unitario_kg=Decimal("20.000"),
+        active=True, product_kind=PRODUCT_KIND_REVIEW,
+    )
+
+    page = _page(db)
+
+    assert page.product_combo.count() == 1
+    assert page.product_combo.itemText(0) == "Almidón de mandioca"
+
+
+def test_production_page_explains_where_to_load_the_unit_weight(db):
+    """Con el combo vacio la pantalla tiene que decir donde cargar el peso.
+
+    El maestro ya muestra «Peso pendiente» en la columna Peso, pero sin esta
+    pista el operador se queda sin salida: es el mismo sintoma que reporto la
+    validacion manual.
+    """
+    Product.create(name="Fecula a granel", unit="kg", peso_unitario_kg=Decimal("0"), active=True)
+
+    page = _page(db)
+
+    texto = page.weight_hint.text()
+    assert "Maestros" in texto
+    assert "Peso" in texto
 
 
 def test_production_page_computes_kg_while_adding_lines(db):
