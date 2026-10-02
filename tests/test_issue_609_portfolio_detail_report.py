@@ -1,4 +1,4 @@
-﻿"""#609 - Reporte de cuenta corriente por vendedor en version Resumido y Detallado.
+"""#609 - Reporte de cuenta corriente por vendedor en version Resumido y Detallado.
 
 Cubre el PDF detallado (vendedor > cliente > movimientos), la conciliacion con
 la pantalla y con el reporte resumido, y el caso de regresion de
@@ -626,4 +626,3 @@ def test_summarized_report_still_behaves_exactly_as_before(db, tmp_path):
     assert _money(BIERZO_SALDO_FINAL) in text
     # El resumen no imprime movimientos: es el reporte corto de siempre.
     assert "OC-000006" not in text
-

@@ -1,4 +1,4 @@
-﻿"""Resumen de cuenta corriente por vendedor, version detallada.
+"""Resumen de cuenta corriente por vendedor, version detallada.
 
 Genera el PDF con la composicion del saldo de cada cliente:
 `VENDEDOR > CLIENTE > MOVIMIENTOS` (fecha, tipo, referencia, descripcion, debe,
@@ -369,4 +369,3 @@ def export_salesperson_portfolio_detailed(
 
     document.build(story, canvasmaker=_canvas_factory(moment))
     return target
-
