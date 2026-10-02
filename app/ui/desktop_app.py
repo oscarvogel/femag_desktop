@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 import webbrowser
 
@@ -84,6 +85,7 @@ from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
+from app.services import salesperson_portfolio_print_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
@@ -134,12 +136,14 @@ class _AccountStatementMailWorker(QRunnable):
         recipients: tuple[str, ...],
         subject: str,
         pdf_path: Path,
+        body: str | None = None,
     ):
         super().__init__()
         self.client_name = client_name
         self.recipients = recipients
         self.subject = subject
         self.pdf_path = pdf_path
+        self.body = body
         self.signals = _AccountStatementMailSignals()
 
     def run(self) -> None:
@@ -149,6 +153,7 @@ class _AccountStatementMailWorker(QRunnable):
                 recipients=self.recipients,
                 subject=self.subject,
                 pdf_path=self.pdf_path,
+                body=self.body,
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
@@ -753,7 +758,11 @@ class FemagDesktopWindow(QMainWindow):
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
             whatsapp_budget_callback=self._share_budget_whatsapp,
+            print_budget_callback=self._print_budget_for_movement,
             email_statement_callback=self._email_account_statement,
+            portfolio_print_callback=self._print_salesperson_portfolio,
+            portfolio_whatsapp_callback=self._share_salesperson_portfolio_whatsapp,
+            portfolio_email_callback=self._email_salesperson_portfolio,
             print_receipt_callback=(
                 self._print_payment_receipt
                 if _can_print_payment_receipts(self.user)
@@ -775,6 +784,148 @@ class FemagDesktopWindow(QMainWindow):
             QMessageBox.warning(self, "Extracto", f"No se pudo generar el extracto: {exc}")
             return
         _open_print_output(pdf_path)
+
+    def _export_salesperson_portfolio(self, summary: dict) -> Path | None:
+        """Genera el PDF del resumen y lo deja en la carpeta de impresión."""
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            return salesperson_portfolio_print_service.export_salesperson_portfolio_report(
+                report_type=summary.get("report_type"),
+                salesperson=summary.get("salesperson"),
+                rows=summary.get("rows") or [],
+                output_dir=self._print_output_dir,
+                label=summary.get("label"),
+                slug=summary.get("slug"),
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Resumen de cartera", f"No se pudo generar el resumen: {exc}"
+            )
+            return None
+
+    def _print_salesperson_portfolio(self, summary: dict) -> None:
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is not None:
+            _open_print_output(pdf_path)
+
+    def _share_salesperson_portfolio_whatsapp(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.phone or "").strip():
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"El vendedor {salesperson.name} no tiene un telefono cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        dialog = WhatsAppSendDialog(
+            client_name=salesperson.name,
+            phone=salesperson.phone,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = self._export_salesperson_portfolio(summary)
+            if pdf_path is None:
+                return
+            envio = service.create_attempt(
+                tipo_documento="resumen_cuenta_vendedor",
+                documento_id=str(salesperson.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        workers = getattr(self, "_account_statement_whatsapp_workers", set())
+        self._account_statement_whatsapp_workers = workers
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda result: QMessageBox.information(
+                self, "WhatsApp", f"El resumen fue enviado correctamente a {result}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(
+                self, "WhatsApp", f"No se pudo enviar el resumen: {message}"
+            )
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        QThreadPool.globalInstance().start(worker)
+
+    def _email_salesperson_portfolio(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.email or "").strip():
+            QMessageBox.warning(
+                self,
+                "Correo",
+                f"El vendedor {salesperson.name} no tiene un correo cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is None:
+            return
+
+        label = summary.get("label") or salesperson.name
+        totals = salesperson_portfolio_print_service.portfolio_totals(
+            summary.get("rows") or []
+        )
+        is_detailed = (
+            summary.get("report_type")
+            == salesperson_portfolio_print_service.REPORT_TYPE_DETAIL
+        )
+        # El resumen conserva el asunto actual; el detallado lo aclara.
+        kind = " (detallado)" if is_detailed else ""
+        subject = (
+            f"Resumen de cuenta corriente{kind} - {label} - {date.today():%d/%m/%Y}"
+        )
+        body = (
+            f"Hola {salesperson.name},\n\n"
+            f"Adjuntamos el resumen de cuenta corriente de {label}: "
+            f"{totals['clients_with_balance']} clientes con saldo sobre "
+            f"{totals['clients']} de la cartera.\n\n"
+            "Saludos.\nGRAEF HERMANOS S.R.L."
+        )
+        recipients = (salesperson.email.strip().lower(),)
+        worker = _AccountStatementMailWorker(
+            client_name=salesperson.name,
+            recipients=recipients,
+            subject=subject,
+            pdf_path=pdf_path,
+            body=body,
+        )
+        workers = getattr(self, "_account_statement_mail_workers", set())
+        self._account_statement_mail_workers = workers
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda address: QMessageBox.information(
+                self, "Correo", f"El resumen fue enviado correctamente a {address}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(self, "Correo", message)
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        _start_mail_worker(worker)
 
     def _share_account_statement_whatsapp(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
@@ -983,6 +1134,29 @@ class FemagDesktopWindow(QMainWindow):
         worker.signals.failed.connect(_failed)
         worker.signals.finished.connect(_finished)
         QThreadPool.globalInstance().start(worker)
+
+    def _print_budget_for_movement(self, movement) -> None:
+        """Reimprime el presupuesto ya persistido del movimiento, sin volver a
+        impactar la cuenta corriente (#452)."""
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
+
+        try:
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Presupuesto", f"No se pudo generar el presupuesto: {exc}"
+            )
+            return
+        _open_print_output(pdf_path)
 
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
@@ -2901,9 +3075,20 @@ class LoadOrderEntryDialog(QDialog):
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
-        self.product_table = QTableWidget(0, 6)
+        self.product_table = QTableWidget(0, 8)
         self.product_table.setObjectName("loadOrderProductDraftTable")
-        self.product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad", "P.Unit", "Dto%", "Total"))
+        self.product_table.setHorizontalHeaderLabels(
+            (
+                "Producto",
+                "Cantidad",
+                "A facturar ahora",
+                "A facturar después",
+                "Unidad",
+                "P.Unit",
+                "Dto%",
+                "Total",
+            )
+        )
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -2926,10 +3111,20 @@ class LoadOrderEntryDialog(QDialog):
         preparation_hint.setObjectName("loadOrderPalletPreparationHint")
         preparation_hint.setWordWrap(True)
         review_layout.addWidget(preparation_hint)
-        self.review_table = QTableWidget(0, 7)
+        self.review_table = QTableWidget(0, 9)
         self.review_table.setObjectName("loadOrderReviewTable")
         self.review_table.setHorizontalHeaderLabels(
-            ("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total", "Descripción")
+            (
+                "Cliente",
+                "Destino",
+                "Producto",
+                "Cantidad",
+                "A facturar ahora",
+                "A facturar después",
+                "Unidad",
+                "Total",
+                "Descripción",
+            )
         )
         self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.review_table.verticalHeader().setVisible(False)
@@ -2937,6 +3132,10 @@ class LoadOrderEntryDialog(QDialog):
         self.review_table.setFocusPolicy(Qt.NoFocus)
         self.review_table.setMinimumHeight(260)
         review_layout.addWidget(self.review_table)
+        self.review_totals_label = QLabel("")
+        self.review_totals_label.setObjectName("loadOrderReviewTotals")
+        self.review_totals_label.setWordWrap(True)
+        review_layout.addWidget(self.review_totals_label)
         self.step_stack.addWidget(review)
 
         root.addWidget(body, 1)
@@ -3074,9 +3273,11 @@ class LoadOrderEntryDialog(QDialog):
                         "product_id": product.product.id,
                         "product_label": product.product.name,
                         "quantity": product.quantity,
+                        "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
                         "unit": product.unit,
                         "precio_neto_unitario": product.precio_neto_unitario,
                         "descuento_porcentaje": product.descuento_porcentaje,
+                        "iva_porcentaje": product.iva_porcentaje,
                         "total": product.total,
                     }
                     for product in destination.products
@@ -3380,9 +3581,12 @@ class LoadOrderEntryDialog(QDialog):
             precio = prod.get("precio_neto_unitario", 0.0)
             dto_pct = prod.get("descuento_porcentaje", 0.0)
             total = prod.get("total", 0.0)
+            ahora, despues = _billing_split_values(prod)
             values = (
                 prod["product_label"],
                 f"{prod['quantity']:g}",
+                f"{ahora:g}",
+                f"{despues:g}",
                 prod["unit"],
                 f"$ {precio:,.2f}",
                 f"{dto_pct:g}%",
@@ -3394,17 +3598,26 @@ class LoadOrderEntryDialog(QDialog):
 
     def _render_review(self) -> None:
         rows = []
+        total_pedido = 0.0
+        total_facturado = 0.0
         for destination in self.destinations:
-            products = destination["products"] or [{}]
-            for product in products:
+            for product in destination["products"]:
+                total = float(product.get("total") or 0.0)
+                total_pedido += total
+                ahora, despues = _billing_split_values(product)
+                cantidad = float(product.get("quantity") or 0.0)
+                if cantidad:
+                    total_facturado += total * (ahora / cantidad)
                 rows.append(
                     (
                         destination["client_label"],
                         destination["address_label"],
                         product.get("product_label", "-"),
-                        f"{product.get('quantity', 0):g}" if product.get("quantity") else "-",
+                        f"{cantidad:g}" if cantidad else "-",
+                        f"{ahora:g}",
+                        f"{despues:g}",
                         product.get("unit", "-"),
-                        f"$ {product.get('total', 0.0):,.2f}" if product.get("total") else "-",
+                        f"$ {total:,.2f}" if total else "-",
                         destination.get("observations") or "-",
                     )
                 )
@@ -3412,6 +3625,11 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
+        self.review_totals_label.setText(
+            f"Total pedido: $ {total_pedido:,.2f}    "
+            f"Facturado ahora: $ {total_facturado:,.2f}    "
+            f"A facturar después: $ {total_pedido - total_facturado:,.2f}"
+        )
         self._update_save_button_state()
 
     def _is_ready_to_save(self) -> bool:
@@ -3525,6 +3743,9 @@ class LoadOrderEntryDialog(QDialog):
                             {
                                 "product": Product.get_by_id(product["product_id"]),
                                 "quantity": product["quantity"],
+                                "cantidad_facturar_ahora": product.get(
+                                    "cantidad_facturar_ahora"
+                                ),
                                 "precio_neto_unitario": product.get("precio_neto_unitario"),
                                 "descuento_porcentaje": product.get("descuento_porcentaje"),
                                 "iva_porcentaje": product.get("iva_porcentaje"),
@@ -3560,6 +3781,20 @@ class LoadOrderEntryDialog(QDialog):
             self.feedback.show_error(str(exc))
 
 
+def _billing_split_values(product: dict) -> tuple[float, float]:
+    """Devuelve (a facturar ahora, a facturar despues) de un renglon en pantalla.
+
+    Sin reparto explicito toda la cantidad se factura de una vez, que es el
+    comportamiento historico de las ordenes ya emitidas.
+    """
+    quantity = float(product.get("quantity") or 0.0)
+    split = product.get("cantidad_facturar_ahora")
+    if split is None:
+        return quantity, 0.0
+    ahora = max(min(float(split), quantity), 0.0)
+    return ahora, max(quantity - ahora, 0.0)
+
+
 class LoadOrderProductDialog(QDialog):
     def __init__(
         self,
@@ -3574,7 +3809,9 @@ class LoadOrderProductDialog(QDialog):
         self._initial_product = product
         self.setObjectName("loadOrderProductDialog")
         self.setWindowTitle("Editar producto" if product is not None else "Agregar producto")
-        self.resize(500, 420)
+        self.resize(500, 500)
+        # El operador todavia no toco el reparto de cantidades.
+        self._split_editado = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 14)
         layout.setSpacing(10)
@@ -3593,6 +3830,14 @@ class LoadOrderProductDialog(QDialog):
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
         self.quantity_input.setDecimals(2)
+        # El operador carga la cantidad total y cuanto queda para facturar despues.
+        # La parte que se factura hoy se deriva de esas dos.
+        self.cantidad_despues_input = QDoubleSpinBox()
+        self.cantidad_despues_input.setObjectName("productDialogCantidadFacturarDespuesInput")
+        self.cantidad_despues_input.setRange(0, 999999)
+        self.cantidad_despues_input.setDecimals(2)
+        self.cantidad_ahora_label = QLabel("0.00")
+        self.cantidad_ahora_label.setObjectName("productDialogCantidadFacturarAhora")
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setObjectName("productDialogPrecioInput")
         configure_money_input(self.precio_input)
@@ -3610,14 +3855,18 @@ class LoadOrderProductDialog(QDialog):
 
         form.addWidget(QLabel("Producto"), 0, 0)
         form.addWidget(self.product_combo, 0, 1, 1, 2)
-        form.addWidget(QLabel("Cantidad"), 1, 0)
+        form.addWidget(QLabel("Cantidad total"), 1, 0)
         form.addWidget(self.quantity_input, 1, 1, 1, 2)
-        form.addWidget(QLabel("Precio neto unitario"), 2, 0)
-        form.addWidget(self.precio_input, 2, 1, 1, 2)
-        form.addWidget(QLabel("Descuento"), 3, 0)
-        form.addWidget(self.descuento_input, 3, 1)
-        form.addWidget(QLabel("IVA"), 3, 2)
-        form.addWidget(self.iva_input, 3, 3)
+        form.addWidget(QLabel("Cantidad a facturar después"), 2, 0)
+        form.addWidget(self.cantidad_despues_input, 2, 1, 1, 2)
+        form.addWidget(QLabel("Cantidad a facturar ahora"), 3, 0)
+        form.addWidget(self.cantidad_ahora_label, 3, 1, 1, 2)
+        form.addWidget(QLabel("Precio neto unitario"), 4, 0)
+        form.addWidget(self.precio_input, 4, 1, 1, 2)
+        form.addWidget(QLabel("Descuento"), 5, 0)
+        form.addWidget(self.descuento_input, 5, 1)
+        form.addWidget(QLabel("IVA"), 5, 2)
+        form.addWidget(self.iva_input, 5, 3)
         layout.addLayout(form)
 
         totals_grid = QGridLayout()
@@ -3633,6 +3882,10 @@ class LoadOrderProductDialog(QDialog):
         self.total_label = QLabel("$ 0.00")
         self.total_label.setObjectName("productDialogTotal")
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.total_facturado_label = QLabel("$ 0.00")
+        self.total_facturado_label.setObjectName("productDialogTotalFacturadoAhora")
+        self.total_diferido_label = QLabel("$ 0.00")
+        self.total_diferido_label.setObjectName("productDialogTotalFacturarDespues")
 
         totals_grid.addWidget(QLabel("Neto subtotal:"), 0, 0)
         totals_grid.addWidget(self.neto_subtotal_label, 0, 1)
@@ -3644,6 +3897,10 @@ class LoadOrderProductDialog(QDialog):
         totals_grid.addWidget(self.iva_importe_label, 3, 1)
         totals_grid.addWidget(QLabel("Total:"), 4, 0)
         totals_grid.addWidget(self.total_label, 4, 1)
+        totals_grid.addWidget(QLabel("Total facturado ahora:"), 5, 0)
+        totals_grid.addWidget(self.total_facturado_label, 5, 1)
+        totals_grid.addWidget(QLabel("Total a facturar después:"), 6, 0)
+        totals_grid.addWidget(self.total_diferido_label, 6, 1)
         layout.addLayout(totals_grid)
 
         self.feedback = FormFeedback("productDialogFeedback")
@@ -3663,7 +3920,8 @@ class LoadOrderProductDialog(QDialog):
 
         _fill_combo(self.product_combo, _product_options())
         self.product_combo.currentIndexChanged.connect(self._on_product_changed)
-        self.quantity_input.valueChanged.connect(self._recalculate)
+        self.quantity_input.valueChanged.connect(self._on_total_changed)
+        self.cantidad_despues_input.valueChanged.connect(self._on_split_changed)
         self.precio_input.valueChanged.connect(self._recalculate)
         self.descuento_input.valueChanged.connect(self._recalculate)
         cancel_button.clicked.connect(self.reject)
@@ -3671,6 +3929,7 @@ class LoadOrderProductDialog(QDialog):
         focus_chain = (
             self.product_combo,
             self.quantity_input,
+            self.cantidad_despues_input,
             self.precio_input,
             self.descuento_input,
             self.add_button,
@@ -3682,6 +3941,7 @@ class LoadOrderProductDialog(QDialog):
             (
                 self.product_combo,
                 self.quantity_input,
+                self.cantidad_despues_input,
                 self.precio_input,
                 self.descuento_input,
             ),
@@ -3696,7 +3956,13 @@ class LoadOrderProductDialog(QDialog):
         if index >= 0:
             with QSignalBlocker(self.product_combo):
                 self.product_combo.setCurrentIndex(index)
-        self.quantity_input.setValue(float(product.get("quantity") or 0.0))
+        cantidad = float(product.get("quantity") or 0.0)
+        split = product.get("cantidad_facturar_ahora")
+        self._split_editado = split is not None
+        despues = 0.0 if split is None else cantidad - float(split)
+        with QSignalBlocker(self.quantity_input), QSignalBlocker(self.cantidad_despues_input):
+            self.quantity_input.setValue(cantidad)
+            self.cantidad_despues_input.setValue(despues)
         self.precio_input.setValue(float(product.get("precio_neto_unitario") or 0.0))
         self.descuento_input.setValue(float(product.get("descuento_porcentaje") or 0.0))
         self.iva_input.setValue(float(product.get("iva_porcentaje") or 0.0))
@@ -3719,8 +3985,31 @@ class LoadOrderProductDialog(QDialog):
             self.descuento_input.setValue(self.client.descuento_porcentaje or 0.0)
         self._recalculate()
 
+    def _on_split_changed(self, value: float) -> None:
+        self._split_editado = True
+        self._recalculate()
+
+    def _on_total_changed(self, value: float) -> None:
+        """Mantiene la parte pendiente coherente con la cantidad total.
+
+        Mientras el operador no haya repartido, no queda nada pendiente y toda la
+        mercaderia se factura de una vez, que es el comportamiento historico. Si ya
+        repartio, lo pendiente solo se recorta cuando la nueva total le queda por
+        debajo, para no dejar mas mercaderia pendiente que la que sale del camion.
+        """
+        if not self._split_editado:
+            with QSignalBlocker(self.cantidad_despues_input):
+                self.cantidad_despues_input.setValue(0.0)
+        elif self.cantidad_despues_input.value() > value:
+            with QSignalBlocker(self.cantidad_despues_input):
+                self.cantidad_despues_input.setValue(value)
+        self._recalculate()
+
     def _recalculate(self) -> None:
         quantity = self.quantity_input.value()
+        despues = min(self.cantidad_despues_input.value(), quantity)
+        ahora = max(quantity - despues, 0.0)
+        self.cantidad_ahora_label.setText(f"{ahora:g}")
         precio = self.precio_input.value()
         descuento = self.descuento_input.value()
         iva_pct = self.iva_input.value()
@@ -3734,6 +4023,11 @@ class LoadOrderProductDialog(QDialog):
         self.neto_gravado_label.setText(f"$ {neto_gravado:,.2f}")
         self.iva_importe_label.setText(f"$ {iva_importe:,.2f}")
         self.total_label.setText(f"$ {total:,.2f}")
+        # Las dos partes comparten el precio del renglon, asi que el reparto del
+        # importe es proporcional a la cantidad y suma exactamente el total.
+        factor = (ahora / quantity) if quantity else 0.0
+        self.total_facturado_label.setText(f"$ {total * factor:,.2f}")
+        self.total_diferido_label.setText(f"$ {total * (1.0 - factor):,.2f}")
 
     def _accept_product(self) -> None:
         product_id = self.product_combo.currentData()
@@ -3748,11 +4042,21 @@ class LoadOrderProductDialog(QDialog):
                 "La cantidad debe ser mayor a cero.", focus_widget=self.quantity_input
             )
             return
+        cantidad_despues = self.cantidad_despues_input.value()
+        if cantidad_despues > quantity:
+            self.feedback.show_warning(
+                "La cantidad a facturar después no puede superar la cantidad total.",
+                focus_widget=self.cantidad_despues_input,
+            )
+            return
         product = Product.get_by_id(product_id)
         self.product = {
             "product_id": product_id,
             "product_label": product.name,
             "quantity": quantity,
+            "cantidad_facturar_ahora": (
+                None if cantidad_despues <= 0 else quantity - cantidad_despues
+            ),
             "unit": product.unit,
             "precio_neto_unitario": self.precio_input.value(),
             "descuento_porcentaje": self.descuento_input.value(),

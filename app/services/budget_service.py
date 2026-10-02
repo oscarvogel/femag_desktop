@@ -2,7 +2,12 @@ from datetime import date, timedelta
 
 from app.config.database import database_proxy
 from app.models.budgets import Budget, BudgetItem
-from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
+from app.models.load_orders import (
+    BILLING_TIMINGS,
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderProduct,
+)
 from app.models.masters import Client, Product
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
@@ -36,10 +41,25 @@ class BudgetService:
         return sequence.current_number
 
     def ensure_for_load_order(self, order: LoadOrder) -> list[Budget]:
-        order = LoadOrder.get_by_id(order.id)
-        return [self.ensure_for_load_order_client(order, client) for client in self._clients_for_order(order)]
+        """Emite los presupuestos de cada cliente, uno por parte de facturacion.
 
-    def _observations_for_order_client(self, order: LoadOrder, client: Client) -> str | None:
+        Una orden puede repartir la cantidad de un renglon entre la parte que se
+        factura al contado y la que queda pendiente, asi que cada cliente puede
+        tener hasta dos presupuestos. Devuelve solo los que se emitieron: si un
+        renglon esta totalmente diferido no hay nada que facture hoy.
+        """
+        order = LoadOrder.get_by_id(order.id)
+        budgets = []
+        for client in self._clients_for_order(order):
+            for timing in BILLING_TIMINGS:
+                budget = self.ensure_for_load_order_client(order, client, timing=timing)
+                if budget is not None:
+                    budgets.append(budget)
+        return budgets
+
+    def _observations_for_order_client(
+        self, order: LoadOrder, client: Client, timing: str = Budget.TIMING_IMMEDIATE
+    ) -> str | None:
         """Condiciones comerciales del cliente dentro de la orden.
 
         Une las observaciones de los destinos de ese cliente (y, como
@@ -59,35 +79,67 @@ class BudgetService:
                 _remember(destination.observations)
         for row in self._load_order_rows_for_client(order, client):
             _remember(row.observations)
-        if not seen:
-            return None
-        return " / ".join(seen)
+        base = " / ".join(seen) if seen else None
+        if timing == Budget.TIMING_DEFERRED:
+            marca = f"Parte a facturar despues de la OC-{order.order_number:06d}."
+            base = f"{base} / {marca}" if base else marca
+        return base
 
-    def ensure_for_load_order_client(self, order: LoadOrder, client: Client) -> Budget:
+    def ensure_for_load_order_client(
+        self,
+        order: LoadOrder,
+        client: Client,
+        *,
+        timing: str = Budget.TIMING_IMMEDIATE,
+    ) -> Budget | None:
+        """Emite, o devuelve, el presupuesto de una parte de facturacion del cliente.
+
+        Devuelve ``None`` cuando esa parte no tiene mercaderia: un renglon
+        totalmente diferido no genera presupuesto de la parte facturada hoy.
+        """
         order = LoadOrder.get_by_id(order.id)
         client = Client.get_by_id(client.id)
         existing = Budget.get_or_none(
             (Budget.load_order == order)
             & (Budget.client == client)
             & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            & (Budget.timing == timing)
         )
-        if existing is not None:
-            backfill = self._observations_for_order_client(order, client)
-            if backfill and not (existing.observations or "").strip():
-                existing.observations = backfill
-                existing.save(only=[Budget.observations])
-            return existing
-
         rows = self._load_order_rows_for_client(order, client)
         if not rows:
             raise ValueError("El cliente no tiene mercadería en la orden de carga.")
+
+        if existing is not None:
+            if self._budget_matches_order(existing, rows, timing):
+                backfill = self._observations_for_order_client(order, client, timing)
+                if backfill and not (existing.observations or "").strip():
+                    existing.observations = backfill
+                    existing.save(only=[Budget.observations])
+                return existing
+            # El documento no refleja la mercaderia actual. Mientras la orden se
+            # puede editar se rehace con el mismo numero; una vez emitida no se
+            # toca, porque la orden tampoco cambia mas y no se puede avisar.
+            if not order.is_unissued:
+                raise ValueError(
+                    f"El presupuesto {existing.display_number} no coincide con la mercaderia "
+                    f"de la OC-{order.order_number:06d}. La orden ya esta emitida y no se puede "
+                    "corregir sola: anule la orden y genere una nueva."
+                )
+            self._regenerate_from_order(existing, order, rows, timing)
+            return existing
 
         # Los importes de cada renglón se recalculan con la rutina monetaria
         # única y se persisten a partir de ese mismo resultado. Los totales de
         # cabecera se derivan de esos renglones, nunca de otra suma: por
         # construcción, SUM(renglones) == total general.
-        lines = [self._line_amounts_from_order_row(row) for row in rows]
-        totals = compute_totals(lines)
+        lines = []
+        for row in rows:
+            amounts = self._line_amounts_for_timing(row, timing)
+            if amounts is not None:
+                lines.append((row, amounts))
+        if not lines:
+            return None
+        totals = compute_totals(amounts for _row, amounts in lines)
 
         with database_proxy.atomic():
             budget = Budget.create(
@@ -95,15 +147,16 @@ class BudgetService:
                 client=client,
                 load_order=order,
                 origin=Budget.ORIGIN_LOAD_ORDER,
+                timing=timing,
                 issue_date=order.date,
-                observations=self._observations_for_order_client(order, client),
+                observations=self._observations_for_order_client(order, client, timing),
                 net_amount=money_to_float(totals.net_amount),
                 discount_amount=money_to_float(totals.discount_amount),
                 vat_amount=money_to_float(totals.vat_amount),
                 total_amount=money_to_float(totals.total_amount),
                 created_by=self.current_user,
             )
-            for row, amounts in zip(rows, lines):
+            for row, amounts in lines:
                 BudgetItem.create(
                     budget=budget,
                     product=row.product,
@@ -281,14 +334,146 @@ class BudgetService:
             vat_percentage=row.iva_porcentaje,
         )
 
-    def totals_for_order_rows(self, order: LoadOrder, client: Client) -> BudgetTotals:
+    def _budget_matches_order(
+        self, budget: Budget, rows: list[LoadOrderProduct], timing: str
+    ) -> bool:
+        """Si el detalle del presupuesto sigue siendo el de la orden.
+
+        Se comparan cantidad e importe por renglon de origen. Si no coinciden, el
+        documento quedo viejo y sus importes no son los de la mercaderia.
+        """
+        expected = {}
+        for row in rows:
+            amounts = self._line_amounts_for_timing(row, timing)
+            if amounts is not None:
+                expected[row.id] = (
+                    quantize_money(amounts.quantity),
+                    quantize_money(amounts.total),
+                )
+        actual = {
+            item.source_order_product_id: (
+                quantize_money(item.quantity),
+                quantize_money(item.total),
+            )
+            for item in budget.items
+            if item.source_order_product_id is not None
+        }
+        if not expected:
+            # La parte ya no tiene mercaderia: el documento sobra.
+            return not actual
+        return expected == actual
+
+    def _regenerate_from_order(
+        self,
+        budget: Budget,
+        order: LoadOrder,
+        rows: list[LoadOrderProduct],
+        timing: str,
+    ) -> None:
+        """Rehace el detalle de un presupuesto con la mercaderia actual.
+
+        Solo se usa con la orden pendiente, donde todavia no se mando nada y el
+        numero del presupuesto se conserva. Si la parte quedo sin mercaderia, el
+        documento se anula en vez de quedar vacio.
+        """
+        BudgetItem.delete().where(BudgetItem.budget == budget).execute()
+        lines = []
+        for row in rows:
+            amounts = self._line_amounts_for_timing(row, timing)
+            if amounts is not None:
+                lines.append((row, amounts))
+        if not lines:
+            budget.status = Budget.STATUS_ANNULLED
+            budget.net_amount = 0.0
+            budget.discount_amount = 0.0
+            budget.vat_amount = 0.0
+            budget.total_amount = 0.0
+            budget.observations = self._observations_for_order_client(order, budget.client, timing)
+            budget.save()
+            self._record("anular_parte_sin_mercaderia", budget)
+            return
+
+        totals = compute_totals(amounts for _row, amounts in lines)
+        budget.net_amount = money_to_float(totals.net_amount)
+        budget.discount_amount = money_to_float(totals.discount_amount)
+        budget.vat_amount = money_to_float(totals.vat_amount)
+        budget.total_amount = money_to_float(totals.total_amount)
+        budget.status = Budget.STATUS_ACTIVE
+        budget.observations = self._observations_for_order_client(order, budget.client, timing)
+        budget.save()
+        for row, amounts in lines:
+            BudgetItem.create(
+                budget=budget,
+                product=row.product,
+                source_order_product=row,
+                quantity=money_to_float(amounts.quantity),
+                unit=str(row.unit or ""),
+                unit_price=money_to_float(amounts.unit_price),
+                discount_percentage=money_to_float(amounts.discount_percentage),
+                net_subtotal=money_to_float(amounts.net_subtotal),
+                discount_amount=money_to_float(amounts.discount_amount),
+                net_taxable=money_to_float(amounts.net_taxable),
+                vat_percentage=money_to_float(amounts.vat_percentage),
+                vat_amount=money_to_float(amounts.vat_amount),
+                total=money_to_float(amounts.total),
+                observations=row.observations,
+            )
+        self.assert_monetary_integrity(budget)
+        self._record("recalcular_desde_orden", budget)
+
+    def has_deferred_portion(self, order: LoadOrder, client: Client) -> bool:
+        """True si a ese cliente le queda mercaderia para facturar despues.
+
+        Sin esto no se podria distinguir una orden sin reparto, que se factura
+        entera de una vez y sigue el plazo de pago del cliente, de una orden
+        partida, donde la parte de hoy es al contado.
+        """
+        return any(
+            row.cantidad_facturacion_diferida > 0
+            for row in self._load_order_rows_for_client(order, client)
+        )
+
+    def _line_amounts_for_timing(self, row: LoadOrderProduct, timing: str) -> LineAmounts | None:
+        """Recalcula los importes de una de las dos partes de un renglón.
+
+        Las dos partes comparten el precio, el descuento y el IVA del renglón, así
+        que repartir la cantidad reparte también el subtotal, el descuento y el
+        IVA, y las dos partes suman exactamente el renglón. Devuelve ``None``
+        cuando a esa parte no le corresponde mercadería.
+        """
+        if timing == Budget.TIMING_DEFERRED:
+            cantidad = row.cantidad_facturacion_diferida
+        else:
+            cantidad = row.cantidad_facturacion_inmediata
+        if cantidad <= 0:
+            return None
+        return compute_line_amounts(
+            quantity=cantidad,
+            unit_price=row.precio_neto_unitario,
+            discount_percentage=row.descuento_porcentaje,
+            vat_percentage=row.iva_porcentaje,
+        )
+
+    def totals_for_order_rows(
+        self,
+        order: LoadOrder,
+        client: Client,
+        *,
+        timing: str = Budget.TIMING_IMMEDIATE,
+    ) -> BudgetTotals:
         """Totales derivados de los renglones de la orden, sin persistir.
 
         Usa la misma rutina de cálculo que la emisión del presupuesto para que
         ningún consumidor pueda obtener un importe por otra vía.
         """
         rows = self._load_order_rows_for_client(order, client)
-        return compute_totals(self._line_amounts_from_order_row(row) for row in rows)
+        return compute_totals(
+            amounts
+            for amounts in (
+                self._line_amounts_for_timing(row, timing) for row in rows
+            )
+            if amounts is not None
+        )
 
     def assert_monetary_integrity(self, budget: Budget) -> None:
         """Verifica que el detalle de un presupuesto sume su total general.

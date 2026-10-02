@@ -49,7 +49,13 @@ def test_closing_with_return_generates_credit_and_reduces_balance(db):
     assert movement.total_amount == pytest.approx(-expected_credit)
     assert movement.reference == f"OC-{order.order_number:06d}"
     assert "Nota de crédito por devolución" in movement.description
-    assert f"LoadOrderClosure:{closure.id}:ReturnCredit:{client.id}" == movement.source_ref
+    # Con el reparto hay dos presupuestos, asi que el credito se identifica
+    # tambien por la parte: sin esto, devolver de las dos partes en el mismo
+    # cierre colisionaria en el indice unico de movimientos.
+    assert (
+        f"LoadOrderClosure:{closure.id}:ReturnCredit:{client.id}:immediate"
+        == movement.source_ref
+    )
     assert client_balance(client) == pytest.approx(balance_before - expected_credit)
 
 

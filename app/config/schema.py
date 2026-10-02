@@ -145,6 +145,8 @@ def ensure_runtime_schema(database) -> None:
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
         _ensure_client_salesperson_index(database)
+        _ensure_budget_timing_index(database)
+        _ensure_return_line_timing_index(database)
     _ensure_sqlite_index_integrity(database)
 
 
@@ -271,6 +273,64 @@ def _ensure_client_salesperson_index(database) -> None:
         return
     database.execute_sql(
         "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    )
+
+
+def _ensure_budget_timing_index(database) -> None:
+    """Reemplaza el índice único de presupuesto por su versión con momento de facturación.
+
+    El índice legacy de tres columnas impide emitir dos presupuestos para el mismo
+    cliente de la misma orden. Sin este paso, la parte facturada al contado y la
+    diferida chocarían en tiempo de ejecución en vez de en el desarrollo.
+    """
+    table_name = "budget"
+    legacy_columns = {"load_order_id", "client_id", "origin"}
+    expected_columns = {"load_order_id", "client_id", "origin", "timing"}
+    indexes = database.get_indexes(table_name)
+    # El índice legacy se baja antes de decidir nada: `create_tables` ya puede haber
+    # creado el nuevo, y quedarse con los dos dejaría el legacy bloqueando la parte
+    # diferida en tiempo de ejecución.
+    for index in indexes:
+        if index.unique and set(index.columns) == legacy_columns:
+            escaped_name = _escape_identifier(index.name)
+            if _is_mysql_database(database):
+                database.execute_sql(
+                    f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
+                )
+            else:
+                database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
+    if any(index.unique and set(index.columns) == expected_columns for index in indexes):
+        return
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `budget_load_order_client_origin_timing` "
+        "ON `budget` (`load_order_id`, `client_id`, `origin`, `timing`)"
+    )
+
+
+def _ensure_return_line_timing_index(database) -> None:
+    """Reemplaza el indice unico de devoluciones por su version con momento de factura.
+
+    El indice de dos columnas (cierre, renglón) no permite devolver el mismo
+    producto en el mismo cierre desde las dos partes de una orden partida.
+    """
+    table_name = "loadorderreturnline"
+    legacy_columns = {"closure_id", "order_product_id"}
+    expected_columns = {"closure_id", "order_product_id", "timing"}
+    indexes = database.get_indexes(table_name)
+    if any(index.unique and set(index.columns) == expected_columns for index in indexes):
+        return
+    for index in indexes:
+        if index.unique and set(index.columns) == legacy_columns:
+            escaped_name = _escape_identifier(index.name)
+            if _is_mysql_database(database):
+                database.execute_sql(
+                    f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
+                )
+            else:
+                database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `loadorderreturnline_closure_order_product_timing` "
+        "ON `loadorderreturnline` (`closure_id`, `order_product_id`, `timing`)"
     )
 
 

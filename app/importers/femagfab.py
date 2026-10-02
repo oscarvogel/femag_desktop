@@ -11,6 +11,7 @@ import pymysql
 
 from app.config.database import resolve_mysql_host_ipv4
 from app.config.settings import load_settings
+from app.utils.datetime_utils import as_datetime
 
 
 TWOPLACES = Decimal("0.01")
@@ -45,7 +46,7 @@ class LegacyReceipt:
     def payload(self) -> dict:
         return {
             "comp": self.comp,
-            "received_at": self.received_at.isoformat(sep=" "),
+            "received_at": as_datetime(self.received_at).isoformat(sep=" "),
             "supplier_code": self.supplier_code,
             "supplier_name": self.supplier_name,
             "product_code": self.product_code,

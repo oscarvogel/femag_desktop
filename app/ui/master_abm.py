@@ -54,6 +54,7 @@ from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
+from app.utils.datetime_utils import as_datetime
 
 
 AUTO_ABM_TECHNICAL_DEBT = (
@@ -297,12 +298,12 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "salespeople": MasterAbmConfig(
             "Vendedores",
-            ["Nombre", "Teléfono", "Estado"],
+            ["Nombre", "Teléfono", "Email", "Estado"],
             _salesperson_rows,
             SalespersonEntryDialog,
             "newSalespersonButton",
             "editSalespersonButton",
-            search_placeholder="Buscar vendedores por nombre o teléfono...",
+            search_placeholder="Buscar vendedores por nombre, teléfono o email...",
         ),
         "addresses": MasterAbmConfig(
             "Domicilios",
@@ -880,6 +881,9 @@ class SalespersonEntryDialog(QDialog):
         self.name_input.setObjectName("salespersonNameInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("salespersonPhoneInput")
+        self.email_input = QLineEdit()
+        self.email_input.setObjectName("salespersonEmailInput")
+        self.email_input.setPlaceholderText("correo@ejemplo.com")
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("salespersonObservationsInput")
         self.active_combo = _combo(
@@ -891,10 +895,12 @@ class SalespersonEntryDialog(QDialog):
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Teléfono"), 1, 0)
         form.addWidget(self.phone_input, 1, 1)
-        form.addWidget(QLabel("Observaciones"), 2, 0)
-        form.addWidget(self.observations_input, 2, 1)
-        form.addWidget(QLabel("Estado"), 3, 0)
-        form.addWidget(self.active_combo, 3, 1)
+        form.addWidget(QLabel("Email"), 2, 0)
+        form.addWidget(self.email_input, 2, 1)
+        form.addWidget(QLabel("Observaciones"), 3, 0)
+        form.addWidget(self.observations_input, 3, 1)
+        form.addWidget(QLabel("Estado"), 4, 0)
+        form.addWidget(self.active_combo, 4, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveSalespersonButton", self._save)
@@ -906,6 +912,7 @@ class SalespersonEntryDialog(QDialog):
         salesperson = Salesperson.get_by_id(self.record_id)
         self.name_input.setText(salesperson.name)
         self.phone_input.setText(salesperson.phone or "")
+        self.email_input.setText(salesperson.email or "")
         self.observations_input.setText(salesperson.observations or "")
         _set_combo(self.active_combo, bool(salesperson.active))
 
@@ -914,6 +921,7 @@ class SalespersonEntryDialog(QDialog):
             service = MasterService(self.current_user)
             values = {
                 "phone": self.phone_input.text(),
+                "email": self.email_input.text(),
                 "observations": self.observations_input.text(),
                 "active": bool(self.active_combo.currentData()),
             }
@@ -1246,7 +1254,7 @@ class ProductCostDialog(QDialog):
         self.history_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             values = [
-                row.created_at.strftime("%d/%m/%Y %H:%M"),
+                as_datetime(row.created_at).strftime("%d/%m/%Y %H:%M"),
                 self._cost_text(row.previous_cost),
                 self._cost_text(row.new_cost),
                 row.changed_by,
@@ -1663,6 +1671,7 @@ def _salesperson_rows() -> list[list[object]]:
                 salesperson.id,
                 salesperson.name,
                 salesperson.phone or "",
+                salesperson.email or "",
                 "Activo" if salesperson.active else "Inactivo",
             ]
             for salesperson in Salesperson.select().order_by(Salesperson.name)

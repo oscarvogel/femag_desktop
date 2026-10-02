@@ -18,6 +18,7 @@ from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.ledger_query_service import movements_for_client, running_balance
+from app.utils.datetime_utils import as_datetime
 
 
 BRAND_DARK = colors.HexColor("#16324A")
@@ -36,8 +37,10 @@ _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 MOVEMENT_TYPE_LABELS = {
     ClientAccountMovement.TYPE_OPENING_BALANCE: "Saldo inicial",
-    ClientAccountMovement.TYPE_LOAD_ORDER: "Orden de carga",
+    ClientAccountMovement.TYPE_LOAD_ORDER: "Orden de carga (facturado hoy)",
+    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED: "Orden de carga (a facturar después)",
     ClientAccountMovement.TYPE_LOAD_ORDER_REVERSAL: "Reverso de orden",
+    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED_REVERSAL: "Reverso de orden diferida",
     ClientAccountMovement.TYPE_BUDGET_MANUAL: "Presupuesto",
     ClientAccountMovement.TYPE_BUDGET_MANUAL_REVERSAL: "Anulación de presupuesto",
     ClientAccountMovement.TYPE_PAYMENT: "Pago",
@@ -158,7 +161,8 @@ def _reference(movement: ClientAccountMovement) -> str:
 def _movement_date(movement: ClientAccountMovement) -> str:
     if movement.movement_date is not None:
         return movement.movement_date.strftime("%d/%m/%Y")
-    return movement.created_at.strftime("%d/%m/%Y")
+    # created_at puede volver como texto desde SQLite (#615).
+    return as_datetime(movement.created_at).strftime("%d/%m/%Y")
 
 
 def _description(movement: ClientAccountMovement) -> str:
@@ -405,10 +409,10 @@ def _movements_table(
     return table
 
 
-def _balance_block(balance: Decimal, styles: dict) -> Table:
+def _balance_block(balance: Decimal, styles: dict, *, label: str = "SALDO ACTUAL") -> Table:
     table = Table(
         [[
-            Paragraph("SALDO ACTUAL", styles["balance_label"]),
+            Paragraph(label, styles["balance_label"]),
             Paragraph(_format_money(balance), styles["balance_value"]),
         ]],
         colWidths=[55 * mm, 55 * mm],

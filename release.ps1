@@ -188,14 +188,18 @@ function Invoke-CandidateLocal {
 
         Write-Host ""
         Write-Host "[4/7] Build EXE + instalador..." -ForegroundColor Yellow
-        $buildArgs = @("-PythonPath", $Python)
-        if ($IsccPath) { $buildArgs += @("-IsccPath", $IsccPath) }
-        elseif ($env:ISCC_PATH) { $buildArgs += @("-IsccPath", $env:ISCC_PATH) }
-        if ($NoAutoInstall) { $buildArgs += "-NoAutoInstall" }
+        # Hashtable y no array: un array splateado se pasa de forma POSICIONAL, por lo que
+        # los flags con guion se emparejaban con el parametro equivocado y $BuildVersion
+        # quedaba con el literal "-PythonPath", publicando una version invalida en
+        # candidate.json y en los metadatos del instalador. Ver issue #606.
+        $buildArgs = @{ PythonPath = $Python }
+        if ($IsccPath) { $buildArgs["IsccPath"] = $IsccPath }
+        elseif ($env:ISCC_PATH) { $buildArgs["IsccPath"] = $env:ISCC_PATH }
+        if ($NoAutoInstall) { $buildArgs["NoAutoInstall"] = $true }
         if (-not $SkipDeps) {
             Write-Host "Instalando dependencias de build (requirements-build.txt)..."
         } else {
-            $buildArgs += "-SkipInstallDependencies"
+            $buildArgs["SkipInstallDependencies"] = $true
         }
         # El script de build hace throw ante cualquier fallo; si retorna, verificar artefacto.
         & (Join-Path $RepoRoot "scripts\build_production_installer.ps1") @buildArgs
@@ -377,7 +381,9 @@ function Invoke-CandidateLocal {
 function Invoke-Production {
     if ($Local) {
         Write-Host "FEMAG PRODUCCION (local, sin Actions)" -ForegroundColor Yellow
-        $promoteArgs = @("-Mode", "promote", "-Confirmation", "PROMOTE")
+        # Hashtable y no array, por el mismo motivo que en el build del candidate:
+        # el splat de un array es posicional y rompe el binding por nombre. Ver #606.
+        $promoteArgs = @{ Mode = "promote"; Confirmation = "PROMOTE" }
         & (Join-Path $RepoRoot "scripts\publish_femag_release.ps1") @promoteArgs
         if ($LASTEXITCODE -ne 0) { throw "La promocion local fallo." }
         Write-Host ""

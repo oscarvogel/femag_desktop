@@ -124,7 +124,14 @@ class ClientCreditService:
                 .where(
                     (ClientAccountMovement.client == client)
                     & (ClientAccountMovement.load_order == order)
-                    & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER)
+                    & (
+                        ClientAccountMovement.movement_type.in_(
+                            (
+                                ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+                                ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
+                            )
+                        )
+                    )
                     & (ClientAccountMovement.is_reversal == False)  # noqa: E712
                 )
                 .order_by(ClientAccountMovement.id)
