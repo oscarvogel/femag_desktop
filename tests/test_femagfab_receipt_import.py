@@ -93,10 +93,14 @@ def test_production_menu_group_exposes_receipt_import_route(db):
     assert [child.title for child in produccion.children] == [
         "Recepciones de materia prima",
         "Partes de producción",
+        "Contraste de producción",
     ]
     child = produccion.children[0]
     assert child.route_key == "raw_material_receipts"
     assert child.placeholder is False
+    contraste = produccion.children[2]
+    assert contraste.route_key == "production_contrast"
+    assert contraste.placeholder is False
     # La pantalla debe quedar dentro del bloque propio de Producción, sin romper
     # la cadena Operaciones -> Informes -> Maestros -> Cuenta corriente.
     assert titles.index("Producción") < titles.index("Operaciones")
