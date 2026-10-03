@@ -1,4 +1,4 @@
-﻿"""Confirmacion del parte de produccion y su efecto en el libro de stock (#572).
+"""Confirmacion del parte de produccion y su efecto en el libro de stock (#572).
 
 El parte arranca como borrador y no toca el stock. Al confirmarlo el operador lo
 convierte en produccion real y en ese momento se escriben los movimientos. Un

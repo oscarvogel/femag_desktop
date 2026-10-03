@@ -145,8 +145,9 @@ def test_el_contraste_es_de_solo_lectura(db):
 
     for _ in range(3):
         ProductionContrastService.for_day(DAY)
-        ProductionContrastService.receipt_lines(DAY)
-        ProductionContrastService.part_lines(DAY)
+        ProductionContrastService.for_month(DAY)
+        ProductionContrastService.receipt_lines(DAY, DAY)
+        ProductionContrastService.part_lines(DAY, DAY)
 
     assert (
         RawMaterialReceipt.select().count(),
@@ -159,42 +160,97 @@ def test_detalles_de_recepciones_y_partes(db):
     product = _product()
     _confirmed_part(product, 60, shift="Tarde")
 
-    receipts = ProductionContrastService.receipt_lines(DAY)
+    receipts = ProductionContrastService.receipt_lines(DAY, DAY)
     assert len(receipts) == 1
     assert receipts[0][0] == "KLEM JORGE"
     assert receipts[0][2] == Decimal("41043")
 
-    partes = ProductionContrastService.part_lines(DAY)
+    partes = ProductionContrastService.part_lines(DAY, DAY)
     assert len(partes) == 1
-    assert partes[0][0] == "Tarde"
-    assert partes[0][1] == "Confirmado"
-    assert partes[0][3] == 60
-    assert partes[0][4] == Decimal("1500.00")
+    assert partes[0][0] == DAY
+    assert partes[0][1] == "Tarde"
+    assert partes[0][2] == "Confirmado"
+    assert partes[0][4] == 60
+    assert partes[0][5] == Decimal("1500.00")
+
+
+def test_el_mes_agrega_todo_y_el_dia_no(db):
+    """Decidido con el dueno: el mes es la media que sirve.
+
+    Como no se sabe en que dia se proceso la mandioca, el detalle diario mezcla
+    dias distintos. Sumando el mes el desfase se promedia.
+    """
+    _receipt(date(2026, 10, 1), "10000", "20.00", "2000.00", comp="1")
+    _receipt(date(2026, 10, 15), "30000", "30.00", "9000.00", comp="2")
+    _receipt(date(2026, 11, 3), "50000", "25.00", "12500.00", comp="3")
+    product = _product()
+    parte = ProductionPartService.create(
+        production_date=date(2026, 10, 20), shift="Mañana", lines=[(product, 200)]
+    )
+    ProductionPartService.confirm(parte, current_user="operador1")
+
+    mes = ProductionContrastService.for_month(date(2026, 10, 2))
+    # El ticket de noviembre NO entra en el mes de octubre.
+    assert mes.start == date(2026, 10, 1)
+    assert mes.end == date(2026, 10, 31)
+    assert mes.is_month
+    assert mes.label == "10/2026"
+    assert mes.received_kg == Decimal("40000")
+    assert mes.received_tickets == 2
+    assert mes.theoretical_starch_kg == Decimal("11000.00")
+    assert mes.real_starch_kg == Decimal("5000.00")
+    # (10000x20 + 30000x30) / 40000 = 27.50
+    assert mes.theoretical_yield_pct == Decimal("27.50")
+    assert mes.real_yield_pct == Decimal("12.50")
+    assert mes.deviation_kg == Decimal("-6000.00")
+
+    dia = ProductionContrastService.for_day(date(2026, 10, 20))
+    assert not dia.is_month
+    # El dia solo ve su parte: no hay tickets importados ese dia.
+    assert dia.received_kg == Decimal("0.00")
+    assert dia.real_starch_kg == Decimal("5000.00")
+    assert dia.real_yield_pct is None
+
+
+def test_los_limites_del_mes_son_correctos_en_diciembre(db):
+    primero, fin = ProductionContrastService.month_bounds(date(2026, 12, 17))
+    assert primero == date(2026, 12, 1)
+    assert fin == date(2026, 12, 31)
+
+    primero, fin = ProductionContrastService.month_bounds(date(2027, 1, 1))
+    assert primero == date(2027, 1, 1)
+    assert fin == date(2027, 1, 31)
 
 
 _QAPP = None
 
 
-def _page(db):
+def _page(db, periodo="Mes"):
     """Construye la pantalla real.
 
     Importa y construye la pagina a proposito: un error en su constructor
     (por ejemplo pasarle el widget padre a FormFeedback en vez de un nombre)
-    revienta la ventana entera y se lleva por delante dozens de tests de la
+    revienta la ventana entera y se lleva por delante decenas de tests de la
     barra lateral que construyen la app entera.
     """
     global _QAPP
     from PyQt5.QtCore import QDate
     from PyQt5.QtWidgets import QApplication
 
-    from app.ui.production_contrast import ProductionContrastPage
+    from app.ui.production_contrast import PERIODO_DIA, PERIODO_MES, ProductionContrastPage
 
     if _QAPP is None:
         _QAPP = QApplication.instance() or QApplication([])
     page = ProductionContrastPage()
+    page.period.setCurrentText(PERIODO_DIA if periodo == "Dia" else PERIODO_MES)
     page.day.setDate(QDate(DAY.year, DAY.month, DAY.day))
     page.refresh()
     return page
+
+
+def _tarjeta(page, clave) -> tuple[str, str]:
+    valor, ayuda = page.kpis[clave]
+    return valor.text(), ayuda.text()
 
 
 def test_la_pantalla_se_construye_y_muestra_el_contraste(db):
@@ -202,23 +258,47 @@ def test_la_pantalla_se_construye_y_muestra_el_contraste(db):
     product = _product()
     _confirmed_part(product, 60)
 
-    page = _page(db)
+    page = _page(db, periodo="Dia")
 
-    resumen = page.summary.text()
-    assert "41,043" in resumen
-    assert "9,249.00" in resumen
-    assert "1,500.00" in resumen
-    assert "3.65" in resumen
+    valor, ayuda = _tarjeta(page, "mandioca")
+    assert valor == "41,043 kg"
+    assert "1 ticket(s)" in ayuda
+
+    valor, _ = _tarjeta(page, "teorica")
+    assert valor == "9,249.00 kg"
+
+    valor, _ = _tarjeta(page, "real")
+    assert valor == "1,500.00 kg"
+
+    valor, _ = _tarjeta(page, "rinde")
+    assert valor == "3.65 %"
+
+    valor, _ = _tarjeta(page, "desvio")
+    assert valor == "-7,749.00 kg"
+
     assert page.receipts_table.rowCount() == 1
     assert page.parts_table.rowCount() == 1
-    assert "no registra cuantos kilos entraron al proceso" in page.assumption_note.text()
+    assert "no sirve para juzgar el rinde" in page.nota.text()
+
+
+def test_la_pantalla_usa_el_mes_por_defecto(db):
+    """El mes es el periodo que sirve: tiene que venir elegido."""
+    page = _page(db, periodo="Mes")
+
+    assert page.period.currentText() == "Mes"
+    assert "el mes es la media que sirve" in page.nota.text()
 
 
 def test_la_pantalla_avisa_cuando_no_hay_que_comparar(db):
     page = _page(db)
 
-    assert "sin tickets importados" in page.summary.text()
-    assert "No hay tickets importados" in page.assumption_note.text()
+    valor, ayuda = _tarjeta(page, "rinde")
+    assert valor == "-"
+    assert "sin mandioca recibida" in ayuda
+    valor, ayuda = _tarjeta(page, "desvio")
+    assert valor == "-"
+    assert "sin teoría" in ayuda
+    assert "No hay tickets importados" in page.nota.text()
     assert page.receipts_table.rowCount() == 0
 
 
@@ -231,5 +311,6 @@ def test_la_pantalla_avisa_los_borradores_que_no_cuentan(db):
 
     page = _page(db)
 
-    assert "1 parte(s) en borrador" in page.assumption_note.text()
-    assert "1,500.00" not in page.summary.text()
+    assert "1 parte(s) en borrador" in page.nota.text()
+    valor, _ = _tarjeta(page, "real")
+    assert valor == "0.00 kg"

@@ -15,15 +15,22 @@ ONE_HUNDRED = Decimal("100")
 class ProductionContrast:
     """Contraste entre lo que la planta recibio y lo que produjo de verdad.
 
-    Ojo con ``processed_kg``: el sistema **no** registra cuantas kilos de
-    mandioca entraron al proceso, solo cuantos entraron al deposito. Por eso
-    aca se asume que toda la mandioca recibida se proceso el mismo dia. Esa
-    assumption es lo que hay que revisar con el dueÃ±o: si queda producto
-    terminado del dia anterior (WIP o arranque), el rinde real sale mal porque
-    el numerador y el denominador son de dias distintos.
+    El periodo va de ``start`` a ``end`` inclusive. Puede ser un dia o un mes.
+
+    Decidido con el dueno (2026-10-03): **no hay forma de saber cuantos kilos de
+    mandioca entraron al proceso**, asi que el sistema no lo registra. Por eso el
+    rinde real se calcula sobre la mandioca recibida.
+
+    Es un problema del detalle diario: si el material de un dia se procesa otro,
+    numerador y denominador son de dias distintos y el numero diaria no significa
+    nada. **Por eso el agregado mensual es el que manda**: al sumar todo el mes,
+    el desfasaje se promedia y el rinde del mes es una media utilis. El dia se
+    mantiene porque sirve para ver el detalle de tickets y partes, no para
+    juzgar el rinde.
     """
 
-    day: date
+    start: date
+    end: date
     received_tickets: int
     received_kg: Decimal
     theoretical_yield_pct: Decimal
@@ -34,8 +41,20 @@ class ProductionContrast:
     pending_parts: int
 
     @property
+    def is_month(self) -> bool:
+        return (self.end - self.start).days >= 27
+
+    @property
+    def label(self) -> str:
+        if self.is_month:
+            return f"{self.start:%m/%Y}"
+        if self.start == self.end:
+            return f"{self.start:%d/%m/%Y}"
+        return f"{self.start:%d/%m/%Y} al {self.end:%d/%m/%Y}"
+
+    @property
     def processed_kg(self) -> Decimal:
-        """Mandioca que se asume procesada. Hoy: lo recibido."""
+        """Mandioca que se asume procesada. Es lo recibido, sin forma de saber mas."""
         return self.received_kg
 
     @property
@@ -79,28 +98,45 @@ class ProductionContrastService:
     """Solo lectura: no escribe nada. Compara recepciones contra partes confirmados."""
 
     @staticmethod
-    def receipts_of(day: date) -> list[RawMaterialReceipt]:
+    def receipts_between(start: date, end: date) -> list[RawMaterialReceipt]:
+        desde = datetime.combine(start, time.min)
+        hasta = datetime.combine(end, time.min) + timedelta(days=1)
         return list(
             RawMaterialReceipt.select()
-            .where(
-                (RawMaterialReceipt.received_at >= datetime.combine(day, time.min))
-                & (RawMaterialReceipt.received_at < datetime.combine(day, time.min) + timedelta(days=1))
-            )
+            .where((RawMaterialReceipt.received_at >= desde) & (RawMaterialReceipt.received_at < hasta))
             .order_by(RawMaterialReceipt.received_at, RawMaterialReceipt.source_comp)
         )
 
     @staticmethod
-    def parts_of(day: date) -> list[ProductionPart]:
+    def parts_between(start: date, end: date) -> list[ProductionPart]:
         return list(
             ProductionPart.select()
-            .where(ProductionPart.production_date == day)
-            .order_by(ProductionPart.id)
+            .where((ProductionPart.production_date >= start) & (ProductionPart.production_date <= end))
+            .order_by(ProductionPart.production_date, ProductionPart.id)
         )
+
+    @staticmethod
+    def month_bounds(any_day: date) -> tuple[date, date]:
+        """Primer y ultimo dia del mes al que pertenece ``any_day``."""
+        primero = any_day.replace(day=1)
+        if primero.month == 12:
+            siguiente = primero.replace(year=primero.year + 1, month=1)
+        else:
+            siguiente = primero.replace(month=primero.month + 1)
+        return primero, siguiente - timedelta(days=1)
 
     @classmethod
     def for_day(cls, day: date) -> ProductionContrast:
-        receipts = cls.receipts_of(day)
-        parts = cls.parts_of(day)
+        return cls.between(day, day)
+
+    @classmethod
+    def for_month(cls, any_day: date) -> ProductionContrast:
+        return cls.between(*cls.month_bounds(any_day))
+
+    @classmethod
+    def between(cls, start: date, end: date) -> ProductionContrast:
+        receipts = cls.receipts_between(start, end)
+        parts = cls.parts_between(start, end)
 
         received_kg = ZERO
         weighted_sum = ZERO
@@ -137,7 +173,8 @@ class ProductionContrastService:
         )
 
         return ProductionContrast(
-            day=day,
+            start=start,
+            end=end,
             received_tickets=len(receipts),
             received_kg=received_kg,
             theoretical_yield_pct=theoretical_yield_pct,
@@ -148,8 +185,8 @@ class ProductionContrastService:
             pending_parts=pending_parts,
         )
 
-    @staticmethod
-    def receipt_lines(day: date) -> list[tuple]:
+    @classmethod
+    def receipt_lines(cls, start: date, end: date) -> list[tuple]:
         return [
             (
                 (r.supplier_name or "").strip() or r.supplier_code,
@@ -158,18 +195,19 @@ class ProductionContrastService:
                 Decimal(str(r.yield_average or 0)),
                 Decimal(str(r.theoretical_starch_kg or 0)),
             )
-            for r in ProductionContrastService.receipts_of(day)
+            for r in ProductionContrastService.receipts_between(start, end)
         ]
 
     @staticmethod
-    def part_lines(day: date) -> list[tuple]:
+    def part_lines(start: date, end: date) -> list[tuple]:
         filas = []
-        for part in ProductionContrastService.parts_of(day):
+        for part in ProductionContrastService.parts_between(start, end):
             if part.is_voided:
                 continue
             for bag in part.bags:
                 filas.append(
                     (
+                        part.production_date,
                         part.shift,
                         part.status_label,
                         bag.product.name,
