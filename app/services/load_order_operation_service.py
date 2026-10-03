@@ -49,6 +49,10 @@ class LoadOrderOperationService:
             details = " ".join(issue.message for issue in composition.issues)
             raise ValueError(f"No se puede emitir la orden: {details}")
         ClientCreditService.assert_can_issue(order)
+        # Se valida el descuento ANTES de tocar el estado. `_change_status` no
+        # abre transaccion, asi que fallar despues dejaria la orden emitida con
+        # presupuesto y sin salida de stock.
+        self.stock.plan_dispatch(order)
         issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
         self.account_ledger.generate_for_load_order(issued)
         # La mercaderia sale de la planta cuando se emite la orden, no cuando se

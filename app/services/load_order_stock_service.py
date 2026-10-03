@@ -88,24 +88,38 @@ class LoadOrderStockService:
             for producto_id, (unidades, kilos) in totales.items()
         }
 
-    def register_dispatch(self, order) -> list[StockMovement]:
-        """Descuenta del stock lo que sale al emitir la orden."""
-        order = self._require_order(order)
-        prefix = dispatch_source_prefix(order.id)
+    def plan_dispatch(self, order) -> list[tuple]:
+        """Calcula y valida el despacho **sin escribir nada**.
 
-        movimientos: list[StockMovement] = []
+        Se llama antes de emitir a proposito. ``LoadOrderService._change_status``
+        no abre transaccion, asi que si el descuento fallara despues de cambiar
+        el estado la orden quedaria emitida con presupuesto y sin salida de
+        stock. Validando antes, lo unico que puede fallar despues es la base,
+        que es el mismo riesgo que ya corre con el resto de la emision.
+        """
+        order = self._require_order(order)
+        plan: list[tuple] = []
         for producto_id, (unidades, kilos) in sorted(
             self._dispatched_by_product(order).items()
         ):
             if kilos <= ZERO:
-                # Sin peso de bolsa en la asignacion no hay kilos que restar, y
-                # un movimiento de 0 solo ensucia el libro.
                 continue
             producto = Product.get_or_none(Product.id == producto_id)
             if producto is None:
                 raise LoadOrderStockError(
                     f"El producto {producto_id} de la orden {order.order_number} no existe."
                 )
+            plan.append((producto_id, unidades, kilos))
+        return plan
+
+    def register_dispatch(self, order) -> list[StockMovement]:
+        """Descuenta del stock lo que sale al emitir la orden."""
+        order = self._require_order(order)
+        prefix = dispatch_source_prefix(order.id)
+
+        movimientos: list[StockMovement] = []
+        for producto_id, unidades, kilos in self.plan_dispatch(order):
+            producto = Product.get_by_id(producto_id)
             movimientos.append(
                 StockService.register(
                     product=producto,
