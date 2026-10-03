@@ -22,7 +22,12 @@ ACTIONS = [
 MENU = {
     "Inicio": ["Dashboard", "Dashboard Gerencial", "Rentabilidad por producto", "Pendientes", "Accesos rápidos"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
-    "Producción": ["Recepciones de materia prima", "Partes de producción", "Contraste de producción"],
+    "Producción": [
+        "Recepciones de materia prima",
+        "Partes de producción",
+        "Contraste de producción",
+        "Inventario inicial",
+    ],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
         "Clientes",
