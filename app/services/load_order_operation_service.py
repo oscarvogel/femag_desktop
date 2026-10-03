@@ -8,6 +8,7 @@ from app.services.audit_service import AuditService
 from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
 from app.services.load_order_pallet_excel_export_service import LoadOrderPalletExcelExportService
+from app.services.load_order_stock_service import LoadOrderStockService
 from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
@@ -31,6 +32,9 @@ class LoadOrderOperationService:
             audit_service=self.audit_service,
         )
         self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
+        self.stock = LoadOrderStockService(
+            current_user=current_user, audit_service=self.audit_service
+        )
 
     def issue(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
@@ -47,6 +51,10 @@ class LoadOrderOperationService:
         ClientCreditService.assert_can_issue(order)
         issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
         self.account_ledger.generate_for_load_order(issued)
+        # La mercaderia sale de la planta cuando se emite la orden, no cuando se
+        # cierra la entrega: emitir es el hecho operativo que produce el
+        # presupuesto. Va aca y no en el cierre, que es un paso administrativo.
+        self.stock.register_dispatch(issued)
         return issued
 
     def print_order(self, order: LoadOrder) -> Path:
@@ -101,6 +109,10 @@ class LoadOrderOperationService:
             raise ValueError("Debe indicar el motivo de la anulación.")
         annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason=reason)
         self.account_ledger.reverse_for_load_order(annulled)
+        # Anular una orden emitida devuelve la mercaderia: la mercaderia nunca
+        # llego a salir, asi que el stock tiene que volver. No borra nada: deja
+        # el movimiento de salida y su contrario, con el motivo de la anulacion.
+        self.stock.reverse_dispatch(annulled, reason=f"Anulación de OC-{annulled.order_number:06d}: {reason}")
         return annulled
 
     def budget_timings_for_order(self, order: LoadOrder) -> list[str]:
