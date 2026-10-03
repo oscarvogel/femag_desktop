@@ -202,6 +202,102 @@ def test_un_producto_sin_peso_no_llega_ni_a_descontarse(db):
     assert StockMovement.select().count() == 0
 
 
+def _cerrar_con_devolucion(order, producto, unidades_devueltas, *, peso_maestro=None):
+    """Emite la orden y la cierra devolviendo parte de la mercaderia."""
+    from app.models.load_orders import LoadOrderProduct
+    from app.services.load_order_closure_service import LoadOrderClosureService
+
+    LoadOrderOperationService(current_user="admin").issue(order)
+    if peso_maestro is not None:
+        producto.peso_unitario_kg = Decimal(peso_maestro)
+        producto.save()
+
+    renglon = LoadOrderProduct.select().where(LoadOrderProduct.order == order).first()
+    return LoadOrderClosureService(current_user="admin").close_order(
+        order,
+        no_payment_reason="Cliente paga a 30 dias",
+        returns=[
+            {
+                "order_product": renglon,
+                "client": order.client,
+                "quantity": unidades_devueltas,
+                "reason": "Mercaderia en mal estado",
+            }
+        ],
+    )
+
+
+def test_la_devolucion_repone_stock(db):
+    """Decidido con el dueno: lo que vuelve en la entrega repone stock."""
+    order, producto = _escena()
+    # 40 bolsas salen (1.000 kg) y vuelven 8 (200 kg): quedan 800 fuera.
+    _cerrar_con_devolucion(order, producto, 8)
+
+    saldo = StockService.balance_for(producto)
+    assert saldo.balance_kg == Decimal("-800.000")
+    assert saldo.inbound_kg == Decimal("200.000")
+    assert saldo.outbound_kg == Decimal("1000.000")
+
+
+def test_la_devolucion_es_una_entrada_y_no_una_reversa_del_despacho(db):
+    """El despacho queda como salio y la devolucion como lo que volvio."""
+    order, producto = _escena()
+    _cerrar_con_devolucion(order, producto, 8)
+
+    movimientos = list(StockMovement.select().order_by(StockMovement.id))
+    assert [m.movement_type for m in movimientos] == [
+        StockMovement.TYPE_DISPATCH,
+        StockMovement.TYPE_ADJUSTMENT_POSITIVE,
+    ]
+    assert all(not m.is_reversal for m in movimientos)
+    assert all(m.reverses_id is None for m in movimientos)
+    # El motivo de la devolucion queda asentado en el libro.
+    assert movimientos[1].observations == "Mercaderia en mal estado"
+
+
+def test_la_devolucion_usa_el_peso_con_el_que_salio_y_no_el_del_maestro(db):
+    """La devolucion repone los mismos kilos que se descontaron.
+
+    Si el peso del maestro cambio entre la emision y el cierre, reponer con el
+    peso actual devolveria mercaderia de mas o de menos.
+    """
+    order, producto = _escena()
+    # El maestro pasa de 25 a 30 kg entre la emision y la devolucion.
+    _cerrar_con_devolucion(order, producto, 8, peso_maestro="30.000")
+
+    entradas = StockService.balance_for(producto).inbound_kg
+    # 8 x 25 = 200, no 8 x 30 = 240.
+    assert entradas == Decimal("200.000")
+    assert StockService.balance_for(producto).balance_kg == Decimal("-800.000")
+
+
+def test_reabrir_una_entrega_no_toca_la_devolucion(db):
+    """La mercaderia ya volvio a la planta: reabrir el cierre no la repone otra vez."""
+    from app.services.load_order_closure_service import LoadOrderClosureService
+
+    order, producto = _escena()
+    _cerrar_con_devolucion(order, producto, 8)
+    saldo_antes = StockService.balance_for(producto).balance_kg
+
+    LoadOrderClosureService(current_user="admin").reopen_order(order, reason="Error de cierre")
+
+    assert StockService.balance_for(producto).balance_kg == saldo_antes
+    assert StockMovement.select().count() == 2
+
+
+def test_cerrar_sin_devoluciones_no_repone_nada(db):
+    from app.services.load_order_closure_service import LoadOrderClosureService
+
+    order, producto = _escena()
+    LoadOrderOperationService(current_user="admin").issue(order)
+    LoadOrderClosureService(current_user="admin").close_order(
+        order, no_payment_reason="Cliente paga a 30 dias"
+    )
+
+    assert StockMovement.select().count() == 1
+    assert StockService.balance_for(producto).balance_kg == Decimal("-1000.000")
+
+
 def test_varios_productos_generan_un_movimiento_cada_uno(db):
     cliente = Client.create(name="Cliente dos productos", cuit="30333333332", iva_condition="RI")
     domicilio = ClientAddress.create(

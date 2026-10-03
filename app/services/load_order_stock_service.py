@@ -32,6 +32,16 @@ def _miles(unidades: Decimal) -> str:
     return f"{unidades:,.0f}".replace(",", ".")
 
 
+def return_source_prefix(return_line_id: int) -> str:
+    """Prefijo del movimiento de stock de una devolucion.
+
+    Va por la linea de devolucion, no por el cierre ni por la orden: cada
+    devolucion es un hecho propio y reponer dos veces la misma linea seria
+    duplicar mercaderia que no volvio dos veces.
+    """
+    return f"LoadOrderReturnLine:{return_line_id}:Return"
+
+
 class LoadOrderStockService:
     """Despachos de ordenes FEMAG como salidas del libro de stock (#573).
 
@@ -111,6 +121,73 @@ class LoadOrderStockService:
                 )
             plan.append((producto_id, unidades, kilos))
         return plan
+
+    def _weight_of_dispatch(self, order, producto_id: int) -> Decimal:
+        """Peso de bolsa que se uso cuando salio ese producto de esta orden.
+
+        Se busca en las asignaciones y no en el maestro a proposito: la
+        devolucion tiene que reponer los mismos kilos que se descontaron, y si
+        el peso del maestro cambio entre la emision y el cierre, usar el
+        peso actual devolveria una cantidad distinta de la que salio.
+        """
+        for asignacion in self._allocations_of(order):
+            if asignacion.product_id == producto_id:
+                return Decimal(str(asignacion.peso_unitario_kg or 0))
+        producto = Product.get_or_none(Product.id == producto_id)
+        if producto is None:
+            raise LoadOrderStockError(f"El producto {producto_id} ya no existe.")
+        return Decimal(str(producto.peso_unitario_kg or 0))
+
+    def register_returns(self, closure) -> list[StockMovement]:
+        """Repone el stock de lo que volvio en la entrega.
+
+        Decidido con el dueno: **una devolucion repone stock**. Es mercaderia
+        que vuelve a la planta, no un ajuste contable: por eso el movimiento es
+        una entrada comun y no una reversa del despacho. El despacho sigue
+        registrado como salio, y la devolucion como lo que volvio, que es la
+        foto real de lo que paso.
+        """
+        order = closure.order
+        movimientos: list[StockMovement] = []
+
+        for linea in closure.return_lines:
+            producto = linea.order_product.product
+            unidades = Decimal(str(linea.quantity or 0))
+            if unidades <= ZERO:
+                continue
+            peso = self._weight_of_dispatch(order, producto.id)
+            kilos = (unidades * peso).quantize(Decimal("0.001"))
+            if kilos <= ZERO:
+                continue
+            movimientos.append(
+                StockService.register(
+                    product=producto,
+                    movement_type=StockMovement.TYPE_ADJUSTMENT_POSITIVE,
+                    quantity_kg=kilos,
+                    source_ref=f"{return_source_prefix(linea.id)}",
+                    description=(
+                        f"Devolución OC-{order.order_number:06d} · "
+                        f"{_miles(unidades)} unidad(es)"
+                    ),
+                    movement_date=order.date,
+                    observations=(linea.reason or "").strip() or None,
+                    created_by=linea.created_by or self.current_user,
+                )
+            )
+
+        if movimientos:
+            self.audit_service.record(
+                user=self.current_user,
+                module="Stock",
+                action="reponer_devolucion",
+                record_ref=f"LoadOrderClosure:{closure.id}",
+                new_value={
+                    "order_number": order.order_number,
+                    "movement_ids": [m.id for m in movimientos],
+                    "kg": str(sum(m.quantity_kg for m in movimientos)),
+                },
+            )
+        return movimientos
 
     def register_dispatch(self, order) -> list[StockMovement]:
         """Descuenta del stock lo que sale al emitir la orden."""
