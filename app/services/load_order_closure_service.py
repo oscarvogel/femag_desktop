@@ -19,6 +19,7 @@ from app.models.payments import ClientPayment
 from app.services.audit_service import AuditService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.load_order_return_credit_service import LoadOrderReturnCreditService
+from app.services.load_order_stock_service import LoadOrderStockService
 from app.services.load_order_service import LoadOrderService
 
 
@@ -45,6 +46,10 @@ class LoadOrderClosureService:
             audit_service=self.audit_service,
         )
         self.return_credits = LoadOrderReturnCreditService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
+        self.stock = LoadOrderStockService(
             current_user=current_user,
             audit_service=self.audit_service,
         )
@@ -120,6 +125,9 @@ class LoadOrderClosureService:
                     },
                 )
             credit_movements = self.return_credits.generate_for_closure(closure)
+            # Lo que volvio en la entrega repone stock: es mercaderia que
+            # regresa a la planta, no un ajuste contable.
+            stock_returns = self.stock.register_returns(closure)
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_CLOSED,
@@ -139,6 +147,7 @@ class LoadOrderClosureService:
                     "return_line_ids": [row.id for row in closure.return_lines],
                     "return_credit_amount": self.return_credit_total(closure),
                     "return_credit_movement_ids": [row.id for row in credit_movements],
+                    "stock_return_movement_ids": [row.id for row in stock_returns],
                     "payment_status": self.payment_status(closure),
                 },
             )
