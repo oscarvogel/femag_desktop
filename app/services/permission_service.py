@@ -27,6 +27,7 @@ MENU = {
         "Partes de producción",
         "Contraste de producción",
         "Inventario inicial",
+        "Conteo físico",
     ],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
