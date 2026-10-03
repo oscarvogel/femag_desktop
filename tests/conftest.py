@@ -1,8 +1,37 @@
+import gc
+
 import pytest
 from peewee import SqliteDatabase
 
 
 TEST_DB = SqliteDatabase(":memory:")
+
+
+@pytest.fixture(autouse=True)
+def _recolecta_qt_entre_tests():
+    """Hace determinista el reciclado de memoria entre tests de interfaz.
+
+    Los tests de UI crean la ``QApplication`` y la guardan a nivel de modulo
+    para que el recolector no se lleve los widgets C++ por delante. El problema
+    es el inverso: cuando el recolector decide limpiar en un punto arbitrario,
+    PyQt destruye objetos C++ que todavia estan en uso y el proceso muere con
+    ``0xC0000409`` en Windows o con SIGSEGV en Linux.
+
+    Y lo que se ve es desconcertante: **todos los tests pasaron**. El log del CI
+    muestra el resumen verde y recien despues el crash, asi que parece un fallo
+    de asercion y no es. Sin esto, agregar un solo test de pantalla hace fallar
+    la build entera.
+
+    Recolectar explicitamente despues de cada test devuelve el control a un
+    momento controlado, y ahi PyQt destruye en orden.
+    """
+    yield
+    gc.collect()
+    from PyQt5.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
 
 
 @pytest.fixture(autouse=True)
