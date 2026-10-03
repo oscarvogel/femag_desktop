@@ -34,6 +34,7 @@ from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
 from app.models.whatsapp import WhatsAppEnvio
 from app.models.production import ProductionBag, ProductionPart, RawMaterialReceipt
+from app.models.stock import StockMovement
 
 
 ALL_MODELS = [
@@ -83,4 +84,5 @@ ALL_MODELS = [
     RawMaterialReceipt,
     ProductionPart,
     ProductionBag,
+    StockMovement,
 ]
