@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QDateEdit, QDoubleSpinBox, QHBoxLayout, QHeaderView,
-    QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QDateEdit, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from app.services.stock_inventory_service import (
@@ -76,13 +76,13 @@ class StockInitialInventoryPage(QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
-        self.table = QTableWidget(0, len(HEADERS))
-        self.table.setObjectName("stockInitialInventoryTable")
-        self.table.setHorizontalHeaderLabels(list(HEADERS))
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.table, 1)
+        self.entradas = QTableWidget(0, len(HEADERS))
+        self.entradas.setObjectName("stockInitialInventoryTable")
+        self.entradas.setHorizontalHeaderLabels(list(HEADERS))
+        self.entradas.verticalHeader().setVisible(False)
+        self.entradas.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.entradas.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.entradas, 1)
 
         self.observations = QLineEdit()
         self.observations.setObjectName("stockInitialInventoryObservations")
@@ -141,38 +141,62 @@ class StockInitialInventoryPage(QWidget):
         self.observations.setEnabled(not ya_cargado)
 
     def _fill_table(self, productos, cantidades: dict, *, bloqueado: bool) -> None:
-        self.table.setRowCount(len(productos))
+        self.entradas.setRowCount(len(productos))
         self.inputs = {}
         for indice, producto in enumerate(productos):
-            self.table.setItem(indice, 0, QTableWidgetItem(producto.name))
-            self.table.setItem(indice, 1, QTableWidgetItem(producto.unit or ""))
-            entrada = QDoubleSpinBox()
+            self.entradas.setItem(indice, 0, QTableWidgetItem(producto.name))
+            self.entradas.setItem(indice, 1, QTableWidgetItem(producto.unit or ""))
+            entrada = QLineEdit()
             entrada.setObjectName("stockInitialInventoryQty")
-            entrada.setRange(0, 99_999_999.999)
-            entrada.setDecimals(3)
-            entrada.setSingleStep(25.0)
-            entrada.setSuffix(" kg")
-            entrada.setValue(float(cantidades.get(producto.id, 0) or 0))
+            entrada.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            entrada.setPlaceholderText("0,000")
+            entrada.setText(
+                f"{cantidades[producto.id]:,.3f}".replace(",", "X")
+                .replace(".", ",")
+                .replace("X", ".")
+                if producto.id in cantidades
+                else ""
+            )
             entrada.setReadOnly(bloqueado)
-            entrada.setEnabled(not bloqueado)
-            self.table.setCellWidget(indice, 2, entrada)
+            self.entradas.setCellWidget(indice, 2, entrada)
             self.inputs[producto.id] = entrada
             # Lo que dice el libro hoy. Sin esta columna el operador carga el
             # conteo y no tiene forma de verificar que haya quedado bien.
             saldo = StockService.balance_for(producto).balance_kg
-            item = QTableWidgetItem(f"{saldo:,.3f}")
+            item = QTableWidgetItem(f"{saldo:,.3f}".replace(",", "X").replace(".", ",").replace("X", "."))
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(indice, 3, item)
+            self.entradas.setItem(indice, 3, item)
+
+    @staticmethod
+    def _parsear_kilos(texto: str) -> Decimal | None:
+        """Acepta 710025, 710025,5 y 1.234,5: siempre comas decimales."""
+        limpio = (texto or "").strip().replace(" ", "")
+        if not limpio:
+            return None
+        limpio = limpio.replace(".", "").replace(",", ".")
+        try:
+            return Decimal(limpio)
+        except InvalidOperation:
+            return None
 
     def load_inventory(self) -> None:
         dia = self.selected_date()
-        quantities = {
-            producto_id: Decimal(str(entrada.value()))
-            for producto_id, entrada in self.inputs.items()
-            if entrada.value() > 0
-        }
+        quantities = {}
+        for producto_id, entrada in self.inputs.items():
+            kilos = self._parsear_kilos(entrada.text())
+            if kilos is None or kilos <= 0:
+                continue
+            quantities[producto_id] = kilos
         if not quantities:
-            self.feedback.show_warning("Cargá al menos un producto con kilos.")
+            inválido = any(
+                (entrada.text() or "").strip() and self._parsear_kilos(entrada.text()) is None
+                for entrada in self.inputs.values()
+            )
+            self.feedback.show_error(
+                "Hay un valor que no es un número. Usá 710025 o 710025,5."
+                if inválido
+                else "Cargá al menos un producto con kilos."
+            )
             return
         total = sum(quantities.values())
         answer = QMessageBox.question(
