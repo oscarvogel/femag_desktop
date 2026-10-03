@@ -4,10 +4,15 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
+from app.models.base import utc_now
 from app.models.production import ProductionBag, ProductionPart
+from app.models.stock import StockMovement
+from app.services.stock_service import StockService
 
 TWO_PLACES = Decimal("0.01")
 THREE_PLACES = Decimal("0.001")
+
+SOURCE_REF_PREFIX = "production_part"
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,15 @@ class ProductionPartService:
         cls, part: ProductionPart, *, production_date: date, shift: str, lines,
         observations: str = "",
     ) -> ProductionPart:
+        # El orden importa: un parte anulado tambien esta confirmado, y decirle
+        # "esta confirmado" manda al operador al motivo equivocado.
+        if part.is_voided:
+            raise ValueError("El parte está anulado y no se puede editar.")
+        if part.is_confirmed:
+            raise ValueError(
+                "El parte está confirmado: ya entró al stock y no se puede editar. "
+                "Anulalo para generar el movimiento contrario."
+            )
         shift, observations = cls._values(shift=shift, observations=observations)
         prepared = cls._lines(lines)
         with ProductionPart._meta.database.atomic():
@@ -111,16 +125,93 @@ class ProductionPartService:
         return part
 
     @staticmethod
+    def source_ref_of(part: ProductionPart) -> str:
+        """Identidad del parte en el libro de stock.
+
+        Es la misma que usa ``StockMovement.source_ref``. Como el libro tiene un
+        indice unico sobre esa referencia, un parte no puede generar dos veces el
+        mismo movimiento: confirmar dos veces no duplica stock.
+        """
+        return f"{SOURCE_REF_PREFIX}:{part.id}"
+
+    @classmethod
+    def confirm(cls, part: ProductionPart, *, current_user: str | None = None) -> ProductionPart:
+        """El operador confirma el turno: la produccion entra al stock.
+
+        Idempotente. Si el parte ya esta confirmado devuelve el mismo parte sin
+        volver a escribir movimientos, gracias al indice unico del libro.
+        """
+        if part.is_voided:
+            raise ValueError("El parte está anulado y no se puede confirmar.")
+        if part.is_confirmed:
+            return part
+
+        lineas = cls.lines_of(part)
+        if not lineas:
+            raise ValueError("El parte no tiene bolsas cargadas, no hay nada que confirmar.")
+
+        with ProductionPart._meta.database.atomic():
+            part.confirmed_at = utc_now()
+            part.confirmed_by = (current_user or "").strip() or None
+            part.save()
+            for bag in lineas:
+                StockService.register(
+                    product=bag.product,
+                    movement_type=StockMovement.TYPE_PRODUCTION,
+                    quantity_kg=bag.kg,
+                    source_ref=cls.source_ref_of(part),
+                    description=(
+                        f"Producción del {part.production_date.isoformat()} "
+                        f"turno {part.shift}"
+                    ),
+                    movement_date=part.production_date,
+                    created_by=part.confirmed_by,
+                )
+        return part
+
+    @staticmethod
     def _write_lines(part: ProductionPart, prepared: list[tuple]) -> None:
         for product, bags, weight, kg in prepared:
             ProductionBag.create(
                 part=part, product=product, bags=bags, unit_weight_kg=weight, kg=kg
             )
 
-    @staticmethod
-    def annul(part: ProductionPart) -> None:
-        ProductionPartService._delete_lines(part)
-        part.delete_instance()
+    @classmethod
+    def annul(
+        cls, part: ProductionPart, *, current_user: str | None = None, reason: str = ""
+    ) -> None:
+        """Anula el parte.
+
+        Un **borrador** se borra: todavia no toco el stock, no hay nada que
+        corregir en el libro. Un parte **confirmado** ya entró al stock, asi que
+        borrarlo desincronizaria el saldo: en ese caso se generan los movimientos
+        contrarios y el parte queda marcado como anulado, con quien lo hizo y por
+        que. Ninguna de las dos cosas reescribe el libro.
+        """
+        if part.is_voided:
+            raise ValueError("El parte ya está anulado.")
+
+        if not part.is_confirmed:
+            ProductionPartService._delete_lines(part)
+            part.delete_instance()
+            return
+
+        motivo = (reason or "").strip()
+        if not motivo:
+            raise ValueError("Explicá por qué se anula un parte ya confirmado.")
+
+        with ProductionPart._meta.database.atomic():
+            movements = StockMovement.select().where(
+                (StockMovement.source_ref == cls.source_ref_of(part))
+                & (StockMovement.movement_type == StockMovement.TYPE_PRODUCTION)
+                & (StockMovement.is_reversal == False)  # noqa: E712
+            )
+            for movement in list(movements):
+                StockService.reverse(movement, created_by=current_user, reason=motivo)
+            part.voided_at = utc_now()
+            part.voided_by = (current_user or "").strip() or None
+            part.void_reason = motivo
+            part.save()
 
     @staticmethod
     def for_day(day: date):
@@ -145,11 +236,19 @@ class ProductionPartService:
 
     @staticmethod
     def totals(rows) -> ProductionTotals:
+        """Totales del dia. Los partes anulados no cuentan.
+
+        Se los muestra igual en la tabla para que quede el rastro, pero su
+        produccion ya fue revertida en el libro y sumarla volveria a mostrar
+        kg que no existen.
+        """
         rows = list(rows)
         lines = 0
         bags = 0
         kg = Decimal("0")
         for row in rows:
+            if row.is_voided:
+                continue
             for bag in ProductionPartService.lines_of(row):
                 lines += 1
                 bags += int(bag.bags or 0)
