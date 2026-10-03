@@ -1,5 +1,3 @@
-import gc
-
 import pytest
 from peewee import SqliteDatabase
 
@@ -7,31 +5,38 @@ from peewee import SqliteDatabase
 TEST_DB = SqliteDatabase(":memory:")
 
 
-@pytest.fixture(autouse=True)
-def _recolecta_qt_entre_tests():
-    """Hace determinista el reciclado de memoria entre tests de interfaz.
+@pytest.fixture(scope="session", autouse=True)
+def _destruye_qapplication_al_finalizar():
+    """Apaga Qt una sola vez, al terminar TODOS los tests.
 
-    Los tests de UI crean la ``QApplication`` y la guardan a nivel de modulo
-    para que el recolector no se lleve los widgets C++ por delante. El problema
-    es el inverso: cuando el recolector decide limpiar en un punto arbitrario,
-    PyQt destruye objetos C++ que todavia estan en uso y el proceso muere con
-    ``0xC0000409`` en Windows o con SIGSEGV en Linux.
+    Los tests de UI comparten una sola ``QApplication`` que se crea la primera
+    vez. Si el interprete la encuentra viva al apagarse mientras todavia quedan
+    widgets, el proceso muere con ``0xC0000409`` en Windows o SIGSEGV en Linux.
 
-    Y lo que se ve es desconcertante: **todos los tests pasaron**. El log del CI
-    muestra el resumen verde y recien despues el crash, asi que parece un fallo
-    de asercion y no es. Sin esto, agregar un solo test de pantalla hace fallar
-    la build entera.
+    Lo que se ve en el log es desconcertante: **todos los tests pasaron**. El
+    resumen verde se imprime y recien despues el crash, asi que parece un fallo
+    de asercion y no lo es. Sin esto, agregar un solo modulo de tests de
+    pantalla hace fallar la build entera.
 
-    Recolectar explicitamente despues de cada test devuelve el control a un
-    momento controlado, y ahi PyQt destruye en orden.
+    Importante: la limpieza va **al final de la sesion**, no despues de cada
+    test. Forzar el reciclado entre tests hace peor el problema, porque los
+    modulos guardan la ``QApplication`` y sus paginas en variables de modulo a
+    proposito, y el recolector se los lleva mientras el codigo los sigue
+    usando.
     """
     yield
-    gc.collect()
     from PyQt5.QtWidgets import QApplication
 
     app = QApplication.instance()
-    if app is not None:
-        app.processEvents()
+    if app is None:
+        return
+    app.processEvents()
+    try:
+        from PyQt5 import sip
+
+        sip.delete(app)
+    except Exception:  # noqa: BLE001 - es una limpieza, nunca debe romper la suite
+        pass
 
 
 @pytest.fixture(autouse=True)
