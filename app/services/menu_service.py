@@ -16,6 +16,7 @@ REAL_MODULES = {
     "Remitos": "remittances",
     "Recepciones de materia prima": "raw_material_receipts",
     "Partes de producción": "production_parts",
+    "Contraste de producción": "production_contrast",
     "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
     "Vendedores": "salespeople",
