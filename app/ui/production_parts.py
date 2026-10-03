@@ -3,8 +3,8 @@ from __future__ import annotations
 from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QDateEdit, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from app.models.masters import PRODUCT_KIND_PRODUCT, Product
@@ -21,12 +21,13 @@ class ProductionPartPage(QWidget):
     embolsaron en el turno y los kg se derivan del peso del producto.
     """
 
-    HEADERS = ("Fecha", "Turno", "Productos", "Bolsas", "Kg embolsados", "Observación")
+    HEADERS = ("Fecha", "Turno", "Estado", "Productos", "Bolsas", "Kg embolsados", "Observación")
     LINE_HEADERS = ("Producto", "Bolsas", "Kg embolsados")
 
-    def __init__(self, parent=None, *, service=None):
+    def __init__(self, parent=None, *, service=None, current_username: str | None = None):
         super().__init__(parent)
         self.service = service or ProductionPartService()
+        self.current_username = current_username
         self.rows = []
         self.editing_part = None
         self.pending = []
@@ -133,6 +134,7 @@ class ProductionPartPage(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.doubleClicked.connect(self.edit_selected)
+        self.table.itemSelectionChanged.connect(self._sync_row_buttons)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table, 1)
 
@@ -140,10 +142,14 @@ class ProductionPartPage(QWidget):
         self.edit_button = QPushButton("Modificar")
         self.edit_button.setObjectName("productionPartEditButton")
         self.edit_button.clicked.connect(self.edit_selected)
+        self.confirm_button = QPushButton("Confirmar parte")
+        self.confirm_button.setObjectName("productionPartConfirmButton")
+        self.confirm_button.clicked.connect(self.confirm_selected)
         self.annul_button = QPushButton("Anular")
         self.annul_button.setObjectName("productionPartAnnulButton")
         self.annul_button.clicked.connect(self.annul_selected)
         row_actions.addWidget(self.edit_button)
+        row_actions.addWidget(self.confirm_button)
         row_actions.addWidget(self.annul_button)
         row_actions.addStretch(1)
         layout.addLayout(row_actions)
@@ -234,8 +240,13 @@ class ProductionPartPage(QWidget):
     def refresh(self):
         self.rows = self.service.for_day(self.selected_date())
         totals = self.service.totals(self.rows)
+        confirmados = sum(1 for row in self.rows if row.is_confirmed and not row.is_voided)
+        pendientes = sum(
+            1 for row in self.rows if not row.is_confirmed and not row.is_voided
+        )
         self.summary.setText(
             f"{totals.parts} parte(s) del {self.selected_date():%d/%m/%Y} · "
+            f"{confirmados} confirmado(s) · {pendientes} en borrador · "
             f"{totals.lines} producto(s) · {totals.bags:,} bolsa(s) · "
             f"{totals.kg:,.2f} kg embolsados"
         )
@@ -245,21 +256,35 @@ class ProductionPartPage(QWidget):
             kg = sum((float(bag.kg or 0) for bag in self.service.lines_of(row)), 0.0)
             values = (
                 row.production_date.strftime("%d/%m/%Y"), row.shift,
+                row.status_label,
                 len(self.service.lines_of(row)), f"{bags:,}", f"{kg:,.2f}",
                 row.observations or "",
             )
             for column, value in enumerate(values):
                 self.table.setItem(index, column, QTableWidgetItem(str(value)))
-        enabled = bool(self.rows)
-        self.edit_button.setEnabled(enabled)
-        self.annul_button.setEnabled(enabled)
+        self._sync_row_buttons()
 
-    def _selected_part(self):
+    def _selected_part(self, *, avisar: bool = True):
         index = self.table.currentRow()
         if index < 0 or index >= len(self.rows):
-            self.feedback.show_warning("Seleccione un parte.")
+            if avisar:
+                self.feedback.show_warning("Seleccione un parte.")
             return None
         return self.rows[index]
+
+    def _sync_row_buttons(self):
+        """Cada boton segun el estado del parte elegido.
+
+        Borrador: se edita, se confirma y se borra.
+        Confirmado: ya esta en el stock, no se toca; solo se anula con motivo.
+        Anulado: no se toca mas.
+        """
+        part = self._selected_part(avisar=False)
+        hay_seleccion = part is not None
+        es_borrador = hay_seleccion and not part.is_confirmed and not part.is_voided
+        self.edit_button.setEnabled(es_borrador)
+        self.confirm_button.setEnabled(es_borrador)
+        self.annul_button.setEnabled(hay_seleccion and not part.is_voided)
 
     def edit_selected(self):
         part = self._selected_part()
@@ -309,18 +334,74 @@ class ProductionPartPage(QWidget):
             f"{message} {totals.bags:,} bolsa(s) · {totals.kg:,.2f} kg embolsados."
         )
 
-    def annul_selected(self):
+    def confirm_selected(self):
+        """El operador confirma el turno y la produccion entra al stock."""
         part = self._selected_part()
         if part is None:
             return
+        lineas = self.service.lines_of(part)
+        kg = sum((float(bag.kg or 0) for bag in lineas), 0.0)
         answer = QMessageBox.question(
-            self, "Anular parte",
-            f"¿Anular el parte del {part.production_date:%d/%m/%Y} - {part.shift}?",
+            self, "Confirmar parte",
+            f"Confirmar el parte del {part.production_date:%d/%m/%Y} - {part.shift}?\n\n"
+            f"{len(lineas)} producto(s) · {kg:,.2f} kg.\n"
+            "Al confirmar, la producción entra al stock y el parte ya no se puede "
+            "editar: solo se anula con motivo, generando el movimiento contrario.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer != QMessageBox.Yes:
             return
-        self.service.annul(part)
+        try:
+            self.service.confirm(part, current_user=self.current_username)
+        except Exception as exc:
+            self.feedback.show_error(str(exc))
+            return
         self.cancel_edit()
         self.refresh()
-        self.feedback.show_success("Parte anulado.")
+        self.feedback.show_success(
+            f"Parte confirmado: {kg:,.2f} kg entraron al stock."
+        )
+
+    def annul_selected(self):
+        part = self._selected_part()
+        if part is None:
+            return
+
+        motivo = ""
+        if part.is_confirmed:
+            motivo, acepto = QInputDialog.getText(
+                self, "Anular parte confirmado",
+                "El parte ya está confirmado y su producción está en el stock.\n"
+                "Se van a generar los movimientos contrarios y queda asentado "
+                "quién lo anuló y por qué.\n\nMotivo:",
+            )
+            if not acepto:
+                return
+            motivo = (motivo or "").strip()
+            if not motivo:
+                self.feedback.show_warning("El motivo es obligatorio.")
+                return
+        else:
+            answer = QMessageBox.question(
+                self, "Anular parte",
+                f"¿Anular el parte del {part.production_date:%d/%m/%Y} - {part.shift}?\n\n"
+                "Está en borrador: se borra sin dejar rastro porque todavía no "
+                "tocó el stock.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        try:
+            self.service.annul(part, current_user=self.current_username, reason=motivo)
+        except Exception as exc:
+            self.feedback.show_error(str(exc))
+            return
+        self.cancel_edit()
+        self.refresh()
+        if part.is_confirmed:
+            self.feedback.show_success(
+                "Parte anulado: se generaron los movimientos contrarios en el stock."
+            )
+        else:
+            self.feedback.show_success("Parte anulado.")

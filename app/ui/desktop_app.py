@@ -369,7 +369,7 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("raw_material_receipts", RawMaterialReceiptImportPage(parent=self))
-        self._add_page("production_parts", ProductionPartPage(parent=self))
+        self._add_page("production_parts", ProductionPartPage(current_username=self.shell.username, parent=self))
         self._add_page(
             "whatsapp_configuration",
             WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),

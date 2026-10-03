@@ -52,15 +52,43 @@ class ProductionPart(BaseModel):
     A partir de #580 el parte ya no pide kg de mandioca procesada ni de fécula
     producida: en planta esos datos no se pueden medir. Lo que se registra es
     cuántas bolsas de cada producto se embolsaron, en :class:`ProductionBag`.
+
+    El parte tiene estados. Mientras ``confirmed_at`` está vacío es un
+    borrador: se puede editar y borrar libremente, y **no toca el stock**. Al
+    confirmarlo, el operador lo convierte en producción real y en ese momento
+    se escriben los movimientos ``PRODUCCION`` en el libro de stock (#572). Un
+    parte confirmado ya no se edita ni se borra: se anula generando los
+    movimientos contrarios, y queda el rastro de quien lo hizo y por qué.
     """
 
     production_date = DateField()
     shift = CharField(max_length=40)
     observations = TextField(null=True)
 
+    confirmed_at = DateTimeField(null=True)
+    confirmed_by = CharField(max_length=80, null=True)
+
+    voided_at = DateTimeField(null=True)
+    voided_by = CharField(max_length=80, null=True)
+    void_reason = TextField(null=True)
+
     class Meta:
         table_name = "production_part"
         indexes = ((("production_date", "shift"), False),)
+
+    @property
+    def is_confirmed(self) -> bool:
+        return self.confirmed_at is not None
+
+    @property
+    def is_voided(self) -> bool:
+        return self.voided_at is not None
+
+    @property
+    def status_label(self) -> str:
+        if self.is_voided:
+            return "Anulado"
+        return "Confirmado" if self.is_confirmed else "Borrador"
 
 
 class ProductionBag(BaseModel):
