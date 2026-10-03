@@ -5,40 +5,6 @@ from peewee import SqliteDatabase
 TEST_DB = SqliteDatabase(":memory:")
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _destruye_qapplication_al_finalizar():
-    """Apaga Qt una sola vez, al terminar TODOS los tests.
-
-    Los tests de UI comparten una sola ``QApplication`` que se crea la primera
-    vez. Si el interprete la encuentra viva al apagarse mientras todavia quedan
-    widgets, el proceso muere con ``0xC0000409`` en Windows o SIGSEGV en Linux.
-
-    Lo que se ve en el log es desconcertante: **todos los tests pasaron**. El
-    resumen verde se imprime y recien despues el crash, asi que parece un fallo
-    de asercion y no lo es. Sin esto, agregar un solo modulo de tests de
-    pantalla hace fallar la build entera.
-
-    Importante: la limpieza va **al final de la sesion**, no despues de cada
-    test. Forzar el reciclado entre tests hace peor el problema, porque los
-    modulos guardan la ``QApplication`` y sus paginas en variables de modulo a
-    proposito, y el recolector se los lleva mientras el codigo los sigue
-    usando.
-    """
-    yield
-    from PyQt5.QtWidgets import QApplication
-
-    app = QApplication.instance()
-    if app is None:
-        return
-    app.processEvents()
-    try:
-        from PyQt5 import sip
-
-        sip.delete(app)
-    except Exception:  # noqa: BLE001 - es una limpieza, nunca debe romper la suite
-        pass
-
-
 @pytest.fixture(autouse=True)
 def _isolate_femag_env(monkeypatch, tmp_path):
     """Aisla ``FEMAG_*`` del entorno real para que los tests sean deterministas.
