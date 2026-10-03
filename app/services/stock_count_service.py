@@ -83,39 +83,52 @@ class StockCountService:
         )
 
     def add_line(
-        self, count: StockCount, product, counted_kg, *, reason: str | None = None
+        self, count: StockCount, product, counted_units, *, reason: str | None = None
     ) -> StockCountLine:
-        """Agrega un producto al conteo y le copia el saldo que tiene el libro.
+        """Agrega un producto al conteo.
 
-        La copia es del momento de agregar la linea, no del cierre. Es lo que
-        permitio que el operador viera: si despues se emite una orden, el
-        ajuste no se va a enterar de un cambio que no es del conteo.
+        ``counted_units`` son **bolsas**, no kilos: el operador cuenta lo que ve
+        en el deposito. Los kilos se derivan con el peso de bolsa del producto,
+        igual que en la pantalla de partes de produccion. Pedirle kilos seria
+        volver a poner la cuenta manual en el operador.
+
+        La copia del saldo del libro y del peso usados es **del momento de
+        agregar la linea**, no del cierre. Es lo que permitio que el operador
+        viera: si despues se emite una orden, el ajuste no se va a enterar de un
+        cambio que no es del conteo.
         """
         self._require_open(count)
         if product is None or getattr(product, "id", None) is None:
             raise StockCountError("Seleccione un producto del conteo.")
         try:
-            cantidad = Decimal(str(counted_kg or 0))
+            unidades = Decimal(str(counted_units or 0))
         except (TypeError, ValueError, ArithmeticError):
             raise StockCountError("La cantidad contada debe ser un número.") from None
-        if cantidad < ZERO:
+        if unidades < ZERO:
             raise StockCountError("La cantidad contada no puede ser negativa.")
-        cantidad = cantidad.quantize(Decimal("0.001"))
+        unidades = unidades.quantize(Decimal("0.001"))
 
+        peso = Decimal(str(product.peso_unitario_kg or 0))
+        kilos = (unidades * peso).quantize(Decimal("0.001"))
         calculada = StockService.balance_for(product).balance_kg
+
         linea, creada = StockCountLine.get_or_create(
             count=count,
             product=product,
             defaults={
                 "calculated_kg": calculada,
-                "counted_kg": cantidad,
+                "counted_units": unidades,
+                "unit_weight_kg": peso,
+                "counted_kg": kilos,
                 "reason": (reason or "").strip() or None,
             },
         )
         if not creada:
             # Volver a cargar el mismo producto actualiza lo contado, pero no
             # recalcula contra el libro: el operador ya lo vio una vez.
-            linea.counted_kg = cantidad
+            linea.counted_units = unidades
+            linea.unit_weight_kg = peso
+            linea.counted_kg = kilos
             linea.reason = (reason or "").strip() or linea.reason
             linea.save()
         return linea
@@ -162,7 +175,9 @@ class StockCountService:
                         description=(
                             f"Conteo físico del {count.count_date:%d/%m/%Y}: "
                             f"libro {_kg(linea.calculated_kg)} kg, "
-                            f"contado {_kg(linea.counted_kg)} kg"
+                            f"contadas {_kg(linea.counted_units)} bolsa(s) "
+                            f"de {_kg(linea.unit_weight_kg)} kg "
+                            f"= {_kg(linea.counted_kg)} kg"
                         ),
                         movement_date=count.count_date,
                         observations=(linea.reason or "").strip() or None,

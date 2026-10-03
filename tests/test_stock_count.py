@@ -1,8 +1,11 @@
 """Conteo fisico y ajustes auditables (#574).
 
+El operador cuenta **bolsas**, no kilos. El libro vive en kilos y la conversion
+sale del peso de bolsa del producto, igual que en la pantalla de partes de
+produccion.
+
 El conteo no reescribe movimientos: agrega el ajuste que lleva el saldo del
-libro a la realidad contada. El libro queda mostrando la foto completa de lo que
-entro, salio, se devolvio y se conto.
+libro a la realidad contada.
 """
 
 from datetime import date, timedelta
@@ -17,9 +20,10 @@ from app.services.stock_count_service import StockCountError, StockCountService
 from app.services.stock_service import StockService
 
 DAY = date(2026, 10, 5)
+PESO_BOLSA = Decimal("25.000")  # cada bolsa pesa 25 kg
 
 
-def _product(name="BOLSAS DE FECULA NATIVA", peso="25.000"):
+def _product(name="BOLSAS DE FECULA NATIVA", peso=PESO_BOLSA):
     return Product.create(
         name=name, unit="unidad", peso_unitario_kg=Decimal(peso),
         product_kind=PRODUCT_KIND_PRODUCT, active=True,
@@ -35,11 +39,28 @@ def _inventario_inicial(producto, kg):
         product=producto,
         movement_type=StockMovement.TYPE_INITIAL_INVENTORY,
         quantity_kg=kg,
-        source_ref=f"stock_take:2026-10-01:init",
+        source_ref="stock_take:2026-10-01:init",
         description="Inventario inicial al 01/10/2026",
         movement_date=date(2026, 10, 1),
         created_by="admin",
     )
+
+
+def test_el_operador_cuenta_bolsas_y_los_kilos_se_derivan(db):
+    """50 bolsas de 25 kg son 1.250 kg. Preguntar kilos seria poner la cuenta
+    en el operador, que es justo lo que #580 vino a eliminar."""
+    producto = _product()
+    _inventario_inicial(producto, Decimal("1000"))
+    servicio = _servicio()
+
+    conteo = servicio.open_count(DAY)
+    linea = servicio.add_line(conteo, producto, Decimal("50"), reason="Conteo de bolsas")
+
+    assert linea.counted_units == Decimal("50.000")
+    assert linea.unit_weight_kg == PESO_BOLSA
+    assert linea.counted_kg == Decimal("1250.000"), "50 x 25 = 1.250 kg"
+    assert linea.calculated_kg == Decimal("1000.000")
+    assert linea.difference_kg == Decimal("250.000")
 
 
 def test_contar_mas_que_el_libro_genera_un_ajuste_positivo(db):
@@ -48,11 +69,9 @@ def test_contar_mas_que_el_libro_genera_un_ajuste_positivo(db):
     servicio = _servicio()
 
     conteo = servicio.open_count(DAY)
-    linea = servicio.add_line(conteo, producto, Decimal("1200"), reason="Habia bolsa que no estaba en el sistema")
-
-    assert linea.calculated_kg == Decimal("1000.000")
+    # El libro dice 1.000 kg = 40 bolsas. Hay 48: sobran 8 bolsas (200 kg).
+    linea = servicio.add_line(conteo, producto, Decimal("48"), reason="Habia bolsa sin cargar")
     assert linea.difference_kg == Decimal("200.000")
-    assert linea.has_difference
 
     movimientos = servicio.close_count(conteo)
 
@@ -68,9 +87,10 @@ def test_contar_menos_que_el_libro_genera_un_ajuste_negativo(db):
     servicio = _servicio()
 
     conteo = servicio.open_count(DAY)
-    linea = servicio.add_line(conteo, producto, Decimal("800"), reason="Faltan bolsas rotas")
-
+    # Faltan 8 bolsas de 25 kg.
+    linea = servicio.add_line(conteo, producto, Decimal("32"), reason="Faltan bolsas rotas")
     assert linea.difference_kg == Decimal("-200.000")
+
     movimientos = servicio.close_count(conteo)
 
     assert movimientos[0].movement_type == StockMovement.TYPE_ADJUSTMENT_NEGATIVE
@@ -85,7 +105,7 @@ def test_contar_exacto_no_genera_nada(db):
     servicio = _servicio()
 
     conteo = servicio.open_count(DAY)
-    linea = servicio.add_line(conteo, producto, Decimal("1000"))
+    linea = servicio.add_line(conteo, producto, Decimal("40"))  # 40 x 25 = 1.000
 
     assert not linea.has_difference
     assert servicio.close_count(conteo) == []
@@ -94,12 +114,11 @@ def test_contar_exacto_no_genera_nada(db):
 
 
 def test_el_conteo_no_toca_los_movimientos_historicos(db):
-    """El ajuste es un movimiento mas. Los anteriores no se reescriben."""
     producto = _product()
     _inventario_inicial(producto, Decimal("1000"))
     servicio = _servicio()
     conteo = servicio.open_count(DAY)
-    servicio.add_line(conteo, producto, Decimal("900"), reason="Merma")
+    servicio.add_line(conteo, producto, Decimal("36"), reason="Merma")
     antes = StockMovement.get(StockMovement.source_ref == "stock_take:2026-10-01:init")
 
     servicio.close_count(conteo)
@@ -109,12 +128,11 @@ def test_el_conteo_no_toca_los_movimientos_historicos(db):
 
 
 def test_cerrar_dos_veces_no_duplica_el_ajuste(db):
-    """Idempotencia por el indice unico del libro."""
     producto = _product()
     _inventario_inicial(producto, Decimal("1000"))
     servicio = _servicio()
     conteo = servicio.open_count(DAY)
-    servicio.add_line(conteo, producto, Decimal("900"), reason="Merma")
+    servicio.add_line(conteo, producto, Decimal("36"), reason="Merma")
 
     servicio.close_count(conteo)
     with pytest.raises(StockCountError, match="ya está cerrado"):
@@ -137,7 +155,7 @@ def test_un_conteo_parcial_solo_ajusta_lo_contado(db):
     servicio = _servicio()
 
     conteo = servicio.open_count(DAY)
-    servicio.add_line(conteo, contado, Decimal("700"), reason="Diferencia")
+    servicio.add_line(conteo, contado, Decimal("28"), reason="Diferencia")
     servicio.close_count(conteo)
 
     assert StockService.balance_for(contado).balance_kg == Decimal("700.000")
@@ -161,19 +179,18 @@ def test_sacar_una_linea_no_genera_ajuste(db):
 def test_el_ajuste_compara_con_el_saldo_visto_al_contar(db):
     """Si despues de contar se emite una orden, el ajuste no la absorbe.
 
-    El operador vio 1.000 kg en el deposito. Despues se emiten 400 kg y el
-    conteo dice que habia 1.000. El ajuste tiene que ser de 0: la diferencia es
-    de la orden, no del conteo. Por eso la linea guarda el saldo del momento en
-    que se agrego, no el de ahora.
+    El operador vio 1.000 kg. Despues se emiten 400 kg y el conteo dice que
+    habia 1.000. La diferencia es de la orden, no del conteo: el ajuste tiene
+    que ser cero. Por eso la linea guarda el saldo del momento en que se agrego,
+    no el de ahora.
     """
     producto = _product()
     _inventario_inicial(producto, Decimal("1000"))
     servicio = _servicio()
     conteo = servicio.open_count(DAY)
-    linea = servicio.add_line(conteo, producto, Decimal("1000"))
+    linea = servicio.add_line(conteo, producto, Decimal("40"))  # 40 x 25 = 1.000
     assert linea.calculated_kg == Decimal("1000.000")
 
-    # Se emite una orden despues de contar.
     StockService.register(
         product=producto,
         movement_type=StockMovement.TYPE_DISPATCH,
@@ -184,10 +201,28 @@ def test_el_ajuste_compara_con_el_saldo_visto_al_contar(db):
         created_by="admin",
     )
 
-    # El conteo dice 1.000, el libro ahora dice 600: la diferencia es de la orden.
     assert StockService.balance_for(producto).balance_kg == Decimal("600.000")
     assert servicio.close_count(conteo) == []
     assert StockService.balance_for(producto).balance_kg == Decimal("600.000")
+
+
+def test_el_peso_usado_queda_auditado(db):
+    """El conteo guarda el peso con el que convertingio, no el de hoy.
+
+    Si despues se corrige el peso de bolsa del maestro, el conteo ya realizado
+    tiene que seguir diciendo lo que conto y lo que valia al momento.
+    """
+    producto = _product()
+    _inventario_inicial(producto, Decimal("1000"))
+    servicio = _servicio()
+    conteo = servicio.open_count(DAY)
+    linea = servicio.add_line(conteo, producto, Decimal("50"))
+
+    producto.peso_unitario_kg = Decimal("30.000")
+    producto.save()
+
+    assert linea.counted_kg == Decimal("1250.000")
+    assert linea.unit_weight_kg == PESO_BOLSA
 
 
 def test_el_ajuste_queda_asentado_con_usuario_motivo_y_fecha(db):
@@ -198,14 +233,16 @@ def test_el_ajuste_queda_asentado_con_usuario_motivo_y_fecha(db):
     conteo = servicio.open_count(DAY)
     conteo.counted_by = "supervisor_1"
     conteo.save()
-    servicio.add_line(conteo, producto, Decimal("750"), reason="Se Romano con el conteo")
+    servicio.add_line(conteo, producto, Decimal("30"), reason="Se Romano con el conteo")
 
     movimiento = servicio.close_count(conteo)[0]
 
     assert movimiento.created_by == "supervisor_1"
     assert movimiento.observations == "Se Romano con el conteo"
     assert movimiento.movement_date == DAY
-    assert "1.000,000" in movimiento.description or "1.000" in movimiento.description
+    # Y la descripcion dice cuantas bolsas se contaron, no solo los kilos.
+    assert "30,000 bolsa(s)" in movimiento.description
+    assert "750,000 kg" in movimiento.description
 
 
 def test_el_conteo_queda_cerrado_con_quien_y_cuando(db):
@@ -213,7 +250,7 @@ def test_el_conteo_queda_cerrado_con_quien_y_cuando(db):
     _inventario_inicial(producto, Decimal("1000"))
     servicio = _servicio()
     conteo = servicio.open_count(DAY)
-    servicio.add_line(conteo, producto, Decimal("800"), reason="Merma")
+    servicio.add_line(conteo, producto, Decimal("32"), reason="Merma")
     servicio.close_count(conteo)
 
     cerrado = StockCount.get_by_id(conteo.id)
@@ -229,10 +266,11 @@ def test_no_se_puede_contar_un_producto_dos_veces_en_el_mismo_conteo(db):
     servicio = _servicio()
     conteo = servicio.open_count(DAY)
 
-    servicio.add_line(conteo, producto, Decimal("900"), reason="Primera vez")
-    linea = servicio.add_line(conteo, producto, Decimal("950"), reason="Me corregi")
+    servicio.add_line(conteo, producto, Decimal("36"), reason="Primera vez")
+    linea = servicio.add_line(conteo, producto, Decimal("38"), reason="Me corregi")
 
     assert StockCountLine.select().where(StockCountLine.count == conteo).count() == 1
+    assert linea.counted_units == Decimal("38.000")
     assert linea.counted_kg == Decimal("950.000")
     # Y al recargar el conteo no recalcula contra el libro.
     assert linea.calculated_kg == Decimal("1000.000")
@@ -253,7 +291,7 @@ def test_se_puede_contar_desde_una_fecha_distinta_a_la_del_conteo(db):
     _inventario_inicial(producto, Decimal("1000"))
     servicio = _servicio()
     conteo = servicio.open_count(DAY - timedelta(days=3))
-    servicio.add_line(conteo, producto, Decimal("900"), reason="Merma")
+    servicio.add_line(conteo, producto, Decimal("36"), reason="Merma")
     movimiento = servicio.close_count(conteo)[0]
 
     assert movimiento.movement_date == DAY - timedelta(days=3)

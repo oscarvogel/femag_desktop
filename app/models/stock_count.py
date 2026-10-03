@@ -29,6 +29,11 @@ class StockCount(BaseModel):
     el ajuste tiene que compararse contra lo que el operador vio, no contra un
     numero que ya cambio sola: si no, el conteo estariaria ajustando una
     diferencia que en realidad cambio por otra operacion.
+
+    El operador cuenta **bolsas**, igual que en la pantalla de partes de
+    produccion. Los kilos se derivan con el peso de bolsa del producto, y se
+    guarda la copia del peso usado para que el conteo no cambie de valor despues
+    si alguien corrige el maestro.
     """
 
     STATUS_OPEN = "open"
@@ -55,9 +60,18 @@ class StockCountLine(BaseModel):
 
     count = ForeignKeyField(StockCount, backref="lines", on_delete="CASCADE")
     product = ForeignKeyField(Product, backref="stock_count_lines")
+    # Lo que el operador cuenta son **bolsas**, no kilos: en el deposito hay
+    # bolsas, no kilos. El libro vive en kilos, asi que la conversion se deriva
+    # aca y no se le pide la cuenta al operador.
+    counted_units = DecimalField(max_digits=14, decimal_places=3, default=ZERO)
+    # Copia del peso de bolsa usado, para que el conteo siga siendo auditable si
+    # despues se corrige el peso del maestro.
+    unit_weight_kg = DecimalField(max_digits=12, decimal_places=3, default=ZERO)
+    # Kilos que esas bolsas representan. Derivado, no capturado: es lo que se
+    # compara contra el saldo del libro.
+    counted_kg = DecimalField(max_digits=14, decimal_places=3, default=ZERO)
     # Copia del saldo del libro en el momento del conteo.
     calculated_kg = DecimalField(max_digits=14, decimal_places=3)
-    counted_kg = DecimalField(max_digits=14, decimal_places=3, default=ZERO)
     reason = TextField(null=True)
 
     class Meta:
