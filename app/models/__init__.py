@@ -35,6 +35,7 @@ from app.models.security import MenuItem, Permission, User, UserProfile
 from app.models.whatsapp import WhatsAppEnvio
 from app.models.production import ProductionBag, ProductionPart, RawMaterialReceipt
 from app.models.stock import StockMovement
+from app.models.stock_count import StockCount, StockCountLine
 
 
 ALL_MODELS = [
@@ -85,4 +86,6 @@ ALL_MODELS = [
     ProductionPart,
     ProductionBag,
     StockMovement,
+    StockCount,
+    StockCountLine,
 ]
