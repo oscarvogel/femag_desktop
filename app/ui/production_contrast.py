@@ -223,15 +223,16 @@ class ProductionContrastPage(QWidget):
         avisos = []
         if contraste.is_month:
             avisos.append(
-                "No se sabe cuántos kilos de mandioca entraron al proceso, así que el "
-                "rinde se calcula sobre la recibida. Al sumar todo el mes el desfase se "
+                "No se sabe en qué día entró al proceso cada kilo de mandioca, así que el "
+                "rinde se calcula sobre la recibida. Al sumar el mes entero el desfase se "
                 "promedia: por eso el mes es la media que sirve."
             )
         elif contraste.has_receipts:
             avisos.append(
-                "El detalle diario no sirve para juzgar el rinde: si el material de un día "
-                "se procesa al otro, el numerador y el denominador son de días distintos. "
-                "Mire el mes para la media."
+                "La mandioca no se procesa el mismo día que llega: queda para los días "
+                "siguientes, sobre todo al cerrar el fin de semana. El detalle diario no "
+                "sirve para juzgar el rinde porque el numerador y el denominador son de "
+                "días distintos. Mire el mes."
             )
         if contraste.pending_parts:
             avisos.append(

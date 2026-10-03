@@ -278,7 +278,7 @@ def test_la_pantalla_se_construye_y_muestra_el_contraste(db):
 
     assert page.receipts_table.rowCount() == 1
     assert page.parts_table.rowCount() == 1
-    assert "no sirve para juzgar el rinde" in page.nota.text()
+    assert "no se procesa el mismo día que llega" in page.nota.text()
 
 
 def test_la_pantalla_usa_el_mes_por_defecto(db):
@@ -287,7 +287,6 @@ def test_la_pantalla_usa_el_mes_por_defecto(db):
 
     assert page.period.currentText() == "Mes"
     assert "el mes es la media que sirve" in page.nota.text()
-
 
 def test_la_pantalla_avisa_cuando_no_hay_que_comparar(db):
     page = _page(db)
