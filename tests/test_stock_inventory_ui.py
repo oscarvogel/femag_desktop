@@ -20,6 +20,25 @@ def _product(name="BOLSAS DE FECULA NATIVA", weight="25.000"):
 
 
 _QAPP = None
+_PAGINAS = []
+
+
+@pytest.fixture(autouse=True)
+def _limpia_paginas():
+    """Destruye las pantallas de cada test.
+
+    Sin esto quedan widgets C++ vivos cuando el interprete termina y el
+    proceso se va con segmentation fault **despues** de que pytest ya
+    imprimio el resumen verde. No es un test que falle: es el proceso que
+    muere al salir, y el CI lo marca en rojo.
+    """
+    yield
+    while _PAGINAS:
+        pagina = _PAGINAS.pop()
+        pagina.close()
+        pagina.deleteLater()
+    if _QAPP is not None:
+        _QAPP.processEvents()
 
 
 def _page(db):
@@ -38,6 +57,7 @@ def _page(db):
     if _QAPP is None:
         _QAPP = QApplication.instance() or QApplication([])
     page = StockInitialInventoryPage(current_username="oscar")
+    _PAGINAS.append(page)
     page.day.setDate(QDate(DAY.year, DAY.month, DAY.day))
     page.refresh()
     return page
