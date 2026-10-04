@@ -157,6 +157,10 @@ def _backfill_product_classification(database) -> None:
     with database.atomic():
         for product in Product.select().order_by(Product.id):
             inference = analyze_legacy_product(product.name)
+            original_kind = product.product_kind
+            original_source = product.classification_source
+            original_weight_source = product.weight_source
+            original_weight = product.peso_unitario_kg
             if product.classification_source != "manual":
                 product.product_kind = inference.product_kind
                 product.classification_source = "inferido"
@@ -170,6 +174,17 @@ def _backfill_product_classification(database) -> None:
                 product.product_kind == "revisar"
                 or (product.product_kind == "producto" and product.peso_unitario_kg <= 0)
             )
+            # Sin este chequeo se escribian todos los productos en cada arranque
+            # aunque no hubiera nada que corregir. Medido sobre el dump real:
+            # 37 escrituras por arranque que no cambiaban nada.
+            cambio = (
+                product.product_kind != original_kind
+                or product.classification_source != original_source
+                or product.weight_source != original_weight_source
+                or product.peso_unitario_kg != original_weight
+            )
+            if not cambio:
+                continue
             product.save()
 
 
@@ -185,6 +200,18 @@ def _backfill_client_emails(database) -> None:
             try:
                 normalized = ClientEmailService.normalize_email(raw_email)
             except ValueError:
+                continue
+            # Si el correo ya existe y esta activo y es el principal, no hay nada
+            # que hacer por este cliente. Sin este chequeo se corria una consulta
+            # de "tiene primario" por cada uno de los clientes en cada arranque.
+            existente = ClientEmail.get_or_none(
+                (ClientEmail.client == client) & (ClientEmail.email == normalized)
+            )
+            if (
+                existente is not None
+                and existente.active
+                and existente.is_primary
+            ):
                 continue
             has_primary = ClientEmail.select().where(
                 (ClientEmail.client == client)
@@ -207,11 +234,25 @@ def _backfill_client_emails(database) -> None:
 
 
 def _consolidate_shared_client_addresses(database) -> None:
-    from app.models.masters import Client
-    from app.services.client_service import ClientService
+    from app.models.masters import Client, ClientAddress
+    from app.services.client_service import CLIENT_ADDRESS_TYPE_SHARED, ClientService
+
+    # Consolidar no hace nada por un cliente que ya tiene direccion compartida:
+    # la funcion la devuelve tal cual. Pero el chequeo de "tiene compartida" se
+    # pagaba con una consulta por cliente, o sea una por cada cliente de la
+    # cartera en cada arranque. Se resuelve en una sola consulta.
+    ya_consolidados = {
+        fila.client_id
+        for fila in ClientAddress.select(ClientAddress.client_id).where(
+            ClientAddress.address_type == CLIENT_ADDRESS_TYPE_SHARED
+        )
+    }
+    consulta = Client.select()
+    if ya_consolidados:
+        consulta = consulta.where(Client.id.not_in(list(ya_consolidados)))
 
     with database.atomic():
-        for client in Client.select().order_by(Client.id):
+        for client in consulta.order_by(Client.id):
             ClientService.consolidate_identical_fiscal_delivery(client)
 
 
@@ -337,9 +378,18 @@ def _ensure_return_line_timing_index(database) -> None:
 def _normalize_legacy_pallet_rows(database) -> None:
     from app.models.load_orders import LoadOrderPallet
 
+    # La funcion solo tiene trabajo donde un pallet trae quantity distinta de 1:
+    # ahi lo expande en varias filas de quantity 1 y renumera la secuencia. Si
+    # todo el historico ya esta normalizado, no hay nada que hacer.
+    #
+    # Sin este filtro recorreria TODAS las ordenes con pallets y guardaria cada
+    # fila dos veces, en cada arranque, sin cambiar un solo valor. Medido sobre el
+    # dump real: 1.050 pallets, ~2.100 escrituras por arranque, 3,5 s.
     order_ids = [
         row.order_id
-        for row in LoadOrderPallet.select(LoadOrderPallet.order).distinct()
+        for row in LoadOrderPallet.select(LoadOrderPallet.order_id)
+        .where(LoadOrderPallet.quantity != 1)
+        .distinct()
     ]
     if not order_ids:
         return
