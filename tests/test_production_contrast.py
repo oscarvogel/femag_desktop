@@ -225,7 +225,7 @@ def test_los_limites_del_mes_son_correctos_en_diciembre(db):
 _QAPP = None
 
 
-def _page(db, periodo="Mes"):
+def _page(db, periodo="Mes", dia=DAY):
     """Construye la pantalla real.
 
     Importa y construye la pagina a proposito: un error en su constructor
@@ -243,7 +243,7 @@ def _page(db, periodo="Mes"):
         _QAPP = QApplication.instance() or QApplication([])
     page = ProductionContrastPage()
     page.period.setCurrentText(PERIODO_DIA if periodo == "Dia" else PERIODO_MES)
-    page.day.setDate(QDate(DAY.year, DAY.month, DAY.day))
+    page.day.setDate(QDate(dia.year, dia.month, dia.day))
     page.refresh()
     return page
 
@@ -282,11 +282,18 @@ def test_la_pantalla_se_construye_y_muestra_el_contraste(db):
 
 
 def test_la_pantalla_usa_el_mes_por_defecto(db):
-    """El mes es el periodo que sirve: tiene que venir elegido."""
+    """El mes es el periodo que sirve: tiene que venir elegido.
+
+    El texto que se verifica aca cambio en #639. Antes decia "el mes es la media
+    que sirve", y era falso: medido sobre los tickets reales, el 7,2 % de la
+    mandioca de cada mes entra en los ultimos dias y se procesa al mes siguiente,
+    asi que el mes cierra subestimando su rinde. El texto nuevo lo dice y
+    cuantifica.
+    """
     page = _page(db, periodo="Mes")
 
     assert page.period.currentText() == "Mes"
-    assert "el mes es la media que sirve" in page.nota.text()
+    assert "no hay desfase de cierre" in page.nota.text()
 
 def test_la_pantalla_avisa_cuando_no_hay_que_comparar(db):
     page = _page(db)
@@ -313,3 +320,78 @@ def test_la_pantalla_avisa_los_borradores_que_no_cuentan(db):
     assert "1 parte(s) en borrador" in page.nota.text()
     valor, _ = _tarjeta(page, "real")
     assert valor == "0.00 kg"
+
+
+# --------------------------------------------------------------- #639 borde
+# El material que entra los ultimos dias del mes se procesa al mes siguiente, asi
+# que no se promedia dentro del mes: el mes cierra subestimando su rinde y el
+# siguiente lo infla. Medido sobre los tickets reales (mar-oct 2026), es el 7,2 %
+# de la recepcion mensual en promedio y el 26 % en abril.
+#
+# Abajo se reproduce esa magnitud con datos sinteticos. Las cifras estan en el
+# issue #639.
+
+
+ABRIL = date(2026, 4, 30)   # 30 dias: el borde son los dias 28, 29 y 30
+MAYO = date(2026, 5, 20)    # 31 dias: el borde son los dias 29, 30 y 31
+
+
+def test_el_borde_del_mes_suma_la_mandioca_de_los_ultimos_dias(db):
+    """Abril: 30 % de lo recibido cae en los ultimos 3 dias."""
+    _receipt(date(2026, 4, 1), "70000", "22.50", "15750.00", comp="A1")
+    _receipt(ABRIL, "30000", "22.50", "6750.00", comp="A2")
+
+    c = ProductionContrastService.for_month(ABRIL)
+
+    assert c.received_kg == Decimal("100000")
+    assert c.border_kg == Decimal("30000.00")
+    assert c.border_pct == Decimal("30.0")
+    assert c.border_days == 3
+
+
+def test_un_mes_sin_material_de_borde_no_tiene_desfase_de_cierre(db):
+    """Mayo: el material entra pronto y el mes cierra sin cola."""
+    _receipt(date(2026, 5, 2), "80000", "22.50", "18000.00", comp="B1")
+    _receipt(date(2026, 5, 20), "20000", "22.50", "4500.00", comp="B2")
+
+    c = ProductionContrastService.for_month(MAYO)
+
+    assert c.received_kg == Decimal("100000")
+    assert c.border_kg == Decimal("0.00")
+    assert c.border_pct == Decimal("0.0")
+
+
+def test_el_borde_de_un_mes_de_31_dias_llega_hasta_el_31(db):
+    """Mayo tiene 31 dias, asi que el borde arranca el 29 y no el 28."""
+    _receipt(date(2026, 5, 28), "10000", "22.50", "2250.00", comp="C1")
+    _receipt(date(2026, 5, 29), "40000", "22.50", "9000.00", comp="C2")
+
+    c = ProductionContrastService.for_month(MAYO)
+
+    assert c.border_kg == Decimal("40000.00")
+    assert c.border_pct == Decimal("80.0")
+
+
+def test_un_dia_no_tiene_material_de_borde(db):
+    """En un dia todo el material es de borde, asi que el porcentaje no aplica."""
+    _receipt(DAY, "41043", "22.54", "9249.00")
+
+    c = ProductionContrastService.for_day(DAY)
+
+    assert c.border_kg == Decimal("0.00")
+    assert c.border_pct is None
+
+
+def test_la_pantalla_cuantifica_el_material_de_borde(db):
+    """La nota dice cuantos kg quedan para el mes siguiente, no solo que existen."""
+    _receipt(date(2026, 4, 1), "70000", "22.50", "15750.00", comp="D1")
+    _receipt(ABRIL, "30000", "22.50", "6750.00", comp="D2")
+
+    page = _page(db, periodo="Mes", dia=ABRIL)
+
+    nota = page.nota.text()
+    assert "30,000 kg de mandioca" in nota
+    assert "30.0 %" in nota
+    assert "subestima su rinde" in nota
+    # Y no puede decir que el mes promedia, porque no es asi (#639).
+    assert "el mes es la media que sirve" not in nota

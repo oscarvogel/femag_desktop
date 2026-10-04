@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -9,6 +10,12 @@ from app.models.production import ProductionBag, ProductionPart, RawMaterialRece
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 ONE_HUNDRED = Decimal("100")
+
+# Dias del final del mes que se consideran "de borde": el material que entra ahi
+# no llega a procesarse dentro del mes. Tres dias es el supuesto operativo, segun
+# el dueno: el material queda para el dia siguiente y, si cae viernes, salta el
+# fin de semana. Es una convencion declarada, no un dato medido.
+BORDER_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -21,12 +28,22 @@ class ProductionContrast:
     mandioca entraron al proceso**, asi que el sistema no lo registra. Por eso el
     rinde real se calcula sobre la mandioca recibida.
 
-    Es un problema del detalle diario: si el material de un dia se procesa otro,
-    numerador y denominador son de dias distintos y el numero diaria no significa
-    nada. **Por eso el agregado mensual es el que manda**: al sumar todo el mes,
-    el desfasaje se promedia y el rinde del mes es una media utilis. El dia se
-    mantiene porque sirve para ver el detalle de tickets y partes, no para
-    juzgar el rinde.
+    Y el mes **no promedia** el desfase, aunque durante un tiempo se creyo que si
+    (#639). Medido sobre los tickets reales de marzo a octubre de 2026: el 7,2 %
+    de la mandioca de cada mes -- hasta el 26 % en abril -- entra en los ultimos
+    dias. Ese material no se procesa dentro del mes, asi que no se promedia: sale
+    del denominador del mes que cierra y aparece en el numerador del siguiente.
+    El mes que cierra **subestima** su rinde y el que abre lo **infla**, en esa
+    proporcion.
+
+    Por eso ``border_kg`` existe: es la parte del material recibido que, por la
+    dinamica de la planta, se procesa al mes siguiente. No es "material pendiente"
+    porque eso no se puede calcular -- separarlo de la diferencia de rinde haria
+    falta saber cuantos kilos entraron al proceso, y no hay forma de saberlo. Es
+    el material que se sabe que todavia no pudo procesarse.
+
+    El dia se mantiene para ver el detalle de tickets y partes, no para juzgar
+    el rinde: ahi el desfase es siempre del 100 % del periodo.
     """
 
     start: date
@@ -39,10 +56,24 @@ class ProductionContrast:
     real_bags: int
     real_parts: int
     pending_parts: int
+    border_kg: Decimal
+    border_days: int
 
     @property
     def is_month(self) -> bool:
         return (self.end - self.start).days >= 27
+
+    @property
+    def border_pct(self) -> Decimal | None:
+        """Por parte del material recibido que se procesa al mes siguiente.
+
+        Solo tiene sentido en el mes: en un dia, todo el material es de borde.
+        """
+        if not self.is_month or self.received_kg <= ZERO:
+            return None
+        return (self.border_kg / self.received_kg * ONE_HUNDRED).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
 
     @property
     def label(self) -> str:
@@ -141,6 +172,10 @@ class ProductionContrastService:
         received_kg = ZERO
         weighted_sum = ZERO
         theoretical_starch_kg = ZERO
+        border_kg = ZERO
+        ultimo_dia = calendar.monthrange(start.year, start.month)[1]
+        desde_borde = ultimo_dia - BORDER_DAYS + 1
+        es_mes = (end - start).days >= 27
         for receipt in receipts:
             payable = Decimal(str(receipt.payable_kg or 0))
             rendes = Decimal(str(receipt.yield_average or 0))
@@ -149,6 +184,8 @@ class ProductionContrastService:
             # pesa una planta: no todos los tickets pesan lo mismo.
             weighted_sum += payable * rendes
             theoretical_starch_kg += Decimal(str(receipt.theoretical_starch_kg or 0))
+            if es_mes and receipt.received_at.day >= desde_borde:
+                border_kg += payable
 
         real_starch_kg = ZERO
         real_bags = 0
@@ -183,6 +220,8 @@ class ProductionContrastService:
             real_bags=real_bags,
             real_parts=real_parts,
             pending_parts=pending_parts,
+            border_kg=border_kg.quantize(CENT),
+            border_days=BORDER_DAYS,
         )
 
     @classmethod
