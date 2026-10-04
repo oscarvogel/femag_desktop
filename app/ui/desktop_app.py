@@ -117,6 +117,7 @@ from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
 from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
 from app.ui.production_parts import ProductionPartPage
 from app.ui.production_contrast import ProductionContrastPage
+from app.ui.stock_count import StockCountPage
 from app.ui.stock_initial_inventory import StockInitialInventoryPage
 from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
@@ -376,6 +377,10 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page(
             "stock_initial_inventory",
             StockInitialInventoryPage(current_username=self.shell.username, parent=self),
+        )
+        self._add_page(
+            "stock_count",
+            StockCountPage(current_username=self.shell.username, parent=self),
         )
         self._add_page(
             "whatsapp_configuration",

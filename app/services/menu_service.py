@@ -18,6 +18,7 @@ REAL_MODULES = {
     "Partes de producción": "production_parts",
     "Contraste de producción": "production_contrast",
     "Inventario inicial": "stock_initial_inventory",
+    "Conteo físico": "stock_count",
     "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
     "Vendedores": "salespeople",
