@@ -53,11 +53,10 @@ def _metric_card(titulo: str):
 class ProductionContrastPage(QWidget):
     """Fecula teorica contra fecula real, por dia o por mes.
 
-    El mes es el periodo util. Como no hay forma de saber cuantos kilos de
-    mandioca entraron al proceso, el rinde diario no significa nada: si el
-    material de un dia se procesa al otro, el numerador y el denominador son de
-    dias distintos. Sumando el mes entero el desfase se promedia y queda una
-    media que si se puede usar. El dia queda para ver el detalle.
+    El mes es el periodo util, pero con un sesgo que hay que mostrar y no
+    esconder (#639): la mandioca que entra los ultimos dias del mes se procesa
+    al siguiente, asi que el mes que cierra subestima su rinde y el que abre lo
+    infla. La pagina cuantifica cuanto material es ese.
     """
 
     def __init__(self, parent=None, *, service=None):
@@ -74,8 +73,8 @@ class ProductionContrastPage(QWidget):
         layout.addWidget(heading)
         subheading = QLabel(
             "Compara la fécula que la planta recibió según el legacy contra la que "
-            "realmente embolsó. El mes es la media útil: como no se sabe en qué día "
-            "se procesó la mandioca, el agregado mensual promedia el desfase."
+            "realmente embolsó. El mes es la media útil, con un sesgo conocido: la "
+            "mandioca que entra los últimos días se procesa al mes siguiente."
         )
         subheading.setObjectName("subheading")
         subheading.setWordWrap(True)
@@ -222,11 +221,22 @@ class ProductionContrastPage(QWidget):
     def _note(contraste) -> str:
         avisos = []
         if contraste.is_month:
-            avisos.append(
-                "No se sabe en qué día entró al proceso cada kilo de mandioca, así que el "
-                "rinde se calcula sobre la recibida. Al sumar el mes entero el desfase se "
-                "promedia: por eso el mes es la media que sirve."
-            )
+            borde_pct = contraste.border_pct
+            if contraste.border_kg > 0 and borde_pct is not None:
+                avisos.append(
+                    f"El mes cierra con {contraste.border_kg:,.0f} kg de mandioca "
+                    f"({borde_pct} %) recibidos en los últimos "
+                    f"{contraste.border_days} días. Esa parte no se procesa dentro "
+                    "del mes: el mes subestima su rinde en esa proporción y el "
+                    "mes siguiente lo infla. Cuando compare dos meses, tenga esto "
+                    "en cuenta antes de concluir que uno rindió menos."
+                )
+            else:
+                avisos.append(
+                    "No se sabe en qué día entró al proceso cada kilo de mandioca, así "
+                    "que el rinde se calcula sobre la recibida. Este mes no cerró con "
+                    "material de los últimos días, así que no hay desfase de cierre."
+                )
         elif contraste.has_receipts:
             avisos.append(
                 "La mandioca no se procesa el mismo día que llega: queda para los días "
