@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 
 from app.config.logging_config import configure_logging
@@ -66,27 +65,11 @@ def production_health_check() -> int:
 
 
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
-    from app.config.secure_credentials import has_runtime_configuration
+    from app.config.settings import resolve_effective_connection_settings
 
-    packaged_app = bool(getattr(sys, "frozen", False))
-    saved_runtime_config = has_runtime_configuration()
-    use_secure_config = bool(
-        not demo_mode
-        and (
-            configure
-            or packaged_app
-            or saved_runtime_config
-            or os.getenv("FEMAG_SECURE_CONFIG") == "1"
-        )
-    )
-    if use_secure_config:
-        # Toda ejecución normal (EXE o source) usa la configuración segura
-        # del puesto cuando existe. Así evitamos que .env o variables viejas
-        # de demo redirijan FEMAG a SQLite por accidente.
-        os.environ["FEMAG_SECURE_CONFIG"] = "1"
-        os.environ["FEMAG_DEMO"] = "0"
-        os.environ["FEMAG_DB_ENGINE"] = "mysql"
-
+    # El preámbulo de conexión vive en ``settings`` y no acá: el auditor
+    # monetario usa la misma función para conectarse a la misma base que la app.
+    if resolve_effective_connection_settings(demo_mode=demo_mode, configure=configure):
         from PyQt5.QtWidgets import QApplication
         from app.ui.connection_dialog import ensure_runtime_configuration
 
