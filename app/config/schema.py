@@ -188,12 +188,47 @@ def _backfill_product_classification(database) -> None:
             product.save()
 
 
+def _clients_with_pending_email_migration(client_model, email_model):
+    """Clientes a los que el backfill de correos todavia tiene algo que hacerles.
+
+    El corte va en SQL porque recorrer la cartera entera en cada arranque es lo
+    que hacia lento al equipo: con el correo poblado, 851 clientes ya
+    consolidados costaban 851 consultas en la segunda corrida, todas para
+    descubrir que no habia nada que hacer.
+
+    "Algo que hacer" es exactamente "no tener un ClientEmail activo y principal":
+
+    - sin ninguna fila: hay que crearla;
+    - con filas pero ninguna activa y principal: hay que promover una;
+    - con una activa y principal: no hay nada que hacer.
+
+    El caso masivo es el primero, y el filtro lo cubre entero sin recorrer en
+    Python, que es lo que hacia el trabajo inutil. La normalizacion del correo
+    sigue siendo de Python, asi que la consulta sola no alcanza: aca solo se
+    prescignan los clientes que ya estan completos.
+
+    Va con ``NOT IN`` y no con ``EXISTS`` porque ``Exists`` no existe en peewee 3
+    y el proyecto esta en 3.17. La columna ``client_id`` es una FK sin null, asi
+    que la subconsulta nunca devuelve null y el ``NOT IN`` no puede caer en el
+    caso en que MySQL devuelve desconocido y excluye al cliente.
+    """
+    con_primario_activo = email_model.select(email_model.client_id).where(
+        (email_model.active == True) & (email_model.is_primary == True)  # noqa: E712
+    )
+    return (
+        client_model.select()
+        .where(client_model.email.is_null(False))
+        .where(client_model.id.not_in(con_primario_activo))
+        .order_by(client_model.id)
+    )
+
+
 def _backfill_client_emails(database) -> None:
     from app.models.masters import Client, ClientEmail
     from app.services.client_email_service import ClientEmailService
 
     with database.atomic():
-        for client in Client.select().where(Client.email.is_null(False)).order_by(Client.id):
+        for client in _clients_with_pending_email_migration(Client, ClientEmail):
             raw_email = (client.email or "").strip()
             if not raw_email:
                 continue
