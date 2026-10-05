@@ -95,7 +95,7 @@ from app.ui.glass_v2 import glass_v2_stylesheet
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
-from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.combo_autocomplete import enable_combo_autocomplete, matching_combo_index
 from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
 from app.ui.aviso_dropdown import AvisoDropdown
@@ -109,7 +109,13 @@ from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
-from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
+from app.ui.master_abm import (
+    ClientAddressEntryDialog,
+    build_client_abm_page,
+    build_master_abm_page,
+    master_abm_configs,
+    normalize_master_text,
+)
 from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
@@ -3027,6 +3033,7 @@ class LoadOrderEntryDialog(QDialog):
         self.address_combo = QComboBox()
         self.address_combo.setObjectName("loadOrderAddressInput")
         enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
+        self._keep_typed_destination()
         self.add_destination_button = _action_button(
             "addLoadOrderClientButton", "Agregar cliente/destino"
         )
@@ -3373,11 +3380,61 @@ class LoadOrderEntryDialog(QDialog):
         elif len(options) == 1:
             self.trailer_combo.setCurrentIndex(1)
 
-    def _refresh_address_options(self) -> None:
+    def _keep_typed_destination(self) -> None:
+        """El destino escrito a mano no se borra al perder el foco (#658).
+
+        `commit_combo_text` descarta todo lo que no coincide exactamente con una
+        opcion del combo, y como el destino se elige escribiendo, Enter borraba lo
+        que el operador acababa de tipear. Aca el texto sin coincidencia se
+        conserva: es el alta pendiente, no basura.
+        """
+        line_edit = self.address_combo.lineEdit()
+        if line_edit is None:
+            return
+        try:
+            line_edit.editingFinished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        line_edit.editingFinished.connect(self._commit_address_text)
+
+    def _commit_address_text(self) -> None:
+        """Solo confirma el texto que SI es un domicilio del combo.
+
+        No se toca el indice cuando no hay coincidencia: en un combo editable,
+        `setCurrentIndex(-1)` borra el texto de la pantalla, que es justamente lo
+        que hay que conservar para ofrecer el alta.
+        """
+        combo = self.address_combo
+        index = matching_combo_index(combo, combo.lineEdit().text())
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _pending_destination_text(self) -> str:
+        """Texto escrito que todavia no identifica un domicilio del combo.
+
+        El combo auto-selecciona el destino cuando el cliente tiene uno solo, asi que
+        el indice actual no dice si el operador eligio ese destino o escribio otro.
+        Manda lo que esta escrito en pantalla.
+        """
+        combo = self.address_combo
+        line_edit = combo.lineEdit()
+        if line_edit is None:
+            return ""
+        text = line_edit.text().strip()
+        if not text:
+            return ""
+        current = combo.currentIndex()
+        if current >= 0 and combo.itemText(current).strip().casefold() == text.casefold():
+            return ""
+        return text
+
+    def _refresh_address_options(self, *, preferred: int | None = None) -> None:
         client_id = self.client_combo.currentData()
         options = _address_options(client_id=client_id)
         _fill_combo(self.address_combo, options)
-        if len(options) == 1:
+        if preferred is not None and self.address_combo.findData(preferred) >= 0:
+            _set_combo(self.address_combo, preferred)
+        elif len(options) == 1:
             self.address_combo.setCurrentIndex(1)
         if client_id is not None and not options:
             self.feedback.show_warning(
@@ -3385,15 +3442,77 @@ class LoadOrderEntryDialog(QDialog):
                 focus_widget=self.client_combo,
             )
 
+    def _offer_new_delivery_address(self, client_id: int, typed: str) -> int | None:
+        """Pregunta siempre si el destino escrito se da de alta, y lo crea si dice que si.
+
+        El alta es decision del operador, no una heuristica: un cliente que entrega en
+        un lugar nuevo es el caso normal de la operacion. El domicilio nuevo queda
+        asociado al cliente seleccionado y la orden sigue sin cerrarse.
+        """
+        if not typed:
+            return None
+        client = Client.get_by_id(client_id)
+        existing = _find_client_delivery_address(client_id, typed)
+        if existing is not None:
+            self._refresh_address_options(preferred=existing.id)
+            self.feedback.show_warning(
+                f"El lugar de entrega {existing.address}, {existing.city} ya estaba "
+                f"cargado para {client.name}: se selecciono ese destino.",
+                focus_widget=self.address_combo,
+            )
+            return existing.id
+        answer = QMessageBox.question(
+            self,
+            "Nuevo lugar de entrega",
+            f'"{typed}" no es un lugar de entrega de {client.name}.\n\n'
+            "¿Quiere darlo de alta ahora, asociado a ese cliente?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        dialog = ClientAddressEntryDialog(
+            current_user=self.current_user,
+            client_id=client_id,
+            prefill_address=typed,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.saved_record is None:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        self._refresh_address_options(preferred=dialog.saved_record.id)
+        return dialog.saved_record.id
+
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
-        address_id = self.address_combo.currentData()
-        if client_id is None or address_id is None:
-            focus_widget = self.client_combo if client_id is None else self.address_combo
+        if client_id is None:
             self.feedback.show_warning(
-                "Seleccione cliente y destino.", focus_widget=focus_widget
+                "Seleccione cliente y destino.", focus_widget=self.client_combo
             )
             return
+        address_id = self.address_combo.currentData()
+        typed = self._pending_destination_text()
+        if typed:
+            # El operador escribio un destino: el indice auto-seleccionado no manda.
+            address_id = None
+        if address_id is None:
+            asked = bool(typed)
+            address_id = self._offer_new_delivery_address(client_id, typed)
+            if address_id is None:
+                # Si se pregunto, el aviso especifico ya esta en pantalla y el
+                # generico lo taparia.
+                if not asked:
+                    self.feedback.show_warning(
+                        "Seleccione cliente y destino.", focus_widget=self.address_combo
+                    )
+                return
         address = ClientAddress.get_by_id(address_id)
         if address.client.id != client_id:
             self.feedback.show_error(
@@ -4417,6 +4536,30 @@ def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
         ]
     except (InterfaceError, OperationalError):
         return []
+
+
+def _find_client_delivery_address(client_id: int, typed: str) -> ClientAddress | None:
+    """Domicilio de entrega del cliente al que corresponde el texto escrito, si existe.
+
+    El combo muestra `Cliente - calle, ciudad`, asi que escribir `Ruta A` nunca
+    coincide con la etiqueta completa. Sin esta comparacion, "siempre preguntar si se
+    da de alta" terminaria creando un domicilio duplicado de uno que el cliente ya
+    tiene. Se comparan calle, ciudad y launion de ambas, sin tildes ni mayusculas.
+    """
+    key = normalize_master_text(typed)
+    if not key:
+        return None
+    query = ClientAddress.select().where(
+        (ClientAddress.client == client_id)
+        & (ClientAddress.active == True)  # noqa: E712
+        & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
+    ).order_by(ClientAddress.id)
+    for address in query:
+        street = normalize_master_text(address.address)
+        city = normalize_master_text(address.city)
+        if key in {street, city, f"{street}{city}"}:
+            return address
+    return None
 
 
 def _product_options() -> list[tuple[int, str]]:
