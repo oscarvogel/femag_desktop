@@ -75,12 +75,34 @@ class StockCountService:
         )
 
     def countable_products(self) -> list[Product]:
-        """Productos que se pueden contar: los de venta activos."""
+        """Productos que se pueden contar: los de venta activos.
+
+        Acá NO se filtran los que no tienen peso de bolsa: la pantalla los
+        muestra igual, bloqueados y con el motivo, para que el operador entienda
+        que le falta cargar el dato en Productos en vez de preguntarse por que
+        el producto no aparece. El filtro real esta en
+        :meth:`is_countable_in_bags`, y el servicio igual se niega a contar en
+        bolsas un producto sin peso.
+        """
         return list(
             Product.select()
             .where((Product.active == True) & (Product.product_kind == PRODUCT_KIND_PRODUCT))  # noqa: E712
             .order_by(Product.name)
         )
+
+    @staticmethod
+    def is_countable_in_bags(product) -> bool:
+        """Si el producto se puede contar en bolsas.
+
+        Un producto sin ``peso_unitario_kg`` cargado **no** se puede contar en
+        bolsas: los kilos se derivan multiplicando por el peso, asi que con peso
+        cero N bolsas equivalen a 0 kg y el conteo generaria un ajuste que lleva
+        el saldo del libro a cero. Por eso el conteo es en bolsas y el peso es
+        obligatorio, no una convenience.
+        """
+        if product is None or getattr(product, "id", None) is None:
+            return False
+        return Decimal(str(product.peso_unitario_kg or 0)) > ZERO
 
     def add_line(
         self, count: StockCount, product, counted_units, *, reason: str | None = None
@@ -109,6 +131,16 @@ class StockCountService:
         unidades = unidades.quantize(Decimal("0.001"))
 
         peso = Decimal(str(product.peso_unitario_kg or 0))
+        if peso <= ZERO:
+            # Sin peso de bolsa, N bolsas darían 0 kg y la diferencia contra el
+            # libro sería -saldo: al cerrar el conteo se generaría un ajuste que
+            # deja el producto en cero. Es pérdida de inventario silenciosa, así
+            # que acá se corta y se dice qué dato falta y dónde cargarlo.
+            raise StockCountError(
+                f"{product.name} no tiene peso de bolsa cargado, así que no se "
+                "puede contar en bolsas. Cargá el peso de bolsa del producto en "
+                "Productos y volvé a contar."
+            )
         kilos = (unidades * peso).quantize(Decimal("0.001"))
         calculada = StockService.balance_for(product).balance_kg
 
