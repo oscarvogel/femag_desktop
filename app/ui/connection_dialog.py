@@ -18,7 +18,7 @@ from app.config.database import (
     ensure_mysql_database_exists,
     initialize_runtime_database,
 )
-from app.config.schema import SchemaValidationError, validate_runtime_schema
+from app.config.schema import SchemaTooNewError, SchemaValidationError, validate_runtime_schema
 from app.config.schema import ensure_runtime_schema
 from app.config.secure_credentials import (
     RuntimeConnection,
@@ -149,6 +149,17 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
     try:
         database.connect()
         validate_runtime_schema(database)
+    except SchemaTooNewError as exc:
+        # No se ofrece "crear o actualizar tablas": la base ya esta migrada a una
+        # version mas nueva y esta app no la conoce. Prepararla daria el mismo
+        # resultado y dejaria fuera de servicio a los puestos ya actualizados.
+        # Se propaga como RuntimeError para que el dialogo solo muestre el mensaje.
+        raise RuntimeError(
+            f"La base esta actualizada a una version mas nueva que este programa. "
+            f"Hay que actualizar la aplicacion; volver a preparar las tablas no lo "
+            f"soluciona y dejaria fuera de servicio a los puestos ya actualizados. "
+            f"Detalle: {exc}"
+        ) from exc
     except SchemaValidationError as exc:
         raise RuntimeSchemaPreparationRequired(
             f"La base existe pero su estructura no es compatible: {exc}. "
