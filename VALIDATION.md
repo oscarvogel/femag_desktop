@@ -14,7 +14,15 @@ Verifica espacios en blanco problematicos y errores basicos del diff.
 python -m pytest
 ```
 
-Ejecuta la suite de tests del proyecto.
+Ejecuta la suite de tests del proyecto. La suite incluye el modulo `webapp`, asi que las
+dependencias se instalan con `requirements-web.txt` y no con `requirements.txt`:
+
+```bash
+python -m pip install -r requirements-web.txt
+```
+
+Con solo `requirements.txt` la suite **no llega a ejecutarse**: la recoleccion aborta con
+`ModuleNotFoundError: No module named 'flask'` en `tests/test_webapp_qr_orders.py`.
 
 **En PowerShell hay que exportar `QT_QPA_PLATFORM=offscreen` antes de correrla:**
 
@@ -28,10 +36,11 @@ abre un dialogo modal y **la suite queda colgada indefinidamente**. El CI lo def
 `env:` dentro de `.github/workflows/ci.yml`; localmente hay que setearlo a mano.
 
 ```bash
-python -m compileall app
+python -m compileall app webapp
 ```
 
-Compila los modulos Python dentro de `app` para detectar errores de sintaxis o imports basicos.
+Compila los modulos Python dentro de `app` y `webapp` para detectar errores de sintaxis o imports
+basicos. Es el mismo comando que ejecuta el CI.
 
 ## Smoke checks
 
@@ -53,26 +62,43 @@ No listar comandos inexistentes como obligatorios. Si en una rama futura existe 
 
 ## Tests actuales detectados
 
-En esta rama, `py -3 -m pytest --collect-only -q` detecta 69 tests:
+**La fuente de verdad es `pytest --collect-only`, no este documento.** Los numeros de abajo son
+de una corrida real y quedan fechados; si la suite cambia, se actualiza con una corrida nueva.
 
-- `tests/test_audit.py`: 1 test.
-- `tests/test_backup.py`: 1 test.
-- `tests/test_clients.py`: 2 tests.
-- `tests/test_config.py`: 2 tests.
-- `tests/test_load_order_desktop_ui.py`: 5 tests.
-- `tests/test_load_order_multi_client_ui.py`: 3 tests.
-- `tests/test_load_order_operations.py`: 4 tests.
-- `tests/test_load_order_printing.py`: 2 tests.
-- `tests/test_load_orders.py`: 27 tests.
-- `tests/test_master_abm_desktop_ui.py`: 2 tests.
-- `tests/test_masters.py`: 3 tests.
-- `tests/test_models.py`: 2 tests.
-- `tests/test_permissions.py`: 2 tests.
-- `tests/test_schema.py`: 2 tests.
-- `tests/test_ui_pyqt5libs.py`: 4 tests.
-- `tests/test_ui_smoke.py`: 7 tests.
+```bash
+py -3.12 -m pytest --collect-only -q
+```
 
-No asumir una cantidad fija de tests en `main`. Si cambia la suite, actualizar esta seccion con una nueva corrida de collect-only.
+Ultima corrida registrada: **05-Oct-2026**, sobre `main` en `4c6afc0`, con
+`QT_QPA_PLATFORM=offscreen` y `requirements-web.txt` instalado.
+
+| Medida | Valor |
+|---|---|
+| Tests recolectados | 1383 |
+| Archivos de test | 188 |
+| Corrida completa | 1383 passed, ~220 s |
+
+El total depende de la rama: `fix/issue-643-backup-real` detecta 1389 porque agrega
+`tests/test_backup_service_real.py` (+6). No comparar totales entre ramas como si fueran
+comparables.
+
+Archivos con mas tests (orientativo, no inventario cerrado):
+
+| Archivo | Tests |
+|---|---|
+| `tests/test_monetary_audit_readonly.py` | 54 |
+| `tests/test_load_orders.py` | 54 |
+| `tests/test_load_order_desktop_ui.py` | 50 |
+| `tests/test_master_abm_desktop_ui.py` | 30 |
+| `tests/test_legacy_dbf_importer.py` | 26 |
+| `tests/test_monetary_audit.py` | 25 |
+| `tests/test_schema.py` | 24 |
+| `tests/test_budget_monetary_integrity.py` | 24 |
+| `tests/test_issue_272_load_order_trailer.py` | 23 |
+| `tests/test_issue_585_billing_split_ui.py` | 20 |
+
+Esta tabla es orientativa y va a quedar vieja. Para el inventario vigente, correr
+`py -3.12 -m pytest --collect-only -q` y agrupar por archivo.
 
 ## Matriz de validaciones por tipo de cambio
 
@@ -86,7 +112,7 @@ Ejecutar:
 git diff --check
 git diff --cached --check
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 python -m app.main --smoke
 ```
 
@@ -100,7 +126,7 @@ Ejecutar:
 git diff --check
 git diff --cached --check
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 python -m app.main --smoke
 ```
 
@@ -114,7 +140,7 @@ Ejecutar:
 git diff --check
 git diff --cached --check
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 python -m app.main --smoke
 python scripts/generate_ux_screenshots.py
 ```
@@ -131,7 +157,7 @@ Ejecutar:
 git diff --check
 git diff --cached --check
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 ```
 
 Agregar test o smoke enfocado si existe. Adjuntar evidencia de salida A4, PDF o preview cuando aplique. Screenshots o archivos de evidencia solo si ayudan a revisar el resultado.
@@ -144,7 +170,7 @@ Ejecutar:
 git diff --check
 git diff --cached --check
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 python -m app.main --smoke
 ```
 
@@ -204,7 +230,7 @@ Validacion general recomendada:
 
 ```bash
 python -m pytest
-python -m compileall app
+python -m compileall app webapp
 python -m app.main --smoke
 ```
 
