@@ -110,8 +110,8 @@ def test_typed_destination_asks_and_creates_the_address_for_the_client(db, monke
 
     asked = []
 
-    def fake_question(_parent, _title, text, *_args):
-        asked.append(text)
+    def fake_question(_parent, title, text, *_args):
+        asked.append((title, text))
         return QMessageBox.Yes
 
     monkeypatch.setattr(QMessageBox, "question", fake_question)
@@ -129,9 +129,14 @@ def test_typed_destination_asks_and_creates_the_address_for_the_client(db, monke
     _add_destination_click(dialog)
     app.processEvents()
 
-    assert len(asked) == 1
-    assert "Ruta 21" in asked[0]
-    assert data["client"].name in asked[0]
+    # Desde #665 se pregunta ademas por el domicilio principal cuando el cliente ya
+    # tiene lugares de entrega cargados.
+    assert [title for title, _text in asked] == [
+        "Nuevo lugar de entrega",
+        "Domicilio principal",
+    ]
+    assert "Ruta 21" in asked[0][1]
+    assert data["client"].name in asked[0][1]
 
     created = ClientAddress.get(
         (ClientAddress.client == data["client"]) & (ClientAddress.address == "Ruta 21")

@@ -100,6 +100,7 @@ from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
 from app.ui.combo_autocomplete import enable_combo_autocomplete, matching_combo_index
 from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
+from app.services.audit_service import AuditService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
@@ -359,6 +360,7 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
         if login.show() != QDialog.Accepted:
             return 0
         user = login.authenticated_user
+        _record_workstation_version()
         app.setStyleSheet(STYLES + glass_v2_stylesheet())
         window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
         window.show()
@@ -368,6 +370,19 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     if database is not None and not database.is_closed():
         database.close()
     return result
+
+
+def _record_workstation_version() -> None:
+    """Deja registrada que version esta corriendo en este puesto (#664).
+
+    Va despues del login, no antes: asi solo se registra cuando alguien abrio la
+    aplicacion de verdad. Y nunca puede tirar el puesto: registrar la version no
+    puede ser un motivo mas de que la app no abra.
+    """
+    try:
+        AuditService().record_workstation_version(BUILD_VERSION)
+    except Exception:
+        logger.exception("No se pudo registrar la version del puesto")
 
 
 def _prepare_database(*, demo_mode: bool):
@@ -3568,10 +3583,12 @@ class LoadOrderEntryDialog(QDialog):
                 focus_widget=self.address_combo,
             )
             return None
+        as_primary = self._ask_primary_delivery_address(client)
         dialog = ClientAddressEntryDialog(
             current_user=self.current_user,
             client_id=client_id,
             prefill_address=typed,
+            is_primary=as_primary,
             parent=self,
         )
         if dialog.exec_() != QDialog.Accepted or dialog.saved_record is None:
@@ -3582,6 +3599,33 @@ class LoadOrderEntryDialog(QDialog):
             return None
         self._refresh_address_options(preferred=dialog.saved_record.id)
         return dialog.saved_record.id
+
+    def _ask_primary_delivery_address(self, client) -> bool:
+        """El destino principal del cliente lo decide el operador, no el alta (#665).
+
+        El alta manual desde el ABM deja el domicilio nuevo como principal porque ahi
+        el operador esta de ese modo. Desde la orden de carga no: se esta cargando un destino
+        puntual para una carga y eso no dice nada sobre cual es el domicilio de siempre.
+        """
+        existing = ClientAddress.select().where(
+            (ClientAddress.client == client.id)
+            & (ClientAddress.active == True)  # noqa: E712
+            & (ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED)))
+        )
+        if not existing.exists():
+            # El cliente no tenia ningun domicilio de entrega: no hay a que sacarle
+            # el principal, asi que este pasa a serlo.
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Domicilio principal",
+            f"{client.name} ya tiene lugares de entrega cargados.\n\n"
+            "¿Querés que este nuevo sea el domicilio principal del cliente?\n\n"
+            'Si decís "No", el domicilio principal sigue siendo el que ya estaba.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
 
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
