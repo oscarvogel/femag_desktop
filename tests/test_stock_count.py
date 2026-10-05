@@ -295,3 +295,140 @@ def test_se_puede_contar_desde_una_fecha_distinta_a_la_del_conteo(db):
     movimiento = servicio.close_count(conteo)[0]
 
     assert movimiento.movement_date == DAY - timedelta(days=3)
+
+
+def _producto_sin_peso(nombre="FECULA SIN PESO CARGADO", kg=Decimal("1000")):
+    """Producto con stock en el libro pero sin peso de bolsa cargado.
+
+    Es el caso que rompe: los kilos se derivan multiplicando bolsas por el peso,
+    asi que con peso cero N bolsas dan 0 kg.
+    """
+    producto = Product.create(
+        name=nombre,
+        unit="kg",
+        peso_unitario_kg=Decimal("0.000"),
+        product_kind=PRODUCT_KIND_PRODUCT,
+        active=True,
+    )
+    _inventario_inicial(producto, kg)
+    return producto
+
+
+def test_contar_un_producto_sin_peso_de_bolsa_no_puede_dejar_el_stock_en_cero(db):
+    """El bug de #650: 50 bolsas de un producto sin peso dan 0 kg, la diferencia
+    contra el libro es -saldo y al cerrar el conteo el ajuste deja el producto en
+    cero. El operador perdia inventario sin ver nada raro en pantalla."""
+    producto = _producto_sin_peso()
+    servicio = _servicio()
+    conteo = servicio.open_count(DAY)
+
+    with pytest.raises(StockCountError):
+        servicio.add_line(conteo, producto, Decimal("50"), reason="Conteo de bolsas")
+
+    servicio.close_count(conteo)
+
+    assert StockService.balance_for(producto).balance_kg == Decimal("1000.000"), (
+        "el conteo de un producto sin peso de bolsa dejó el stock en cero"
+    )
+
+
+def test_el_error_dice_que_cargar_y_donde(db):
+    """El mensaje tiene que decir qué falta y dónde se carga. Un error que solo
+    dice ' StockCountError' obliga al operador a buscar la causa."""
+    producto = _producto_sin_peso()
+    servicio = _servicio()
+    conteo = servicio.open_count(DAY)
+
+    with pytest.raises(StockCountError) as error:
+        servicio.add_line(conteo, producto, Decimal("50"))
+
+    mensaje = str(error.value)
+    assert producto.name in mensaje
+    assert "peso de bolsa" in mensaje
+    assert "Productos" in mensaje
+
+
+def test_solo_se_pueden_contar_en_bolsas_los_productos_con_peso(db):
+    """La pantalla usa este mismo predicado para no ofrecer un campo donde la
+    conversión no existe."""
+    con_peso = _product("FECULA CON PESO")
+    sin_peso = _producto_sin_peso("FECULA SIN PESO")
+
+    assert StockCountService.is_countable_in_bags(con_peso) is True
+    assert StockCountService.is_countable_in_bags(sin_peso) is False
+    assert StockCountService.is_countable_in_bags(None) is False
+
+
+def test_la_pantalla_no_ofrece_campo_de_bolsas_sin_peso(db):
+    """Un producto sin peso de bolsa no aparece en ``inputs``, o sea que no hay
+    spinbox editable que el operador pueda usar para crear la linea que lo borra.
+    Las lineas ya cargadas siguen visibles: no se oculta historia."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.stock_count import StockCountPage
+
+    _producto_sin_peso("FECULA OTRA SIN PESO", kg=Decimal("1000"))
+    sin_peso = _producto_sin_peso("FECULA SIN PESO", kg=Decimal("500"))
+    con_peso = Product.create(
+        name="FECULA CON PESO DE BOLSA",
+        unit="unidad",
+        peso_unitario_kg=PESO_BOLSA,
+        product_kind=PRODUCT_KIND_PRODUCT,
+        active=True,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    pagina = StockCountPage(service=_servicio(), current_username="admin")
+
+    # Sin campo editable: es lo que impide crear la linea que borra el stock.
+    assert sin_peso.id not in pagina.inputs
+    assert con_peso.id in pagina.inputs
+    # Y el motivo visible, en la fila y en el estado de la pantalla.
+    fila = _fila_de(pagina, sin_peso)
+    assert pagina.table.item(fila, 2).text() == "falta peso de bolsa"
+    assert "sin peso de bolsa" in pagina.status.text()
+    pagina.close()
+    app.processEvents()
+
+
+def _fila_de(pagina, producto) -> int:
+    """Fila de la grilla donde esta un producto, por id."""
+    for indice in range(pagina.table.rowCount()):
+        if pagina.table.item(indice, 0).text() == producto.name:
+            return indice
+    raise AssertionError(f"{producto.name} no esta en la grilla")
+
+
+def test_una_linea_ya_cargada_se_sigue_viendo_aunque_no_se_pueda_editar(db):
+    """Si una linea con peso cero ya existe (cargada antes de #650), no se
+    borra ni se oculta: se muestra para que el operador vea la diferencia y
+    pueda revertirla, pero sin poder editarla."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.stock_count import StockCountPage
+
+    producto = _producto_sin_peso("FECULA SIN PESO", kg=Decimal("800"))
+    servicio = _servicio()
+    conteo = servicio.open_count(DAY)
+    # Se escribe la linea a mano, saltando el guard, como si ya estuviera de
+    # antes del fix.
+    StockCountLine.create(
+        count=conteo,
+        product=producto,
+        calculated_kg=Decimal("800.000"),
+        counted_units=Decimal("32.000"),
+        unit_weight_kg=Decimal("0.000"),
+        counted_kg=Decimal("0.000"),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    pagina = StockCountPage(service=servicio, current_username="admin")
+
+    # La linea se ve (no se oculta historia) pero el campo no se puede tocar:
+    # el operador ve la diferencia y puede revertirla, no editarla.
+    assert producto.id in pagina.inputs
+    assert pagina.inputs[producto.id].isReadOnly() is True
+    assert pagina.lineas[producto.id].counted_units == Decimal("32.000")
+    assert pagina.table.item(_fila_de(pagina, producto), 3).text() == "0,000"
+    pagina.close()
+    app.processEvents()
