@@ -47,6 +47,7 @@ try:  # solo presente en builds demo (PyInstaller DEMO.spec)
 except ImportError:  # pragma: no cover - build de produccion no incluye el modulo
     BUILD_DEMO_VERSION = None
 from app.config.schema import (
+    SchemaTooNewError,
     SchemaValidationError,
     ensure_runtime_schema,
     validate_runtime_schema,
@@ -308,6 +309,19 @@ def _prepare_database(*, demo_mode: bool):
 
     try:
         validate_runtime_schema(database)
+    except SchemaTooNewError as exc:
+        if not database.is_closed():
+            database.close()
+        # La base no esta incompleta: otro puesto la migro a una version mas nueva.
+        # Preparar el esquema no lo arregla (misma version, mismo resultado) y
+        # ademas dejaria fuera de servicio a los puestos ya actualizados.
+        raise RuntimeError(
+            f"La base de datos de FEMAG esta actualizada a una version mas nueva que "
+            f"este programa (version {BUILD_VERSION}). Hay que actualizar la aplicacion "
+            f"a la ultima version; volver a preparar las tablas no lo soluciona y "
+            f"dejaria fuera de servicio a los puestos que ya estan actualizados. "
+            f"Detalle: {exc}"
+        ) from exc
     except SchemaValidationError as exc:
         if not database.is_closed():
             database.close()

@@ -110,6 +110,195 @@ def test_validate_runtime_schema_reports_missing_indexes(db):
     assert "loadorderpallet" in str(exc_info.value)
 
 
+def test_validate_runtime_schema_reports_schema_newer_than_the_app(db):
+    """App vieja contra base migrada por otro build: dice "falta" y no es falta.
+
+    Es el incidente real: el PR #623 cambio el indice de devoluciones de dos columnas
+    a tres. El puesto con la version anterior declara (closure_id, order_product_id)
+    y la base ya tiene ese mismo indice con `timing` agregado. Antes el mensaje decia
+    "Faltan indices requeridos" y mandaba a correr `init_db.py`, que no lo arregla
+    porque corre la misma migracion y deja el esquema igual.
+
+    Aqui se reproduce la situacion al reves con un indice real: la base tiene el
+    indice declarado MAS una columna de mas.
+    """
+    import pytest
+
+    from app.config.schema import SchemaTooNewError, validate_runtime_schema
+
+    declared = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{declared.name}"')
+    db.execute_sql(
+        'CREATE UNIQUE INDEX "loadorderpallet_newer_index" '
+        'ON "loadorderpallet" ("order_id", "sequence", "pallet_type_id")'
+    )
+
+    try:
+        with pytest.raises(SchemaTooNewError) as exc_info:
+            validate_runtime_schema(db)
+
+        message = str(exc_info.value)
+        assert "mas nueva" in message
+        assert "loadorderpallet" in message
+        # Nombra las columnas que la base tiene de mas, para que se entienda el choque.
+        assert "pallet_type_id" in message
+        assert "Faltan indices requeridos" not in message
+    finally:
+        db.execute_sql('DROP INDEX "loadorderpallet_newer_index"')
+        db.execute_sql(
+            'CREATE UNIQUE INDEX "%s" ON "loadorderpallet" ("order_id", "sequence")'
+            % declared.name
+        )
+
+
+def test_validate_runtime_schema_still_reports_a_truly_missing_index(db):
+    """Un indice que no existe, sin equivalente mas nuevo en la base, sigue faltando."""
+    import pytest
+
+    from app.config.schema import (
+        SchemaTooNewError,
+        SchemaValidationError,
+        validate_runtime_schema,
+    )
+
+    declared = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{declared.name}"')
+
+    try:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_runtime_schema(db)
+
+        assert not isinstance(exc_info.value, SchemaTooNewError)
+        assert "Faltan indices requeridos" in str(exc_info.value)
+        assert "loadorderpallet" in str(exc_info.value)
+    finally:
+        db.execute_sql(
+            'CREATE UNIQUE INDEX "%s" ON "loadorderpallet" ("order_id", "sequence")'
+            % declared.name
+        )
+
+
+def test_schema_too_new_error_is_a_schema_validation_error():
+    """Los dos sitios que ya capturaban SchemaValidationError siguen funcionando."""
+    from app.config.schema import SchemaTooNewError, SchemaValidationError
+
+    assert issubclass(SchemaTooNewError, SchemaValidationError)
+
+
+def test_startup_message_for_newer_schema_says_update_the_app(monkeypatch):
+    """El mensaje de arranque no puede mandar a init_db.py en el caso de base nueva."""
+    import pytest
+
+    from app.ui.desktop_app import _prepare_database
+
+    class _Closed:
+        def connect(self, *args, **kwargs):
+            pass
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            pass
+
+    from app.config import schema as schema_module
+
+    def _raise(_database):
+        raise schema_module.SchemaTooNewError("loadorderreturnline: closure_id, order_product_id")
+
+    monkeypatch.setattr(schema_module, "validate_runtime_schema", _raise)
+    monkeypatch.setattr(
+        "app.ui.desktop_app.validate_runtime_schema", _raise, raising=False
+    )
+    monkeypatch.setattr(
+        "app.ui.desktop_app.initialize_runtime_database", lambda: _Closed()
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _prepare_database(demo_mode=False)
+
+    message = str(exc_info.value)
+    assert "actualizar la aplicacion" in message
+    assert "init_db.py" not in message
+    assert "fuera de servicio" in message
+
+
+def test_startup_message_for_incomplete_schema_still_says_init_db(monkeypatch):
+    """El caso de base incompleta conserva la accion correcta: init_db.py."""
+    import pytest
+
+    from app.config import schema as schema_module
+    from app.ui.desktop_app import _prepare_database
+
+    class _Closed:
+        def connect(self, *args, **kwargs):
+            pass
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            pass
+
+    def _raise(_database):
+        raise schema_module.SchemaValidationError("Faltan tablas requeridas: client")
+
+    monkeypatch.setattr("app.ui.desktop_app.initialize_runtime_database", lambda: _Closed())
+    monkeypatch.setattr("app.ui.desktop_app.validate_runtime_schema", _raise, raising=False)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _prepare_database(demo_mode=False)
+
+    message = str(exc_info.value)
+    assert "init_db.py" in message
+    assert "actualizar la aplicacion" not in message
+
+
+def test_connection_dialog_does_not_offer_to_prepare_a_newer_schema(monkeypatch):
+    """Base nueva no debe ofrecer "crear o actualizar tablas": no lo arregla."""
+    import pytest
+
+    from app.ui import connection_dialog
+
+    class _Database:
+        def connect(self):
+            pass
+
+        def close(self):
+            pass
+
+        def is_closed(self):
+            return False
+
+    def _raise(_database):
+        raise connection_dialog.SchemaTooNewError("loadorderreturnline: closure_id")
+
+    monkeypatch.setattr(connection_dialog, "build_mysql_database", lambda _settings: _Database())
+    monkeypatch.setattr(connection_dialog, "validate_runtime_schema", _raise)
+
+    connection = connection_dialog.RuntimeConnection(
+        host="almanet-server",
+        port=3306,
+        database="femag_desktop",
+        user="operador",
+        password="clave",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        connection_dialog.test_runtime_connection(connection)
+
+    assert not isinstance(exc_info.value, connection_dialog.RuntimeSchemaPreparationRequired)
+    assert "actualizar la aplicacion" in str(exc_info.value)
+
+
 def test_backfill_missing_column_default_uses_mysql_placeholder():
     from collections import namedtuple
 
