@@ -197,7 +197,7 @@ def test_startup_message_for_newer_schema_says_update_the_app(monkeypatch):
     """El mensaje de arranque no puede mandar a init_db.py en el caso de base nueva."""
     import pytest
 
-    from app.ui.desktop_app import _prepare_database
+    from app.ui.desktop_app import SchemaTooNewAtStartup, _prepare_database
 
     class _Closed:
         def connect(self, *args, **kwargs):
@@ -222,13 +222,207 @@ def test_startup_message_for_newer_schema_says_update_the_app(monkeypatch):
         "app.ui.desktop_app.initialize_runtime_database", lambda: _Closed()
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(SchemaTooNewAtStartup) as exc_info:
         _prepare_database(demo_mode=False)
 
+    # Sigue siendo RuntimeError para que el arranque no cambie de rama.
+    assert isinstance(exc_info.value, RuntimeError)
     message = str(exc_info.value)
     assert "actualizar la aplicacion" in message
     assert "init_db.py" not in message
     assert "fuera de servicio" in message
+
+
+def test_outdated_workstation_opens_the_update_without_being_able_to_say_no(monkeypatch):
+    """Un puesto atrasado se actualiza en el momento: no puede seguir trabajando."""
+    from app.services.update_service import UpdateInfo
+    from app.ui import desktop_app
+
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+    calls = []
+
+    def _raise(*_args, **_kwargs):
+        raise desktop_app.SchemaTooNewAtStartup("base mas nueva")
+
+    def _fake_show(window, update, mandatory=False):
+        calls.append(("update", window, update.version, mandatory))
+        return True
+
+    def _should_not_run(error):
+        calls.append(("explain", str(error)))
+
+    monkeypatch.setattr(desktop_app, "_prepare_database", _raise)
+    monkeypatch.setattr(desktop_app, "_explain_outdated_app", _should_not_run)
+    monkeypatch.setattr(
+        "app.services.update_service.fetch_update_info", lambda *a, **k: info
+    )
+    monkeypatch.setattr("app.ui.update_extension._show_update_dialog", _fake_show)
+
+    assert desktop_app.run_desktop_app() == 1
+
+    assert len(calls) == 1
+    assert calls[0][0] == "update"
+    # Sin ventana: todavia no hay login. Y mandatory: no puede decir que no.
+    assert calls[0][1] is None
+    assert calls[0][2] == "2099.01.01.00.00.00"
+    assert calls[0][3] is True
+
+
+def test_outdated_workstation_explains_when_there_is_no_published_update(monkeypatch):
+    """Sin version publicada, avisa con el detalle para que alguien lo resuelva."""
+    from app.ui import desktop_app
+
+    calls = []
+
+    def _raise(*_args, **_kwargs):
+        raise desktop_app.SchemaTooNewAtStartup("base mas nueva")
+
+    monkeypatch.setattr(desktop_app, "_prepare_database", _raise)
+    monkeypatch.setattr(
+        "app.services.update_service.fetch_update_info", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "app.ui.update_extension._show_update_dialog",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no hay update")),
+    )
+    monkeypatch.setattr(
+        desktop_app, "_explain_outdated_app", lambda error: calls.append(str(error))
+    )
+
+    assert desktop_app.run_desktop_app() == 1
+    assert len(calls) == 1
+    assert "base mas nueva" in calls[0]
+
+
+def test_explanation_copies_the_detail_and_does_not_ask_to_prepare_the_schema(monkeypatch):
+    """Lo unico accionable sin actualizacion es copiar el detalle y avisar."""
+    import pytest
+
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.ui import desktop_app
+
+    _qapp = QApplication.instance() or QApplication([])
+    seen = {}
+
+    class _Box:
+        Critical = QMessageBox.Critical
+        Ok = QMessageBox.Ok
+
+        def __init__(self, *_args, **_kwargs):
+            seen["box"] = self
+
+        def setText(self, text):
+            seen["text"] = text
+
+        def setInformativeText(self, text):
+            seen["info"] = text
+
+        def setDetailedText(self, text):
+            seen["detail"] = text
+
+        def setTextInteractionFlags(self, *_args):
+            pass
+
+        def setStandardButtons(self, *_args):
+            pass
+
+        def exec_(self):
+            return QMessageBox.Ok
+
+    monkeypatch.setattr(desktop_app, "QMessageBox", _Box)
+
+    desktop_app._explain_outdated_app(RuntimeError("loadorderreturnline: closure_id"))
+
+    detail = seen["detail"]
+    assert desktop_app.BUILD_VERSION in detail
+    assert "loadorderreturnline" in detail
+    assert "init_db.py" not in seen["text"] + seen["info"] + detail
+    assert "No se debe preparar ni revertir el esquema" in seen["info"]
+    assert _qapp.clipboard().text() == detail
+
+
+def test_mandatory_update_dialog_never_offers_a_decline(monkeypatch):
+    """Con mandatory no hay boton de "No": decir que no deja el puesto caido."""
+    import pytest
+
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.update_service import UpdateInfo
+    from app.ui import update_extension
+
+    _qapp = QApplication.instance() or QApplication([])
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+
+    asked = []
+
+    def _information(_parent, title, text, *_args):
+        asked.append(("information", title, text))
+        return QMessageBox.Ok
+
+    def _question(*args, **kwargs):
+        asked.append(("question", args[1] if len(args) > 1 else ""))
+        return QMessageBox.No
+
+    monkeypatch.setattr(update_extension.QMessageBox, "information", staticmethod(_information))
+    monkeypatch.setattr(update_extension.QMessageBox, "question", staticmethod(_question))
+
+    class _FakeSignal:
+        def connect(self, *_args):
+            pass
+
+    class _FakeSignals:
+        progress = _FakeSignal()
+        failed = _FakeSignal()
+        downloaded = _FakeSignal()
+
+    class _FakeWorker:
+        def __init__(self, *_args, **_kwargs):
+            self.signals = _FakeSignals()
+
+    # Corta antes de descargar: solo importa que no se pregunto.
+    monkeypatch.setattr(update_extension, "_DownloadWorker", _FakeWorker)
+    monkeypatch.setattr(update_extension.QProgressDialog, "show", lambda self: None)
+    monkeypatch.setattr(update_extension.QThreadPool.globalInstance(), "start", lambda worker: None)
+
+    update_extension._show_update_dialog(None, info, mandatory=True)
+
+    assert asked
+    assert all(kind == "information" for kind, *_rest in asked)
+    assert any("no puede trabajar" in text for _kind, _title, text in asked)
+
+
+def test_optional_update_dialog_still_asks_before_downloading(monkeypatch):
+    """El chequeo periodico no cambia: ahi el operador puede decir que no."""
+    from PyQt5.QtWidgets import QMessageBox
+
+    from app.services.update_service import UpdateInfo
+    from app.ui import update_extension
+
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+    asked = []
+
+    def _question(_parent, title, text, *_args):
+        asked.append(text)
+        return QMessageBox.No
+
+    monkeypatch.setattr(update_extension.QMessageBox, "question", staticmethod(_question))
+
+    assert update_extension._show_update_dialog(None, info) is False
+    assert len(asked) == 1
+    assert "¿Desea descargar el instalador ahora?" in asked[0]
 
 
 def test_startup_message_for_incomplete_schema_still_says_init_db(monkeypatch):
