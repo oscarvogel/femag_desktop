@@ -15,6 +15,20 @@ class BackupResult:
     message: str
 
 
+def _sin_password(mensaje: str | None, password: str) -> str:
+    """Quita la contrasena de un mensaje de error antes de guardarlo.
+
+    El mensaje de un ``mysqldump`` fallido viene de su stderr y queda escrito en
+    ``BackupLog.message`` y en el log. ``mysqldump`` recibe la contrasena por
+    ``MYSQL_PWD`` y no deberia imprimirla, pero "no deberia" no es una garantia
+    y una contrasena en la base es un incidente, no un detalle de formato.
+    """
+    texto = (mensaje or "").strip() or "Fallo el respaldo de la base."
+    if password and password in texto:
+        texto = texto.replace(password, "***")
+    return texto
+
+
 class BackupService:
     def __init__(
         self,
@@ -30,7 +44,47 @@ class BackupService:
         self.audit_service = audit_service or AuditService()
 
     def _default_dump_runner(self, destination: Path):
-        destination.write_text("Configure mysqldump for production backups.\n", encoding="utf-8")
+        """Respalda la base de verdad, o falla. Nunca un archivo de mentira.
+
+        Antes escribia un texto que decia "Configure mysqldump for production
+        backups." y devolvia exito: el operador se llevaba un ``.sql`` que no
+        era un dump, y el dashboard y la barra de estado mostraban "Ultimo
+        backup: success". Eso es peor que no tener respaldo, porque da
+        confianza falsa justo cuando alguien necesita recuperar.
+
+        Asi que aca no hay camino que "funcione" sin respaldar: si MySQL no esta
+        configurado, si no hay forma de volcar la base, o si el volcado falla,
+        se levanta el error y ``run_manual_backup`` deja el ``BackupLog`` en
+        ``error``.
+
+        El motor se elige con ``pick_dump_runner``: usa ``mysqldump`` si el
+        puesto lo tiene y, si no --que es el caso normal en un equipo con la
+        app congelada-- cae al exportador en Python, que no necesita el cliente
+        de MySQL instalado.
+        """
+        from app.config.secure_credentials import RuntimeConnection
+        from app.config.settings import resolve_effective_connection_settings
+        from app.services.mysql_dump import pick_dump_runner
+
+        resolve_effective_connection_settings()
+        settings = load_settings()
+        if settings.db_engine != "mysql":
+            raise RuntimeError(
+                "El respaldo manual necesita MySQL y la configuracion efectiva dice "
+                f"{settings.db_engine!r}. No se escribe ningun archivo."
+            )
+        connection = RuntimeConnection(
+            host=settings.db_host,
+            port=settings.db_port,
+            database=settings.db_name,
+            user=settings.db_user,
+            password=settings.db_password,
+        )
+        resultado = pick_dump_runner(dump_engine="auto")(
+            connection, settings.db_name, destination
+        )
+        if not resultado.ok:
+            raise RuntimeError(_sin_password(resultado.message, connection.password))
 
     def run_manual_backup(self, user: str) -> BackupResult:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
