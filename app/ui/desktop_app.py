@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date
 from pathlib import Path
@@ -130,6 +131,7 @@ from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
+logger = logging.getLogger("femag.desktop")
 
 
 class _AccountStatementMailSignals(QObject):
@@ -260,6 +262,79 @@ def _current_client_phone(client) -> str:
     return (getattr(current_client or client, "phone", None) or "").strip()
 
 
+class SchemaTooNewAtStartup(RuntimeError):
+    """La base compartida esta mas nueva que este build: el puesto va atrasado.
+
+    Se distingue de un error de conexion porque la accion que lo resuelve no es
+    preparar la base sino actualizar la aplicacion.
+    """
+
+
+def _recover_from_outdated_app(error: Exception) -> None:
+    """Un puesto atrasado se actualiza en el momento o avisa a soporte.
+
+    Decir "actualizate" sin dejarte actualizar es otro callejon sin salida, y aca
+    el puesto queda sin poder trabajar. Si hay una version publicada mas nueva se
+    abre el mismo flujo de descarga del actualizador; si no hay, se muestra el
+    detalle con la version instalada para que el operador pueda avisar a alguien.
+    """
+    from app.services.update_service import fetch_update_info, get_update_channel
+
+    logger.error("Puesto desactualizado, no puede abrir: %s", error)
+    info = None
+    try:
+        info = fetch_update_info(BUILD_VERSION, channel=get_update_channel())
+    except Exception:
+        logger.exception("No se pudo consultar el manifest para recuperar el puesto")
+
+    if info is None:
+        _explain_outdated_app(error)
+        return
+
+    try:
+        from app.ui.update_extension import _show_update_dialog
+
+        launched = _show_update_dialog(None, info, mandatory=True)
+    except Exception:
+        logger.exception("No se pudo lanzar la actualizacion del puesto atrasado")
+        _explain_outdated_app(error)
+        return
+
+    if not launched:
+        logger.info("El instalador no se lanzo desde el puesto atrasado")
+
+
+def _explain_outdated_app(error: Exception) -> None:
+    """Sin actualizacion disponible: deja el dato listo para avisar a soporte."""
+    detail = (
+        f"FEMAG instalado: {BUILD_VERSION}\n"
+        f"Detalle: {error}\n"
+        "Este puesto no puede trabajar hasta que se instale la version que espera "
+        "la base de datos."
+    )
+    box = QMessageBox(QMessageBox.Critical, "FEMAG Desktop - Actualización necesaria")
+    box.setText(
+        "La base de datos de FEMAG está actualizada a una versión más nueva que "
+        "este programa.\n\nEste puesto no puede entrar hasta que se instale la "
+        "versión actual. No hay una versión publicada para descargar en este "
+        "momento, o no se pudo consultar."
+    )
+    box.setInformativeText(
+        "Copie el detalle y avise a soporte o a un administrador para que instale "
+        "la versión actual en este equipo.\n\n"
+        "No se debe preparar ni revertir el esquema de la base: eso dejaría fuera "
+        "de servicio a los puestos que ya están actualizados."
+    )
+    box.setDetailedText(detail)
+    box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec_()
+    clipboard = QApplication.clipboard()
+    if clipboard is not None:
+        clipboard.setText(detail)
+        logger.info("Detalle del puesto atrasado copiado al portapapeles")
+
+
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
@@ -267,6 +342,9 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     # El tema V2 global se aplica recién después de autenticar.
     try:
         database = _prepare_database(demo_mode=demo_mode)
+    except SchemaTooNewAtStartup as exc:
+        _recover_from_outdated_app(exc)
+        return 1
     except RuntimeError as exc:
         QMessageBox.critical(None, "FEMAG Desktop - Base de datos", str(exc))
         return 1
@@ -314,8 +392,9 @@ def _prepare_database(*, demo_mode: bool):
             database.close()
         # La base no esta incompleta: otro puesto la migro a una version mas nueva.
         # Preparar el esquema no lo arregla (misma version, mismo resultado) y
-        # ademas dejaria fuera de servicio a los puestos ya actualizados.
-        raise RuntimeError(
+        # ademas dejaria fuera de servicio a los puestos ya actualizados. Lo
+        # resuelve `run_desktop_app`, que abre el flujo de actualizacion.
+        raise SchemaTooNewAtStartup(
             f"La base de datos de FEMAG esta actualizada a una version mas nueva que "
             f"este programa (version {BUILD_VERSION}). Hay que actualizar la aplicacion "
             f"a la ultima version; volver a preparar las tablas no lo soluciona y "
