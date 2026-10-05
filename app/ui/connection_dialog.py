@@ -206,6 +206,11 @@ def prepare_runtime_schema(connection: RuntimeConnection) -> None:
         database.connect(reuse_if_open=True)
         ensure_runtime_schema(database)
         validate_runtime_schema(database)
+        # Antes los medios de pago iniciales los creaba el arranque de cada puesto.
+        # Con el arranque read-only (#660) queda a cargo de la preparacion admin.
+        from app.services.client_payment_service import ClientPaymentService
+
+        ClientPaymentService.ensure_default_payment_methods()
         # Asegura perfiles/permisos base para el primer admin (bootstrap login)
         try:
             from app.services.permission_service import PermissionService
