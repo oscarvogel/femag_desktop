@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 import webbrowser
 
@@ -4582,11 +4583,28 @@ def _ensure_address(client: Client, label: str, city: str, *, active: bool):
     )
 
 
-def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tuple[float, float, float, float]) -> Product:
+def _ensure_demo_product(
+    name: str,
+    unit: str,
+    iva_default: TipoIVA,
+    prices: tuple[float, float, float, float],
+    *,
+    peso_bolsa: str = "25.000",
+) -> Product:
+    """Producto de demo, contado en bolsas como el deposito real.
+
+    ``peso_bolsa`` importa mas de lo que parece: Conteo fisico e Inventario
+    inicial cuentan **bolsas** y derivan los kilos del peso de bolsa (#651). Un
+    producto demo sin peso queda bloqueado en las dos pantallas, o sea que el
+    demo no puede ejercitar el camino de bolsas. 25 kg es el formato de bolsa
+    que usa la fabrica.
+    """
+    peso = Decimal(peso_bolsa)
     product, _ = Product.get_or_create(
         name=name,
         defaults={
             "unit": unit,
+            "peso_unitario_kg": peso,
             "precio_neto_base": prices[0],
             "precio_lista_1": prices[0],
             "precio_lista_2": prices[1],
@@ -4607,6 +4625,11 @@ def _ensure_demo_product(name: str, unit: str, iva_default: TipoIVA, prices: tup
         if getattr(product, field) != value:
             setattr(product, field, value)
             changed = True
+    # Solo se completa si falta. Si el operador cargo un peso distinto en la
+    # demo, el seed no se lo pisa encima.
+    if not product.peso_unitario_kg and product.peso_unitario_kg != peso:
+        product.peso_unitario_kg = peso
+        changed = True
     if changed:
         product.save()
     return product
