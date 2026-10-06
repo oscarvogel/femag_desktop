@@ -51,10 +51,15 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         capacity_row = QHBoxLayout()
         self.guided_capacity_label = QLabel()
         self.guided_capacity_label.setObjectName("guidedPalletCapacityLabel")
+        self.guided_capacity_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         capacity_row.addWidget(self.guided_capacity_label, 1)
         self.guided_configure_capacity_button = QPushButton("Configurar Kg/pallet")
         self.guided_configure_capacity_button.setObjectName("guidedConfigurePalletCapacityButton")
         self.guided_configure_capacity_button.clicked.connect(self.configure_pallet_capacity)
+        self.guided_configure_capacity_button.setMinimumWidth(150)
+        self.guided_configure_capacity_button.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Fixed
+        )
         capacity_row.addWidget(self.guided_configure_capacity_button)
         current_layout.insertLayout(1, capacity_row)
 
@@ -98,9 +103,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_delete_pallet_button.clicked.connect(self._guided_delete_current_pallet)
         current_layout.insertWidget(5, self.guided_delete_pallet_button)
 
-        # No reparentar el FormFeedback legacy: ese componente no es seguro de
-        # mover en caliente. Creamos feedback propio y hacemos que el flujo
-        # guiado/base lo use desde este punto en adelante.
         self._legacy_issue_label = self.issue_label
         self.guided_feedback = FormFeedback("guidedPalletFeedback", current_group)
         self.issue_label = self.guided_feedback
@@ -129,7 +131,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             self.guided_propose_rest_button,
             self.guided_new_pallet_button,
             self.guided_create_to_total_button,
-            self.guided_configure_capacity_button,
             self.guided_delete_pallet_button,
             self.guided_remove_button,
             self.guided_lock_button,
@@ -137,6 +138,13 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         ):
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        # Esta accion no puede comprimirse a cero: es requisito para habilitar
+        # todo el flujo de armado de pallets.
+        self.guided_configure_capacity_button.setMinimumWidth(150)
+        self.guided_configure_capacity_button.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Fixed
+        )
 
         self.guided_pallet_combo.setMinimumWidth(0)
         self.guided_pallet_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
