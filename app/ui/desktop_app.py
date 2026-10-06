@@ -336,6 +336,26 @@ def _explain_outdated_app(error: Exception) -> None:
         logger.info("Detalle del puesto atrasado copiado al portapapeles")
 
 
+def _destroy_desktop_window(window) -> None:
+    """Libera la ventana principal mientras la QApplication sigue viva (#674).
+
+    En Qt, ``close()`` sólo oculta la ventana: el ``QMainWindow`` y todo su
+    árbol de widgets siguen existiendo hasta que se libera su wrapper de
+    Python. Si eso recién ocurre cuando el intérprete se apaga, entonces
+    ``Py_FinalizeEx`` ya está desmontando la ``QApplication`` y el estado de
+    QtWidgets, y el destructor de la ventana toca memoria liberada: el
+    proceso cierra con ``0xC0000005`` (access violation).
+
+    Destruirla acá mantiene el orden que Qt espera: la ventana muere primero,
+    con la aplicación y el event loop todavía en pie.
+    """
+    try:
+        window.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    except Exception:  # pragma: no cover - el cierre nunca debe tapar la salida.
+        logger.exception("No se pudo destruir la ventana principal al cerrar")
+
+
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
@@ -365,7 +385,9 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
         window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
         window.show()
         result = app.exec_()
-        if not window.session_closed:
+        session_closed = window.session_closed
+        _destroy_desktop_window(window)
+        if not session_closed:
             break
     if database is not None and not database.is_closed():
         database.close()
