@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -25,7 +26,7 @@ from app.ui.pallet_composition_legacy import PalletCard, _kg_text, _quantity_tex
 class PalletCompositionWidget(_GuidedPalletCompositionWidget):
     """Fachada publica del workbench guiado con compatibilidad legacy."""
 
-    PALLET_SELECTOR_COLUMNS = 5
+    PALLET_SELECTOR_COLUMNS = 10
 
     def _install_guided_workbench(self) -> None:
         super()._install_guided_workbench()
@@ -80,7 +81,10 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_pallet_selector_scroll.setObjectName("guidedPalletSelectorScroll")
         self.guided_pallet_selector_scroll.setWidgetResizable(True)
         self.guided_pallet_selector_scroll.setFrameShape(QFrame.NoFrame)
-        self.guided_pallet_selector_scroll.setMaximumHeight(112)
+        self.guided_pallet_selector_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.guided_pallet_selector_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.guided_pallet_selector_scroll.setMinimumHeight(76)
+        self.guided_pallet_selector_scroll.setMaximumHeight(84)
         self.guided_pallet_selector_container = QWidget()
         self.guided_pallet_selector_grid = QGridLayout(self.guided_pallet_selector_container)
         self.guided_pallet_selector_grid.setContentsMargins(0, 0, 0, 0)
@@ -119,12 +123,9 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         current_header.setSectionResizeMode(QHeaderView.Stretch)
         self.guided_content_table.setMinimumWidth(0)
         self.guided_content_table.setMinimumHeight(150)
-        self.guided_content_table.setMaximumHeight(280)
+        self.guided_content_table.setMaximumHeight(260)
         self.guided_content_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-        # El selector de pallets queda debajo del detalle del pallet actual.
-        # Con esto el usuario primero ve que contiene el pallet y luego navega
-        # rapidamente entre 1..N sin que los botones ocupen la cabecera.
         advanced_index = current_layout.indexOf(self.guided_advanced_button)
         current_layout.insertWidget(max(advanced_index, 0), selector_frame)
 
@@ -250,8 +251,8 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             button.setCheckable(True)
             selected = sequence == self._selected_sequence
             button.setChecked(selected)
-            button.setMinimumWidth(42)
-            button.setMaximumHeight(32)
+            button.setMinimumWidth(36)
+            button.setMaximumHeight(30)
             if selected:
                 button.setStyleSheet(
                     "QPushButton { background: #173a59; color: white; font-weight: 900; "
