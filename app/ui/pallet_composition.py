@@ -53,6 +53,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         capacity_row.addWidget(self.guided_capacity_label, 1)
         self.configure_pallet_capacity_button.setParent(current_group)
         self.configure_pallet_capacity_button.setText("Configurar Kg/pallet")
+        self.configure_pallet_capacity_button.show()
         capacity_row.addWidget(self.configure_pallet_capacity_button)
         current_layout.insertLayout(1, capacity_row)
 
@@ -208,6 +209,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             ):
                 button.setToolTip("")
 
+        self.configure_pallet_capacity_button.show()
         self._rebuild_guided_pallet_selector()
 
 
