@@ -32,7 +32,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_total_pallets_input.setObjectName("guidedTotalPalletCountInput")
         self.guided_total_pallets_input.setRange(1, 999)
         self.guided_total_pallets_input.setValue(max(len(self._pallets), 1))
-        self.guided_total_pallets_input.setAlignment(self.guided_pallet_combo.alignment())
         self.guided_total_pallets_input.setMinimumWidth(72)
         self.guided_total_pallets_input.setMaximumWidth(96)
         pallet_count_row.addWidget(self.guided_total_pallets_input)
