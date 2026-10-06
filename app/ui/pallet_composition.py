@@ -7,11 +7,13 @@ from PyQt5.QtWidgets import (
     QAbstractItemView,
     QFrame,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
     QInputDialog,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -142,7 +144,7 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             first_row_layout.addWidget(batch_label)
 
         # Mantener la barra utilizable en notebooks de 1280px. Los textos de
-        # los botones no deben imponer su sizeHint como ancho mínimo del widget.
+        # los botones no deben imponer su sizeHint como ancho minimo del widget.
         self.bulk_pallet_count_input.setMinimumWidth(80)
         self.bulk_pallet_count_input.setMaximumWidth(96)
         self.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -225,11 +227,50 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
         self.pending_table.setHorizontalHeaderLabels(
             ("Cliente", "Destino", "Articulo", "Pedido", "Asignado", "Suelto", "Pendiente", "Kg")
         )
-        self.pending_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        pending_header = self.pending_table.horizontalHeader()
+        for column in range(3):
+            pending_header.setSectionResizeMode(column, QHeaderView.Stretch)
+        for column in range(3, 8):
+            pending_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         self.pending_table.verticalHeader().setVisible(False)
         self.pending_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.pending_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         pending_layout.addWidget(self.pending_table, 1)
+        self._install_pending_workbench()
+
+    def _install_pending_workbench(self) -> None:
+        """Deja los pendientes visibles al mismo tiempo que las tarjetas de pallets."""
+        total_frame = self.total_kg_label.parentWidget()
+        left_panel = total_frame.parentWidget()
+        left_layout = left_panel.layout()
+
+        self.pending_workbench = QFrame(left_panel)
+        self.pending_workbench.setObjectName("palletPendingWorkbench")
+        self.pending_workbench.setMinimumHeight(180)
+        self.pending_workbench.setMaximumHeight(235)
+        self.pending_workbench.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        workbench_layout = QVBoxLayout(self.pending_workbench)
+        workbench_layout.setContentsMargins(0, 4, 0, 4)
+        workbench_layout.setSpacing(4)
+
+        title = QLabel("Mercaderia pendiente", self.pending_workbench)
+        title.setObjectName("palletPendingWorkbenchTitle")
+        title.setStyleSheet("font-size: 14px; font-weight: 800;")
+        hint = QLabel(
+            "Lo que todavia falta ubicar en pallets.",
+            self.pending_workbench,
+        )
+        hint.setObjectName("palletPendingWorkbenchHint")
+        hint.setStyleSheet("color: #5b6770; font-size: 11px;")
+
+        workbench_layout.addWidget(title)
+        workbench_layout.addWidget(hint)
+        workbench_layout.addWidget(self.pending_filter_input)
+        workbench_layout.addWidget(self.pending_table, 1)
+
+        # En el layout legacy el indice 0 es el titulo y el 1 es el total.
+        # Los pendientes quedan inmediatamente antes del scroll de pallets.
+        left_layout.insertWidget(2, self.pending_workbench)
 
     def _planning_destinations(self) -> list[dict]:
         loose_by_key: dict[tuple[int, int], Decimal] = {}
@@ -580,6 +621,30 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
             for column, value in enumerate(values):
                 self.pending_table.setItem(row_index, column, QTableWidgetItem(str(value)))
 
+    def _card_product_summary(self, pallet: dict) -> tuple[str, str]:
+        quantities: dict[tuple[int, str], Decimal] = {}
+        for allocation in pallet.get("allocations") or []:
+            product_id = int(allocation["product_id"])
+            label = str(
+                allocation.get("product_label") or f"Articulo {product_id}"
+            )
+            key = (product_id, label)
+            quantities[key] = quantities.get(key, Decimal("0")) + Decimal(
+                str(allocation["quantity"])
+            )
+
+        lines = [
+            f"{_quantity_text(quantity)} x {label}"
+            for (_, label), quantity in quantities.items()
+        ]
+        if not lines:
+            return "0 articulos", ""
+
+        visible = lines[:2]
+        if len(lines) > 2:
+            visible.append(f"+ {len(lines) - 2} mas")
+        return "\n".join(visible), "\n".join(lines)
+
     def _refresh_auto_distribution_ui(self) -> None:
         try:
             max_kg = PalletCapacityService.pallet_max_kg()
@@ -602,6 +667,10 @@ class PalletCompositionWidget(_LegacyPalletCompositionWidget):
                 card.title_label.setText(
                     f"PALLET {pallet['sequence']}{'  🔒' if locked else ''}"
                 )
+                product_summary, product_details = self._card_product_summary(pallet)
+                card.article_count_label.setText(product_summary)
+                card.article_count_label.setWordWrap(True)
+                card.article_count_label.setToolTip(product_details)
                 if max_kg:
                     occupation = pallet_kg / max_kg * Decimal("100")
                     exceeded = pallet_kg > max_kg
