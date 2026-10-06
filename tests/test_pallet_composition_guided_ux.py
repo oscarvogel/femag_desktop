@@ -69,6 +69,24 @@ def test_guided_selector_shows_twenty_clickable_pallets_without_combo(db):
     assert "Pallet 17" in widget.guided_totals_label.text()
 
 
+def test_guided_capacity_action_is_visible_when_workbench_is_shown(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.system import AppParameter
+    from app.services.pallet_capacity_service import PALLET_MAX_KG_KEY
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    AppParameter.delete().where(AppParameter.key == PALLET_MAX_KG_KEY).execute()
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    widget.show()
+    app.processEvents()
+
+    assert "SIN CONFIGURAR" in widget.guided_capacity_label.text()
+    assert widget.configure_pallet_capacity_button.isVisible() is True
+    assert widget.configure_pallet_capacity_button.text() == "Configurar Kg/pallet"
+
+
 def test_guided_actions_explain_missing_pallet_capacity_in_visible_feedback(db):
     from PyQt5.QtWidgets import QApplication
 
