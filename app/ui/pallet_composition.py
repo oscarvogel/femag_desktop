@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.services.pallet_capacity_service import PalletCapacityService
+from app.ui.form_feedback import FormFeedback
 from app.ui.pallet_composition_guided_impl import (
     PalletCompositionWidget as _GuidedPalletCompositionWidget,
 )
@@ -31,8 +32,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         current_group = self.guided_splitter.widget(1)
         current_layout = current_group.layout()
 
-        # El operador normalmente conoce el total de pallets de la carga. Esta
-        # accion completa hasta ese total en vez de sumar N, evitando duplicados.
         pallet_count_row = QHBoxLayout()
         pallet_count_row.addWidget(QLabel("Total de pallets:"))
         self.guided_total_pallets_input = QSpinBox()
@@ -48,9 +47,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         pallet_count_row.addWidget(self.guided_create_to_total_button, 1)
         current_layout.insertLayout(0, pallet_count_row)
 
-        # La capacidad era parte del panel legacy que ahora esta oculto. Se
-        # vuelve a exponer en el flujo principal para que ninguna accion falle
-        # silenciosamente por falta de Kg/pallet.
         capacity_row = QHBoxLayout()
         self.guided_capacity_label = QLabel()
         self.guided_capacity_label.setObjectName("guidedPalletCapacityLabel")
@@ -60,9 +56,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         capacity_row.addWidget(self.configure_pallet_capacity_button)
         current_layout.insertLayout(1, capacity_row)
 
-        # El combo sirve tecnicamente, pero con 19/20 pallets es incomodo. Se
-        # conserva oculto como sincronizador interno y se reemplaza por una
-        # grilla de botones visibles, estilo selector operativo.
         legacy_pallet_row = current_layout.itemAt(2).layout()
         if legacy_pallet_row is not None:
             label_item = legacy_pallet_row.itemAt(0)
@@ -90,13 +83,14 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         current_layout.insertWidget(3, selector_frame)
         self._guided_pallet_buttons: dict[int, QPushButton] = {}
 
-        # El feedback tambien estaba dentro del panel legacy oculto. Reparentarlo
-        # hace visibles errores, advertencias y confirmaciones del flujo guiado.
-        self.issue_label.setParent(current_group)
-        current_layout.insertWidget(max(current_layout.count() - 1, 0), self.issue_label)
+        # No reparentar el FormFeedback legacy: ese componente no es seguro de
+        # mover en caliente. Creamos feedback propio y hacemos que el flujo
+        # guiado/base lo use desde este punto en adelante.
+        self._legacy_issue_label = self.issue_label
+        self.guided_feedback = FormFeedback("guidedPalletFeedback", current_group)
+        self.issue_label = self.guided_feedback
+        current_layout.insertWidget(max(current_layout.count() - 1, 0), self.guided_feedback)
 
-        # La tabla de pendientes venia con ResizeToContents y forzaba anchos
-        # enormes. En el workbench principal las columnas reparten el espacio.
         pending_header = self.pending_table.horizontalHeader()
         pending_header.setMinimumSectionSize(40)
         pending_header.setSectionResizeMode(QHeaderView.Stretch)
@@ -132,6 +126,11 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_pallet_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.guided_splitter.setMinimumWidth(0)
         self.guided_splitter.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+
+    def configure_pallet_capacity(self) -> None:
+        super().configure_pallet_capacity()
+        if getattr(self, "_guided_ready", False):
+            self._refresh_guided_ui()
 
     def _guided_create_to_total(self) -> None:
         target = int(self.guided_total_pallets_input.value())
