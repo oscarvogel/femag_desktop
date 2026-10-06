@@ -87,7 +87,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_pallet_selector_grid.setSpacing(5)
         self.guided_pallet_selector_scroll.setWidget(self.guided_pallet_selector_container)
         selector_layout.addWidget(self.guided_pallet_selector_scroll, 1)
-        current_layout.insertWidget(3, selector_frame)
+        self.guided_pallet_selector_frame = selector_frame
         self._guided_pallet_buttons: dict[int, QPushButton] = {}
 
         self.guided_current_pallet_label = QLabel("PALLET ACTUAL: -")
@@ -95,13 +95,13 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_current_pallet_label.setStyleSheet(
             "font-size: 15px; font-weight: 900; color: #173a59; padding: 4px 0;"
         )
-        current_layout.insertWidget(4, self.guided_current_pallet_label)
+        current_layout.insertWidget(3, self.guided_current_pallet_label)
 
         self.guided_delete_pallet_button = QPushButton("Eliminar pallet")
         self.guided_delete_pallet_button.setObjectName("guidedDeletePalletButton")
         self.guided_delete_pallet_button.setProperty("secondary", True)
         self.guided_delete_pallet_button.clicked.connect(self._guided_delete_current_pallet)
-        current_layout.insertWidget(5, self.guided_delete_pallet_button)
+        current_layout.insertWidget(4, self.guided_delete_pallet_button)
 
         self._legacy_issue_label = self.issue_label
         self.guided_feedback = FormFeedback("guidedPalletFeedback", current_group)
@@ -118,7 +118,15 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         current_header.setMinimumSectionSize(40)
         current_header.setSectionResizeMode(QHeaderView.Stretch)
         self.guided_content_table.setMinimumWidth(0)
-        self.guided_content_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.guided_content_table.setMinimumHeight(150)
+        self.guided_content_table.setMaximumHeight(280)
+        self.guided_content_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+        # El selector de pallets queda debajo del detalle del pallet actual.
+        # Con esto el usuario primero ve que contiene el pallet y luego navega
+        # rapidamente entre 1..N sin que los botones ocupen la cabecera.
+        advanced_index = current_layout.indexOf(self.guided_advanced_button)
+        current_layout.insertWidget(max(advanced_index, 0), selector_frame)
 
         for group in (self.guided_splitter.widget(0), self.guided_splitter.widget(1)):
             group.setMinimumWidth(0)
@@ -139,8 +147,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
-        # Esta accion no puede comprimirse a cero: es requisito para habilitar
-        # todo el flujo de armado de pallets.
         self.guided_configure_capacity_button.setMinimumWidth(150)
         self.guided_configure_capacity_button.setSizePolicy(
             QSizePolicy.Preferred, QSizePolicy.Fixed
