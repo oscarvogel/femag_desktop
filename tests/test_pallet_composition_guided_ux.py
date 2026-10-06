@@ -66,7 +66,9 @@ def test_guided_selector_shows_twenty_clickable_pallets_without_combo(db):
 
     assert widget._selected_sequence == 17
     assert widget._guided_pallet_buttons[17].isChecked() is True
+    assert "PALLET ACTUAL: 17" == widget.guided_current_pallet_label.text()
     assert "Pallet 17" in widget.guided_totals_label.text()
+    assert "background: #173a59" in widget._guided_pallet_buttons[17].styleSheet()
 
 
 def test_guided_capacity_action_is_visible_when_workbench_is_shown(db):
@@ -83,8 +85,8 @@ def test_guided_capacity_action_is_visible_when_workbench_is_shown(db):
     app.processEvents()
 
     assert "SIN CONFIGURAR" in widget.guided_capacity_label.text()
-    assert widget.configure_pallet_capacity_button.isVisible() is True
-    assert widget.configure_pallet_capacity_button.text() == "Configurar Kg/pallet"
+    assert widget.guided_configure_capacity_button.isVisible() is True
+    assert widget.guided_configure_capacity_button.text() == "Configurar Kg/pallet"
 
 
 def test_guided_actions_explain_missing_pallet_capacity_in_visible_feedback(db):
@@ -133,3 +135,56 @@ def test_guided_manual_add_works_from_visible_flow_when_capacity_is_configured(d
     assert Decimal(str(first["allocations"][0]["quantity"])) == Decimal("1500")
     assert widget.pending_table.rowCount() == 0
     assert "1.500 kg" in widget.guided_totals_label.text()
+
+
+def test_guided_delete_empty_pallet_renumbers_and_keeps_selection_clear(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1500"))
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    widget.guided_total_pallets_input.setValue(5)
+    widget._guided_create_to_total()
+    widget._guided_select_pallet(3)
+    app.processEvents()
+
+    widget._guided_delete_current_pallet()
+    app.processEvents()
+
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == [1, 2, 3, 4]
+    assert widget._selected_sequence == 3
+    assert widget.guided_current_pallet_label.text() == "PALLET ACTUAL: 3"
+    assert len(widget._guided_pallet_buttons) == 4
+
+
+def test_guided_delete_loaded_pallet_returns_merchandise_to_pending(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1500"))
+    destinations = _destinations(db, quantity=100, weight=Decimal("1"))
+    widget = PalletCompositionWidget(destinations=destinations)
+    widget.add_pallets(2)
+    widget.add_allocation(
+        1,
+        destinations[0]["address_id"],
+        destinations[0]["products"][0]["product_id"],
+        40,
+    )
+    widget._guided_select_pallet(1)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    app.processEvents()
+
+    widget._guided_delete_current_pallet()
+    app.processEvents()
+
+    assert len(widget.pallet_drafts()) == 1
+    assert widget.pallet_drafts()[0]["sequence"] == 1
+    assert widget.pending_table.rowCount() == 1
+    assert widget.pending_table.item(0, 6).text() == "100"
