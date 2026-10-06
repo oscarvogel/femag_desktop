@@ -189,3 +189,55 @@ def test_guided_delete_loaded_pallet_returns_merchandise_to_pending(db, monkeypa
     assert widget.pallet_drafts()[0]["sequence"] == 1
     assert widget.pending_table.rowCount() == 1
     assert widget.pending_table.item(0, 6).text() == "100"
+
+
+def test_guided_partial_action_is_visible_and_usable(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    widget = PalletCompositionWidget(destinations=_destinations(db, quantity=1000, weight=Decimal("1")))
+    widget.show()
+    app.processEvents()
+
+    assert widget.guided_partial_button.isVisible() is True
+    assert widget.guided_partial_button.text() == "Agregar cantidad..."
+    assert widget.guided_partial_button.width() >= 140
+
+
+def test_guided_partial_flow_splits_300_600_100_across_three_pallets(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QInputDialog
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1000"))
+    widget = PalletCompositionWidget(destinations=_destinations(db, quantity=1000, weight=Decimal("1")))
+    widget.guided_total_pallets_input.setValue(3)
+    widget._guided_create_to_total()
+    app.processEvents()
+
+    values = iter((300.0, 600.0, 100.0))
+    monkeypatch.setattr(
+        QInputDialog,
+        "getDouble",
+        lambda *args, **kwargs: (next(values), True),
+    )
+
+    for sequence, expected_pending in ((1, "700"), (2, "100"), (3, None)):
+        widget._guided_select_pallet(sequence)
+        widget.pending_table.selectRow(0)
+        assert widget.add_selected_partial() is True
+        app.processEvents()
+        if expected_pending is None:
+            assert widget.pending_table.rowCount() == 0
+        else:
+            assert widget.pending_table.item(0, 6).text() == expected_pending
+
+    drafts = widget.pallet_drafts()
+    quantities = [Decimal(str(pallet["allocations"][0]["quantity"])) for pallet in drafts]
+    assert quantities == [Decimal("300"), Decimal("600"), Decimal("100")]
