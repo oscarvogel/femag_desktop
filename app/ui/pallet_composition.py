@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -51,10 +52,10 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_capacity_label = QLabel()
         self.guided_capacity_label.setObjectName("guidedPalletCapacityLabel")
         capacity_row.addWidget(self.guided_capacity_label, 1)
-        self.configure_pallet_capacity_button.setParent(current_group)
-        self.configure_pallet_capacity_button.setText("Configurar Kg/pallet")
-        self.configure_pallet_capacity_button.show()
-        capacity_row.addWidget(self.configure_pallet_capacity_button)
+        self.guided_configure_capacity_button = QPushButton("Configurar Kg/pallet")
+        self.guided_configure_capacity_button.setObjectName("guidedConfigurePalletCapacityButton")
+        self.guided_configure_capacity_button.clicked.connect(self.configure_pallet_capacity)
+        capacity_row.addWidget(self.guided_configure_capacity_button)
         current_layout.insertLayout(1, capacity_row)
 
         legacy_pallet_row = current_layout.itemAt(2).layout()
@@ -83,6 +84,19 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         selector_layout.addWidget(self.guided_pallet_selector_scroll, 1)
         current_layout.insertWidget(3, selector_frame)
         self._guided_pallet_buttons: dict[int, QPushButton] = {}
+
+        self.guided_current_pallet_label = QLabel("PALLET ACTUAL: -")
+        self.guided_current_pallet_label.setObjectName("guidedCurrentPalletLabel")
+        self.guided_current_pallet_label.setStyleSheet(
+            "font-size: 15px; font-weight: 900; color: #173a59; padding: 4px 0;"
+        )
+        current_layout.insertWidget(4, self.guided_current_pallet_label)
+
+        self.guided_delete_pallet_button = QPushButton("Eliminar pallet")
+        self.guided_delete_pallet_button.setObjectName("guidedDeletePalletButton")
+        self.guided_delete_pallet_button.setProperty("secondary", True)
+        self.guided_delete_pallet_button.clicked.connect(self._guided_delete_current_pallet)
+        current_layout.insertWidget(5, self.guided_delete_pallet_button)
 
         # No reparentar el FormFeedback legacy: ese componente no es seguro de
         # mover en caliente. Creamos feedback propio y hacemos que el flujo
@@ -115,7 +129,8 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             self.guided_propose_rest_button,
             self.guided_new_pallet_button,
             self.guided_create_to_total_button,
-            self.configure_pallet_capacity_button,
+            self.guided_configure_capacity_button,
+            self.guided_delete_pallet_button,
             self.guided_remove_button,
             self.guided_lock_button,
             self.guided_advanced_button,
@@ -151,6 +166,61 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self._render_editor()
         self._refresh_guided_ui()
 
+    def _guided_delete_current_pallet(self) -> None:
+        sequence = self._selected_sequence
+        if sequence is None:
+            self.issue_label.show_warning("Seleccione un pallet para eliminar.")
+            return
+        pallet = next(
+            (item for item in self._pallets if int(item["sequence"]) == int(sequence)),
+            None,
+        )
+        if pallet is None:
+            return
+        if int(sequence) in self._locked_sequences:
+            self.issue_label.show_warning("Libere el pallet antes de eliminarlo.")
+            return
+        allocations = pallet.get("allocations") or []
+        if allocations:
+            answer = QMessageBox.question(
+                self,
+                "Eliminar pallet",
+                (
+                    f"El pallet {sequence} tiene mercaderia asignada.\n\n"
+                    "Si lo elimina, esa mercaderia volvera a quedar pendiente."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        old_locked = set(self._locked_sequences)
+        remaining = [item for item in self._pallets if int(item["sequence"]) != int(sequence)]
+        remaining.sort(key=lambda item: int(item["sequence"]))
+        sequence_map: dict[int, int] = {}
+        for new_sequence, item in enumerate(remaining, start=1):
+            old_sequence = int(item["sequence"])
+            sequence_map[old_sequence] = new_sequence
+            item["sequence"] = new_sequence
+
+        self._pallets = remaining
+        self._locked_sequences = {
+            sequence_map[old_sequence]
+            for old_sequence in old_locked
+            if old_sequence in sequence_map
+        }
+        for item in self._pallets:
+            item["locked"] = int(item["sequence"]) in self._locked_sequences
+
+        if self._pallets:
+            self._selected_sequence = min(int(sequence), len(self._pallets))
+        else:
+            self._selected_sequence = None
+        self._refresh()
+        self.composition_changed.emit()
+        self.issue_label.show_success("Pallet eliminado. La numeracion fue reordenada.")
+
     def _rebuild_guided_pallet_selector(self) -> None:
         while self.guided_pallet_selector_grid.count():
             item = self.guided_pallet_selector_grid.takeAt(0)
@@ -164,9 +234,17 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             button = QPushButton(str(sequence))
             button.setObjectName(f"guidedPalletSelectorButton_{sequence}")
             button.setCheckable(True)
-            button.setChecked(sequence == self._selected_sequence)
+            selected = sequence == self._selected_sequence
+            button.setChecked(selected)
             button.setMinimumWidth(42)
             button.setMaximumHeight(32)
+            if selected:
+                button.setStyleSheet(
+                    "QPushButton { background: #173a59; color: white; font-weight: 900; "
+                    "border: 2px solid #0f2e49; border-radius: 6px; }"
+                )
+            else:
+                button.setStyleSheet("")
             suffix = " · fijado" if sequence in self._locked_sequences else ""
             button.setToolTip(f"Pallet {sequence}{suffix} · {_kg_text(self._pallet_kg(pallet))}")
             button.clicked.connect(lambda _checked=False, seq=sequence: self._guided_select_pallet(seq))
@@ -209,7 +287,15 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             ):
                 button.setToolTip("")
 
-        self.configure_pallet_capacity_button.show()
+        if self._selected_sequence is None:
+            self.guided_current_pallet_label.setText("PALLET ACTUAL: -")
+            self.guided_delete_pallet_button.setEnabled(False)
+        else:
+            self.guided_current_pallet_label.setText(
+                f"PALLET ACTUAL: {self._selected_sequence}"
+            )
+            self.guided_delete_pallet_button.setEnabled(True)
+
         self._rebuild_guided_pallet_selector()
 
 
