@@ -87,6 +87,7 @@ def test_guided_capacity_action_is_visible_when_workbench_is_shown(db):
     assert "SIN CONFIGURAR" in widget.guided_capacity_label.text()
     assert widget.guided_configure_capacity_button.isVisible() is True
     assert widget.guided_configure_capacity_button.text() == "Configurar Kg/pallet"
+    assert widget.guided_configure_capacity_button.width() >= 120
 
 
 def test_guided_actions_explain_missing_pallet_capacity_in_visible_feedback(db):
