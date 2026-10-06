@@ -148,6 +148,13 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
+        # La carga parcial es parte del flujo principal: debe permanecer visible
+        # para repartir manualmente una linea entre varios pallets.
+        self.guided_partial_button.setText("Agregar cantidad...")
+        self.guided_partial_button.setMinimumWidth(160)
+        self.guided_partial_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.guided_partial_button.show()
+
         self.guided_configure_capacity_button.setMinimumWidth(150)
         self.guided_configure_capacity_button.setSizePolicy(
             QSizePolicy.Preferred, QSizePolicy.Fixed
@@ -311,6 +318,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             )
             self.guided_delete_pallet_button.setEnabled(True)
 
+        self.guided_partial_button.show()
         self._rebuild_guided_pallet_selector()
 
 
