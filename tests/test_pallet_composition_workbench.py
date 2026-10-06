@@ -178,3 +178,27 @@ def test_guided_auto_distribution_does_not_reuse_loaded_pallet(db):
         for pallet in drafts[1:]
     ]
     assert auto_quantities == [Decimal("60"), Decimal("60"), Decimal("20")]
+
+
+def test_guided_can_create_pallets_up_to_requested_total(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    widget = PalletCompositionWidget(destinations=_destinations(db))
+    app.processEvents()
+
+    widget.guided_total_pallets_input.setValue(20)
+    widget.guided_create_to_total_button.click()
+    app.processEvents()
+
+    assert len(widget.pallet_drafts()) == 20
+    assert [pallet["sequence"] for pallet in widget.pallet_drafts()] == list(range(1, 21))
+    assert widget.guided_pallet_combo.count() == 20
+
+    widget.guided_total_pallets_input.setValue(20)
+    widget.guided_create_to_total_button.click()
+    app.processEvents()
+
+    assert len(widget.pallet_drafts()) == 20
