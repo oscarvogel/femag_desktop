@@ -31,6 +31,20 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
     def _install_guided_workbench(self) -> None:
         super()._install_guided_workbench()
 
+        # Las cuatro acciones sobre mercaderia pendiente forman un unico flujo.
+        # La implementacion base dejaba "Proponer resto" en una segunda fila;
+        # lo movemos junto a agregar, carga parcial y distribucion automatica.
+        pending_group = self.guided_splitter.widget(0)
+        pending_layout = pending_group.layout()
+        pending_layout.removeWidget(self.guided_propose_rest_button)
+        for index in range(pending_layout.count()):
+            action_layout = pending_layout.itemAt(index).layout()
+            if action_layout is None:
+                continue
+            if action_layout.indexOf(self.guided_auto_button) >= 0:
+                action_layout.addWidget(self.guided_propose_rest_button, 2)
+                break
+
         current_group = self.guided_splitter.widget(1)
         current_layout = current_group.layout()
 
@@ -154,6 +168,8 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_partial_button.setMinimumWidth(160)
         self.guided_partial_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.guided_partial_button.show()
+        self.guided_propose_rest_button.setMinimumWidth(150)
+        self.guided_propose_rest_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         self.guided_configure_capacity_button.setMinimumWidth(150)
         self.guided_configure_capacity_button.setSizePolicy(
