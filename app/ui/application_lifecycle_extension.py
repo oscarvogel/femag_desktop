@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import logging
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QDialog
 
 
 logger = logging.getLogger("femag.lifecycle")
+
+
+def _schedule_application_quit(app) -> None:
+    """Salir del event loop después de terminar el closeEvent actual.
+
+    Ejecutar ``QApplication.quit()`` de forma sincrónica desde ``closeEvent``
+    puede comenzar el teardown global mientras Qt todavía está procesando la
+    destrucción de la ventana y de sus QObject hijos. Se difiere al próximo
+    ciclo del event loop para que el cierre actual termine primero.
+    """
+    QTimer.singleShot(0, app.quit)
 
 
 def install_application_lifecycle_extension() -> None:
@@ -63,7 +75,7 @@ def install_application_lifecycle_extension() -> None:
             logger.info("Ventana principal cerrada; finalizando event loop")
             app = QApplication.instance()
             if app is not None:
-                app.quit()
+                _schedule_application_quit(app)
 
     LoginWindow.__init__ = login_init
     LoginWindow.show = login_show
