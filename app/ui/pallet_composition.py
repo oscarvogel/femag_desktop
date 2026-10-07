@@ -302,7 +302,13 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             return
 
         self.guided_total_pallets_input.setValue(max(len(self._pallets), 1))
-        max_kg = PalletCapacityService.pallet_max_kg()
+        # La pantalla se construye antes de que la base este disponible (#668).
+        # Mismo criterio que `_refresh_auto_distribution_ui` del base: si no se
+        # puede leer la capacidad, se muestra como no configurada.
+        try:
+            max_kg = PalletCapacityService.pallet_max_kg()
+        except Exception:
+            max_kg = None
         if max_kg is None:
             self.guided_capacity_label.setText("Kg/pallet: SIN CONFIGURAR")
             self.guided_capacity_label.setStyleSheet("font-weight: 800; color: #b42318;")
