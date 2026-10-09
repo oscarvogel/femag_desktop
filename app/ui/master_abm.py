@@ -760,11 +760,26 @@ class ClientEmailsDialog(QDialog):
 
 
 class ClientAddressEntryDialog(QDialog):
-    def __init__(self, *, current_user: str, record_id: int | None = None, client_id: int | None = None, parent=None):
+    def __init__(
+        self,
+        *,
+        current_user: str,
+        record_id: int | None = None,
+        client_id: int | None = None,
+        prefill_address: str = "",
+        is_primary: bool | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.current_user = current_user
         self.record_id = record_id
         self.client_id = client_id
+        # La orden de carga ofrece dar de alta el destino que el operador escribio y no
+        # existe (#658). La calle ya esta escrita: no se le pide retipearla.
+        self.prefill_address = prefill_address
+        # `None` mantiene la regla del ABM (un domicilio de entrega es el principal).
+        # Cuando el llamador ya pregunto al operador, manda su respuesta (#665).
+        self.is_primary = is_primary
         self.saved_record: ClientAddress | None = None
         self.setObjectName("clientAddressEntryDialog")
         self.setWindowTitle("Domicilio")
@@ -819,6 +834,8 @@ class ClientAddressEntryDialog(QDialog):
             return
         if self.client_id is not None:
             _set_combo(self.client_combo, self.client_id)
+        if self.prefill_address:
+            self.street_input.setText(self.prefill_address)
 
     def _save(self) -> None:
         client_id = self.client_combo.currentData()
@@ -849,7 +866,11 @@ class ClientAddressEntryDialog(QDialog):
                     province,
                     city,
                     street,
-                    is_primary=client_address_has_delivery_function(address_type),
+                    is_primary=(
+                        client_address_has_delivery_function(address_type)
+                        if self.is_primary is None
+                        else bool(self.is_primary)
+                    ),
                 )
             else:
                 address = ClientAddress.get_by_id(self.record_id)

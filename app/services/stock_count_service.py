@@ -8,7 +8,7 @@ from app.models.stock import StockMovement
 from app.models.stock_count import StockCount, StockCountLine
 from app.services.audit_service import AuditService
 from app.models.base import utc_now
-from app.services.stock_service import StockService
+from app.services.stock_service import StockService, is_countable_in_bags
 
 ZERO = Decimal("0.000")
 
@@ -94,15 +94,15 @@ class StockCountService:
     def is_countable_in_bags(product) -> bool:
         """Si el producto se puede contar en bolsas.
 
-        Un producto sin ``peso_unitario_kg`` cargado **no** se puede contar en
-        bolsas: los kilos se derivan multiplicando por el peso, asi que con peso
-        cero N bolsas equivalen a 0 kg y el conteo generaria un ajuste que lleva
-        el saldo del libro a cero. Por eso el conteo es en bolsas y el peso es
-        obligatorio, no una convenience.
+        Delega en :func:`app.services.stock_service.is_countable_in_bags`, que es
+        la regla compartida: Inventario inicial cuenta en bolsas tambien (#651) y
+        las dos pantallas tienen que decidir igual. Un producto sin
+        ``peso_unitario_kg`` cargado **no** se puede contar en bolsas: los kilos
+        se derivan multiplicando por el peso, asi que con peso cero N bolsas
+        equivalen a 0 kg y el conteo generaria un ajuste que lleva el saldo del
+        libro a cero.
         """
-        if product is None or getattr(product, "id", None) is None:
-            return False
-        return Decimal(str(product.peso_unitario_kg or 0)) > ZERO
+        return is_countable_in_bags(product)
 
     def add_line(
         self, count: StockCount, product, counted_units, *, reason: str | None = None

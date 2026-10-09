@@ -10,18 +10,24 @@ database_proxy = DatabaseProxy()
 
 
 class FemagMySQLDatabase(MySQLDatabase):
-    """MySQL con preparación idempotente del esquema al abrir la aplicación.
+    """MySQL que abre la aplicacion SIN tocar el esquema (#660).
 
-    `ensure_runtime_schema()` usa CREATE TABLE safe / ALTER sólo para faltantes, por
-    lo que una versión nueva puede incorporar tablas/columnas sin intervención en
-    cada puesto. Puede desactivarse con FEMAG_AUTO_MIGRATE_SCHEMA=0 si se necesita
-    una ventana de mantenimiento administrada.
+    El arranque es read-only, como dice `DEPLOY.md`: con este default una
+    aplicacion nueva no altera la base compartida. Eso es lo que evita que el
+    puesto que abre primero decida el esquema de produccion y deje sin poder
+    entrar a todos los demas, que validan contra su propio modelo y encuentra un
+    indice distinto al que declaran.
+
+    La migracion la aplica un administrador, por el camino que ya existe:
+    `Crear o actualizar ahora las tablas de FEMAG` en el asistente de conexion, o
+    `scripts/init_db.py`. Para una ventana de mantenimiento puntual se puede
+    rearmar con FEMAG_AUTO_MIGRATE_SCHEMA=1.
     """
 
     def connect(self, *args, **kwargs):
         result = super().connect(*args, **kwargs)
         if (
-            os.getenv("FEMAG_AUTO_MIGRATE_SCHEMA", "1") != "0"
+            os.getenv("FEMAG_AUTO_MIGRATE_SCHEMA", "0") != "0"
             and not getattr(self, "_femag_schema_prepared", False)
         ):
             from app.config.schema import ensure_runtime_schema
