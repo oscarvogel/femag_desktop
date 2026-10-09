@@ -4,13 +4,13 @@ import sys
 import textwrap
 
 
-def test_pallet_grid_uses_available_width_and_height():
+def test_guided_selector_shows_twenty_pallets_without_stale_empty_state():
     code = textwrap.dedent(
         """
         import os
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-        from PyQt5.QtWidgets import QApplication, QFrame, QScrollArea
+        from PyQt5.QtWidgets import QApplication, QLabel, QScrollArea
 
         import app.ui
         from app.ui.pallet_composition import PalletCompositionWidget
@@ -21,32 +21,40 @@ def test_pallet_grid_uses_available_width_and_height():
         widget.show()
         app.processEvents()
 
-        widget.add_pallets(12)
+        widget.guided_total_pallets_input.setValue(20)
+        widget._guided_create_to_total()
         app.processEvents()
 
-        scroll = widget.findChild(QScrollArea, "palletCardScroll")
-        assert scroll.minimumHeight() >= 220
-        assert scroll.maximumHeight() > 170
+        scroll = widget.findChild(QScrollArea, "guidedPalletSelectorScroll")
+        assert scroll is not None
+        assert scroll.minimumHeight() >= 76
+        assert scroll.maximumHeight() <= 84
+        assert len(widget._guided_pallet_buttons) == 20
 
-        total_frame = widget.findChild(QFrame, "loadOrderKgTotalFrame")
-        assert total_frame.maximumHeight() <= 145
-
-        layout = widget.card_grid
-        columns = []
+        layout = widget.guided_pallet_selector_grid
+        positions = []
         for index in range(layout.count()):
             item = layout.itemAt(index)
-            card = item.widget()
-            if card is not None and card.objectName().startswith("palletCard"):
-                _row, column, _row_span, _col_span = layout.getItemPosition(index)
-                columns.append(column)
+            button = item.widget()
+            if button is not None and button.objectName().startswith(
+                "guidedPalletSelectorButton_"
+            ):
+                row, column, _row_span, _column_span = layout.getItemPosition(index)
+                positions.append((row, column))
 
-        assert columns
-        visible_columns = max(columns) + 1
-        assert 5 <= visible_columns <= 6
+        assert len(positions) == 20
+        rows = sorted({row for row, _column in positions})
+        assert len(rows) == 2
+        assert [
+            sum(row == current for row, _column in positions) for current in rows
+        ] == [10, 10]
 
-        first_card = widget._cards[1]
-        assert first_card.minimumWidth() <= 128
-        assert first_card.maximumWidth() <= 160
+        empty_state = [
+            label
+            for label in widget.findChildren(QLabel)
+            if "todavia no hay pallets" in label.text().lower()
+        ]
+        assert not any(label.isVisible() for label in empty_state)
 
         widget.close()
         """
