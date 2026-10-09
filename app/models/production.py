@@ -115,3 +115,79 @@ class ProductionBag(BaseModel):
         # create_tables() aborta y la app no arranca. SQLite tolera el nombre
         # duplicado, por eso el choque solo aparece contra MySQL.
         pass
+
+
+class RawMaterialIntake(BaseModel):
+    """Ingreso de materia prima comprada en big bags (#656).
+
+    Es la primera mitad del circuito del fraccionado y hoy no existia de ninguna
+    forma: el legacy `femagfab` recibe raiz de mandioca, no big bags de almidon
+    (sus 6 productos son todos mandioca), y FEMAG Desktop no tenia ningun modulo
+    de compras. `StockMovement.TYPE_PURCHASE` estaba declarado desde #572 sin
+    que ningun servicio lo escribiera.
+
+    A diferencia de :class:`RawMaterialReceipt`, que es un snapshot de solo
+    lectura de un ticket ajeno, este ingreso es un documento propio de FEMAG y
+    **si mueve el stock**: al confirmarse escribe los movimientos de compra.
+
+    Los estados son los de :class:`ProductionPart`. Mientras ``confirmed_at``
+    esta vacio es un borrador: se edita y se borra libremente y no toca el
+    stock. Al confirmar, la materia prima entra al libro. Un ingreso confirmado
+    ya no se edita: se anula generando los movimientos contrarios.
+    """
+
+    received_at = DateField()
+    observations = TextField(null=True)
+
+    confirmed_at = DateTimeField(null=True)
+    confirmed_by = CharField(max_length=80, null=True)
+
+    voided_at = DateTimeField(null=True)
+    voided_by = CharField(max_length=80, null=True)
+    void_reason = TextField(null=True)
+
+    class Meta:
+        table_name = "raw_material_intake"
+        indexes = ((("received_at",), False),)
+
+    @property
+    def is_confirmed(self) -> bool:
+        return self.confirmed_at is not None
+
+    @property
+    def is_voided(self) -> bool:
+        return self.voided_at is not None
+
+    @property
+    def status_label(self) -> str:
+        if self.is_voided:
+            return "Anulado"
+        return "Confirmado" if self.is_confirmed else "Borrador"
+
+
+class RawMaterialIntakeLine(BaseModel):
+    """Big bags de una materia prima que entran en un ingreso.
+
+    ``bags`` es la unidad que el operador cuenta: en planta **no se pesa**
+    almidon suelto, se cuentan big bags. El libro de stock sigue trabajando en
+    kg, asi que la linea guarda el peso del big bag **congelado** en
+    ``unit_weight_kg`` y deriva los kg, exactamente igual que hace
+    :class:`ProductionBag` con el peso de la bolsa.
+
+    Que el peso quede congelado no es un detalle: si despues se corrige el
+    maestro, el ingreso ya registrado no debe cambiar, porque el movimiento de
+    stock que lo respalda tampoco.
+    """
+
+    intake = ForeignKeyField(RawMaterialIntake, backref="lines", on_delete="CASCADE")
+    product = ForeignKeyField(Product, backref="intake_lines", on_delete="RESTRICT")
+    bags = IntegerField()
+    unit_weight_kg = DecimalField(max_digits=12, decimal_places=3)
+    kg = DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        table_name = "raw_material_intake_line"
+        # Sin indices declarados a proposito, por la misma razon que en
+        # ``ProductionBag``: las dos claves foraneas ya generan su indice y
+        # duplicar el nombre hace fallar create_tables() contra MySQL.
+        pass

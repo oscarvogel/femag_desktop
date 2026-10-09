@@ -4,6 +4,8 @@ from peewee import fn
 
 from app.models.masters import (
     PRODUCT_KIND_LABELS,
+    STOCK_ROLE_FINISHED,
+    STOCK_ROLE_LABELS,
     Carrier,
     Driver,
     OperationalService,
@@ -45,6 +47,7 @@ class MasterService:
         precio_lista_3: float = 0.0,
         precio_lista_4: float = 0.0,
         product_kind: str = "producto",
+        stock_role: str = STOCK_ROLE_FINISHED,
         tipo_iva: TipoIVA | None = None,
     ) -> Product:
         codigo = self._normalize_product_code(codigo)
@@ -55,6 +58,8 @@ class MasterService:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        if stock_role not in STOCK_ROLE_LABELS:
+            raise ValueError("El rol en el stock no es válido.")
         tipo_iva = tipo_iva or TipoIVA.iva_default()
         self._validate_tipo_iva(tipo_iva)
         row = Product.create(
@@ -63,6 +68,7 @@ class MasterService:
             unit=unit,
             peso_unitario_kg=peso_unitario_kg,
             product_kind=product_kind,
+            stock_role=stock_role,
             classification_source="manual",
             weight_source="manual",
             review_required=False,
@@ -81,6 +87,7 @@ class MasterService:
                 "name": name,
                 "unit": unit,
                 "peso_unitario_kg": str(peso_unitario_kg),
+                "stock_role": stock_role,
             },
         )
         return row
@@ -94,6 +101,7 @@ class MasterService:
         codigo: str | None = None,
         peso_unitario_kg=Decimal("0"),
         product_kind="producto",
+        stock_role=None,
         tipo_iva: TipoIVA | None = None,
         **prices,
     ) -> Product:
@@ -105,11 +113,18 @@ class MasterService:
             raise ValueError("El peso unitario no puede ser negativo.")
         if product_kind not in PRODUCT_KIND_LABELS:
             raise ValueError("La clasificación del artículo no es válida.")
+        # Un producto que ya existe y nunca se clasifico como materia prima
+        # (o de las imported del legacy) se conserva como terminado: cambiarlo
+        # por la duda moveria el circuito de stock sin que nadie lo pida.
+        role = stock_role or product.stock_role or STOCK_ROLE_FINISHED
+        if role not in STOCK_ROLE_LABELS:
+            raise ValueError("El rol en el stock no es válido.")
         tipo_iva = tipo_iva or product.tipo_iva or TipoIVA.iva_default()
         self._validate_tipo_iva(tipo_iva)
         product.codigo = codigo
         product.name, product.unit = name, unit
         product.peso_unitario_kg, product.product_kind = weight, product_kind
+        product.stock_role = role
         product.tipo_iva = tipo_iva
         product.classification_source = product.weight_source = "manual"
         product.review_required = False
