@@ -426,7 +426,7 @@ class ClientEntryDialog(QDialog):
             return
         client = Client.get_by_id(self.record_id)
         self.name_input.setText(client.name)
-        self.cuit_input.setText(client.cuit)
+        self.cuit_input.setText(client.cuit or "")
         self.iva_input.setText(client.iva_condition)
         self.phone_input.setText(client.phone or "")
         if client.salesperson_id is not None:
