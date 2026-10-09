@@ -99,7 +99,11 @@ class Salesperson(BaseModel):
 
 class Client(BaseModel):
     name = CharField()
-    cuit = CharField(unique=True)
+    # Nullable a propósito (#686): el legacy completa el CUIT con ceros y guiones
+    # cuando el cliente no lo tiene, y eso no es un CUIT. Como el campo es único,
+    # varias filas distintas caían en el mismo valor y el importador pisaba un
+    # cliente sobre otro. MySQL y SQLite admiten varios NULL en una columna UNIQUE.
+    cuit = CharField(unique=True, null=True)
     iva_condition = CharField()
     phone = CharField(null=True)
     email = CharField(null=True)
