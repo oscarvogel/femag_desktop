@@ -1,1 +1,5 @@
 *.pdf binary
+
+# Los golden masters F150 son CP1252 con CRLF y un campo fijo de 50 espacios:
+# hay que guardarlos byte a byte, sin convertir fines de linea.
+tests/fixtures/f150/*.TXT -text -diff

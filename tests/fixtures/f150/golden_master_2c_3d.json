@@ -1,0 +1,170 @@
+[
+  {
+    "document_date": "2019-04-13",
+    "point_of_sale": "0001",
+    "number": "00004268",
+    "document_type": "12",
+    "movement_type": "SAL",
+    "observations": "",
+    "origin": {
+      "locality_code": "0015"
+    },
+    "destination": {
+      "cuit": "30-30000006-8",
+      "name": "CLIENTE ANON 01",
+      "address": "DOMICILIO ANON 01",
+      "door_number": "",
+      "location": {
+        "department_code": "0000",
+        "department_name": "DEP ANON 01",
+        "locality_code": "0137",
+        "locality_name": "LOCALIDAD ANON 01",
+        "province_code": "02",
+        "country_code": "ARG"
+      },
+      "country_name": "PAIS ANON"
+    },
+    "carrier": {
+      "cuit": "20-30000011-9",
+      "name": "TRANSPORTISTA ANON 01",
+      "carrier_type": "DIR",
+      "address": "DOMICILIO ANON 01",
+      "code": "0004",
+      "location": {
+        "department_code": "0010",
+        "department_name": "DEP ANON 01",
+        "locality_code": "0061",
+        "locality_name": "LOCALIDAD ANON 01",
+        "province_code": "14",
+        "country_code": "ARG"
+      }
+    },
+    "vehicle": {
+      "chassis_type": "1",
+      "chassis_plate": "002003",
+      "trailer_type": "1",
+      "trailer_plate": "003004",
+      "plate_country_code": "ARG"
+    },
+    "driver": {
+      "cuit": "20-30000012-7",
+      "document_type": "DNI",
+      "document_number": "20000001",
+      "name": "CHOFER ANON 01",
+      "address": "DOMICILIO ANON 01",
+      "door_number": "",
+      "location": {
+        "department_code": "0010",
+        "department_name": "DEP ANON 01",
+        "locality_code": "0062",
+        "locality_name": "LOCALIDAD ANON 01",
+        "province_code": "14",
+        "country_code": "ARG"
+      }
+    },
+    "items": [
+      {
+        "category_1": "2",
+        "category_2": "2",
+        "category_3": "19",
+        "category_4": "0",
+        "item_code": "",
+        "unit": "U",
+        "quantity": "600",
+        "unit_price": "750.00",
+        "total": "450000.00",
+        "description": ""
+      }
+    ]
+  },
+  {
+    "document_date": "2019-04-13",
+    "point_of_sale": "0001",
+    "number": "00004269",
+    "document_type": "12",
+    "movement_type": "SAL",
+    "observations": "",
+    "origin": {
+      "locality_code": "0015"
+    },
+    "destination": {
+      "cuit": "27-30000001-6",
+      "name": "CLIENTE ANON 02",
+      "address": "DOMICILIO ANON 02",
+      "door_number": "",
+      "location": {
+        "department_code": "0127",
+        "department_name": "DEP ANON 02",
+        "locality_code": "0849",
+        "locality_name": "LOCALIDAD ANON 02",
+        "province_code": "02",
+        "country_code": "ARG"
+      },
+      "country_name": "PAIS ANON"
+    },
+    "carrier": {
+      "cuit": "20-30000013-5",
+      "name": "TRANSPORTISTA ANON 02",
+      "carrier_type": "DIR",
+      "address": "DOMICILIO ANON 02",
+      "code": "0004",
+      "location": {
+        "department_code": "0010",
+        "department_name": "DEP ANON 02",
+        "locality_code": "0061",
+        "locality_name": "LOCALIDAD ANON 02",
+        "province_code": "14",
+        "country_code": "ARG"
+      }
+    },
+    "vehicle": {
+      "chassis_type": "1",
+      "chassis_plate": "003005",
+      "trailer_type": "1",
+      "trailer_plate": "004006",
+      "plate_country_code": "ARG"
+    },
+    "driver": {
+      "cuit": "20-30000014-3",
+      "document_type": "DNI",
+      "document_number": "20000002",
+      "name": "CHOFER ANON 02",
+      "address": "DOMICILIO ANON 02",
+      "door_number": "",
+      "location": {
+        "department_code": "0010",
+        "department_name": "DEP ANON 02",
+        "locality_code": "0062",
+        "locality_name": "LOCALIDAD ANON 02",
+        "province_code": "14",
+        "country_code": "ARG"
+      }
+    },
+    "items": [
+      {
+        "category_1": "2",
+        "category_2": "2",
+        "category_3": "19",
+        "category_4": "0",
+        "item_code": "",
+        "unit": "U",
+        "quantity": "60",
+        "unit_price": "800.00",
+        "total": "48000.00",
+        "description": ""
+      },
+      {
+        "category_1": "2",
+        "category_2": "2",
+        "category_3": "19",
+        "category_4": "0",
+        "item_code": "",
+        "unit": "U",
+        "quantity": "480",
+        "unit_price": "32.00",
+        "total": "15360.00",
+        "description": ""
+      }
+    ]
+  }
+]
