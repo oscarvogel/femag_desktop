@@ -117,8 +117,8 @@ def test_env_file_is_no_longer_checked_at_the_end_of_the_build():
 
 
 @requires_powershell
-def test_release_script_parses():
-    result = _extract_functions(["Ensure-Venv"], "'C:\\no-importa'")
+def test_release_script_parses(tmp_path):
+    result = _extract_functions(["Ensure-Venv"], f"'{tmp_path}'")
 
     assert result["json"] is not None, result["stderr"]
     assert result["json"].get("parse_errors", 0) == 0
@@ -181,9 +181,9 @@ def test_env_file_guard_looks_at_the_repo_root_not_the_current_dir(tmp_path):
 
 
 @requires_powershell
-def test_venv_guard_finds_a_base_python_on_this_machine():
+def test_venv_guard_finds_a_base_python_on_this_machine(tmp_path):
     """`Find-BasePython` tiene que encontrar algo en una maquina de build."""
-    result = _extract_functions(["Find-BasePython"], "'C:\\no-importa'")
+    result = _extract_functions(["Find-BasePython"], f"'{tmp_path}'")
 
     assert result["json"] is not None, result["stderr"]
 

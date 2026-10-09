@@ -403,6 +403,7 @@ def test_una_linea_ya_cargada_se_sigue_viendo_aunque_no_se_pueda_editar(db):
     """Si una linea con peso cero ya existe (cargada antes de #650), no se
     borra ni se oculta: se muestra para que el operador vea la diferencia y
     pueda revertirla, pero sin poder editarla."""
+    from PyQt5.QtCore import QDate
     from PyQt5.QtWidgets import QApplication
 
     from app.ui.stock_count import StockCountPage
@@ -423,6 +424,12 @@ def test_una_linea_ya_cargada_se_sigue_viendo_aunque_no_se_pueda_editar(db):
 
     app = QApplication.instance() or QApplication([])
     pagina = StockCountPage(service=servicio, current_username="admin")
+
+    # La pantalla arranca en la fecha de hoy, no en DAY (#676). Sin esto mira
+    # un dia sin conteo, `lineas` queda vacio y el assert de abajo falla con
+    # `inputs` vacio, sin haber comprobado el comportamiento que describe.
+    pagina.day.setDate(QDate(DAY.year, DAY.month, DAY.day))
+    assert pagina.selected_date() == DAY
 
     # La linea se ve (no se oculta historia) pero el campo no se puede tocar:
     # el operador ve la diferencia y puede revertirla, no editarla.

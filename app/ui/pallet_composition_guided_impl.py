@@ -526,7 +526,12 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
                 if column == 0:
                     item.setData(Qt.UserRole, row_index)
                 self.guided_content_table.setItem(row_index, column, item)
-        max_kg = PalletCapacityService.pallet_max_kg()
+        # Ver `PalletCompositionWidget._refresh_guided_ui`: sin base disponible la
+        # capacidad se trata como no configurada y el total se muestra sin tope.
+        try:
+            max_kg = PalletCapacityService.pallet_max_kg()
+        except Exception:
+            max_kg = None
         capacity = f" / {_kg_text(max_kg)}" if max_kg else ""
         self.guided_totals_label.setText(
             f"Pallet {pallet['sequence']}: {len(pallet.get('allocations') or [])} lineas · {_kg_text(total_kg)}{capacity}"
