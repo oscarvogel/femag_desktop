@@ -203,8 +203,10 @@ class DailyCollectionsDialog(QDialog):
         self.movement_combo.addItem("Todos", None)
         movement_types = (
             ClientAccountMovement.TYPE_OPENING_BALANCE,
-            ClientAccountMovement.TYPE_LOAD_ORDER,
+            ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+            ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
             ClientAccountMovement.TYPE_LOAD_ORDER_REVERSAL,
+            ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED_REVERSAL,
             ClientAccountMovement.TYPE_PAYMENT,
             ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
             ClientAccountMovement.TYPE_MANUAL_DEBIT,

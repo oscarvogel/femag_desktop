@@ -20,11 +20,19 @@ ACTIONS = [
 
 
 MENU = {
-    "Inicio": ["Dashboard", "Dashboard Gerencial", "Pendientes", "Accesos rápidos"],
+    "Inicio": ["Dashboard", "Dashboard Gerencial", "Rentabilidad por producto", "Pendientes", "Accesos rápidos"],
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
+    "Producción": [
+        "Recepciones de materia prima",
+        "Partes de producción",
+        "Contraste de producción",
+        "Inventario inicial",
+        "Conteo físico",
+    ],
     "Cuenta corriente": ["Clientes con saldo", "Movimientos", "Registrar pago", "Recibos", "Anulación de pagos"],
     "Maestros": [
         "Clientes",
+        "Vendedores",
         "Domicilios",
         "Productos",
         "Tipos de IVA",
@@ -68,7 +76,7 @@ def canonical_profile_name(name: str) -> str:
     return _CANONICAL_PROFILE_BY_KEY.get(_profile_key(normalized), normalized)
 
 
-SENSITIVE_ACTIONS = {"anular remito", "modificar pago", "anular pago", "cambiar saldo inicial"}
+SENSITIVE_ACTIONS = {"anular remito", "modificar pago", "cambiar saldo inicial"}
 
 
 @dataclass(frozen=True)

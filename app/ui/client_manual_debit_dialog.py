@@ -21,6 +21,7 @@ from app.services.client_manual_debit_service import (
     ClientManualDebitService,
 )
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.money import configure_money_input
 
 
 class ClientManualDebitDialog(QDialog):
@@ -63,10 +64,7 @@ class ClientManualDebitDialog(QDialog):
 
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("clientManualDebitAmountInput")
-        self.amount_input.setRange(0.0, 99999999.99)
-        self.amount_input.setDecimals(2)
-        self.amount_input.setSingleStep(100.0)
-        self.amount_input.setPrefix("$ ")
+        configure_money_input(self.amount_input)
         form.addRow("Monto", self.amount_input)
 
         self.description_input = QLineEdit()

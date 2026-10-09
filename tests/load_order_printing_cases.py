@@ -342,7 +342,7 @@ def test_pdf_marks_annulled_order_without_changing_status(db, tmp_path):
     from app.services.load_order_print_service import LoadOrderPrintService
 
     order = _order()
-    annulled = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).annul(order, can_annul=True)
+    annulled = LoadOrderOperationService(current_user="admin", prints_dir=tmp_path).annul(order, can_annul=True, reason="Anulación de prueba")
 
     pdf_path = LoadOrderPrintService(current_user="admin").export_pdf(annulled, tmp_path)
     text = _pdf_text(pdf_path)
@@ -469,10 +469,10 @@ def test_print_service_exports_budget_pdf_for_client(db, tmp_path):
     assert pdf_path.read_bytes().startswith(b"%PDF")
     assert "PRESUPUESTO" in text
     assert "Cliente Presupuesto" in text
-    assert "Observaciones: Observacion exclusiva del destino" in text
+    assert "Observacion exclusiva del destino" not in text
     assert "Entregar solamente contra orden de compra aprobada." not in text
     assert "Observacion exclusiva del producto" not in text
-    assert text.index("Observaciones:") < text.index("TOTAL PRESUPUESTO:")
+    assert "Observaciones:" not in text
     assert "$ 1,000,000" in text or "1,000,000" in text
     assert "$ 50,000" in text or "50,000" in text
 
@@ -614,9 +614,10 @@ def test_print_service_exports_combined_budget_pdf_for_all_clients(db, tmp_path)
     assert "Producto combinado A" in text
     assert "Cliente B Combined" in text
     assert "Producto combinado B" in text
-    assert text.count("Observaciones: Validez del presupuesto A: siete dias.") == 1
-    assert text.count("Observaciones: Entrega del presupuesto B: coordinada.") == 1
+    assert "Validez del presupuesto A: siete dias." not in text
+    assert "Entrega del presupuesto B: coordinada." not in text
     assert "Validez del presupuesto: siete dias." not in text
+    assert "Observaciones:" not in text
 
 
 def test_print_service_exports_combined_budget_page_for_each_destination(db, tmp_path):

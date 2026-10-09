@@ -50,6 +50,14 @@ def test_production_bundle_includes_reportlab_barcode_submodules() -> None:
     assert 'collect_data_files("reportlab")' in spec
 
 
+def test_production_bundle_includes_system_truststore_support() -> None:
+    spec = SPEC.read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert 'collect_submodules("truststore")' in spec
+    assert "truststore" in requirements
+
+
 def test_secure_first_run_is_documented() -> None:
     content = DOC.read_text(encoding="utf-8")
 

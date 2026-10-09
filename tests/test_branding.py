@@ -7,6 +7,7 @@ ASSET_NAMES = (
     "femag-logo-source.png",
     "femag-logo-ui.png",
     "femag-logo-compact.png",
+    "login-operacion-background.png",
     "femag.ico",
 )
 
@@ -56,7 +57,7 @@ def test_login_displays_accessible_brand_logo():
     window.close()
 
 
-def test_login_branding_does_not_overlap_title_or_subtitle():
+def test_login_branding_and_form_content_use_separate_columns():
     from PyQt5.QtWidgets import QApplication, QDialog, QLabel
 
     from app.ui.login_window import LoginWindow
@@ -69,11 +70,13 @@ def test_login_branding_does_not_overlap_title_or_subtitle():
     title = window.findChild(QLabel, "loginTitle")
     subtitle = window.findChild(QLabel, "loginSubtitle")
 
-    assert logo.geometry().bottom() < title.geometry().top(), (
-        logo.geometry().getRect(),
+    logo_right = logo.mapTo(window, logo.rect().bottomRight()).x()
+    title_left = title.mapTo(window, title.rect().topLeft()).x()
+    assert logo_right < title_left, (logo_right, title_left)
+    assert title.geometry().bottom() < subtitle.geometry().top(), (
         title.geometry().getRect(),
+        subtitle.geometry().getRect(),
     )
-    assert title.geometry().bottom() < subtitle.geometry().top()
     assert window.height() >= window.minimumSizeHint().height()
     window.close()
 
@@ -101,7 +104,7 @@ def test_login_validation_uses_expanding_error_banner():
     window.close()
 
 
-def test_workspace_displays_balanced_branding_and_window_icon(db):
+def test_workspace_displays_sidebar_branding_and_window_icon(db):
     from PyQt5.QtWidgets import QApplication, QLabel
 
     from app.services.auth_service import AuthService
@@ -117,8 +120,7 @@ def test_workspace_displays_balanced_branding_and_window_icon(db):
     topbar_logo = window.findChild(QLabel, "topbarBrandLogo")
     assert sidebar_logo is not None
     assert sidebar_logo.pixmap() is not None and not sidebar_logo.pixmap().isNull()
-    assert topbar_logo is not None
-    assert topbar_logo.pixmap() is not None and not topbar_logo.pixmap().isNull()
+    assert topbar_logo is None
     assert not window.windowIcon().isNull()
     assert not app.windowIcon().isNull()
     window.close()

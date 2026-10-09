@@ -1,7 +1,7 @@
 def _service():
     from app.services.rowspan_consolidated_load_order_print_service import ConsolidatedLoadOrderPrintService
 
-    return ConsolidatedLoadOrderPrintService(current_user="issue315-rowspan")
+    return ConsolidatedLoadOrderPrintService(current_user="issue473-physical-pallets")
 
 
 def _plain_text(value):
@@ -19,33 +19,20 @@ def _shared_pallet_block():
         {"product": product, "unit": unit, "quantity": quantity, "lote": "", "elab": ""}
         for product, unit, quantity in products
     ]
-    consolidated_rows = [
-        {
-            "product": product,
-            "unit": unit,
-            "pallets": "1",
-            "pallet_count": 1,
-            "quantity": quantity,
-            "lote": "",
-            "elab": "",
-        }
-        for product, unit, quantity in products
-    ]
     return {
         "destination": "STRANGES LEONARDO Y STRANGES MAURICIO SH - ALSINA 1835",
         "pallet_blocks": [{"label": "1", "rows": pallet_rows}],
         "loose_block": None,
         "unassigned_block": None,
-        "consolidated_rows": consolidated_rows,
     }
 
 
-def test_regular_detail_places_total_before_pallets_and_rowspans_shared_pallet():
+def test_regular_detail_prints_physical_pallet_and_rowspans_all_its_articles():
     service = _service()
     table = service._destination_table(_shared_pallet_block())
     rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert rows[0] == ["Producto / detalle", "Cantidad total", "Cant. pallets", "Lote", "Elab."]
+    assert rows[0] == ["Producto / detalle", "Cantidad total", "Pallet", "Lote", "Elab."]
     assert rows[2][1] == "30 BOLSAS"
     assert rows[2][2] == "1 pallet"
     assert rows[3][2] == ""
@@ -56,53 +43,150 @@ def test_regular_detail_places_total_before_pallets_and_rowspans_shared_pallet()
     assert table._cellvalues[2][2].style.alignment == 1
 
 
-def test_preparation_sheet_places_total_before_pallets_and_rowspans_shared_pallet():
-    service = _service()
-    table = service._preparation_destination_table(_shared_pallet_block())
-    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
-
-    assert rows[0] == [
-        "Producto / detalle",
-        "Unidad",
-        "Cantidad total",
-        "Cant. pallets",
-        "Lote",
-        "Elab.",
-    ]
-    assert rows[2][2] == "30"
-    assert rows[2][3] == "1 pallet"
-    assert rows[3][3] == ""
-    assert rows[4][3] == ""
-    assert rows[5][3] == ""
-    assert ("SPAN", (3, 2), (3, 5)) in table._spanCmds
-    assert table._cellvalues[2][2].style.alignment == 1
-    assert table._cellvalues[2][3].style.alignment == 1
-
-
-def test_pallet_count_falls_back_to_consolidated_value_when_signature_is_unavailable():
+def test_identical_single_product_pallets_are_grouped_with_total_quantity():
     service = _service()
     block = {
-        "destination": "INDUS. FRIGORIFICAS RECREO SA - S/N - SANTA FE",
-        "pallet_blocks": [],
+        "destination": "GNESETTI SOFIA - ESPAÑA 3757",
+        "pallet_blocks": [
+            {
+                "label": str(sequence),
+                "rows": [
+                    {
+                        "product": "BOLSAS DE FECULA NATIVA",
+                        "unit": "UNIDAD",
+                        "quantity": 60,
+                        "lote": "47",
+                        "elab": "31/08/26",
+                    }
+                ],
+            }
+            for sequence in range(5, 14)
+        ],
         "loose_block": None,
         "unassigned_block": None,
-        "consolidated_rows": [
+    }
+    block["consolidated_rows"] = service._consolidate_rows(block)
+
+    table = service._destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert rows[2][0] == "BOLSAS DE FECULA NATIVA"
+    assert rows[2][1] == "540 UNIDADES"
+    assert rows[2][2] == "9 pallets"
+    assert len(rows) == 3
+
+
+def test_grouped_single_product_pallets_print_total_for_reported_cases():
+    service = _service()
+
+    def grouped_row(pallet_count):
+        block = {
+            "destination": "CLIENTE PRUEBA - DESTINO",
+            "pallet_blocks": [
+                {
+                    "label": str(sequence),
+                    "rows": [
+                        {
+                            "product": "BOLSAS DE FECULA NATIVA",
+                            "unit": "UNIDAD",
+                            "quantity": 60,
+                            "lote": "",
+                            "elab": "",
+                        }
+                    ],
+                }
+                for sequence in range(1, pallet_count + 1)
+            ],
+            "loose_block": None,
+            "unassigned_block": None,
+        }
+        table = service._destination_table(block)
+        return [_plain_text(cell) for cell in table._cellvalues[2]]
+
+    assert grouped_row(19)[1:3] == ["1140 UNIDADES", "19 pallets"]
+    assert grouped_row(2)[1:3] == ["120 UNIDADES", "2 pallets"]
+
+
+def test_issue_473_pallet_with_three_articles_prints_one_pallet_block():
+    service = _service()
+    block = {
+        "destination": "CLIENTE PRUEBA - DESTINO",
+        "pallet_blocks": [
             {
-                "product": "BOL.FEC. NATIVA X25KG",
-                "unit": "BOLSA",
-                "pallets": "1-8",
-                "pallet_count": 8,
-                "quantity": 480,
-                "lote": "",
-                "elab": "",
+                "label": "2",
+                "rows": [
+                    {"product": "PRODUCTO A", "unit": "UNIDAD", "quantity": 10, "lote": "", "elab": ""},
+                    {"product": "PRODUCTO B", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                    {"product": "PRODUCTO C", "unit": "UNIDAD", "quantity": 30, "lote": "", "elab": ""},
+                ],
             }
         ],
+        "loose_block": None,
+        "unassigned_block": None,
     }
 
     table = service._destination_table(block)
-    prep_table = service._preparation_destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
 
-    assert _plain_text(table._cellvalues[2][1]) == "480 BOLSAS"
-    assert _plain_text(table._cellvalues[2][2]) == "8 pallets"
-    assert _plain_text(prep_table._cellvalues[2][2]) == "480"
-    assert _plain_text(prep_table._cellvalues[2][3]) == "8 pallets"
+    assert [rows[index][0] for index in (2, 3, 4)] == ["PRODUCTO A", "PRODUCTO B", "PRODUCTO C"]
+    assert rows[2][2] == "1 pallet"
+    assert rows[3][2] == ""
+    assert rows[4][2] == ""
+    assert ("SPAN", (2, 2), (2, 4)) in table._spanCmds
+
+
+def test_issue_473_loose_merchandise_stays_separate_from_pallets():
+    service = _service()
+    block = {
+        "destination": "CLIENTE PRUEBA - DESTINO",
+        "pallet_blocks": [
+            {
+                "label": "1",
+                "rows": [
+                    {"product": "PRODUCTO A", "unit": "BOLSA", "quantity": 60, "lote": "", "elab": ""}
+                ],
+            }
+        ],
+        "loose_block": {
+            "label": "SUELTO",
+            "rows": [
+                {"product": "PRODUCTO B", "unit": "UNIDAD", "quantity": 5, "lote": "", "elab": ""}
+            ],
+        },
+        "unassigned_block": None,
+    }
+
+    table = service._destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert rows[2][2] == "1 pallet"
+    assert rows[3][2] == "SUELTO"
+
+
+def test_issue_urgent_mixed_pallet_sequence_19_prints_one_physical_pallet():
+    service = _service()
+    block = {
+        "destination": "CARDOZO MAURICIO GUSTAVO - CORRIENTES",
+        "pallet_blocks": [
+            {
+                "label": "19",
+                "rows": [
+                    {"product": "BOLSAS DE FECULA NATIVA", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                    {"product": "PACK 10 UNID. FECULA X 1 KG", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                    {"product": "PACK 10 UNID. ALM. MAIZ X 1/2 KG", "unit": "UNIDAD", "quantity": 10, "lote": "", "elab": ""},
+                    {"product": "PACXX 10 UNID. BOLSAS X 1/2 KG.", "unit": "UNIDAD", "quantity": 20, "lote": "", "elab": ""},
+                ],
+            }
+        ],
+        "loose_block": None,
+        "unassigned_block": None,
+    }
+
+    table = service._destination_table(block)
+    rows = [[_plain_text(cell) for cell in row] for row in table._cellvalues]
+
+    assert rows[2][2] == "1 pallet"
+    assert rows[3][2] == ""
+    assert rows[4][2] == ""
+    assert rows[5][2] == ""
+    assert ("SPAN", (2, 2), (2, 5)) in table._spanCmds

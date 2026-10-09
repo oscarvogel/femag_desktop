@@ -10,6 +10,7 @@ from app.models.security import User
 from app.models.base import utc_now
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
+from app.services.permission_service import PermissionService
 
 
 RECEIPT_SEQUENCE_NAME = "client_payment_receipt"
@@ -207,13 +208,20 @@ class ClientPaymentService:
     ) -> ClientPayment:
         if payment is None or not isinstance(payment, ClientPayment):
             raise ClientPaymentError("Debe seleccionar un pago.")
-        if (
-            authorized_by is None
-            or not isinstance(authorized_by, User)
-            or not authorized_by.active
-            or authorized_by.profile.name.strip().lower() != "administrador"
+        if authorized_by is None or not isinstance(authorized_by, User) or not authorized_by.active:
+            raise PermissionError("La anulación requiere un usuario habilitado.")
+        if authorized_by.username != self.current_user:
+            raise PermissionError("La anulación debe realizarse con la sesión del usuario autorizado.")
+        if not PermissionService().has_permission(
+            authorized_by,
+            "Cuenta corriente",
+            "anular",
+            "Anulación de pagos",
         ):
-            raise PermissionError("La anulación requiere autorización de un administrador.")
+            raise PermissionError("No tiene permiso para anular recibos.")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ClientPaymentError("Debe indicar el motivo de la anulación.")
 
         database = ClientPayment._meta.database
         with database.atomic():
@@ -269,7 +277,7 @@ class ClientPaymentService:
             payment.status = ClientPayment.STATUS_ANNULLED
             payment.annulled_at = annulled_at
             payment.annulled_by = authorized_by.username
-            payment.annulment_reason = (reason or "").strip() or None
+            payment.annulment_reason = reason
             payment.save()
             self.audit_service.record(
                 user=self.current_user,

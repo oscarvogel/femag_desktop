@@ -110,6 +110,389 @@ def test_validate_runtime_schema_reports_missing_indexes(db):
     assert "loadorderpallet" in str(exc_info.value)
 
 
+def test_validate_runtime_schema_reports_schema_newer_than_the_app(db):
+    """App vieja contra base migrada por otro build: dice "falta" y no es falta.
+
+    Es el incidente real: el PR #623 cambio el indice de devoluciones de dos columnas
+    a tres. El puesto con la version anterior declara (closure_id, order_product_id)
+    y la base ya tiene ese mismo indice con `timing` agregado. Antes el mensaje decia
+    "Faltan indices requeridos" y mandaba a correr `init_db.py`, que no lo arregla
+    porque corre la misma migracion y deja el esquema igual.
+
+    Aqui se reproduce la situacion al reves con un indice real: la base tiene el
+    indice declarado MAS una columna de mas.
+    """
+    import pytest
+
+    from app.config.schema import SchemaTooNewError, validate_runtime_schema
+
+    declared = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{declared.name}"')
+    db.execute_sql(
+        'CREATE UNIQUE INDEX "loadorderpallet_newer_index" '
+        'ON "loadorderpallet" ("order_id", "sequence", "pallet_type_id")'
+    )
+
+    try:
+        with pytest.raises(SchemaTooNewError) as exc_info:
+            validate_runtime_schema(db)
+
+        message = str(exc_info.value)
+        assert "mas nueva" in message
+        assert "loadorderpallet" in message
+        # Nombra las columnas que la base tiene de mas, para que se entienda el choque.
+        assert "pallet_type_id" in message
+        assert "Faltan indices requeridos" not in message
+    finally:
+        db.execute_sql('DROP INDEX "loadorderpallet_newer_index"')
+        db.execute_sql(
+            'CREATE UNIQUE INDEX "%s" ON "loadorderpallet" ("order_id", "sequence")'
+            % declared.name
+        )
+
+
+def test_validate_runtime_schema_still_reports_a_truly_missing_index(db):
+    """Un indice que no existe, sin equivalente mas nuevo en la base, sigue faltando."""
+    import pytest
+
+    from app.config.schema import (
+        SchemaTooNewError,
+        SchemaValidationError,
+        validate_runtime_schema,
+    )
+
+    declared = next(
+        item
+        for item in db.get_indexes("loadorderpallet")
+        if item.unique and set(item.columns) == {"order_id", "sequence"}
+    )
+    db.execute_sql(f'DROP INDEX "{declared.name}"')
+
+    try:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_runtime_schema(db)
+
+        assert not isinstance(exc_info.value, SchemaTooNewError)
+        assert "Faltan indices requeridos" in str(exc_info.value)
+        assert "loadorderpallet" in str(exc_info.value)
+    finally:
+        db.execute_sql(
+            'CREATE UNIQUE INDEX "%s" ON "loadorderpallet" ("order_id", "sequence")'
+            % declared.name
+        )
+
+
+def test_schema_too_new_error_is_a_schema_validation_error():
+    """Los dos sitios que ya capturaban SchemaValidationError siguen funcionando."""
+    from app.config.schema import SchemaTooNewError, SchemaValidationError
+
+    assert issubclass(SchemaTooNewError, SchemaValidationError)
+
+
+def test_startup_message_for_newer_schema_says_update_the_app(monkeypatch):
+    """El mensaje de arranque no puede mandar a init_db.py en el caso de base nueva."""
+    import pytest
+
+    from app.ui.desktop_app import SchemaTooNewAtStartup, _prepare_database
+
+    class _Closed:
+        def connect(self, *args, **kwargs):
+            pass
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            pass
+
+    from app.config import schema as schema_module
+
+    def _raise(_database):
+        raise schema_module.SchemaTooNewError("loadorderreturnline: closure_id, order_product_id")
+
+    monkeypatch.setattr(schema_module, "validate_runtime_schema", _raise)
+    monkeypatch.setattr(
+        "app.ui.desktop_app.validate_runtime_schema", _raise, raising=False
+    )
+    monkeypatch.setattr(
+        "app.ui.desktop_app.initialize_runtime_database", lambda: _Closed()
+    )
+
+    with pytest.raises(SchemaTooNewAtStartup) as exc_info:
+        _prepare_database(demo_mode=False)
+
+    # Sigue siendo RuntimeError para que el arranque no cambie de rama.
+    assert isinstance(exc_info.value, RuntimeError)
+    message = str(exc_info.value)
+    assert "actualizar la aplicacion" in message
+    assert "init_db.py" not in message
+    assert "fuera de servicio" in message
+
+
+def test_outdated_workstation_opens_the_update_without_being_able_to_say_no(monkeypatch):
+    """Un puesto atrasado se actualiza en el momento: no puede seguir trabajando."""
+    from app.services.update_service import UpdateInfo
+    from app.ui import desktop_app
+
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+    calls = []
+
+    def _raise(*_args, **_kwargs):
+        raise desktop_app.SchemaTooNewAtStartup("base mas nueva")
+
+    def _fake_show(window, update, mandatory=False):
+        calls.append(("update", window, update.version, mandatory))
+        return True
+
+    def _should_not_run(error):
+        calls.append(("explain", str(error)))
+
+    monkeypatch.setattr(desktop_app, "_prepare_database", _raise)
+    monkeypatch.setattr(desktop_app, "_explain_outdated_app", _should_not_run)
+    monkeypatch.setattr(
+        "app.services.update_service.fetch_update_info", lambda *a, **k: info
+    )
+    monkeypatch.setattr("app.ui.update_extension._show_update_dialog", _fake_show)
+
+    assert desktop_app.run_desktop_app() == 1
+
+    assert len(calls) == 1
+    assert calls[0][0] == "update"
+    # Sin ventana: todavia no hay login. Y mandatory: no puede decir que no.
+    assert calls[0][1] is None
+    assert calls[0][2] == "2099.01.01.00.00.00"
+    assert calls[0][3] is True
+
+
+def test_outdated_workstation_explains_when_there_is_no_published_update(monkeypatch):
+    """Sin version publicada, avisa con el detalle para que alguien lo resuelva."""
+    from app.ui import desktop_app
+
+    calls = []
+
+    def _raise(*_args, **_kwargs):
+        raise desktop_app.SchemaTooNewAtStartup("base mas nueva")
+
+    monkeypatch.setattr(desktop_app, "_prepare_database", _raise)
+    monkeypatch.setattr(
+        "app.services.update_service.fetch_update_info", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "app.ui.update_extension._show_update_dialog",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no hay update")),
+    )
+    monkeypatch.setattr(
+        desktop_app, "_explain_outdated_app", lambda error: calls.append(str(error))
+    )
+
+    assert desktop_app.run_desktop_app() == 1
+    assert len(calls) == 1
+    assert "base mas nueva" in calls[0]
+
+
+def test_explanation_copies_the_detail_and_does_not_ask_to_prepare_the_schema(monkeypatch):
+    """Lo unico accionable sin actualizacion es copiar el detalle y avisar."""
+    import pytest
+
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.ui import desktop_app
+
+    _qapp = QApplication.instance() or QApplication([])
+    seen = {}
+
+    class _Box:
+        Critical = QMessageBox.Critical
+        Ok = QMessageBox.Ok
+
+        def __init__(self, *_args, **_kwargs):
+            seen["box"] = self
+
+        def setText(self, text):
+            seen["text"] = text
+
+        def setInformativeText(self, text):
+            seen["info"] = text
+
+        def setDetailedText(self, text):
+            seen["detail"] = text
+
+        def setTextInteractionFlags(self, *_args):
+            pass
+
+        def setStandardButtons(self, *_args):
+            pass
+
+        def exec_(self):
+            return QMessageBox.Ok
+
+    monkeypatch.setattr(desktop_app, "QMessageBox", _Box)
+
+    desktop_app._explain_outdated_app(RuntimeError("loadorderreturnline: closure_id"))
+
+    detail = seen["detail"]
+    assert desktop_app.BUILD_VERSION in detail
+    assert "loadorderreturnline" in detail
+    assert "init_db.py" not in seen["text"] + seen["info"] + detail
+    assert "No se debe preparar ni revertir el esquema" in seen["info"]
+    assert _qapp.clipboard().text() == detail
+
+
+def test_mandatory_update_dialog_never_offers_a_decline(monkeypatch):
+    """Con mandatory no hay boton de "No": decir que no deja el puesto caido."""
+    import pytest
+
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.update_service import UpdateInfo
+    from app.ui import update_extension
+
+    _qapp = QApplication.instance() or QApplication([])
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+
+    asked = []
+
+    def _information(_parent, title, text, *_args):
+        asked.append(("information", title, text))
+        return QMessageBox.Ok
+
+    def _question(*args, **kwargs):
+        asked.append(("question", args[1] if len(args) > 1 else ""))
+        return QMessageBox.No
+
+    monkeypatch.setattr(update_extension.QMessageBox, "information", staticmethod(_information))
+    monkeypatch.setattr(update_extension.QMessageBox, "question", staticmethod(_question))
+
+    class _FakeSignal:
+        def connect(self, *_args):
+            pass
+
+    class _FakeSignals:
+        progress = _FakeSignal()
+        failed = _FakeSignal()
+        downloaded = _FakeSignal()
+
+    class _FakeWorker:
+        def __init__(self, *_args, **_kwargs):
+            self.signals = _FakeSignals()
+
+    # Corta antes de descargar: solo importa que no se pregunto.
+    monkeypatch.setattr(update_extension, "_DownloadWorker", _FakeWorker)
+    monkeypatch.setattr(update_extension.QProgressDialog, "show", lambda self: None)
+    monkeypatch.setattr(update_extension.QThreadPool.globalInstance(), "start", lambda worker: None)
+
+    update_extension._show_update_dialog(None, info, mandatory=True)
+
+    assert asked
+    assert all(kind == "information" for kind, *_rest in asked)
+    assert any("no puede trabajar" in text for _kind, _title, text in asked)
+
+
+def test_optional_update_dialog_still_asks_before_downloading(monkeypatch):
+    """El chequeo periodico no cambia: ahi el operador puede decir que no."""
+    from PyQt5.QtWidgets import QMessageBox
+
+    from app.services.update_service import UpdateInfo
+    from app.ui import update_extension
+
+    info = UpdateInfo(
+        version="2099.01.01.00.00.00",
+        download_url="https://example.invalid/FEMAG.exe",
+        sha256="a" * 64,
+    )
+    asked = []
+
+    def _question(_parent, title, text, *_args):
+        asked.append(text)
+        return QMessageBox.No
+
+    monkeypatch.setattr(update_extension.QMessageBox, "question", staticmethod(_question))
+
+    assert update_extension._show_update_dialog(None, info) is False
+    assert len(asked) == 1
+    assert "¿Desea descargar el instalador ahora?" in asked[0]
+
+
+def test_startup_message_for_incomplete_schema_still_says_init_db(monkeypatch):
+    """El caso de base incompleta conserva la accion correcta: init_db.py."""
+    import pytest
+
+    from app.config import schema as schema_module
+    from app.ui.desktop_app import _prepare_database
+
+    class _Closed:
+        def connect(self, *args, **kwargs):
+            pass
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            pass
+
+    def _raise(_database):
+        raise schema_module.SchemaValidationError("Faltan tablas requeridas: client")
+
+    monkeypatch.setattr("app.ui.desktop_app.initialize_runtime_database", lambda: _Closed())
+    monkeypatch.setattr("app.ui.desktop_app.validate_runtime_schema", _raise, raising=False)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _prepare_database(demo_mode=False)
+
+    message = str(exc_info.value)
+    assert "init_db.py" in message
+    assert "actualizar la aplicacion" not in message
+
+
+def test_connection_dialog_does_not_offer_to_prepare_a_newer_schema(monkeypatch):
+    """Base nueva no debe ofrecer "crear o actualizar tablas": no lo arregla."""
+    import pytest
+
+    from app.ui import connection_dialog
+
+    class _Database:
+        def connect(self):
+            pass
+
+        def close(self):
+            pass
+
+        def is_closed(self):
+            return False
+
+    def _raise(_database):
+        raise connection_dialog.SchemaTooNewError("loadorderreturnline: closure_id")
+
+    monkeypatch.setattr(connection_dialog, "build_mysql_database", lambda _settings: _Database())
+    monkeypatch.setattr(connection_dialog, "validate_runtime_schema", _raise)
+
+    connection = connection_dialog.RuntimeConnection(
+        host="almanet-server",
+        port=3306,
+        database="femag_desktop",
+        user="operador",
+        password="clave",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        connection_dialog.test_runtime_connection(connection)
+
+    assert not isinstance(exc_info.value, connection_dialog.RuntimeSchemaPreparationRequired)
+    assert "actualizar la aplicacion" in str(exc_info.value)
+
+
 def test_backfill_missing_column_default_uses_mysql_placeholder():
     from collections import namedtuple
 
@@ -559,3 +942,65 @@ def _model_by_table(table_name):
     from app.models import ALL_MODELS
 
     return next(model for model in ALL_MODELS if model._meta.table_name == table_name)
+
+
+
+def test_mysql_money_column_detects_integer_or_zero_scale_legacy_types():
+    from collections import namedtuple
+
+    from app.config.schema import _mysql_money_column_needs_fractional_fix
+
+    Column = namedtuple("Column", "data_type")
+
+    class MySQLDatabase:
+        pass
+
+    database = MySQLDatabase()
+
+    assert _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("int")
+    )
+    assert _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("decimal(18,0)")
+    )
+    assert not _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("decimal(18,2)")
+    )
+    assert not _mysql_money_column_needs_fractional_fix(
+        database, "clientaccountmovement", "total_amount", Column("double")
+    )
+
+
+def test_repair_payment_movement_restores_cents_from_receipt(db):
+    import pytest
+
+    from app.config.schema import _repair_payment_movement_amounts
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.services.client_payment_service import ClientPaymentService
+
+    client = Client.create(
+        name="Cliente Centavos",
+        cuit="30999999991",
+        iva_condition="RI",
+    )
+    payment = ClientPaymentService(current_user="tesoreria").register_payment(
+        client=client,
+        amount=898220.62,
+        method="retenciones_percepciones",
+    )
+    movement = ClientAccountMovement.get(
+        ClientAccountMovement.payment == payment,
+        ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT,
+    )
+    movement.amount = -898221.0
+    movement.net_amount = -898221.0
+    movement.total_amount = -898221.0
+    movement.save()
+
+    _repair_payment_movement_amounts(db)
+
+    movement = ClientAccountMovement.get_by_id(movement.id)
+    assert movement.amount == pytest.approx(-898220.62)
+    assert movement.net_amount == pytest.approx(-898220.62)
+    assert movement.total_amount == pytest.approx(-898220.62)

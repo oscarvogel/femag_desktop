@@ -1,4 +1,5 @@
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,11 @@ class Settings:
     backup_dir: Path
     backup_extra_dir: Path | None
     log_level: str
+    whatsapp_enabled: bool = False
+    whatsapp_api_url: str = ""
+    whatsapp_api_key: str = ""
+    whatsapp_instance_id: str = "default"
+    whatsapp_api_timeout: float = 15.0
 
 
 def _optional_path(value: str | None) -> Path | None:
@@ -32,6 +38,55 @@ def _flag_enabled(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 
 
+def resolve_effective_connection_settings(
+    *,
+    demo_mode: bool = False,
+    configure: bool = False,
+    packaged_app: bool | None = None,
+) -> bool:
+    """Decide si la ejecución usa la configuración segura del puesto y la exige.
+
+    Es el preámbulo de conexión de FEMAG. Todo lo que abre la base en este
+    proyecto pasa por acá: si existe configuración segura guardada (DPAPI en
+    ``%LOCALAPPDATA%\\FEMAG Desktop``), se fuerza MySQL **pese a lo que diga
+    el ``.env``**, para que un ``.env`` de demo heredado no redirija la
+    aplicación a SQLite por accidente.
+
+    Ajusta sólo variables del proceso actual (no toca disco ni base) y devuelve
+    ``True`` cuando la conexión debe venir de la configuración segura.
+
+    Vive acá, y no inline en ``app.main.run_ui()``, porque el auditor monetario
+    la usa para conectarse **a la misma base que la aplicación**. Si hubiera dos
+    copias de esta lógica, el auditor podría auditar una base y la aplicación
+    estar sobre otra, y delivers un informe falso sobre datos que nadie mira.
+
+    ``packaged_app`` detecta la app congelada de producción; se puede pasar
+    explícitamente para no depender de esa detección.
+    """
+    from app.config.secure_credentials import has_runtime_configuration
+
+    if packaged_app is None:
+        packaged_app = bool(getattr(sys, "frozen", False))
+    saved_runtime_config = has_runtime_configuration()
+    use_secure_config = bool(
+        not demo_mode
+        and (
+            configure
+            or packaged_app
+            or saved_runtime_config
+            or os.getenv("FEMAG_SECURE_CONFIG") == "1"
+        )
+    )
+    if use_secure_config:
+        # Toda ejecución normal (EXE o source) usa la configuración segura
+        # del puesto cuando existe. Así evitamos que .env o variables viejas
+        # de demo redirijan FEMAG a SQLite por accidente.
+        os.environ["FEMAG_SECURE_CONFIG"] = "1"
+        os.environ["FEMAG_DEMO"] = "0"
+        os.environ["FEMAG_DB_ENGINE"] = "mysql"
+    return use_secure_config
+
+
 def load_settings() -> Settings:
     secure_connection = None
     if _flag_enabled(os.getenv("FEMAG_SECURE_CONFIG")):
@@ -40,8 +95,11 @@ def load_settings() -> Settings:
         secure_connection = load_runtime_connection()
 
     env_file = os.getenv("FEMAG_ENV_FILE", ".env")
-    if load_dotenv and secure_connection is None:
-        load_dotenv(env_file, override=True)
+    # El .env completa valores faltantes, pero nunca debe pisar variables
+    # explícitas del proceso/shell. Esto evita que una configuración de demo
+    # contamine una ejecución MySQL iniciada expresamente por el operador.
+    if load_dotenv:
+        load_dotenv(env_file, override=False)
 
     demo = False if secure_connection else _flag_enabled(os.getenv("FEMAG_DEMO"))
     db_engine = (
@@ -65,4 +123,9 @@ def load_settings() -> Settings:
         backup_dir=Path(os.getenv("BACKUP_DIR", "backups")),
         backup_extra_dir=_optional_path(os.getenv("BACKUP_EXTRA_DIR")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        whatsapp_enabled=_flag_enabled(os.getenv("WHATSAPP_ENABLED", "false")),
+        whatsapp_api_url=os.getenv("WHATSAPP_API_URL", "").strip().rstrip("/"),
+        whatsapp_api_key=os.getenv("WHATSAPP_API_KEY", "").strip(),
+        whatsapp_instance_id=os.getenv("WHATSAPP_INSTANCE_ID", "default").strip(),
+        whatsapp_api_timeout=float(os.getenv("WHATSAPP_API_TIMEOUT", "15")),
     )

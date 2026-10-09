@@ -110,6 +110,43 @@ def test_default_report_matches_dashboard_closed_totals(db):
     assert report.totals.orders == 1
 
 
+def test_default_report_includes_pending_issued_and_closed_but_excludes_draft_and_annulled(db):
+    client = _client("Cliente Estados 323", "30700060323", "Puerto Rico")
+    product = Product.create(name="Producto Estados 323", unit="bolsa", peso_unitario_kg=25)
+    statuses = (
+        (32310, LoadOrder.STATUS_PENDING, 12100),
+        (32311, LoadOrder.STATUS_ISSUED, 24200),
+        (32312, LoadOrder.STATUS_CLOSED, 36300),
+        (32313, LoadOrder.STATUS_LEGACY_DRAFT, 48400),
+        (32314, LoadOrder.STATUS_ANNULLED, 60500),
+    )
+    for number, status, total in statuses:
+        _order(
+            number=number,
+            order_date=date(2026, 8, 15),
+            client=client,
+            product=product,
+            quantity=10,
+            net=total / 1.21,
+            vat=total - (total / 1.21),
+            total=total,
+            status=status,
+        )
+
+    result = ManagerialSalesDispatchService().report(
+        SalesDispatchFilters(date(2026, 8, 1), date(2026, 8, 31))
+    )
+
+    assert {row["status"] for row in result.rows} == {
+        LoadOrder.STATUS_PENDING,
+        LoadOrder.STATUS_ISSUED,
+        LoadOrder.STATUS_CLOSED,
+    }
+    assert {row["order_number"] for row in result.rows} == {32310, 32311, 32312}
+    assert result.totals.total == 72600
+    assert result.totals.orders == 3
+
+
 def test_report_reuses_physical_kilos_rule(db):
     client = _client("Cliente Peso 323", "30700020323", "Oberá")
     product = Product.create(name="Producto Peso 323", unit="bolsa", peso_unitario_kg=25)

@@ -7,6 +7,8 @@ from peewee import (
     FloatField,
     ForeignKeyField,
     IntegerField,
+    MySQLDatabase,
+    SqliteDatabase,
     TextField,
 )
 from playhouse.migrate import SqliteMigrator, migrate
@@ -16,6 +18,25 @@ from app.models import ALL_MODELS
 
 class SchemaValidationError(RuntimeError):
     """Raised when a workstation finds an incomplete runtime schema."""
+
+
+class SchemaTooNewError(SchemaValidationError):
+    """La base compartida tiene un esquema mas nuevo que el de esta aplicacion.
+
+    Ocurre cuando otro puesto, con una version mas nueva, migro la base al abrir
+    (`FEMAG_AUTO_MIGRATE_SCHEMA`). No falta nada en la base: al puesto le falta la
+    aplicacion nueva, y la accion correcta es actualizar, no preparar el esquema.
+    """
+
+
+def _is_mysql_database(database) -> bool:
+    """Recognize Peewee MySQL databases and lightweight test doubles."""
+    return isinstance(database, MySQLDatabase) or database.__class__.__name__ == "MySQLDatabase"
+
+
+def _is_sqlite_database(database) -> bool:
+    """Recognize Peewee SQLite databases and lightweight test doubles."""
+    return isinstance(database, SqliteDatabase) or database.__class__.__name__ == "SqliteDatabase"
 
 
 def validate_runtime_schema(database) -> None:
@@ -45,20 +66,49 @@ def validate_runtime_schema(database) -> None:
         )
 
     missing_indexes = []
+    newer_indexes = []
     for model in ALL_MODELS:
         table_name = model._meta.table_name
-        existing_indexes = indexes_by_table.get(table_name, [])
+        # SQLite expone los indices internos (autoincrementos) con la columna en
+        # None. No son indices declarados por el modelo y no sirven para comparar.
+        existing_indexes = [
+            (index_columns, index_unique)
+            for index_columns, index_unique in indexes_by_table.get(table_name, [])
+            if all(isinstance(column, str) for column in index_columns)
+        ]
         for field_names, unique in model._meta.indexes:
             expected_columns = {
                 model._meta.fields[field_name].column_name for field_name in field_names
             }
-            if not any(
+            compatible = [
+                (index_columns, index_unique)
+                for index_columns, index_unique in existing_indexes
+                if expected_columns <= index_columns and (not unique or index_unique)
+            ]
+            if any(
                 index_columns == expected_columns and (not unique or index_unique)
                 for index_columns, index_unique in existing_indexes
             ):
-                missing_indexes.append(
-                    f"{table_name}: {', '.join(sorted(expected_columns))}"
+                continue
+            detail = f"{table_name}: {', '.join(sorted(expected_columns))}"
+            if compatible:
+                # La base tiene este indice con columnas EXTRA: es una version mas
+                # nueva escrita por otro build. No falta nada, la app esta atrasada.
+                index_columns, _index_unique = max(
+                    compatible, key=lambda item: len(item[0])
                 )
+                newer_indexes.append(
+                    f"{detail} (la base tiene ademas "
+                    f"{', '.join(sorted(index_columns))})"
+                )
+            else:
+                missing_indexes.append(detail)
+
+    if newer_indexes:
+        raise SchemaTooNewError(
+            "La base de datos tiene una version del esquema mas nueva que esta "
+            "aplicacion: " + "; ".join(newer_indexes)
+        )
 
     if missing_indexes:
         raise SchemaValidationError(
@@ -67,7 +117,7 @@ def validate_runtime_schema(database) -> None:
 
 
 def _runtime_schema_snapshot(database):
-    if database.__class__.__name__ == "MySQLDatabase":
+    if _is_mysql_database(database):
         return _mysql_schema_snapshot(database)
 
     tables = set(database.get_tables())
@@ -122,14 +172,19 @@ def ensure_runtime_schema(database) -> None:
     database.create_tables(ALL_MODELS, safe=True)
     for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    _drop_legacy_production_kilos(database)
     if hasattr(database, "atomic"):
         _backfill_client_emails(database)
         _backfill_product_classification(database)
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
+        _repair_payment_movement_amounts(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
+        _ensure_client_salesperson_index(database)
+        _ensure_budget_timing_index(database)
+        _ensure_return_line_timing_index(database)
     _ensure_sqlite_index_integrity(database)
 
 
@@ -140,6 +195,10 @@ def _backfill_product_classification(database) -> None:
     with database.atomic():
         for product in Product.select().order_by(Product.id):
             inference = analyze_legacy_product(product.name)
+            original_kind = product.product_kind
+            original_source = product.classification_source
+            original_weight_source = product.weight_source
+            original_weight = product.peso_unitario_kg
             if product.classification_source != "manual":
                 product.product_kind = inference.product_kind
                 product.classification_source = "inferido"
@@ -153,7 +212,53 @@ def _backfill_product_classification(database) -> None:
                 product.product_kind == "revisar"
                 or (product.product_kind == "producto" and product.peso_unitario_kg <= 0)
             )
+            # Sin este chequeo se escribian todos los productos en cada arranque
+            # aunque no hubiera nada que corregir. Medido sobre el dump real:
+            # 37 escrituras por arranque que no cambiaban nada.
+            cambio = (
+                product.product_kind != original_kind
+                or product.classification_source != original_source
+                or product.weight_source != original_weight_source
+                or product.peso_unitario_kg != original_weight
+            )
+            if not cambio:
+                continue
             product.save()
+
+
+def _clients_with_pending_email_migration(client_model, email_model):
+    """Clientes a los que el backfill de correos todavia tiene algo que hacerles.
+
+    El corte va en SQL porque recorrer la cartera entera en cada arranque es lo
+    que hacia lento al equipo: con el correo poblado, 851 clientes ya
+    consolidados costaban 851 consultas en la segunda corrida, todas para
+    descubrir que no habia nada que hacer.
+
+    "Algo que hacer" es exactamente "no tener un ClientEmail activo y principal":
+
+    - sin ninguna fila: hay que crearla;
+    - con filas pero ninguna activa y principal: hay que promover una;
+    - con una activa y principal: no hay nada que hacer.
+
+    El caso masivo es el primero, y el filtro lo cubre entero sin recorrer en
+    Python, que es lo que hacia el trabajo inutil. La normalizacion del correo
+    sigue siendo de Python, asi que la consulta sola no alcanza: aca solo se
+    prescignan los clientes que ya estan completos.
+
+    Va con ``NOT IN`` y no con ``EXISTS`` porque ``Exists`` no existe en peewee 3
+    y el proyecto esta en 3.17. La columna ``client_id`` es una FK sin null, asi
+    que la subconsulta nunca devuelve null y el ``NOT IN`` no puede caer en el
+    caso en que MySQL devuelve desconocido y excluye al cliente.
+    """
+    con_primario_activo = email_model.select(email_model.client_id).where(
+        (email_model.active == True) & (email_model.is_primary == True)  # noqa: E712
+    )
+    return (
+        client_model.select()
+        .where(client_model.email.is_null(False))
+        .where(client_model.id.not_in(con_primario_activo))
+        .order_by(client_model.id)
+    )
 
 
 def _backfill_client_emails(database) -> None:
@@ -161,13 +266,25 @@ def _backfill_client_emails(database) -> None:
     from app.services.client_email_service import ClientEmailService
 
     with database.atomic():
-        for client in Client.select().where(Client.email.is_null(False)).order_by(Client.id):
+        for client in _clients_with_pending_email_migration(Client, ClientEmail):
             raw_email = (client.email or "").strip()
             if not raw_email:
                 continue
             try:
                 normalized = ClientEmailService.normalize_email(raw_email)
             except ValueError:
+                continue
+            # Si el correo ya existe y esta activo y es el principal, no hay nada
+            # que hacer por este cliente. Sin este chequeo se corria una consulta
+            # de "tiene primario" por cada uno de los clientes en cada arranque.
+            existente = ClientEmail.get_or_none(
+                (ClientEmail.client == client) & (ClientEmail.email == normalized)
+            )
+            if (
+                existente is not None
+                and existente.active
+                and existente.is_primary
+            ):
                 continue
             has_primary = ClientEmail.select().where(
                 (ClientEmail.client == client)
@@ -190,16 +307,30 @@ def _backfill_client_emails(database) -> None:
 
 
 def _consolidate_shared_client_addresses(database) -> None:
-    from app.models.masters import Client
-    from app.services.client_service import ClientService
+    from app.models.masters import Client, ClientAddress
+    from app.services.client_service import CLIENT_ADDRESS_TYPE_SHARED, ClientService
+
+    # Consolidar no hace nada por un cliente que ya tiene direccion compartida:
+    # la funcion la devuelve tal cual. Pero el chequeo de "tiene compartida" se
+    # pagaba con una consulta por cliente, o sea una por cada cliente de la
+    # cartera en cada arranque. Se resuelve en una sola consulta.
+    ya_consolidados = {
+        fila.client_id
+        for fila in ClientAddress.select(ClientAddress.client_id).where(
+            ClientAddress.address_type == CLIENT_ADDRESS_TYPE_SHARED
+        )
+    }
+    consulta = Client.select()
+    if ya_consolidados:
+        consulta = consulta.where(Client.id.not_in(list(ya_consolidados)))
 
     with database.atomic():
-        for client in Client.select().order_by(Client.id):
+        for client in consulta.order_by(Client.id):
             ClientService.consolidate_identical_fiscal_delivery(client)
 
 
 def _ensure_sqlite_index_integrity(database) -> None:
-    if database.__class__.__name__ != "SqliteDatabase":
+    if not _is_sqlite_database(database):
         return
     issues = [row[0] for row in database.execute_sql("PRAGMA integrity_check").fetchall()]
     if issues == ["ok"]:
@@ -234,7 +365,7 @@ def _ensure_account_movement_source_index(database) -> None:
     for index in indexes:
         if index.unique and set(index.columns) == legacy_columns:
             escaped_name = _escape_identifier(index.name)
-            if database.__class__.__name__ == "MySQLDatabase":
+            if _is_mysql_database(database):
                 database.execute_sql(
                     f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
                 )
@@ -248,12 +379,90 @@ def _ensure_account_movement_source_index(database) -> None:
     )
 
 
+def _ensure_client_salesperson_index(database) -> None:
+    table_name = "client"
+    expected_columns = {"salesperson_id"}
+    indexes = database.get_indexes(table_name)
+    if any(set(index.columns) == expected_columns for index in indexes):
+        return
+    database.execute_sql(
+        "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    )
+
+
+def _ensure_budget_timing_index(database) -> None:
+    """Reemplaza el índice único de presupuesto por su versión con momento de facturación.
+
+    El índice legacy de tres columnas impide emitir dos presupuestos para el mismo
+    cliente de la misma orden. Sin este paso, la parte facturada al contado y la
+    diferida chocarían en tiempo de ejecución en vez de en el desarrollo.
+    """
+    table_name = "budget"
+    legacy_columns = {"load_order_id", "client_id", "origin"}
+    expected_columns = {"load_order_id", "client_id", "origin", "timing"}
+    indexes = database.get_indexes(table_name)
+    # El índice legacy se baja antes de decidir nada: `create_tables` ya puede haber
+    # creado el nuevo, y quedarse con los dos dejaría el legacy bloqueando la parte
+    # diferida en tiempo de ejecución.
+    for index in indexes:
+        if index.unique and set(index.columns) == legacy_columns:
+            escaped_name = _escape_identifier(index.name)
+            if _is_mysql_database(database):
+                database.execute_sql(
+                    f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
+                )
+            else:
+                database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
+    if any(index.unique and set(index.columns) == expected_columns for index in indexes):
+        return
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `budget_load_order_client_origin_timing` "
+        "ON `budget` (`load_order_id`, `client_id`, `origin`, `timing`)"
+    )
+
+
+def _ensure_return_line_timing_index(database) -> None:
+    """Reemplaza el indice unico de devoluciones por su version con momento de factura.
+
+    El indice de dos columnas (cierre, renglón) no permite devolver el mismo
+    producto en el mismo cierre desde las dos partes de una orden partida.
+    """
+    table_name = "loadorderreturnline"
+    legacy_columns = {"closure_id", "order_product_id"}
+    expected_columns = {"closure_id", "order_product_id", "timing"}
+    indexes = database.get_indexes(table_name)
+    if any(index.unique and set(index.columns) == expected_columns for index in indexes):
+        return
+    for index in indexes:
+        if index.unique and set(index.columns) == legacy_columns:
+            escaped_name = _escape_identifier(index.name)
+            if _is_mysql_database(database):
+                database.execute_sql(
+                    f"ALTER TABLE `{table_name}` DROP INDEX `{escaped_name}`"
+                )
+            else:
+                database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
+    database.execute_sql(
+        "CREATE UNIQUE INDEX `loadorderreturnline_closure_order_product_timing` "
+        "ON `loadorderreturnline` (`closure_id`, `order_product_id`, `timing`)"
+    )
+
+
 def _normalize_legacy_pallet_rows(database) -> None:
     from app.models.load_orders import LoadOrderPallet
 
+    # La funcion solo tiene trabajo donde un pallet trae quantity distinta de 1:
+    # ahi lo expande en varias filas de quantity 1 y renumera la secuencia. Si
+    # todo el historico ya esta normalizado, no hay nada que hacer.
+    #
+    # Sin este filtro recorreria TODAS las ordenes con pallets y guardaria cada
+    # fila dos veces, en cada arranque, sin cambiar un solo valor. Medido sobre el
+    # dump real: 1.050 pallets, ~2.100 escrituras por arranque, 3,5 s.
     order_ids = [
         row.order_id
-        for row in LoadOrderPallet.select(LoadOrderPallet.order).distinct()
+        for row in LoadOrderPallet.select(LoadOrderPallet.order_id)
+        .where(LoadOrderPallet.quantity != 1)
+        .distinct()
     ]
     if not order_ids:
         return
@@ -288,6 +497,80 @@ def _normalize_legacy_pallet_rows(database) -> None:
                 row.save()
 
 
+MONEY_FLOAT_COLUMNS = {
+    "clientpayment": {"amount"},
+    "clientpaymentdetail": {"amount"},
+    "clientaccountmovement": {
+        "amount",
+        "net_amount",
+        "discount_amount",
+        "vat_amount",
+        "total_amount",
+    },
+}
+
+
+def _mysql_money_column_needs_fractional_fix(
+    database, table_name: str, column_name: str, existing_column
+) -> bool:
+    if not _is_mysql_database(database):
+        return False
+    if column_name not in MONEY_FLOAT_COLUMNS.get(table_name, set()):
+        return False
+
+    data_type = str(getattr(existing_column, "data_type", "") or "").strip().lower()
+    if not data_type:
+        return False
+    if any(token in data_type for token in ("double", "float", "real")):
+        return False
+    if data_type.startswith("decimal") or data_type.startswith("numeric"):
+        import re
+
+        match = re.search(r"\((\d+)\s*,\s*(\d+)\)", data_type)
+        # Si el driver no informa escala, no tocamos una columna DECIMAL sana.
+        return bool(match and int(match.group(2)) == 0)
+    return any(
+        token in data_type
+        for token in ("int", "bigint", "smallint", "mediumint", "tinyint")
+    )
+
+
+def _repair_payment_movement_amounts(database) -> None:
+    """Repara movimientos de pagos legacy redondeados usando el recibo como fuente."""
+    from app.models.accounting import ClientAccountMovement
+    from app.models.payments import ClientPayment
+
+    query = (
+        ClientAccountMovement.select(ClientAccountMovement, ClientPayment)
+        .join(ClientPayment)
+        .where(
+            ClientAccountMovement.movement_type.in_(
+                (
+                    ClientAccountMovement.TYPE_PAYMENT,
+                    ClientAccountMovement.TYPE_PAYMENT_REVERSAL,
+                )
+            )
+        )
+    )
+    with database.atomic():
+        for movement in query:
+            expected = (
+                -float(movement.payment.amount)
+                if movement.movement_type == ClientAccountMovement.TYPE_PAYMENT
+                else float(movement.payment.amount)
+            )
+            if abs(float(movement.total_amount or 0) - expected) < 0.005:
+                continue
+            movement.amount = expected
+            movement.net_amount = expected
+            movement.total_amount = expected
+            movement.save(only=[
+                ClientAccountMovement.amount,
+                ClientAccountMovement.net_amount,
+                ClientAccountMovement.total_amount,
+            ])
+
+
 def _ensure_model_columns(database, model) -> None:
     table_name = model._meta.table_name
     existing_columns = {column.name: column for column in database.get_columns(table_name)}
@@ -305,13 +588,22 @@ def _ensure_model_columns(database, model) -> None:
             continue
         if not field.null and existing_column.null:
             _backfill_column_default(database, table_name, column_name, field)
+        if _mysql_money_column_needs_fractional_fix(
+            database, table_name, column_name, existing_column
+        ):
+            null_sql = "NULL" if field.null else "NOT NULL"
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"MODIFY COLUMN `{_escape_identifier(column_name)}` DOUBLE {null_sql}"
+            )
+            continue
         if field.null and existing_column.null is False:
             if _supports_modify_column(database):
                 database.execute_sql(
                     f"ALTER TABLE `{_escape_identifier(table_name)}` "
                     f"MODIFY COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
                 )
-            elif database.__class__.__name__ == "SqliteDatabase":
+            elif _is_sqlite_database(database):
                 _sqlite_drop_not_null(database, table_name, column_name)
 
 
@@ -354,7 +646,7 @@ def _escape_identifier(value: str) -> str:
 
 
 def _supports_modify_column(database) -> bool:
-    return database.__class__.__name__ == "MySQLDatabase"
+    return _is_mysql_database(database)
 
 
 def _sqlite_drop_not_null(database, table_name: str, column_name: str) -> None:
@@ -366,3 +658,55 @@ def _sqlite_drop_not_null(database, table_name: str, column_name: str) -> None:
     finally:
         if foreign_keys_were_enabled:
             database.execute_sql("PRAGMA foreign_keys = ON")
+
+
+def _sqlite_drop_column(database, table_name: str, column_name: str) -> None:
+    foreign_keys_were_enabled = bool(database.execute_sql("PRAGMA foreign_keys").fetchone()[0])
+    if foreign_keys_were_enabled:
+        database.execute_sql("PRAGMA foreign_keys = OFF")
+    try:
+        migrate(SqliteMigrator(database).drop_column(table_name, column_name))
+    finally:
+        if foreign_keys_were_enabled:
+            database.execute_sql("PRAGMA foreign_keys = ON")
+
+
+def _drop_legacy_production_kilos(database) -> None:
+    """Retira los kg por turno de produccion (#580).
+
+    En planta no se pueden medir los kg de mandioca procesada ni los de fecula
+    producida por turno, asi que la pantalla terminaba cargando numeros
+    inventados que despues alimentaban un rendimiento real engañoso. A pedido
+    del owner esos datos se descartan.
+
+    Primero se borran los partes que quedaron sin bolsas, porque sin lineas no
+    representan produccion. Despues se eliminan las columnas: ademas estaban
+    declaradas NOT NULL sin default, con lo cual impedirian registrar los
+    partes nuevos. La operacion es idempotente: si las columnas ya no existen,
+    no vuelve a hacer nada.
+    """
+    from app.models.production import ProductionBag, ProductionPart
+
+    table_name = ProductionPart._meta.table_name
+    if not hasattr(database, "get_tables") or table_name not in database.get_tables():
+        return
+    existing_columns = {column.name for column in database.get_columns(table_name)}
+    legacy_columns = ("cassava_processed_kg", "starch_produced_kg")
+    if not any(column in existing_columns for column in legacy_columns):
+        return
+
+    bagged_part_ids = {row[0] for row in ProductionBag.select(ProductionBag.part_id).tuples()}
+    for part in ProductionPart.select(ProductionPart.id, ProductionPart.shift):
+        if part.id not in bagged_part_ids:
+            ProductionPart.delete().where(ProductionPart.id == part.id).execute()
+
+    for column_name in legacy_columns:
+        if column_name not in existing_columns:
+            continue
+        if _is_mysql_database(database):
+            database.execute_sql(
+                f"ALTER TABLE `{_escape_identifier(table_name)}` "
+                f"DROP COLUMN `{_escape_identifier(column_name)}`"
+            )
+        elif _is_sqlite_database(database):
+            _sqlite_drop_column(database, table_name, column_name)

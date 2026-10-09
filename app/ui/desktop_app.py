@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+from datetime import date
 from pathlib import Path
 import webbrowser
 
@@ -9,6 +11,7 @@ from PyQt5.QtCore import QDate, QEvent, QObject, QRunnable, QSignalBlocker, QThr
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
+    QCheckBox,
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
@@ -18,6 +21,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -44,12 +48,14 @@ try:  # solo presente en builds demo (PyInstaller DEMO.spec)
 except ImportError:  # pragma: no cover - build de produccion no incluye el modulo
     BUILD_DEMO_VERSION = None
 from app.config.schema import (
+    SchemaTooNewError,
     SchemaValidationError,
     ensure_runtime_schema,
     validate_runtime_schema,
 )
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
+from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.models.payments import ClientPayment
 from app.models.remittances import RemittanceSeries
@@ -74,34 +80,59 @@ from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
 from app.services.client_manual_credit_service import ClientManualCreditService
 from app.services.client_email_service import ClientEmailService
+from app.services.budget_print_service import BudgetPrintService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.ui.form_feedback import FormFeedback
 from app.services import account_statement_mail_service
 from app.services import account_statement_print_service
 from app.services import account_statement_share_service
 from app.services import global_search_service
+from app.services import salesperson_portfolio_print_service
+from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.customer_ledger import CustomerLedgerPage
-from app.ui.admin_authorization_dialog import AdminAuthorizationDialog
+from app.ui.manual_budget_dialog import ManualBudgetDialog
+from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
+from app.ui.glass_v2 import glass_v2_stylesheet
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
-from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.combo_autocomplete import enable_combo_autocomplete, matching_combo_index
+from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
+from app.services.audit_service import AuditService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
+from app.ui.audit_history_dialog import LoadOrderHistoryDialog
+from app.ui.audit_query_page import AuditQueryPage
+from app.ui.audit_reason_dialog import AuditReasonDialog
+from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
-from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
+from app.ui.master_abm import (
+    ClientAddressEntryDialog,
+    build_client_abm_page,
+    build_master_abm_page,
+    master_abm_configs,
+    normalize_master_text,
+)
 from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
+from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
+from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
+from app.ui.production_parts import ProductionPartPage
+from app.ui.production_contrast import ProductionContrastPage
+from app.ui.stock_count import StockCountPage
+from app.ui.stock_initial_inventory import StockInitialInventoryPage
+from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
+logger = logging.getLogger("femag.desktop")
 
 
 class _AccountStatementMailSignals(QObject):
@@ -118,12 +149,14 @@ class _AccountStatementMailWorker(QRunnable):
         recipients: tuple[str, ...],
         subject: str,
         pdf_path: Path,
+        body: str | None = None,
     ):
         super().__init__()
         self.client_name = client_name
         self.recipients = recipients
         self.subject = subject
         self.pdf_path = pdf_path
+        self.body = body
         self.signals = _AccountStatementMailSignals()
 
     def run(self) -> None:
@@ -133,6 +166,7 @@ class _AccountStatementMailWorker(QRunnable):
                 recipients=self.recipients,
                 subject=self.subject,
                 pdf_path=self.pdf_path,
+                body=self.body,
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
@@ -223,11 +257,115 @@ def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
     return [(legacy, "", True)] if legacy else []
 
 
+def _current_client_phone(client) -> str:
+    client_id = getattr(client, "id", None)
+    current_client = Client.get_or_none(Client.id == client_id) if client_id is not None else None
+    return (getattr(current_client or client, "phone", None) or "").strip()
+
+
+class SchemaTooNewAtStartup(RuntimeError):
+    """La base compartida esta mas nueva que este build: el puesto va atrasado.
+
+    Se distingue de un error de conexion porque la accion que lo resuelve no es
+    preparar la base sino actualizar la aplicacion.
+    """
+
+
+def _recover_from_outdated_app(error: Exception) -> None:
+    """Un puesto atrasado se actualiza en el momento o avisa a soporte.
+
+    Decir "actualizate" sin dejarte actualizar es otro callejon sin salida, y aca
+    el puesto queda sin poder trabajar. Si hay una version publicada mas nueva se
+    abre el mismo flujo de descarga del actualizador; si no hay, se muestra el
+    detalle con la version instalada para que el operador pueda avisar a alguien.
+    """
+    from app.services.update_service import fetch_update_info, get_update_channel
+
+    logger.error("Puesto desactualizado, no puede abrir: %s", error)
+    info = None
+    try:
+        info = fetch_update_info(BUILD_VERSION, channel=get_update_channel())
+    except Exception:
+        logger.exception("No se pudo consultar el manifest para recuperar el puesto")
+
+    if info is None:
+        _explain_outdated_app(error)
+        return
+
+    try:
+        from app.ui.update_extension import _show_update_dialog
+
+        launched = _show_update_dialog(None, info, mandatory=True)
+    except Exception:
+        logger.exception("No se pudo lanzar la actualizacion del puesto atrasado")
+        _explain_outdated_app(error)
+        return
+
+    if not launched:
+        logger.info("El instalador no se lanzo desde el puesto atrasado")
+
+
+def _explain_outdated_app(error: Exception) -> None:
+    """Sin actualizacion disponible: deja el dato listo para avisar a soporte."""
+    detail = (
+        f"FEMAG instalado: {BUILD_VERSION}\n"
+        f"Detalle: {error}\n"
+        "Este puesto no puede trabajar hasta que se instale la version que espera "
+        "la base de datos."
+    )
+    box = QMessageBox(QMessageBox.Critical, "FEMAG Desktop - Actualización necesaria")
+    box.setText(
+        "La base de datos de FEMAG está actualizada a una versión más nueva que "
+        "este programa.\n\nEste puesto no puede entrar hasta que se instale la "
+        "versión actual. No hay una versión publicada para descargar en este "
+        "momento, o no se pudo consultar."
+    )
+    box.setInformativeText(
+        "Copie el detalle y avise a soporte o a un administrador para que instale "
+        "la versión actual en este equipo.\n\n"
+        "No se debe preparar ni revertir el esquema de la base: eso dejaría fuera "
+        "de servicio a los puestos que ya están actualizados."
+    )
+    box.setDetailedText(detail)
+    box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec_()
+    clipboard = QApplication.clipboard()
+    if clipboard is not None:
+        clipboard.setText(detail)
+        logger.info("Detalle del puesto atrasado copiado al portapapeles")
+
+
+def _destroy_desktop_window(window) -> None:
+    """Libera la ventana principal mientras la QApplication sigue viva (#674).
+
+    En Qt, ``close()`` sólo oculta la ventana: el ``QMainWindow`` y todo su
+    árbol de widgets siguen existiendo hasta que se libera su wrapper de
+    Python. Si eso recién ocurre cuando el intérprete se apaga, entonces
+    ``Py_FinalizeEx`` ya está desmontando la ``QApplication`` y el estado de
+    QtWidgets, y el destructor de la ventana toca memoria liberada: el
+    proceso cierra con ``0xC0000005`` (access violation).
+
+    Destruirla acá mantiene el orden que Qt espera: la ventana muere primero,
+    con la aplicación y el event loop todavía en pie.
+    """
+    try:
+        window.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    except Exception:  # pragma: no cover - el cierre nunca debe tapar la salida.
+        logger.exception("No se pudo destruir la ventana principal al cerrar")
+
+
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
+    # El login conserva su diseño propio (incluida la imagen institucional).
+    # El tema V2 global se aplica recién después de autenticar.
     try:
         database = _prepare_database(demo_mode=demo_mode)
+    except SchemaTooNewAtStartup as exc:
+        _recover_from_outdated_app(exc)
+        return 1
     except RuntimeError as exc:
         QMessageBox.critical(None, "FEMAG Desktop - Base de datos", str(exc))
         return 1
@@ -237,18 +375,36 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     if demo_mode:
         _seed_demo_masters()
     while True:
+        app.setStyleSheet("")
         login = LoginWindow(demo_mode=demo_mode)
         if login.show() != QDialog.Accepted:
             return 0
         user = login.authenticated_user
+        _record_workstation_version()
+        app.setStyleSheet(STYLES + glass_v2_stylesheet())
         window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
         window.show()
         result = app.exec_()
-        if not window.session_closed:
+        session_closed = window.session_closed
+        _destroy_desktop_window(window)
+        if not session_closed:
             break
     if database is not None and not database.is_closed():
         database.close()
     return result
+
+
+def _record_workstation_version() -> None:
+    """Deja registrada que version esta corriendo en este puesto (#664).
+
+    Va despues del login, no antes: asi solo se registra cuando alguien abrio la
+    aplicacion de verdad. Y nunca puede tirar el puesto: registrar la version no
+    puede ser un motivo mas de que la app no abra.
+    """
+    try:
+        AuditService().record_workstation_version(BUILD_VERSION)
+    except Exception:
+        logger.exception("No se pudo registrar la version del puesto")
 
 
 def _prepare_database(*, demo_mode: bool):
@@ -268,6 +424,20 @@ def _prepare_database(*, demo_mode: bool):
 
     try:
         validate_runtime_schema(database)
+    except SchemaTooNewError as exc:
+        if not database.is_closed():
+            database.close()
+        # La base no esta incompleta: otro puesto la migro a una version mas nueva.
+        # Preparar el esquema no lo arregla (misma version, mismo resultado) y
+        # ademas dejaria fuera de servicio a los puestos ya actualizados. Lo
+        # resuelve `run_desktop_app`, que abre el flujo de actualizacion.
+        raise SchemaTooNewAtStartup(
+            f"La base de datos de FEMAG esta actualizada a una version mas nueva que "
+            f"este programa (version {BUILD_VERSION}). Hay que actualizar la aplicacion "
+            f"a la ultima version; volver a preparar las tablas no lo soluciona y "
+            f"dejaria fuera de servicio a los puestos que ya estan actualizados. "
+            f"Detalle: {exc}"
+        ) from exc
     except SchemaValidationError as exc:
         if not database.is_closed():
             database.close()
@@ -297,9 +467,10 @@ class FemagDesktopWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setWindowIcon(femag_icon())
-        self.resize(1280, 820)
-        self.setStyleSheet(STYLES)
+        self.resize(1440, 900)
+        self.setStyleSheet(STYLES + glass_v2_stylesheet())
         self.stack = QStackedWidget()
+        self.stack.setObjectName("mainStack")
         self.nav = QListWidget()
         self._route_indexes: dict[str, int] = {}
         self._expanded_sidebar_groups: set[str] = set()
@@ -308,26 +479,51 @@ class FemagDesktopWindow(QMainWindow):
 
     def _build(self) -> None:
         root = QWidget()
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self._topbar())
+        root.setObjectName("femagV2Root")
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(18, 18, 18, 14)
+        outer.setSpacing(0)
 
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        body.addWidget(self._sidebar(), 0)
-        body.addWidget(self.stack, 1)
-        layout.addLayout(body, 1)
-        layout.addWidget(self._statusbar())
+        shell = QFrame()
+        shell.setObjectName("femagV2Shell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(12, 12, 12, 12)
+        shell_layout.setSpacing(14)
 
+        shell_layout.addWidget(self._sidebar(), 0)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(4)
+        content.addWidget(self._topbar())
+        content.addWidget(self.stack, 1)
+        content.addWidget(self._statusbar())
+        shell_layout.addLayout(content, 1)
+
+        outer.addWidget(shell, 1)
         self.setCentralWidget(root)
         self._add_page("dashboard", self._dashboard_page())
         self._add_master_pages()
         self._add_page("load_orders", self._load_order_page())
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
+        self._add_page("raw_material_receipts", RawMaterialReceiptImportPage(parent=self))
+        self._add_page("production_parts", ProductionPartPage(current_username=self.shell.username, parent=self))
+        self._add_page("production_contrast", ProductionContrastPage(parent=self))
+        self._add_page(
+            "stock_initial_inventory",
+            StockInitialInventoryPage(current_username=self.shell.username, parent=self),
+        )
+        self._add_page(
+            "stock_count",
+            StockCountPage(current_username=self.shell.username, parent=self),
+        )
+        self._add_page(
+            "whatsapp_configuration",
+            WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),
+        )
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
+        self._add_page("audit_query", AuditQueryPage(parent=self))
         self._add_page("avisos", AvisoCenterPage(user=self.user, on_navigate=self._navigate_to_route, parent=self))
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
@@ -368,18 +564,16 @@ class FemagDesktopWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("topbar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(22, 10, 22, 10)
-        layout.setSpacing(16)
-        title = QLabel()
-        title.setObjectName("topbarBrandLogo")
-        title.setAccessibleName("Logo FEMAG")
-        title.setPixmap(load_brand_pixmap("femag-logo-ui.png", width=126, height=64))
+        layout.setContentsMargins(8, 4, 8, 8)
+        layout.setSpacing(10)
+
         search = QLineEdit()
         search.setObjectName("globalSearch")
-        search.setPlaceholderText("Buscar ordenes o clientes...")
-        search.setMinimumWidth(360)
+        search.setPlaceholderText("Buscar orden, cliente, chofer...")
+        search.setMinimumWidth(320)
         search.setMaximumWidth(520)
         search.returnPressed.connect(lambda: self._on_global_search(search))
+
         notifications = QPushButton("Avisos")
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
@@ -389,12 +583,27 @@ class FemagDesktopWindow(QMainWindow):
             button.setObjectName("topbarIconButton")
         notifications.setObjectName("avisoButton")
         help_button.setObjectName("helpButton")
+
         self.aviso_service = AvisoService()
-        self.aviso_dropdown = AvisoDropdown(user=self.user, on_navigate=self._navigate_to_route, parent=self)
+        self.aviso_dropdown = AvisoDropdown(
+            user=self.user,
+            on_navigate=self._navigate_to_route,
+            parent=self,
+        )
         self.notifications = notifications
         notifications.clicked.connect(self._toggle_avisos)
-        help_button.clicked.connect(lambda: QMessageBox.information(self, "Ayuda", future_module_message()))
-        QTimer.singleShot(60000, lambda: self.notifications.setText(f"Avisos ({self.aviso_service.count_unread(self.user)})" if self.aviso_service.count_unread(self.user) else "Avisos"))
+        help_button.clicked.connect(
+            lambda: QMessageBox.information(self, "Ayuda", future_module_message())
+        )
+        QTimer.singleShot(
+            60000,
+            lambda: self.notifications.setText(
+                f"Avisos ({self.aviso_service.count_unread(self.user)})"
+                if self.aviso_service.count_unread(self.user)
+                else "Avisos"
+            ),
+        )
+
         change_password.clicked.connect(self._open_change_password)
         can_configure = PermissionService.is_administrator(self.user)
         settings.setEnabled(can_configure)
@@ -403,11 +612,11 @@ class FemagDesktopWindow(QMainWindow):
         else:
             settings.setToolTip("Sólo un administrador puede configurar la numeración.")
         logout.clicked.connect(self._logout)
+
         user = QLabel(f"{self.shell.username}\n{self.shell.profile}")
         user.setObjectName("userBlock")
         user.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        layout.addWidget(title)
-        layout.addSpacing(30)
+
         layout.addWidget(search, 1)
         layout.addStretch(1)
         layout.addWidget(notifications)
@@ -463,18 +672,20 @@ class FemagDesktopWindow(QMainWindow):
         container = QFrame()
         container.setObjectName("sidebarContainer")
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 14, 12, 10)
+        layout.setContentsMargins(12, 16, 12, 12)
         layout.setSpacing(12)
+
         logo = QLabel()
         logo.setObjectName("sidebarBrandLogo")
         logo.setAccessibleName("Logo FEMAG")
         logo.setAlignment(Qt.AlignCenter)
-        logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=154, height=92))
-        logo.setMinimumHeight(92)
+        logo.setPixmap(load_brand_pixmap("femag-logo-compact.png", width=136, height=78))
+        logo.setMinimumHeight(82)
         layout.addWidget(logo)
+
         self.nav.setObjectName("sidebar")
-        container.setFixedWidth(250)
-        self.nav.setSpacing(4)
+        container.setFixedWidth(215)
+        self.nav.setSpacing(2)
         self._populate_sidebar()
         layout.addWidget(self.nav, 1)
         return container
@@ -591,7 +802,7 @@ class FemagDesktopWindow(QMainWindow):
             refresh()
 
     def _refresh_master_routes(self) -> None:
-        for route in ("clients", "addresses", "products", "vat_types", "carriers", "drivers", "trucks"):
+        for route in ("clients", "salespeople", "addresses", "products", "vat_types", "carriers", "drivers", "trucks"):
             self._refresh_route(route)
 
     def _handle_dashboard_new_load_order(self) -> None:
@@ -643,6 +854,24 @@ class FemagDesktopWindow(QMainWindow):
     def _handle_dashboard_register_payment(self) -> None:
         self._open_payment_dialog(preset_client=None)
 
+    def _handle_dashboard_due_report(self, preset: str | None = None) -> None:
+        if (
+            self.user is None
+            or not self.user.active
+            or not PermissionService().has_permission(
+                self.user, "Inicio", "ver", "Pendientes"
+            )
+        ):
+            QMessageBox.warning(
+                self,
+                "Vencimientos de cobranzas",
+                "El usuario actual no tiene permiso para ver este informe.",
+            )
+            return
+        dialog = CollectionDueReportDialog(self)
+        dialog.apply_dashboard_preset(preset)
+        dialog.exec_()
+
     def _on_global_search(self, search_input: QLineEdit) -> None:
         query = search_input.text().strip()
         if not query:
@@ -671,11 +900,17 @@ class FemagDesktopWindow(QMainWindow):
         return CustomerLedgerPage(
             current_user=self.shell.username,
             register_payment_callback=self._open_payment_dialog,
+            create_manual_budget_callback=self._open_manual_budget_dialog,
             register_manual_debit_callback=self._open_manual_debit_dialog,
             register_manual_credit_callback=self._open_manual_credit_dialog,
             print_statement_callback=self._print_account_statement,
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
+            whatsapp_budget_callback=self._share_budget_whatsapp,
+            print_budget_callback=self._print_budget_for_movement,
             email_statement_callback=self._email_account_statement,
+            portfolio_print_callback=self._print_salesperson_portfolio,
+            portfolio_whatsapp_callback=self._share_salesperson_portfolio_whatsapp,
+            portfolio_email_callback=self._email_salesperson_portfolio,
             print_receipt_callback=(
                 self._print_payment_receipt
                 if _can_print_payment_receipts(self.user)
@@ -698,27 +933,378 @@ class FemagDesktopWindow(QMainWindow):
             return
         _open_print_output(pdf_path)
 
-    def _share_account_statement_whatsapp(self, client) -> None:
+    def _export_salesperson_portfolio(self, summary: dict) -> Path | None:
+        """Genera el PDF del resumen y lo deja en la carpeta de impresión."""
         if not hasattr(self, "_print_output_dir"):
             self._print_output_dir = Path.cwd()
         try:
-            whatsapp_url = account_statement_share_service.build_whatsapp_url(
-                client.name, client.phone
+            return salesperson_portfolio_print_service.export_salesperson_portfolio_report(
+                report_type=summary.get("report_type"),
+                salesperson=summary.get("salesperson"),
+                rows=summary.get("rows") or [],
+                output_dir=self._print_output_dir,
+                label=summary.get("label"),
+                slug=summary.get("slug"),
             )
-            pdf_path = account_statement_print_service.export_account_statement(
-                client, self._print_output_dir
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Resumen de cartera", f"No se pudo generar el resumen: {exc}"
             )
-            if not webbrowser.open(whatsapp_url):
-                raise RuntimeError("No se pudo abrir WhatsApp en este equipo.")
+            return None
+
+    def _print_salesperson_portfolio(self, summary: dict) -> None:
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is not None:
+            _open_print_output(pdf_path)
+
+    def _share_salesperson_portfolio_whatsapp(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.phone or "").strip():
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"El vendedor {salesperson.name} no tiene un telefono cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        dialog = WhatsAppSendDialog(
+            client_name=salesperson.name,
+            phone=salesperson.phone,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = self._export_salesperson_portfolio(summary)
+            if pdf_path is None:
+                return
+            envio = service.create_attempt(
+                tipo_documento="resumen_cuenta_vendedor",
+                documento_id=str(salesperson.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "WhatsApp", str(exc))
             return
-        QMessageBox.information(
-            self,
-            "WhatsApp",
-            "Se abrio el chat del cliente. Adjunte manualmente este PDF:\n"
-            f"{pdf_path}",
+
+        workers = getattr(self, "_account_statement_whatsapp_workers", set())
+        self._account_statement_whatsapp_workers = workers
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
         )
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda result: QMessageBox.information(
+                self, "WhatsApp", f"El resumen fue enviado correctamente a {result}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(
+                self, "WhatsApp", f"No se pudo enviar el resumen: {message}"
+            )
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        QThreadPool.globalInstance().start(worker)
+
+    def _email_salesperson_portfolio(self, summary: dict) -> None:
+        salesperson = summary.get("salesperson")
+        if salesperson is None:
+            return
+        if not (salesperson.email or "").strip():
+            QMessageBox.warning(
+                self,
+                "Correo",
+                f"El vendedor {salesperson.name} no tiene un correo cargado. "
+                "Completelo en Maestros > Vendedores.",
+            )
+            return
+
+        pdf_path = self._export_salesperson_portfolio(summary)
+        if pdf_path is None:
+            return
+
+        label = summary.get("label") or salesperson.name
+        totals = salesperson_portfolio_print_service.portfolio_totals(
+            summary.get("rows") or []
+        )
+        is_detailed = (
+            summary.get("report_type")
+            == salesperson_portfolio_print_service.REPORT_TYPE_DETAIL
+        )
+        # El resumen conserva el asunto actual; el detallado lo aclara.
+        kind = " (detallado)" if is_detailed else ""
+        subject = (
+            f"Resumen de cuenta corriente{kind} - {label} - {date.today():%d/%m/%Y}"
+        )
+        body = (
+            f"Hola {salesperson.name},\n\n"
+            f"Adjuntamos el resumen de cuenta corriente de {label}: "
+            f"{totals['clients_with_balance']} clientes con saldo sobre "
+            f"{totals['clients']} de la cartera.\n\n"
+            "Saludos.\nGRAEF HERMANOS S.R.L."
+        )
+        recipients = (salesperson.email.strip().lower(),)
+        worker = _AccountStatementMailWorker(
+            client_name=salesperson.name,
+            recipients=recipients,
+            subject=subject,
+            pdf_path=pdf_path,
+            body=body,
+        )
+        workers = getattr(self, "_account_statement_mail_workers", set())
+        self._account_statement_mail_workers = workers
+        workers.add(worker)
+        worker.signals.succeeded.connect(
+            lambda address: QMessageBox.information(
+                self, "Correo", f"El resumen fue enviado correctamente a {address}."
+            )
+        )
+        worker.signals.failed.connect(
+            lambda message: QMessageBox.warning(self, "Correo", message)
+        )
+        worker.signals.finished.connect(lambda: workers.discard(worker))
+        _start_mail_worker(worker)
+
+    def _share_account_statement_whatsapp(self, client) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        dialog = WhatsAppSendDialog(
+            client_name=client.name,
+            phone=_current_client_phone(client),
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = account_statement_print_service.export_account_statement(
+                client, self._print_output_dir
+            )
+            envio = service.create_attempt(
+                tipo_documento="extracto_cuenta",
+                documento_id=str(client.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        page = self.stack.currentWidget()
+        button = (
+            page.whatsapp_statement_button
+            if isinstance(page, CustomerLedgerPage)
+            else None
+        )
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("Enviando...")
+
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers = getattr(self, "_account_statement_whatsapp_workers", set())
+        self._account_statement_whatsapp_workers = workers
+        workers.add(worker)
+
+        def _success(result) -> None:
+            labels = {
+                "queued": "encolado",
+                "processing": "procesando",
+                "accepted": "aceptado por WhatsApp",
+                "delivered": "entregado",
+                "read": "leído",
+                "failed": "fallido",
+            }
+            status = labels.get(result.estado, result.estado)
+            QMessageBox.information(
+                self,
+                "WhatsApp",
+                f"PDF enviado al gateway. Estado: {status}.\n"
+                f"Message ID: {result.message_id or '-'}",
+            )
+
+        def _failed(message: str) -> None:
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"No se pudo completar el envío: {message}",
+            )
+
+        def _finished() -> None:
+            workers.discard(worker)
+            if button is not None:
+                button.setText("Enviar por WhatsApp")
+                button.setEnabled(True)
+
+        worker.signals.succeeded.connect(_success)
+        worker.signals.failed.connect(_failed)
+        worker.signals.finished.connect(_finished)
+        QThreadPool.globalInstance().start(worker)
+
+    def _budget_for_movement(self, movement):
+        if movement.budget_id is not None:
+            return Budget.get_by_id(movement.budget_id)
+
+        source_ref = str(movement.source_ref or "")
+        if source_ref.startswith("Budget:"):
+            try:
+                budget_id = int(source_ref.split(":", 1)[1])
+            except (TypeError, ValueError):
+                budget_id = None
+            if budget_id is not None:
+                budget = Budget.get_or_none(Budget.id == budget_id)
+                if budget is not None:
+                    return budget
+
+        if movement.load_order_id is not None:
+            budget = Budget.get_or_none(
+                (Budget.load_order == movement.load_order_id)
+                & (Budget.client == movement.client_id)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            )
+            if budget is not None:
+                return budget
+            return BudgetPrintService(
+                current_user=self.shell.username
+            ).budget_service.ensure_for_load_order_client(
+                movement.load_order, movement.client
+            )
+
+        raise ValueError("El movimiento seleccionado no tiene un presupuesto asociado.")
+
+    def _share_budget_whatsapp(self, movement) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
+
+        client = budget.client
+        dialog = WhatsAppSendDialog(
+            client_name=client.name,
+            phone=_current_client_phone(client),
+            default_message=(
+                f"Hola {client.name}. Le enviamos adjunto el presupuesto "
+                f"{budget.display_number} de FEMAG con el detalle correspondiente. "
+                "Ante cualquier consulta, quedamos a disposición."
+            ),
+            window_title="Enviar presupuesto por WhatsApp",
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            service = WhatsAppEnvioService()
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+            envio = service.create_attempt(
+                tipo_documento="presupuesto",
+                documento_id=str(budget.id),
+                destinatario=dialog.phone(),
+                caption=dialog.caption(),
+                pdf_path=pdf_path,
+                usuario=self.user,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        page = self.stack.currentWidget()
+        action = (
+            page.whatsapp_budget_action
+            if isinstance(page, CustomerLedgerPage)
+            else None
+        )
+        if action is not None:
+            action.setEnabled(False)
+
+        worker = WhatsAppSendWorker(
+            envio_id=envio.id,
+            pdf_path=pdf_path,
+            service=service,
+        )
+        workers = getattr(self, "_budget_whatsapp_workers", set())
+        self._budget_whatsapp_workers = workers
+        workers.add(worker)
+
+        def _success(result) -> None:
+            labels = {
+                "queued": "encolado",
+                "processing": "procesando",
+                "accepted": "aceptado por WhatsApp",
+                "delivered": "entregado",
+                "read": "leído",
+                "failed": "fallido",
+            }
+            status = labels.get(result.estado, result.estado)
+            QMessageBox.information(
+                self,
+                "WhatsApp",
+                f"Presupuesto {budget.display_number} enviado. Estado: {status}.\n"
+                f"Message ID: {result.message_id or '-'}",
+            )
+
+        def _failed(message: str) -> None:
+            QMessageBox.warning(
+                self,
+                "WhatsApp",
+                f"No se pudo enviar el presupuesto: {message}",
+            )
+
+        def _finished() -> None:
+            workers.discard(worker)
+            if isinstance(page, CustomerLedgerPage):
+                page._sync_more_actions()
+
+        worker.signals.succeeded.connect(_success)
+        worker.signals.failed.connect(_failed)
+        worker.signals.finished.connect(_finished)
+        QThreadPool.globalInstance().start(worker)
+
+    def _print_budget_for_movement(self, movement) -> None:
+        """Reimprime el presupuesto ya persistido del movimiento, sin volver a
+        impactar la cuenta corriente (#452)."""
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Presupuesto", str(exc))
+            return
+
+        try:
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Presupuesto", f"No se pudo generar el presupuesto: {exc}"
+            )
+            return
+        _open_print_output(pdf_path)
 
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):
@@ -764,6 +1350,37 @@ class FemagDesktopWindow(QMainWindow):
         )
         worker.signals.finished.connect(lambda: workers.discard(worker))
         _start_mail_worker(worker)
+
+    def _open_manual_budget_dialog(self, preset_client=None) -> None:
+        if preset_client is None:
+            return
+        try:
+            dialog = ManualBudgetDialog(
+                client=preset_client,
+                current_user=self.shell.username,
+                parent=self,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Presupuesto manual",
+                f"No se pudo abrir el formulario: {exc}",
+            )
+            return
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        budget = dialog.budget()
+        if budget is None:
+            return
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            pdf_path = BudgetPrintService(
+                current_user=self.shell.username
+            ).export_pdf(budget, self._print_output_dir)
+        except Exception:
+            return
+        _open_print_output(pdf_path)
 
     def _open_payment_dialog(self, preset_client=None) -> None:
         try:
@@ -823,42 +1440,60 @@ class FemagDesktopWindow(QMainWindow):
         _open_print_output(pdf_path)
 
     def _annul_payment(self, payment: ClientPayment) -> None:
-        dialog = AdminAuthorizationDialog(parent=self)
+        if not _can_annul_payments(self.user):
+            QMessageBox.warning(
+                self,
+                "Anular recibo",
+                "Su usuario no tiene permiso para anular recibos.",
+            )
+            return
+
+        dialog = AuditReasonDialog(
+            title=f"Anular recibo {payment.receipt_number}",
+            prompt=(
+                "Indique el motivo de la anulación. Se generará un contra-asiento "
+                "y el recibo original quedará conservado en la auditoría."
+            ),
+            confirm_text="Anular recibo",
+            parent=self,
+        )
         if dialog.exec_() != QDialog.Accepted:
             return
-        authorized_user = dialog.authorized_user()
-        if authorized_user is None:
-            return
+
         try:
-            ClientPaymentService(current_user=self.shell.username).annul_payment(
+            ClientPaymentService(current_user=self.user.username).annul_payment(
                 payment,
-                authorized_by=authorized_user,
+                authorized_by=self.user,
                 reason=dialog.reason(),
             )
         except Exception as exc:
-            QMessageBox.warning(self, "Anular pago", str(exc))
+            QMessageBox.warning(self, "Anular recibo", str(exc))
             return
         QMessageBox.information(
             self,
-            "Anular pago",
+            "Anular recibo",
             f"El recibo {payment.receipt_number} fue anulado y revertido.",
         )
 
     def _reverse_manual_debit(self, movement) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Reversar débito",
-            "¿Confirma el reverso del débito manual seleccionado? "
-            "Se generará un movimiento inverso y se conservará la auditoría.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+        dialog = AuditReasonDialog(
+            title="Reversar débito manual",
+            prompt=(
+                "Indique el motivo del reverso. Se generará un movimiento inverso "
+                "y el movimiento original permanecerá en el historial."
+            ),
+            confirm_text="Reversar débito",
+            parent=self,
         )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
             ClientManualDebitService(
                 current_user=self.shell.username
-            ).reverse_manual_debit(movement)
+            ).reverse_manual_debit(
+                movement,
+                reason=dialog.reason(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Reversar débito", str(exc))
             return
@@ -869,20 +1504,24 @@ class FemagDesktopWindow(QMainWindow):
         )
 
     def _reverse_manual_credit(self, movement) -> None:
-        answer = QMessageBox.question(
-            self,
-            "Reversar crédito",
-            "¿Confirma el reverso del crédito manual seleccionado? "
-            "Se generará un movimiento inverso y se conservará la auditoría.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+        dialog = AuditReasonDialog(
+            title="Reversar crédito manual",
+            prompt=(
+                "Indique el motivo del reverso. Se generará un movimiento inverso "
+                "y el movimiento original permanecerá en el historial."
+            ),
+            confirm_text="Reversar crédito",
+            parent=self,
         )
-        if answer != QMessageBox.Yes:
+        if dialog.exec_() != QDialog.Accepted:
             return
         try:
             ClientManualCreditService(
                 current_user=self.shell.username
-            ).reverse_manual_credit(movement)
+            ).reverse_manual_credit(
+                movement,
+                reason=dialog.reason(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Reversar crédito", str(exc))
             return
@@ -898,15 +1537,45 @@ class FemagDesktopWindow(QMainWindow):
             page.refresh()
 
     def _dashboard_page(self) -> QWidget:
-        spec = DashboardService().view_spec(demo_mode=True)
+        demo_mode = self.shell.connection_state == "Modo demo"
+        spec = DashboardService().view_spec(demo_mode=demo_mode)
         page = _page(spec.title, "Vista general de actividad y accesos frecuentes")
+        page.setObjectName("dashboardPage")
+        page.layout().setContentsMargins(28, 26, 28, 28)
+        page.layout().setSpacing(16)
         layout = page.layout()
-        actions = QHBoxLayout()
-        for action in spec.quick_actions:
+
+        eyebrow = QLabel("OPERACIÓN EN TIEMPO REAL")
+        eyebrow.setObjectName("dashboardEyebrow")
+        layout.insertWidget(0, eyebrow)
+        page.findChild(QLabel, "heading").setObjectName("dashboardHeading")
+        page.findChild(QLabel, "subheading").setObjectName("dashboardSubheading")
+
+        quick_actions_panel = QFrame()
+        quick_actions_panel.setObjectName("dashboardQuickActions")
+        quick_actions_layout = QVBoxLayout(quick_actions_panel)
+        quick_actions_layout.setContentsMargins(16, 14, 16, 16)
+        quick_actions_layout.setSpacing(10)
+        quick_actions_heading = QLabel("Accesos rápidos")
+        quick_actions_heading.setObjectName("dashboardQuickActionsTitle")
+        quick_actions_layout.addWidget(quick_actions_heading)
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(8)
+        actions.setVerticalSpacing(8)
+        for column in range(4):
+            actions.setColumnStretch(column, 1)
+        secondary_positions = ((0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3))
+        for index, action in enumerate(spec.quick_actions):
             button = QPushButton(action.title)
             button.setObjectName(f"dashboard{action.title.replace(' ', '')}")
+            button.setProperty(
+                "uiRole",
+                "primary" if action.route_key == "load_orders.new" else "secondary",
+            )
             button.setEnabled(action.enabled)
-            button.setMinimumHeight(52)
+            button.setMinimumHeight(38)
+            if not action.enabled:
+                button.setProperty("dashboardState", "planned")
             if action.enabled and action.route_key:
                 if action.route_key == "load_orders.new":
                     button.clicked.connect(self._handle_dashboard_new_load_order)
@@ -920,17 +1589,169 @@ class FemagDesktopWindow(QMainWindow):
                     button.clicked.connect(self._handle_dashboard_open_customer_ledger)
                 elif action.route_key == "customer_ledger.register_payment":
                     button.clicked.connect(self._handle_dashboard_register_payment)
-            actions.addWidget(button)
-        layout.addLayout(actions)
+            if index == 0:
+                actions.addWidget(button, 0, 0, 1, 2)
+            else:
+                row, column = secondary_positions[index - 1]
+                actions.addWidget(button, row, column)
+        quick_actions_layout.addLayout(actions)
+        layout.addWidget(quick_actions_panel)
+
         cards = QGridLayout()
+        cards.setHorizontalSpacing(10)
+        cards.setVerticalSpacing(10)
         for index, (title, value) in enumerate(spec.summary_cards.items()):
-            cards.addWidget(_card(title, str(value)), index // 3, index % 3)
+            cards.setColumnStretch(index, 1)
+            cards.addWidget(_dashboard_metric_card(title, str(value)), 0, index)
         layout.addLayout(cards)
-        layout.addWidget(QLabel("Pendientes y alertas"))
-        for alert in spec.alerts:
-            layout.addWidget(QLabel(f"• {alert}"))
+
+        collection_title = QLabel("Cobranzas y cuentas corrientes")
+        collection_title.setObjectName("dashboardCollectionsTitle")
+        layout.addWidget(collection_title)
+
+        collection_cards = QGridLayout()
+        collection_cards.setHorizontalSpacing(10)
+        preset_by_title = {
+            "Presupuestos vencidos": "overdue",
+            "Vence hoy": "today",
+            "Próximos 7 días": "next_7",
+            "Próximos 30 días": "next_30",
+        }
+
+        def _money(value: float) -> str:
+            return f"$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        for index, card in enumerate(spec.collection_cards):
+            button = QPushButton(
+                f"{card.title}\n{_money(card.amount)}\n{card.count} "
+                f"{'cliente' if card.title == 'Saldo deudor clientes' and card.count == 1 else ('clientes' if card.title == 'Saldo deudor clientes' else ('presupuesto' if card.count == 1 else 'presupuestos'))}"
+            )
+            button.setObjectName(
+                {
+                    "Presupuestos vencidos": "dashboardOverdueBudgetsCard",
+                    "Vence hoy": "dashboardDueTodayCard",
+                    "Próximos 7 días": "dashboardNext7Card",
+                    "Próximos 30 días": "dashboardNext30Card",
+                    "Saldo deudor clientes": "dashboardDebtorBalanceCard",
+                }[card.title]
+            )
+            button.setMinimumHeight(92)
+            button.setCursor(Qt.PointingHandCursor)
+            if card.route_key == "customer_ledger":
+                button.clicked.connect(self._handle_dashboard_open_customer_ledger)
+            else:
+                preset = preset_by_title.get(card.title)
+                button.clicked.connect(
+                    lambda _checked=False, selected=preset: self._handle_dashboard_due_report(selected)
+                )
+            collection_cards.addWidget(button, index // 5, index % 5)
+        layout.addLayout(collection_cards)
+
+        details = QHBoxLayout()
+        details.setSpacing(12)
+
+        def _build_due_panel(title: str, rows, *, overdue: bool) -> QFrame:
+            panel = QFrame()
+            panel.setObjectName(
+                "dashboardOverduePanel" if overdue else "dashboardUpcomingPanel"
+            )
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(16, 15, 16, 15)
+            panel_layout.setSpacing(10)
+            heading = QLabel(title)
+            heading.setObjectName("dashboardPanelTitle")
+            panel_layout.addWidget(heading)
+            caption = QLabel("Vista rápida · últimos 5 registros")
+            caption.setObjectName("dashboardPanelCaption")
+            panel_layout.addWidget(caption)
+
+            table = QTableWidget(0, 5)
+            table.setObjectName(
+                "dashboardOverdueTable" if overdue else "dashboardUpcomingTable"
+            )
+            table.setHorizontalHeaderLabels(
+                ["Cliente", "Presupuesto", "Vencimiento", "Días", "Importe"]
+            )
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.setSelectionBehavior(QTableWidget.SelectRows)
+            table.setAlternatingRowColors(True)
+            table.setShowGrid(False)
+            table.verticalHeader().setDefaultSectionSize(30)
+            table.setMinimumHeight(210)
+            table.setMaximumHeight(230)
+            table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                order_number = row.get("order_number")
+                order_text = (
+                    f"OC-{order_number:06d}" if order_number is not None else "-"
+                )
+                delta = int(row.get("delta_days") or 0)
+                days_text = (
+                    f"{abs(delta)} vencido(s)"
+                    if delta < 0
+                    else ("Hoy" if delta == 0 else f"{delta} día(s)")
+                )
+                values = (
+                    row.get("client_name") or "-",
+                    order_text,
+                    row["due_date"].strftime("%d/%m/%Y"),
+                    days_text,
+                    _money(float(row.get("total_amount") or 0)),
+                )
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if col == 4:
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    table.setItem(row_index, col, item)
+            header = table.horizontalHeader()
+            header.setSectionResizeMode(0, QHeaderView.Stretch)
+            for col in (1, 2, 3, 4):
+                header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+            panel_layout.addWidget(table)
+
+            if not rows:
+                empty = QLabel(
+                    "No hay presupuestos vencidos."
+                    if overdue
+                    else "No hay vencimientos próximos."
+                )
+                empty.setStyleSheet("color:#64748b;border:none;")
+                panel_layout.addWidget(empty)
+
+            open_report = QPushButton("Ver todos los vencimientos")
+            open_report.setProperty("uiRole", "secondary")
+            open_report.setObjectName(
+                "dashboardOpenOverdueReportButton"
+                if overdue
+                else "dashboardOpenUpcomingReportButton"
+            )
+            open_report.clicked.connect(
+                lambda _checked=False, selected=("overdue" if overdue else None):
+                    self._handle_dashboard_due_report(selected)
+            )
+            panel_layout.addWidget(open_report)
+            return panel
+
+        details.addWidget(
+            _build_due_panel("Presupuestos vencidos", spec.overdue_rows, overdue=True),
+            1,
+        )
+        details.addWidget(
+            _build_due_panel("Próximos vencimientos", spec.upcoming_rows, overdue=False),
+            1,
+        )
+        layout.addLayout(details)
+
         layout.addStretch(1)
-        return page
+
+        scroll = QScrollArea()
+        scroll.setObjectName("dashboardScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        return scroll
 
     def _table_page(self, title: str, columns: list[str], rows: list[list[str]]) -> QWidget:
         page = _page(title, "Listado maestro de consulta rápida")
@@ -974,6 +1795,7 @@ class FemagDesktopWindow(QMainWindow):
         actions.setSpacing(8)
         new_button = _action_button("newLoadOrderButton", "Nuevo")
         edit_button = _action_button("editLoadOrderButton", "Editar", secondary=True)
+        history_button = _action_button("historyLoadOrderButton", "Historial", secondary=True)
         issue_button = _action_button("issueLoadOrderButton", "Emitir")
         close_button = _action_button("closeLoadOrderButton", "Cerrar")
         annul_button = _action_button("annulLoadOrderButton", "Anular")
@@ -999,6 +1821,7 @@ class FemagDesktopWindow(QMainWindow):
         for button in (
             new_button,
             edit_button,
+            history_button,
             issue_button,
             close_button,
             print_button,
@@ -1015,6 +1838,22 @@ class FemagDesktopWindow(QMainWindow):
         search_row.addWidget(search_input, 1)
         search_row.addWidget(search_button)
 
+        pagination_row = QHBoxLayout()
+        pagination_row.setContentsMargins(10, 0, 10, 10)
+        pagination_row.setSpacing(8)
+        previous_page_button = _action_button(
+            "previousLoadOrderPageButton", "Anterior", secondary=True
+        )
+        next_page_button = _action_button(
+            "nextLoadOrderPageButton", "Siguiente", secondary=True
+        )
+        page_label = QLabel("Página 1 de 1 · 0 órdenes")
+        page_label.setObjectName("loadOrderPageLabel")
+        pagination_row.addWidget(previous_page_button)
+        pagination_row.addWidget(next_page_button)
+        pagination_row.addStretch(1)
+        pagination_row.addWidget(page_label)
+
         left_layout.addLayout(actions)
         left_layout.addLayout(search_row)
         left_layout.addWidget(feedback)
@@ -1030,15 +1869,55 @@ class FemagDesktopWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         left_layout.addWidget(table, 1)
+        left_layout.addLayout(pagination_row)
         layout.addWidget(left_panel, 1)
 
-        def refresh(*, query: str | None = None) -> None:
-            rows = service.list_orders() if hasattr(service, "list_orders") else []
+        page_state = {"page": 1, "page_size": 50, "total": 0, "pages": 1}
+
+        def refresh(*, query: str | None = None, page_number: int | None = None) -> None:
+            query = (query if query is not None else search_input.text()).strip()
+            if page_number is not None:
+                page_state["page"] = max(1, int(page_number))
+
+            if hasattr(service, "list_orders_page"):
+                rows, total = service.list_orders_page(
+                    page=page_state["page"],
+                    page_size=page_state["page_size"],
+                    search=query,
+                )
+            else:
+                rows = service.list_orders(limit=page_state["page_size"]) if hasattr(service, "list_orders") else []
+                total = len(rows)
+
+            page_state["total"] = total
+            page_state["pages"] = max(
+                1,
+                (total + page_state["page_size"] - 1) // page_state["page_size"],
+            )
+            if page_state["page"] > page_state["pages"]:
+                page_state["page"] = page_state["pages"]
+                if hasattr(service, "list_orders_page"):
+                    rows, total = service.list_orders_page(
+                        page=page_state["page"],
+                        page_size=page_state["page_size"],
+                        search=query,
+                    )
+                    page_state["total"] = total
+
             if not hasattr(service, "list_orders"):
                 feedback.show_info("Listado operativo pendiente de la capa funcional correspondiente.")
-            query = (query if query is not None else search_input.text()).strip()
-            if query:
-                rows = [order for order in rows if _matches_load_order_query(order, query)]
+
+            snapshots = (
+                service.build_grid_snapshots(rows)
+                if hasattr(service, "build_grid_snapshots")
+                else {}
+            )
+            page_label.setText(
+                f"Página {page_state['page']} de {page_state['pages']} · "
+                f"{page_state['total']} orden(es)"
+            )
+            previous_page_button.setEnabled(page_state["page"] > 1)
+            next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
             if rows and not any(order.id == selected_id for order in rows):
                 selected_id = rows[0].id
@@ -1052,13 +1931,17 @@ class FemagDesktopWindow(QMainWindow):
                 visual_row = 0
                 selected_row = 0
                 for order in rows:
+                    snapshot = snapshots.get(order.id) or {}
+                    composition = snapshot.get("composition")
+                    if composition is None:
+                        composition = service.composition(order)
                     values = (
                         _format_order_number(order.order_number),
                         order.date.strftime("%d/%m/%Y"),
-                        _summarize_order_clients(order),
-                        _summarize_order_deliveries(order),
-                        _summarize_order_products(order),
-                        _load_order_pallet_progress(service, order),
+                        snapshot.get("clients_summary", ""),
+                        snapshot.get("deliveries_summary", ""),
+                        snapshot.get("products_summary", ""),
+                        _load_order_pallet_progress_from_composition(composition),
                         _display_status(order.status),
                         "",
                     )
@@ -1066,12 +1949,13 @@ class FemagDesktopWindow(QMainWindow):
                         table.setItem(visual_row, column, QTableWidgetItem(value))
                     table.item(visual_row, 0).setData(Qt.UserRole, order.id)
                     table.item(visual_row, 6).setForeground(_status_color(order.status))
+                    has_pallets = bool(composition.pallets)
                     pallet_action = _action_button(
                         f"prepareLoadOrderPalletsButton{order.id}",
-                        _load_order_pallet_action_text(service, order),
-                        secondary=bool(order.pallets.exists()),
+                        _load_order_pallet_action_text_from_composition(order, composition),
+                        secondary=has_pallets,
                     )
-                    pallet_action.setEnabled(order.is_unissued or order.pallets.exists())
+                    pallet_action.setEnabled(order.is_unissued or has_pallets)
                     pallet_action.clicked.connect(
                         lambda _checked=False, order_id=order.id: open_pallets_for_order(order_id)
                     )
@@ -1079,7 +1963,13 @@ class FemagDesktopWindow(QMainWindow):
                     if order.id == selected_id:
                         selected_row = visual_row
                         visual_row += 1
-                        _add_load_order_detail_row(table, visual_row, order, open_detail_dialog)
+                        _add_load_order_detail_row(
+                            table,
+                            visual_row,
+                            order,
+                            open_detail_dialog,
+                            snapshot=snapshot,
+                        )
                     visual_row += 1
                 if rows:
                     table.setCurrentCell(selected_row, 0)
@@ -1117,6 +2007,8 @@ class FemagDesktopWindow(QMainWindow):
             issue_button.setToolTip("Seleccione una orden pendiente para emitir.")
             edit_button.setEnabled(False)
             edit_button.setToolTip("Seleccione una orden pendiente para editar.")
+            history_button.setEnabled(False)
+            history_button.setToolTip("Seleccione una orden para ver su historial.")
             close_button.setEnabled(False)
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
             reprint_button.setEnabled(False)
@@ -1127,6 +2019,8 @@ class FemagDesktopWindow(QMainWindow):
             is_issued = order.status == LoadOrder.STATUS_ISSUED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
+            history_button.setEnabled(True)
+            history_button.setToolTip("Ver la trazabilidad completa de la orden seleccionada.")
             close_button.setEnabled(is_issued)
             has_original_print = _has_printed_load_order(order)
             reprint_button.setEnabled(can_reprint and has_original_print)
@@ -1153,6 +2047,13 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para ver el detalle.", focus_widget=table)
                 return
             LoadOrderDetailDialog(order, self).exec_()
+
+        def open_history_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.show_warning("Seleccione una orden para ver su historial.", focus_widget=table)
+                return
+            LoadOrderHistoryDialog(order, self).exec_()
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -1232,8 +2133,18 @@ class FemagDesktopWindow(QMainWindow):
             if order is None:
                 feedback.show_warning("Seleccione una orden para anular.", focus_widget=table)
                 return
+            if not _can_annul_load_orders(self.user):
+                feedback.show_error("No tiene permiso para anular ordenes de carga.", focus_widget=table)
+                return
+            dialog = LoadOrderAnnulDialog(order, self)
+            if dialog.exec_() != QDialog.Accepted:
+                return
             try:
-                annulled = operation_service.annul(order, can_annul=_can_annul_load_orders(self.user))
+                annulled = operation_service.annul(
+                    order,
+                    can_annul=_can_annul_load_orders(self.user),
+                    reason=dialog.reason(),
+                )
                 feedback.show_success(
                     f"Orden {_format_order_number(annulled.order_number)} anulada."
                 )
@@ -1275,6 +2186,26 @@ class FemagDesktopWindow(QMainWindow):
                 path = operation_service.print_order(order)
                 resolved_path = Path(path).resolve()
                 feedback.show_success(f"PDF generado correctamente: {resolved_path}")
+
+                # Preguntar antes de abrir el visor externo del PDF. En Windows el visor
+                # toma el foco inmediatamente y el diálogo modal de Qt puede quedar detrás,
+                # dando la impresión de que la pregunta nunca apareció.
+                export_excel = QMessageBox.question(
+                    page,
+                    "Exportar armado de pallets",
+                    "¿Desea exportar el armado de pallets a Excel para editarlo fuera de FEMAG?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+
+                excel_path = None
+                if export_excel == QMessageBox.Yes:
+                    excel_path = operation_service.export_pallet_layout_xlsx(order).resolve()
+                    feedback.show_success(
+                        f"PDF generado correctamente: {resolved_path}\n"
+                        f"Excel de armado de pallets generado: {excel_path}"
+                    )
+
                 try:
                     _open_print_output(resolved_path)
                 except Exception as open_exc:
@@ -1282,6 +2213,15 @@ class FemagDesktopWindow(QMainWindow):
                         f"PDF generado correctamente: {resolved_path}. "
                         f"No se pudo abrir automaticamente: {open_exc}"
                     )
+
+                if excel_path is not None:
+                    try:
+                        _open_print_output(excel_path)
+                    except Exception as open_exc:
+                        feedback.show_warning(
+                            f"Excel generado correctamente: {excel_path}. "
+                            f"No se pudo abrir automaticamente: {open_exc}"
+                        )
                 set_action_state(order)
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
@@ -1312,30 +2252,55 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
                 return
             try:
-                path = operation_service.export_combined_budget(order)
-                resolved = Path(path).resolve()
-                feedback.show_success(f"Presupuesto generado: {resolved}")
-                try:
-                    _open_print_output(resolved)
-                except Exception:
-                    pass
+                paths = operation_service.export_budgets(order)
+                if not paths:
+                    feedback.show_warning(
+                        "La orden no tiene presupuestos para generar.", focus_widget=table
+                    )
+                    return
+                resolved_paths = [Path(path).resolve() for path in paths]
+                feedback.show_success(
+                    f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
+                )
+                for resolved in resolved_paths:
+                    try:
+                        _open_print_output(resolved)
+                    except Exception:
+                        pass
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
 
         def search_orders() -> None:
             query = search_input.text().strip()
-            refresh(query=query)
-            count = _load_order_table_order_count(table)
+            page_state["page"] = 1
+            refresh(query=query, page_number=1)
             if query:
-                feedback.show_info(f"Buscar '{query}': {count} resultado(s).")
+                feedback.show_info(
+                    f"Buscar '{query}': {page_state['total']} resultado(s)."
+                )
             else:
-                feedback.show_info(f"Buscar: {count} orden(es).")
+                feedback.show_info(
+                    f"Buscar: {page_state['total']} orden(es)."
+                )
+
+        def previous_page() -> None:
+            if page_state["page"] <= 1:
+                return
+            refresh(page_number=page_state["page"] - 1)
+
+        def next_page() -> None:
+            if page_state["page"] >= page_state["pages"]:
+                return
+            refresh(page_number=page_state["page"] + 1)
 
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
         edit_button.clicked.connect(open_edit_order_dialog)
+        history_button.clicked.connect(open_history_dialog)
         search_button.clicked.connect(search_orders)
         search_input.returnPressed.connect(search_orders)
+        previous_page_button.clicked.connect(previous_page)
+        next_page_button.clicked.connect(next_page)
         issue_button.clicked.connect(issue)
         close_button.clicked.connect(close_order)
         annul_button.clicked.connect(annul)
@@ -1474,6 +2439,24 @@ def _card(title: str, value: str) -> QFrame:
     return frame
 
 
+def _dashboard_metric_card(title: str, value: str) -> QFrame:
+    frame = QFrame()
+    frame.setObjectName("dashboardMetricCard")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(14, 13, 14, 14)
+    layout.setSpacing(5)
+    title_label = QLabel(title)
+    title_label.setObjectName("dashboardMetricLabel")
+    title_label.setWordWrap(True)
+    layout.addWidget(title_label)
+    value_label = QLabel(value)
+    value_label.setObjectName("dashboardMetricValue")
+    value_label.setWordWrap(True)
+    layout.addWidget(value_label)
+    layout.addStretch(1)
+    return frame
+
+
 def _kpi_card(title: str, value: str, helper: str) -> QFrame:
     frame = QFrame()
     frame.setObjectName("kpiCard")
@@ -1494,8 +2477,7 @@ def _load_order_metrics_strip(service: LoadOrderService) -> QLabel:
     return metrics
 
 
-def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
-    composition = service.composition(order)
+def _load_order_pallet_progress_from_composition(composition) -> str:
     pallet_count = len(composition.pallets)
     if pallet_count == 0:
         return "Sin preparar"
@@ -1510,14 +2492,22 @@ def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> 
     return f"{pallet_count} pallet" + ("s · Revisar pesos" if pallet_count != 1 else " · Revisar pesos")
 
 
-def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
-    if not order.pallets.exists():
+def _load_order_pallet_action_text_from_composition(order: LoadOrder, composition) -> str:
+    if not composition.pallets:
         return "Armar pallets" if order.is_unissued else "Sin pallets"
     if not order.is_unissued:
         return "Ver pallets"
-    if service.composition(order).can_issue:
+    if composition.can_issue:
         return "Editar pallets"
     return "Continuar"
+
+
+def _load_order_pallet_progress(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_progress_from_composition(service.composition(order))
+
+
+def _load_order_pallet_action_text(service: LoadOrderService, order: LoadOrder) -> str:
+    return _load_order_pallet_action_text_from_composition(order, service.composition(order))
 
 
 def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) -> None:
@@ -1527,6 +2517,8 @@ def _set_button_icon(button: QPushButton, standard_icon: QStyle.StandardPixmap) 
 def _action_button(object_name: str, text: str, *, secondary: bool = False) -> QPushButton:
     button = QPushButton(text)
     button.setObjectName(object_name)
+    role = "secondary" if secondary else "primary"
+    button.setProperty("uiRole", role)
     if secondary:
         button.setProperty("secondary", True)
     return button
@@ -1565,7 +2557,14 @@ class _FieldFocusNavigation(QObject):
         return True
 
 
-def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, open_detail_dialog) -> None:
+def _add_load_order_detail_row(
+    table: QTableWidget,
+    row: int,
+    order: LoadOrder,
+    open_detail_dialog,
+    *,
+    snapshot: dict | None = None,
+) -> None:
     item = QTableWidgetItem("")
     item.setData(Qt.UserRole, order.id)
     table.setItem(row, 0, item)
@@ -1573,7 +2572,7 @@ def _add_load_order_detail_row(table: QTableWidget, row: int, order: LoadOrder, 
     detail = _inline_load_order_detail_panel()
     labels: dict[str, QLabel] = detail.property("detailLabels")
     view_button: QPushButton = detail.property("viewDetailButton")
-    _set_inline_load_order_detail(labels, order)
+    _set_inline_load_order_detail(labels, order, snapshot=snapshot)
     view_button.setEnabled(True)
     view_button.clicked.connect(open_detail_dialog)
     table.setCellWidget(row, 0, detail)
@@ -1713,19 +2712,43 @@ def _detail_panel(spec) -> QFrame:
     return panel
 
 
-def _set_inline_load_order_detail(labels: dict[str, QLabel], order: LoadOrder) -> None:
-    first_pallet = order.pallets.first()
+def _set_inline_load_order_detail(
+    labels: dict[str, QLabel],
+    order: LoadOrder,
+    *,
+    snapshot: dict | None = None,
+) -> None:
+    snapshot = snapshot or {}
+    if snapshot:
+        clients_summary = snapshot.get("clients_summary", "")
+        deliveries_summary = snapshot.get("deliveries_summary", "")
+        products_summary = snapshot.get("products_summary", "")
+        driver_name = snapshot.get("driver_name", "")
+        carrier_name = snapshot.get("carrier_name", "")
+        truck_domain = snapshot.get("truck_domain", "")
+        pallet_quantity = snapshot.get("first_pallet_quantity", 0)
+        pallet_weight = snapshot.get("first_pallet_weight", "-")
+    else:
+        first_pallet = _first_related(order.pallets)
+        clients_summary = _summarize_order_clients(order)
+        deliveries_summary = _summarize_order_deliveries(order)
+        products_summary = _summarize_order_products(order)
+        driver_name = order.driver.name
+        carrier_name = order.carrier.name
+        truck_domain = order.truck.domain
+        pallet_quantity = first_pallet.quantity if first_pallet else 0
+        pallet_weight = _estimated_weight(first_pallet)
+
     labels["number"].setText(_format_order_number(order.order_number))
     labels["status"].setText(_display_status(order.status))
     labels["status"].setProperty("statusKey", _status_key(order.status))
     labels["summary"].setText(
-        f"{_summarize_order_clients(order)} | {_summarize_order_deliveries(order)} | "
-        f"{_summarize_order_products(order)}"
+        f"{clients_summary} | {deliveries_summary} | {products_summary}"
     )
     labels["transport"].setText(
-        f"{order.date.strftime('%d/%m/%Y')} | {order.driver.name} | "
-        f"{order.carrier.name} | {order.truck.domain} | "
-        f"Pallets: {first_pallet.quantity if first_pallet else 0} | Peso: {_estimated_weight(first_pallet)}"
+        f"{order.date.strftime('%d/%m/%Y')} | {driver_name} | "
+        f"{carrier_name} | {truck_domain} | "
+        f"Pallets: {pallet_quantity} | Peso: {pallet_weight}"
     )
     labels["observations"].setText(f"Obs: {order.observations}" if order.observations else "")
 
@@ -2086,6 +3109,7 @@ class LoadOrderEntryDialog(QDialog):
         header_layout.setVerticalSpacing(8)
         # Mantener las filas compactas arriba del QFrame; el stacked widget
         # heredaba el alto y las dejaba repartidas en huecos grandes.
+        header_layout.setAlignment(Qt.AlignTop)
         for row in range(3):
             header_layout.setRowStretch(row, 0)
         self.order_date = QDateEdit()
@@ -2139,6 +3163,7 @@ class LoadOrderEntryDialog(QDialog):
         self.address_combo = QComboBox()
         self.address_combo.setObjectName("loadOrderAddressInput")
         enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
+        self._keep_typed_destination()
         self.add_destination_button = _action_button(
             "addLoadOrderClientButton", "Agregar cliente/destino"
         )
@@ -2188,15 +3213,31 @@ class LoadOrderEntryDialog(QDialog):
         self.add_product_button = _action_button(
             "addLoadOrderProductButton", "Agregar producto"
         )
+        self.edit_product_button = _action_button(
+            "editLoadOrderProductButton", "Editar producto", secondary=True
+        )
+        self.edit_product_button.setFocusPolicy(Qt.NoFocus)
         remove_product_button = _action_button("removeLoadOrderProductButton", "Quitar producto", secondary=True)
         remove_product_button.setFocusPolicy(Qt.NoFocus)
         product_actions.addWidget(self.add_product_button)
+        product_actions.addWidget(self.edit_product_button)
         product_actions.addWidget(remove_product_button)
         product_actions.addStretch(1)
         product_layout.addLayout(product_actions)
-        self.product_table = QTableWidget(0, 6)
+        self.product_table = QTableWidget(0, 8)
         self.product_table.setObjectName("loadOrderProductDraftTable")
-        self.product_table.setHorizontalHeaderLabels(("Producto", "Cantidad", "Unidad", "P.Unit", "Dto%", "Total"))
+        self.product_table.setHorizontalHeaderLabels(
+            (
+                "Producto",
+                "Cantidad",
+                "A facturar ahora",
+                "A facturar después",
+                "Unidad",
+                "P.Unit",
+                "Dto%",
+                "Total",
+            )
+        )
         self.product_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.product_table.verticalHeader().setVisible(False)
         self.product_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -2219,10 +3260,20 @@ class LoadOrderEntryDialog(QDialog):
         preparation_hint.setObjectName("loadOrderPalletPreparationHint")
         preparation_hint.setWordWrap(True)
         review_layout.addWidget(preparation_hint)
-        self.review_table = QTableWidget(0, 7)
+        self.review_table = QTableWidget(0, 9)
         self.review_table.setObjectName("loadOrderReviewTable")
         self.review_table.setHorizontalHeaderLabels(
-            ("Cliente", "Destino", "Producto", "Cantidad", "Unidad", "Total", "Descripción")
+            (
+                "Cliente",
+                "Destino",
+                "Producto",
+                "Cantidad",
+                "A facturar ahora",
+                "A facturar después",
+                "Unidad",
+                "Total",
+                "Descripción",
+            )
         )
         self.review_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.review_table.verticalHeader().setVisible(False)
@@ -2230,6 +3281,10 @@ class LoadOrderEntryDialog(QDialog):
         self.review_table.setFocusPolicy(Qt.NoFocus)
         self.review_table.setMinimumHeight(260)
         review_layout.addWidget(self.review_table)
+        self.review_totals_label = QLabel("")
+        self.review_totals_label.setObjectName("loadOrderReviewTotals")
+        self.review_totals_label.setWordWrap(True)
+        review_layout.addWidget(self.review_totals_label)
         self.step_stack.addWidget(review)
 
         root.addWidget(body, 1)
@@ -2256,6 +3311,10 @@ class LoadOrderEntryDialog(QDialog):
         self.add_destination_button.clicked.connect(self._add_destination)
         remove_destination_button.clicked.connect(self._remove_destination)
         self.add_product_button.clicked.connect(self._open_product_dialog)
+        self.edit_product_button.clicked.connect(self._edit_product)
+        self.product_table.cellDoubleClicked.connect(
+            lambda _row, _column: self._edit_product()
+        )
         remove_product_button.clicked.connect(self._remove_product)
         self.save_button.clicked.connect(self._save)
         cancel_button.clicked.connect(self.reject)
@@ -2363,9 +3422,11 @@ class LoadOrderEntryDialog(QDialog):
                         "product_id": product.product.id,
                         "product_label": product.product.name,
                         "quantity": product.quantity,
+                        "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
                         "unit": product.unit,
                         "precio_neto_unitario": product.precio_neto_unitario,
                         "descuento_porcentaje": product.descuento_porcentaje,
+                        "iva_porcentaje": product.iva_porcentaje,
                         "total": product.total,
                     }
                     for product in destination.products
@@ -2449,11 +3510,61 @@ class LoadOrderEntryDialog(QDialog):
         elif len(options) == 1:
             self.trailer_combo.setCurrentIndex(1)
 
-    def _refresh_address_options(self) -> None:
+    def _keep_typed_destination(self) -> None:
+        """El destino escrito a mano no se borra al perder el foco (#658).
+
+        `commit_combo_text` descarta todo lo que no coincide exactamente con una
+        opcion del combo, y como el destino se elige escribiendo, Enter borraba lo
+        que el operador acababa de tipear. Aca el texto sin coincidencia se
+        conserva: es el alta pendiente, no basura.
+        """
+        line_edit = self.address_combo.lineEdit()
+        if line_edit is None:
+            return
+        try:
+            line_edit.editingFinished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        line_edit.editingFinished.connect(self._commit_address_text)
+
+    def _commit_address_text(self) -> None:
+        """Solo confirma el texto que SI es un domicilio del combo.
+
+        No se toca el indice cuando no hay coincidencia: en un combo editable,
+        `setCurrentIndex(-1)` borra el texto de la pantalla, que es justamente lo
+        que hay que conservar para ofrecer el alta.
+        """
+        combo = self.address_combo
+        index = matching_combo_index(combo, combo.lineEdit().text())
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _pending_destination_text(self) -> str:
+        """Texto escrito que todavia no identifica un domicilio del combo.
+
+        El combo auto-selecciona el destino cuando el cliente tiene uno solo, asi que
+        el indice actual no dice si el operador eligio ese destino o escribio otro.
+        Manda lo que esta escrito en pantalla.
+        """
+        combo = self.address_combo
+        line_edit = combo.lineEdit()
+        if line_edit is None:
+            return ""
+        text = line_edit.text().strip()
+        if not text:
+            return ""
+        current = combo.currentIndex()
+        if current >= 0 and combo.itemText(current).strip().casefold() == text.casefold():
+            return ""
+        return text
+
+    def _refresh_address_options(self, *, preferred: int | None = None) -> None:
         client_id = self.client_combo.currentData()
         options = _address_options(client_id=client_id)
         _fill_combo(self.address_combo, options)
-        if len(options) == 1:
+        if preferred is not None and self.address_combo.findData(preferred) >= 0:
+            _set_combo(self.address_combo, preferred)
+        elif len(options) == 1:
             self.address_combo.setCurrentIndex(1)
         if client_id is not None and not options:
             self.feedback.show_warning(
@@ -2461,15 +3572,106 @@ class LoadOrderEntryDialog(QDialog):
                 focus_widget=self.client_combo,
             )
 
+    def _offer_new_delivery_address(self, client_id: int, typed: str) -> int | None:
+        """Pregunta siempre si el destino escrito se da de alta, y lo crea si dice que si.
+
+        El alta es decision del operador, no una heuristica: un cliente que entrega en
+        un lugar nuevo es el caso normal de la operacion. El domicilio nuevo queda
+        asociado al cliente seleccionado y la orden sigue sin cerrarse.
+        """
+        if not typed:
+            return None
+        client = Client.get_by_id(client_id)
+        existing = _find_client_delivery_address(client_id, typed)
+        if existing is not None:
+            self._refresh_address_options(preferred=existing.id)
+            self.feedback.show_warning(
+                f"El lugar de entrega {existing.address}, {existing.city} ya estaba "
+                f"cargado para {client.name}: se selecciono ese destino.",
+                focus_widget=self.address_combo,
+            )
+            return existing.id
+        answer = QMessageBox.question(
+            self,
+            "Nuevo lugar de entrega",
+            f'"{typed}" no es un lugar de entrega de {client.name}.\n\n'
+            "¿Quiere darlo de alta ahora, asociado a ese cliente?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        as_primary = self._ask_primary_delivery_address(client)
+        dialog = ClientAddressEntryDialog(
+            current_user=self.current_user,
+            client_id=client_id,
+            prefill_address=typed,
+            is_primary=as_primary,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.saved_record is None:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        self._refresh_address_options(preferred=dialog.saved_record.id)
+        return dialog.saved_record.id
+
+    def _ask_primary_delivery_address(self, client) -> bool:
+        """El destino principal del cliente lo decide el operador, no el alta (#665).
+
+        El alta manual desde el ABM deja el domicilio nuevo como principal porque ahi
+        el operador esta de ese modo. Desde la orden de carga no: se esta cargando un destino
+        puntual para una carga y eso no dice nada sobre cual es el domicilio de siempre.
+        """
+        existing = ClientAddress.select().where(
+            (ClientAddress.client == client.id)
+            & (ClientAddress.active == True)  # noqa: E712
+            & (ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED)))
+        )
+        if not existing.exists():
+            # El cliente no tenia ningun domicilio de entrega: no hay a que sacarle
+            # el principal, asi que este pasa a serlo.
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Domicilio principal",
+            f"{client.name} ya tiene lugares de entrega cargados.\n\n"
+            "¿Querés que este nuevo sea el domicilio principal del cliente?\n\n"
+            'Si decís "No", el domicilio principal sigue siendo el que ya estaba.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
-        address_id = self.address_combo.currentData()
-        if client_id is None or address_id is None:
-            focus_widget = self.client_combo if client_id is None else self.address_combo
+        if client_id is None:
             self.feedback.show_warning(
-                "Seleccione cliente y destino.", focus_widget=focus_widget
+                "Seleccione cliente y destino.", focus_widget=self.client_combo
             )
             return
+        address_id = self.address_combo.currentData()
+        typed = self._pending_destination_text()
+        if typed:
+            # El operador escribio un destino: el indice auto-seleccionado no manda.
+            address_id = None
+        if address_id is None:
+            asked = bool(typed)
+            address_id = self._offer_new_delivery_address(client_id, typed)
+            if address_id is None:
+                # Si se pregunto, el aviso especifico ya esta en pantalla y el
+                # generico lo taparia.
+                if not asked:
+                    self.feedback.show_warning(
+                        "Seleccione cliente y destino.", focus_widget=self.address_combo
+                    )
+                return
         address = ClientAddress.get_by_id(address_id)
         if address.client.id != client_id:
             self.feedback.show_error(
@@ -2554,6 +3756,55 @@ class LoadOrderEntryDialog(QDialog):
         self.add_product_button.setFocus(Qt.TabFocusReason)
         self._update_save_button_state()
 
+    def _edit_product(self) -> None:
+        destination_row = self.destination_table.currentRow()
+        product_row = self.product_table.currentRow()
+        if destination_row < 0 or destination_row >= len(self.destinations):
+            self.feedback.show_warning(
+                "Seleccione un cliente/destino.", focus_widget=self.destination_table
+            )
+            return
+        products = self.destinations[destination_row]["products"]
+        if product_row < 0 or product_row >= len(products):
+            self.feedback.show_warning(
+                "Seleccione un producto para editar.", focus_widget=self.product_table
+            )
+            return
+
+        dest = self.destinations[destination_row]
+        client = None
+        if dest.get("client_id"):
+            try:
+                client = Client.get_by_id(dest["client_id"])
+            except Client.DoesNotExist:
+                pass
+
+        dialog = LoadOrderProductDialog(
+            self,
+            client=client,
+            product=products[product_row],
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.product is None:
+            return
+
+        edited_product_id = dialog.product.get("product_id")
+        for index, product in enumerate(products):
+            if index != product_row and product.get("product_id") == edited_product_id:
+                self.feedback.show_error(
+                    f"El articulo {product['product_label']} ya esta cargado para "
+                    f"{dest['client_label']} / {dest['address_label']}.",
+                    focus_widget=self.product_table,
+                )
+                return
+
+        products[product_row] = dialog.product
+        self._render_products(destination_row)
+        self._render_destinations()
+        self.destination_table.setCurrentCell(destination_row, 0)
+        self.product_table.setCurrentCell(product_row, 0)
+        self.feedback.show_success("Producto actualizado.")
+        self._update_save_button_state()
+
     def _remove_product(self) -> None:
         destination_row = self.destination_table.currentRow()
         product_row = self.product_table.currentRow()
@@ -2620,9 +3871,12 @@ class LoadOrderEntryDialog(QDialog):
             precio = prod.get("precio_neto_unitario", 0.0)
             dto_pct = prod.get("descuento_porcentaje", 0.0)
             total = prod.get("total", 0.0)
+            ahora, despues = _billing_split_values(prod)
             values = (
                 prod["product_label"],
                 f"{prod['quantity']:g}",
+                f"{ahora:g}",
+                f"{despues:g}",
                 prod["unit"],
                 f"$ {precio:,.2f}",
                 f"{dto_pct:g}%",
@@ -2634,17 +3888,26 @@ class LoadOrderEntryDialog(QDialog):
 
     def _render_review(self) -> None:
         rows = []
+        total_pedido = 0.0
+        total_facturado = 0.0
         for destination in self.destinations:
-            products = destination["products"] or [{}]
-            for product in products:
+            for product in destination["products"]:
+                total = float(product.get("total") or 0.0)
+                total_pedido += total
+                ahora, despues = _billing_split_values(product)
+                cantidad = float(product.get("quantity") or 0.0)
+                if cantidad:
+                    total_facturado += total * (ahora / cantidad)
                 rows.append(
                     (
                         destination["client_label"],
                         destination["address_label"],
                         product.get("product_label", "-"),
-                        f"{product.get('quantity', 0):g}" if product.get("quantity") else "-",
+                        f"{cantidad:g}" if cantidad else "-",
+                        f"{ahora:g}",
+                        f"{despues:g}",
                         product.get("unit", "-"),
-                        f"$ {product.get('total', 0.0):,.2f}" if product.get("total") else "-",
+                        f"$ {total:,.2f}" if total else "-",
                         destination.get("observations") or "-",
                     )
                 )
@@ -2652,6 +3915,11 @@ class LoadOrderEntryDialog(QDialog):
         for row_index, values in enumerate(rows):
             for column, value in enumerate(values):
                 self.review_table.setItem(row_index, column, QTableWidgetItem(value))
+        self.review_totals_label.setText(
+            f"Total pedido: $ {total_pedido:,.2f}    "
+            f"Facturado ahora: $ {total_facturado:,.2f}    "
+            f"A facturar después: $ {total_pedido - total_facturado:,.2f}"
+        )
         self._update_save_button_state()
 
     def _is_ready_to_save(self) -> bool:
@@ -2765,6 +4033,9 @@ class LoadOrderEntryDialog(QDialog):
                             {
                                 "product": Product.get_by_id(product["product_id"]),
                                 "quantity": product["quantity"],
+                                "cantidad_facturar_ahora": product.get(
+                                    "cantidad_facturar_ahora"
+                                ),
                                 "precio_neto_unitario": product.get("precio_neto_unitario"),
                                 "descuento_porcentaje": product.get("descuento_porcentaje"),
                                 "iva_porcentaje": product.get("iva_porcentaje"),
@@ -2800,18 +4071,41 @@ class LoadOrderEntryDialog(QDialog):
             self.feedback.show_error(str(exc))
 
 
+def _billing_split_values(product: dict) -> tuple[float, float]:
+    """Devuelve (a facturar ahora, a facturar despues) de un renglon en pantalla.
+
+    Sin reparto explicito toda la cantidad se factura de una vez, que es el
+    comportamiento historico de las ordenes ya emitidas.
+    """
+    quantity = float(product.get("quantity") or 0.0)
+    split = product.get("cantidad_facturar_ahora")
+    if split is None:
+        return quantity, 0.0
+    ahora = max(min(float(split), quantity), 0.0)
+    return ahora, max(quantity - ahora, 0.0)
+
+
 class LoadOrderProductDialog(QDialog):
-    def __init__(self, parent=None, *, client: Client | None = None):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        client: Client | None = None,
+        product: dict | None = None,
+    ):
         super().__init__(parent)
         self.product: dict | None = None
         self.client = client
+        self._initial_product = product
         self.setObjectName("loadOrderProductDialog")
-        self.setWindowTitle("Agregar producto")
-        self.resize(500, 420)
+        self.setWindowTitle("Editar producto" if product is not None else "Agregar producto")
+        self.resize(500, 500)
+        # El operador todavia no toco el reparto de cantidades.
+        self._split_editado = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 14)
         layout.setSpacing(10)
-        title = QLabel("Agregar producto")
+        title = QLabel("Editar producto" if product is not None else "Agregar producto")
         title.setObjectName("dialogTitle")
         layout.addWidget(title)
 
@@ -2826,11 +4120,17 @@ class LoadOrderProductDialog(QDialog):
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
         self.quantity_input.setDecimals(2)
+        # El operador carga la cantidad total y cuanto queda para facturar despues.
+        # La parte que se factura hoy se deriva de esas dos.
+        self.cantidad_despues_input = QDoubleSpinBox()
+        self.cantidad_despues_input.setObjectName("productDialogCantidadFacturarDespuesInput")
+        self.cantidad_despues_input.setRange(0, 999999)
+        self.cantidad_despues_input.setDecimals(2)
+        self.cantidad_ahora_label = QLabel("0.00")
+        self.cantidad_ahora_label.setObjectName("productDialogCantidadFacturarAhora")
         self.precio_input = QDoubleSpinBox()
         self.precio_input.setObjectName("productDialogPrecioInput")
-        self.precio_input.setRange(0, 99999999)
-        self.precio_input.setDecimals(2)
-        self.precio_input.setPrefix("$ ")
+        configure_money_input(self.precio_input)
         self.descuento_input = QDoubleSpinBox()
         self.descuento_input.setObjectName("productDialogDescuentoInput")
         self.descuento_input.setRange(0, 100)
@@ -2845,14 +4145,18 @@ class LoadOrderProductDialog(QDialog):
 
         form.addWidget(QLabel("Producto"), 0, 0)
         form.addWidget(self.product_combo, 0, 1, 1, 2)
-        form.addWidget(QLabel("Cantidad"), 1, 0)
+        form.addWidget(QLabel("Cantidad total"), 1, 0)
         form.addWidget(self.quantity_input, 1, 1, 1, 2)
-        form.addWidget(QLabel("Precio neto unitario"), 2, 0)
-        form.addWidget(self.precio_input, 2, 1, 1, 2)
-        form.addWidget(QLabel("Descuento"), 3, 0)
-        form.addWidget(self.descuento_input, 3, 1)
-        form.addWidget(QLabel("IVA"), 3, 2)
-        form.addWidget(self.iva_input, 3, 3)
+        form.addWidget(QLabel("Cantidad a facturar después"), 2, 0)
+        form.addWidget(self.cantidad_despues_input, 2, 1, 1, 2)
+        form.addWidget(QLabel("Cantidad a facturar ahora"), 3, 0)
+        form.addWidget(self.cantidad_ahora_label, 3, 1, 1, 2)
+        form.addWidget(QLabel("Precio neto unitario"), 4, 0)
+        form.addWidget(self.precio_input, 4, 1, 1, 2)
+        form.addWidget(QLabel("Descuento"), 5, 0)
+        form.addWidget(self.descuento_input, 5, 1)
+        form.addWidget(QLabel("IVA"), 5, 2)
+        form.addWidget(self.iva_input, 5, 3)
         layout.addLayout(form)
 
         totals_grid = QGridLayout()
@@ -2868,6 +4172,10 @@ class LoadOrderProductDialog(QDialog):
         self.total_label = QLabel("$ 0.00")
         self.total_label.setObjectName("productDialogTotal")
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        self.total_facturado_label = QLabel("$ 0.00")
+        self.total_facturado_label.setObjectName("productDialogTotalFacturadoAhora")
+        self.total_diferido_label = QLabel("$ 0.00")
+        self.total_diferido_label.setObjectName("productDialogTotalFacturarDespues")
 
         totals_grid.addWidget(QLabel("Neto subtotal:"), 0, 0)
         totals_grid.addWidget(self.neto_subtotal_label, 0, 1)
@@ -2879,6 +4187,10 @@ class LoadOrderProductDialog(QDialog):
         totals_grid.addWidget(self.iva_importe_label, 3, 1)
         totals_grid.addWidget(QLabel("Total:"), 4, 0)
         totals_grid.addWidget(self.total_label, 4, 1)
+        totals_grid.addWidget(QLabel("Total facturado ahora:"), 5, 0)
+        totals_grid.addWidget(self.total_facturado_label, 5, 1)
+        totals_grid.addWidget(QLabel("Total a facturar después:"), 6, 0)
+        totals_grid.addWidget(self.total_diferido_label, 6, 1)
         layout.addLayout(totals_grid)
 
         self.feedback = FormFeedback("productDialogFeedback")
@@ -2888,14 +4200,18 @@ class LoadOrderProductDialog(QDialog):
         footer.addStretch(1)
         cancel_button = _action_button("cancelProductButton", "Cancelar", secondary=True)
         cancel_button.setFocusPolicy(Qt.NoFocus)
-        self.add_button = _action_button("confirmProductButton", "Agregar")
+        self.add_button = _action_button(
+            "confirmProductButton",
+            "Guardar cambios" if product is not None else "Agregar",
+        )
         footer.addWidget(cancel_button)
         footer.addWidget(self.add_button)
         layout.addLayout(footer)
 
         _fill_combo(self.product_combo, _product_options())
         self.product_combo.currentIndexChanged.connect(self._on_product_changed)
-        self.quantity_input.valueChanged.connect(self._recalculate)
+        self.quantity_input.valueChanged.connect(self._on_total_changed)
+        self.cantidad_despues_input.valueChanged.connect(self._on_split_changed)
         self.precio_input.valueChanged.connect(self._recalculate)
         self.descuento_input.valueChanged.connect(self._recalculate)
         cancel_button.clicked.connect(self.reject)
@@ -2903,6 +4219,7 @@ class LoadOrderProductDialog(QDialog):
         focus_chain = (
             self.product_combo,
             self.quantity_input,
+            self.cantidad_despues_input,
             self.precio_input,
             self.descuento_input,
             self.add_button,
@@ -2914,11 +4231,32 @@ class LoadOrderProductDialog(QDialog):
             (
                 self.product_combo,
                 self.quantity_input,
+                self.cantidad_despues_input,
                 self.precio_input,
                 self.descuento_input,
             ),
         )
+        if product is not None:
+            self._load_product(product)
         self.product_combo.setFocus(Qt.TabFocusReason)
+
+    def _load_product(self, product: dict) -> None:
+        product_id = product.get("product_id")
+        index = self.product_combo.findData(product_id)
+        if index >= 0:
+            with QSignalBlocker(self.product_combo):
+                self.product_combo.setCurrentIndex(index)
+        cantidad = float(product.get("quantity") or 0.0)
+        split = product.get("cantidad_facturar_ahora")
+        self._split_editado = split is not None
+        despues = 0.0 if split is None else cantidad - float(split)
+        with QSignalBlocker(self.quantity_input), QSignalBlocker(self.cantidad_despues_input):
+            self.quantity_input.setValue(cantidad)
+            self.cantidad_despues_input.setValue(despues)
+        self.precio_input.setValue(float(product.get("precio_neto_unitario") or 0.0))
+        self.descuento_input.setValue(float(product.get("descuento_porcentaje") or 0.0))
+        self.iva_input.setValue(float(product.get("iva_porcentaje") or 0.0))
+        self._recalculate()
 
     def _on_product_changed(self) -> None:
         product_id = self.product_combo.currentData()
@@ -2937,8 +4275,31 @@ class LoadOrderProductDialog(QDialog):
             self.descuento_input.setValue(self.client.descuento_porcentaje or 0.0)
         self._recalculate()
 
+    def _on_split_changed(self, value: float) -> None:
+        self._split_editado = True
+        self._recalculate()
+
+    def _on_total_changed(self, value: float) -> None:
+        """Mantiene la parte pendiente coherente con la cantidad total.
+
+        Mientras el operador no haya repartido, no queda nada pendiente y toda la
+        mercaderia se factura de una vez, que es el comportamiento historico. Si ya
+        repartio, lo pendiente solo se recorta cuando la nueva total le queda por
+        debajo, para no dejar mas mercaderia pendiente que la que sale del camion.
+        """
+        if not self._split_editado:
+            with QSignalBlocker(self.cantidad_despues_input):
+                self.cantidad_despues_input.setValue(0.0)
+        elif self.cantidad_despues_input.value() > value:
+            with QSignalBlocker(self.cantidad_despues_input):
+                self.cantidad_despues_input.setValue(value)
+        self._recalculate()
+
     def _recalculate(self) -> None:
         quantity = self.quantity_input.value()
+        despues = min(self.cantidad_despues_input.value(), quantity)
+        ahora = max(quantity - despues, 0.0)
+        self.cantidad_ahora_label.setText(f"{ahora:g}")
         precio = self.precio_input.value()
         descuento = self.descuento_input.value()
         iva_pct = self.iva_input.value()
@@ -2952,6 +4313,11 @@ class LoadOrderProductDialog(QDialog):
         self.neto_gravado_label.setText(f"$ {neto_gravado:,.2f}")
         self.iva_importe_label.setText(f"$ {iva_importe:,.2f}")
         self.total_label.setText(f"$ {total:,.2f}")
+        # Las dos partes comparten el precio del renglon, asi que el reparto del
+        # importe es proporcional a la cantidad y suma exactamente el total.
+        factor = (ahora / quantity) if quantity else 0.0
+        self.total_facturado_label.setText(f"$ {total * factor:,.2f}")
+        self.total_diferido_label.setText(f"$ {total * (1.0 - factor):,.2f}")
 
     def _accept_product(self) -> None:
         product_id = self.product_combo.currentData()
@@ -2966,11 +4332,21 @@ class LoadOrderProductDialog(QDialog):
                 "La cantidad debe ser mayor a cero.", focus_widget=self.quantity_input
             )
             return
+        cantidad_despues = self.cantidad_despues_input.value()
+        if cantidad_despues > quantity:
+            self.feedback.show_warning(
+                "La cantidad a facturar después no puede superar la cantidad total.",
+                focus_widget=self.cantidad_despues_input,
+            )
+            return
         product = Product.get_by_id(product_id)
         self.product = {
             "product_id": product_id,
             "product_label": product.name,
             "quantity": quantity,
+            "cantidad_facturar_ahora": (
+                None if cantidad_despues <= 0 else quantity - cantidad_despues
+            ),
             "unit": product.unit,
             "precio_neto_unitario": self.precio_input.value(),
             "descuento_porcentaje": self.descuento_input.value(),
@@ -3167,6 +4543,32 @@ def _open_print_output(path: Path) -> None:
     webbrowser.open(target.as_uri())
 
 
+def _matches_load_order_grid_snapshot(
+    order: LoadOrder,
+    snapshot: dict | None,
+    query: str,
+) -> bool:
+    snapshot = snapshot or {}
+    text = " ".join(
+        (
+            _format_order_number(order.order_number),
+            str(order.order_number),
+            order.date.strftime("%d/%m/%Y"),
+            order.status,
+            snapshot.get("carrier_name", ""),
+            snapshot.get("driver_name", ""),
+            snapshot.get("truck_domain", ""),
+            snapshot.get("clients_summary", ""),
+            snapshot.get("deliveries_summary", ""),
+            snapshot.get("products_summary", ""),
+            snapshot.get("destinations_text", ""),
+            snapshot.get("products_text", ""),
+            order.observations or "",
+        )
+    )
+    return query.lower() in text.lower()
+
+
 def _matches_load_order_query(order: LoadOrder, query: str) -> bool:
     text = " ".join(
         (
@@ -3195,6 +4597,10 @@ def _can_use_menu_action(user, section: str, action: str, title: str) -> bool:
         return PermissionService().has_permission(user, section, action, title)
     except (InterfaceError, OperationalError):
         return False
+
+
+def _first_related(rows):
+    return next(iter(rows), None)
 
 
 def _summarize_order_clients(order: LoadOrder) -> str:
@@ -3289,6 +4695,30 @@ def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
         ]
     except (InterfaceError, OperationalError):
         return []
+
+
+def _find_client_delivery_address(client_id: int, typed: str) -> ClientAddress | None:
+    """Domicilio de entrega del cliente al que corresponde el texto escrito, si existe.
+
+    El combo muestra `Cliente - calle, ciudad`, asi que escribir `Ruta A` nunca
+    coincide con la etiqueta completa. Sin esta comparacion, "siempre preguntar si se
+    da de alta" terminaria creando un domicilio duplicado de uno que el cliente ya
+    tiene. Se comparan calle, ciudad y launion de ambas, sin tildes ni mayusculas.
+    """
+    key = normalize_master_text(typed)
+    if not key:
+        return None
+    query = ClientAddress.select().where(
+        (ClientAddress.client == client_id)
+        & (ClientAddress.active == True)  # noqa: E712
+        & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
+    ).order_by(ClientAddress.id)
+    for address in query:
+        street = normalize_master_text(address.address)
+        city = normalize_master_text(address.city)
+        if key in {street, city, f"{street}{city}"}:
+            return address
+    return None
 
 
 def _product_options() -> list[tuple[int, str]]:

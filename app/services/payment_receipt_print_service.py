@@ -11,6 +11,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.models.payments import ClientPayment, ClientPaymentDetail
 from app.services.audit_service import AuditService
+from app.utils.datetime_utils import as_datetime
 
 
 LEGACY_METHOD_LABELS = {
@@ -251,6 +252,9 @@ def _payment_table(payment: ClientPayment, styles: dict) -> Table:
 
 
 def _display_datetime(value) -> str:
+    value = as_datetime(value)
+    if value is None:
+        return ""
     if value.tzinfo is not None:
         value = value.astimezone()
     return value.strftime("%d/%m/%Y %H:%M")

@@ -18,7 +18,7 @@ from app.config.database import (
     ensure_mysql_database_exists,
     initialize_runtime_database,
 )
-from app.config.schema import SchemaValidationError, validate_runtime_schema
+from app.config.schema import SchemaTooNewError, SchemaValidationError, validate_runtime_schema
 from app.config.schema import ensure_runtime_schema
 from app.config.secure_credentials import (
     RuntimeConnection,
@@ -149,6 +149,17 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
     try:
         database.connect()
         validate_runtime_schema(database)
+    except SchemaTooNewError as exc:
+        # No se ofrece "crear o actualizar tablas": la base ya esta migrada a una
+        # version mas nueva y esta app no la conoce. Prepararla daria el mismo
+        # resultado y dejaria fuera de servicio a los puestos ya actualizados.
+        # Se propaga como RuntimeError para que el dialogo solo muestre el mensaje.
+        raise RuntimeError(
+            f"La base esta actualizada a una version mas nueva que este programa. "
+            f"Hay que actualizar la aplicacion; volver a preparar las tablas no lo "
+            f"soluciona y dejaria fuera de servicio a los puestos ya actualizados. "
+            f"Detalle: {exc}"
+        ) from exc
     except SchemaValidationError as exc:
         raise RuntimeSchemaPreparationRequired(
             f"La base existe pero su estructura no es compatible: {exc}. "
@@ -166,7 +177,8 @@ def test_runtime_connection(connection: RuntimeConnection) -> None:
         ) from exc
     except Exception as exc:
         raise RuntimeError(
-            f"No se pudo iniciar el cliente MySQL ({type(exc).__name__})."
+            f"No se pudo iniciar el cliente MySQL ({type(exc).__name__}): "
+            f"{str(exc) or 'sin detalle'}."
         ) from exc
     finally:
         if not database.is_closed():
@@ -194,6 +206,11 @@ def prepare_runtime_schema(connection: RuntimeConnection) -> None:
         database.connect(reuse_if_open=True)
         ensure_runtime_schema(database)
         validate_runtime_schema(database)
+        # Antes los medios de pago iniciales los creaba el arranque de cada puesto.
+        # Con el arranque read-only (#660) queda a cargo de la preparacion admin.
+        from app.services.client_payment_service import ClientPaymentService
+
+        ClientPaymentService.ensure_default_payment_methods()
         # Asegura perfiles/permisos base para el primer admin (bootstrap login)
         try:
             from app.services.permission_service import PermissionService

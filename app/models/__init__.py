@@ -1,7 +1,8 @@
 from app.models.audit import AuditLog
 from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
+from app.models.budgets import Budget, BudgetItem
 from app.models.accounting import ClientAccountMovement
-from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence
+from app.models.system import AppParameter, BackupLog, ImportBatch, NumberSequence, ManagerialSummaryDelivery
 from app.models.masters import (
     Carrier,
     Client,
@@ -11,6 +12,8 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    ProductCostHistory,
+    Salesperson,
     TipoIVA,
     Truck,
 )
@@ -31,6 +34,10 @@ from app.models.dgr import DgrCountry, DgrLocality, DgrProvince
 from app.models.f150 import F150Batch, F150BatchRemittance
 from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
+from app.models.whatsapp import WhatsAppEnvio
+from app.models.production import ProductionBag, ProductionPart, RawMaterialReceipt
+from app.models.stock import StockMovement
+from app.models.stock_count import StockCount, StockCountLine
 
 
 ALL_MODELS = [
@@ -39,15 +46,16 @@ ALL_MODELS = [
     MenuItem,
     Permission,
     AuditLog,
-    ClientAccountMovement,
     PaymentMethod,
     ClientPayment,
     ClientPaymentDetail,
     ImportBatch,
+    Salesperson,
     Client,
     ClientEmail,
     ClientAddress,
     Product,
+    ProductCostHistory,
     TipoIVA,
     Carrier,
     Truck,
@@ -67,6 +75,9 @@ ALL_MODELS = [
     LoadOrderClosure,
     LoadOrderReturnLine,
     LoadOrderBudgetStatus,
+    Budget,
+    BudgetItem,
+    ClientAccountMovement,
     RemittanceSeries,
     Remittance,
     RemittanceItem,
@@ -75,5 +86,13 @@ ALL_MODELS = [
     AppParameter,
     NumberSequence,
     BackupLog,
+    ManagerialSummaryDelivery,
     AvisoLectura,
+    WhatsAppEnvio,
+    RawMaterialReceipt,
+    ProductionPart,
+    ProductionBag,
+    StockMovement,
+    StockCount,
+    StockCountLine,
 ]

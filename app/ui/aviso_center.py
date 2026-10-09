@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QPushButton, QHBoxLayout, QHeaderView
 from PyQt5.QtCore import Qt
 from app.services.aviso_service import AvisoService
+from app.utils.datetime_utils import as_datetime
 
 
 class AvisoCenterPage(QWidget):
@@ -38,7 +39,7 @@ class AvisoCenterPage(QWidget):
             self.table.setItem(i, 0, QTableWidgetItem(av.prioridad))
             self.table.setItem(i, 1, QTableWidgetItem(av.tipo))
             self.table.setItem(i, 2, QTableWidgetItem(f"{av.titulo} - {av.descripcion}"))
-            self.table.setItem(i, 3, QTableWidgetItem(av.created_at.strftime("%d/%m")))
+            self.table.setItem(i, 3, QTableWidgetItem(as_datetime(av.created_at).strftime("%d/%m")))
             btn = QPushButton("Ver")
             btn.clicked.connect(lambda _, av=av: self._navigate(av))
             self.table.setCellWidget(i, 4, btn)

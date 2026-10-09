@@ -4,7 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QHeaderView, QTableWidgetItem
 
 
-DUE_DATE_COLUMN = 6
+DUE_DATE_COLUMN = 7
 
 
 def install_customer_ledger_due_date_extension() -> None:
@@ -20,7 +20,7 @@ def install_customer_ledger_due_date_extension() -> None:
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            if self.movements_table.columnCount() == 6:
+            if self.movements_table.columnCount() == DUE_DATE_COLUMN:
                 self.movements_table.insertColumn(DUE_DATE_COLUMN)
                 self.movements_table.setHorizontalHeaderItem(
                     DUE_DATE_COLUMN, QTableWidgetItem("Vencimiento")
@@ -28,7 +28,23 @@ def install_customer_ledger_due_date_extension() -> None:
                 self.movements_table.horizontalHeader().setSectionResizeMode(
                     DUE_DATE_COLUMN, QHeaderView.ResizeToContents
                 )
-            self.refresh()
+            self._populate_due_dates()
+
+        def _populate_due_dates(self) -> None:
+            if self.movements_table.columnCount() <= DUE_DATE_COLUMN:
+                return
+
+            movements = getattr(self, "_detail_movements_cache", ())
+            for row_index, movement in enumerate(movements):
+                due_text = (
+                    movement.due_date.strftime("%d/%m/%Y")
+                    if movement.due_date is not None
+                    else ""
+                )
+                due_cell = QTableWidgetItem(due_text)
+                due_cell.setTextAlignment(Qt.AlignCenter)
+                due_cell.setToolTip(due_text or "Sin vencimiento")
+                self.movements_table.setItem(row_index, DUE_DATE_COLUMN, due_cell)
 
         def _on_client_selected(
             self,
@@ -43,22 +59,8 @@ def install_customer_ledger_due_date_extension() -> None:
                 previous_row,
                 previous_col,
             )
-            if self.movements_table.columnCount() <= DUE_DATE_COLUMN or current_row < 0:
+            if current_row < 0:
                 return
-
-            client = self._selected_client()
-            if client is None:
-                return
-            movements = customer_ledger.movements_for_client(client)
-            for row_index, movement in enumerate(movements):
-                due_text = (
-                    movement.due_date.strftime("%d/%m/%Y")
-                    if movement.due_date is not None
-                    else ""
-                )
-                due_cell = QTableWidgetItem(due_text)
-                due_cell.setTextAlignment(Qt.AlignCenter)
-                due_cell.setToolTip(due_text or "Sin vencimiento")
-                self.movements_table.setItem(row_index, DUE_DATE_COLUMN, due_cell)
+            self._populate_due_dates()
 
     customer_ledger.CustomerLedgerPage = CustomerLedgerPage

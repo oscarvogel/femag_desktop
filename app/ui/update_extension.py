@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 import webbrowser
 
-from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
-from PyQt5.QtWidgets import QApplication, QMessageBox, QPushButton
+from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, pyqtSignal
+from PyQt5.QtWidgets import QApplication, QMessageBox, QProgressDialog, QPushButton
 
 from app.build_info import APP_ID, BUILD_VERSION
 from app.services.production_health import run_production_health_check
@@ -26,8 +27,25 @@ PROMOTION_WORKFLOW_URL = (
 )
 
 
+class _UpdateHost:
+    """Sustituye a la ventana cuando la actualizacion arranca antes del login.
+
+    `_show_update_dialog` guarda el worker y el dialogo de progreso como atributos
+    de la ventana para que el recolector de basura no se los lleve mientras
+    descarga. Cuando la actualizacion se dispara sin ventana (puesto atrasado, sin
+    sesion iniciada) hace falta el mismo anclaje.
+    """
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _Signals(QObject):
     update_found = pyqtSignal(object)
+    progress = pyqtSignal(int, object)
     downloaded = pyqtSignal(str)
     pilot_ready = pyqtSignal(object)
     failed = pyqtSignal(str)
@@ -56,7 +74,10 @@ class _DownloadWorker(QRunnable):
 
     def run(self) -> None:
         try:
-            path = download_installer(self.info)
+            path = download_installer(
+                self.info,
+                progress_callback=lambda downloaded, total: self.signals.progress.emit(downloaded, total),
+            )
         except Exception as exc:
             logger.exception("No se pudo descargar/validar la actualizacion")
             self.signals.failed.emit(str(exc))
@@ -107,49 +128,145 @@ class _PilotApprovalWorker(QRunnable):
         self.signals.pilot_ready.emit(info)
 
 
-def _show_update_dialog(window, info: UpdateInfo) -> None:
+def _show_update_dialog(window, info: UpdateInfo, *, mandatory: bool = False) -> bool:
+    """Pregunta, descarga, verifica y lanza el instalador.
+
+    Devuelve True si se lanzo el instalador (hay que cerrar la aplicacion). Con
+    `mandatory=True` no hay forma de decir que no: se usa cuando el puesto no puede
+    trabajar con la version instalada, asi que un "No" dejaria el puesto caido.
+    """
+    host = window if window is not None else _UpdateHost()
     notes = info.notes or "Hay una nueva versión disponible."
     channel_note = "\nCanal piloto: candidate." if info.channel == CANDIDATE_CHANNEL else ""
-    message = (
-        f"Versión instalada: {BUILD_VERSION}\n"
-        f"Nueva versión: {info.version}\n"
-        f"{channel_note}\n\n"
-        f"{notes}\n\n"
-        "¿Desea descargar el instalador ahora?"
-    )
-    buttons = QMessageBox.Yes | QMessageBox.No
-    answer = QMessageBox.question(window, "Nueva versión de FEMAG", message, buttons, QMessageBox.Yes)
-    if answer != QMessageBox.Yes:
-        return
-
-    worker = _DownloadWorker(info)
-    worker.signals.failed.connect(
-        lambda text: QMessageBox.warning(window, "Actualización FEMAG", f"No se pudo descargar la actualización:\n{text}")
-    )
-
-    def _launch(path: str) -> None:
-        answer2 = QMessageBox.question(
+    if mandatory:
+        message = (
+            f"Este puesto no puede trabajar con la versión instalada.\n\n"
+            f"Versión instalada: {BUILD_VERSION}\n"
+            f"Nueva versión: {info.version}\n"
+            f"{channel_note}\n\n"
+            f"{notes}\n\n"
+            "La descarga se inicia para poder volver a entrar. Si no puede "
+            "completarse, copie el detalle de la pantalla para avisar a soporte."
+        )
+    else:
+        message = (
+            f"Versión instalada: {BUILD_VERSION}\n"
+            f"Nueva versión: {info.version}\n"
+            f"{channel_note}\n\n"
+            f"{notes}\n\n"
+            "¿Desea descargar el instalador ahora?"
+        )
+    if mandatory:
+        answer = QMessageBox.information(
             window,
-            "Actualización descargada",
-            "El instalador fue descargado y validado correctamente.\n\n"
-            "¿Desea cerrar FEMAG e instalar la nueva versión ahora?",
+            "Actualización necesaria de FEMAG",
+            message,
+            QMessageBox.Ok,
+            QMessageBox.Ok,
+        )
+    else:
+        answer = QMessageBox.question(
+            window,
+            "Nueva versión de FEMAG",
+            message,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
         )
-        if answer2 != QMessageBox.Yes:
-            return
+    if not mandatory and answer != QMessageBox.Yes:
+        return False
+
+    worker = _DownloadWorker(info)
+    progress = QProgressDialog(window)
+    progress.setWindowTitle("Actualizando FEMAG")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setCancelButton(None)
+    progress.setMinimumDuration(0)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
+    progress.setRange(0, 0)
+    progress.setLabelText(f"Preparando descarga de FEMAG {info.version}…")
+    started_at = time.monotonic()
+
+    def _format_size(value: int) -> str:
+        return f"{value / (1024 * 1024):.1f} MB"
+
+    def _show_progress(downloaded: int, total: object) -> None:
+        total_bytes = total if isinstance(total, int) and total > 0 else None
+        elapsed = max(time.monotonic() - started_at, 0.001)
+        speed = downloaded / elapsed
+        speed_text = f"{speed / (1024 * 1024):.1f} MB/s" if downloaded else "iniciando…"
+        if total_bytes:
+            percent = min(100, int(downloaded * 100 / total_bytes))
+            progress.setRange(0, 100)
+            progress.setValue(percent)
+            progress.setLabelText(
+                f"Descargando FEMAG {info.version}…\n"
+                f"{percent}% · {_format_size(downloaded)} de {_format_size(total_bytes)} · {speed_text}"
+            )
+        else:
+            progress.setRange(0, 0)
+            progress.setLabelText(
+                f"Descargando FEMAG {info.version}…\n"
+                f"{_format_size(downloaded)} descargados · {speed_text}"
+            )
+
+    def _failed(text: str) -> None:
+        progress.close()
+        QMessageBox.warning(
+            window,
+            "Actualización FEMAG",
+            f"No se pudo descargar la actualización:\n{text}",
+        )
+
+    worker.signals.progress.connect(_show_progress)
+    worker.signals.failed.connect(_failed)
+
+    def _launch(path: str) -> None:
+        progress.setRange(0, 100)
+        progress.setValue(100)
+        progress.setLabelText("Descarga completa. Verificando instalador…")
+        QApplication.processEvents()
+        progress.close()
+        if mandatory:
+            QMessageBox.information(
+                window,
+                "Actualización descargada",
+                "El instalador fue descargado y validado correctamente.\n\n"
+                "FEMAG se va a cerrar para instalarla. Vuelva a abrirlo cuando "
+                "termine la instalación.",
+                QMessageBox.Ok,
+                QMessageBox.Ok,
+            )
+        else:
+            answer2 = QMessageBox.question(
+                window,
+                "Actualización descargada",
+                "El instalador fue descargado y validado correctamente.\n\n"
+                "¿Desea cerrar FEMAG e instalar la nueva versión ahora?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer2 != QMessageBox.Yes:
+                return False
         try:
             subprocess.Popen([path], close_fds=True)
         except OSError as exc:
             logger.exception("No se pudo ejecutar el instalador descargado")
             QMessageBox.warning(window, "Actualización FEMAG", f"No se pudo abrir el instalador:\n{exc}")
-            return
+            return False
         logger.info("Instalador de FEMAG %s lanzado; cerrando aplicacion", info.version)
-        window.close()
+        if window is not None:
+            window.close()
+        else:
+            host.close()
+        return True
 
     worker.signals.downloaded.connect(_launch)
-    window._femag_update_download_worker = worker
+    host._femag_update_download_worker = worker
+    host._femag_update_progress_dialog = progress
+    progress.show()
     QThreadPool.globalInstance().start(worker)
+    return False
 
 
 def _start_pilot_approval(window) -> None:

@@ -1,30 +1,45 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from datetime import date
+
+from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QDateEdit,
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPushButton,
+    QMenu,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QToolButton,
+    QMessageBox,
 )
 
 from app.models.accounting import ClientAccountMovement
-from app.models.masters import Client
+from app.models.masters import Client, Salesperson
 from app.models.payments import ClientPayment
+from app.ui.financial_history_dialog import FinancialHistoryDialog
+from app.ui.ledger_document_detail_dialog import LedgerDocumentDetailDialog
+from app.utils.datetime_utils import as_datetime
 from app.services.ledger_query_service import (
-    client_balance,
-    client_balances,
+    client_portfolio_rows,
     movements_for_client,
     running_balance,
+)
+from app.services.salesperson_portfolio_print_service import (
+    REPORT_TYPE_BY_LABEL,
+    REPORT_TYPE_CHOICES,
+    REPORT_TYPE_SUMMARY,
 )
 
 
@@ -32,6 +47,8 @@ MOVEMENT_TYPE_LABELS = {
     "opening_balance": "Saldo inicial",
     "load_order_documental": "Orden de carga",
     "load_order_documental_reversal": "Reverso OC",
+    "budget_manual": "Presupuesto manual",
+    "budget_manual_reversal": "Anulación presupuesto",
     "payment": "Pago",
     "payment_reversal": "Anulación de pago",
     "manual_debit": "Débito manual",
@@ -66,11 +83,17 @@ class CustomerLedgerPage(QWidget):
         *,
         current_user: str,
         register_payment_callback=None,
+        create_manual_budget_callback=None,
         register_manual_debit_callback=None,
         register_manual_credit_callback=None,
         print_statement_callback=None,
         whatsapp_statement_callback=None,
+        whatsapp_budget_callback=None,
+        print_budget_callback=None,
         email_statement_callback=None,
+        portfolio_print_callback=None,
+        portfolio_whatsapp_callback=None,
+        portfolio_email_callback=None,
         print_receipt_callback=None,
         annul_payment_callback=None,
         reverse_manual_debit_callback=None,
@@ -82,29 +105,41 @@ class CustomerLedgerPage(QWidget):
         self.setObjectName("customerLedgerPage")
         self.current_user = current_user
         self.register_payment_callback = register_payment_callback
+        self.create_manual_budget_callback = create_manual_budget_callback
         self.register_manual_debit_callback = register_manual_debit_callback
         self.register_manual_credit_callback = register_manual_credit_callback
         self.print_statement_callback = print_statement_callback
         self.whatsapp_statement_callback = whatsapp_statement_callback
+        self.whatsapp_budget_callback = whatsapp_budget_callback
+        self.print_budget_callback = print_budget_callback
         self.email_statement_callback = email_statement_callback
+        self.portfolio_print_callback = portfolio_print_callback
+        self.portfolio_whatsapp_callback = portfolio_whatsapp_callback
+        self.portfolio_email_callback = portfolio_email_callback
         self.print_receipt_callback = print_receipt_callback
         self.annul_payment_callback = annul_payment_callback
         self.reverse_manual_debit_callback = reverse_manual_debit_callback
         self.reverse_manual_credit_callback = reverse_manual_credit_callback
         self.can_annul_payments = can_annul_payments
         self._direct_client_id: int | None = None
+        self._all_balances: list[dict] = []
+        self._detail_client_id: int | None = None
+        self._detail_movements_cache: list[ClientAccountMovement] = []
+        self._detail_balances_cache: list[float] = []
+        # Tipo de reporte elegido para "Resumen del vendedor" (#609). Arranca en
+        # el resumen, que es el reporte que ya existia.
+        self._portfolio_report_type: str = REPORT_TYPE_SUMMARY
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(18, 12, 18, 18)
         layout.setSpacing(12)
 
-        title = QLabel("Cuenta corriente por cliente")
+        title = QLabel("Cuenta corriente")
         title.setObjectName("customerLedgerTitle")
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "Listado de clientes con movimientos y saldo consolidado. "
-            "Seleccione un cliente para ver el detalle."
+            "Saldos, cobranzas y movimientos por cliente."
         )
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
@@ -113,9 +148,9 @@ class CustomerLedgerPage(QWidget):
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_clients_panel())
         splitter.addWidget(self._build_detail_panel())
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([420, 720])
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 7)
+        splitter.setSizes([460, 820])
         layout.addWidget(splitter, 1)
 
         self.refresh()
@@ -123,29 +158,59 @@ class CustomerLedgerPage(QWidget):
     def _build_clients_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("customerLedgerClientsPanel")
-        panel.setMinimumWidth(310)
+        panel.setMinimumWidth(300)
+        panel.setMaximumWidth(390)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-        header = QLabel("Clientes con movimientos")
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+        header = QLabel("Clientes")
         header.setObjectName("customerLedgerClientsHeader")
         layout.addWidget(header)
 
+        filters_row = QHBoxLayout()
+        filters_row.setSpacing(8)
         self.search_input = QLineEdit()
         self.search_input.setObjectName("customerLedgerSearchInput")
         self.search_input.setPlaceholderText("Buscar cliente...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self.search_input)
+        filters_row.addWidget(self.search_input, 1)
 
         self.only_with_balance = QCheckBox("Solo con saldo")
         self.only_with_balance.setObjectName("customerLedgerOnlyWithBalance")
         self.only_with_balance.toggled.connect(self._on_search_changed)
-        layout.addWidget(self.only_with_balance)
+        filters_row.addWidget(self.only_with_balance)
+        layout.addLayout(filters_row)
 
-        self.clients_table = QTableWidget(0, 3)
+        salesperson_row = QHBoxLayout()
+        salesperson_row.setSpacing(8)
+        salesperson_row.addWidget(QLabel("Vendedor"))
+        self.salesperson_filter = QComboBox()
+        self.salesperson_filter.setObjectName("customerLedgerSalespersonFilter")
+        self.salesperson_filter.setToolTip(
+            "Filtra la cartera según el vendedor actualmente asignado al cliente."
+        )
+        self.salesperson_filter.addItem("Todos", "all")
+        self.salesperson_filter.addItem("Sin asignar", "unassigned")
+        for salesperson in Salesperson.select().order_by(Salesperson.name):
+            label = (
+                salesperson.name
+                if salesperson.active
+                else f"{salesperson.name} (Inactivo)"
+            )
+            self.salesperson_filter.addItem(label, salesperson.id)
+        self.salesperson_filter.activated.connect(self._on_salesperson_changed)
+        salesperson_row.addWidget(self.salesperson_filter, 1)
+        layout.addLayout(salesperson_row)
+
+        self.totals_label = QLabel("")
+        self.totals_label.setObjectName("customerLedgerTotalsLabel")
+        self.totals_label.setWordWrap(True)
+        layout.addWidget(self.totals_label)
+
+        self.clients_table = QTableWidget(0, 2)
         self.clients_table.setObjectName("customerLedgerClientsTable")
-        self.clients_table.setHorizontalHeaderLabels(["Cliente", "Saldo", "Movs."])
+        self.clients_table.setHorizontalHeaderLabels(["Cliente", "Saldo"])
         self.clients_table.verticalHeader().setVisible(False)
         self.clients_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -154,16 +219,15 @@ class CustomerLedgerPage(QWidget):
         self.clients_table.setShowGrid(False)
         header_view = self.clients_table.horizontalHeader()
         header_view.setSectionResizeMode(0, QHeaderView.Stretch)
-        header_view.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header_view.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.clients_table.verticalHeader().setDefaultSectionSize(28)
+        # La columna Saldo lleva ancho fijo a proposito. Con ResizeToContents Qt
+        # mide el texto de cada celda en cada render para calcular el ancho: con la
+        # cartera completa (~872 clientes) la pantalla se bloqueaba casi 6 s.
+        # El ancho cubre importes de 10 o mas digitos sin truncar. Ver issue #602.
+        header_view.setSectionResizeMode(1, QHeaderView.Interactive)
+        self.clients_table.setColumnWidth(1, 150)
+        self.clients_table.verticalHeader().setDefaultSectionSize(46)
         self.clients_table.currentCellChanged.connect(self._on_client_selected)
         layout.addWidget(self.clients_table, 1)
-
-        self.totals_label = QLabel("")
-        self.totals_label.setObjectName("customerLedgerTotalsLabel")
-        self.totals_label.setWordWrap(True)
-        layout.addWidget(self.totals_label)
         return panel
 
     def _build_detail_panel(self) -> QWidget:
@@ -173,16 +237,42 @@ class CustomerLedgerPage(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        header_row = QHBoxLayout()
+        header_card = QFrame()
+        header_card.setObjectName("customerLedgerHeaderCard")
+        header_card.setFrameShape(QFrame.StyledPanel)
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(18, 14, 18, 14)
+        header_layout.setSpacing(7)
+
         self.detail_header = QLabel("Seleccione un cliente de la izquierda.")
         self.detail_header.setObjectName("customerLedgerDetailHeader")
-        header_row.addWidget(self.detail_header, 1)
+        self.detail_header.setWordWrap(True)
+        header_layout.addWidget(self.detail_header)
 
-        self.register_payment_button = QPushButton("Registrar pago")
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(18)
+        self.detail_balance = QLabel("$ 0,00")
+        self.detail_balance.setObjectName("customerLedgerBalanceValue")
+        summary_row.addWidget(self.detail_balance)
+        self.detail_movements = QLabel("0 movimientos")
+        self.detail_movements.setObjectName("customerLedgerMovementsValue")
+        summary_row.addWidget(self.detail_movements)
+        summary_row.addStretch(1)
+        header_layout.addLayout(summary_row)
+        layout.addWidget(header_card)
+
+        primary_actions = QHBoxLayout()
+        self.register_payment_button = QPushButton("＋  Registrar pago")
         self.register_payment_button.setObjectName("customerLedgerRegisterPaymentButton")
         self.register_payment_button.setEnabled(False)
         self.register_payment_button.clicked.connect(self._on_register_payment)
-        header_row.addWidget(self.register_payment_button)
+        primary_actions.addWidget(self.register_payment_button)
+
+        self.create_manual_budget_button = QPushButton("Nuevo presupuesto")
+        self.create_manual_budget_button.setObjectName("customerLedgerCreateManualBudgetButton")
+        self.create_manual_budget_button.setEnabled(False)
+        self.create_manual_budget_button.clicked.connect(self._on_create_manual_budget)
+        primary_actions.addWidget(self.create_manual_budget_button)
 
         self.register_manual_debit_button = QPushButton("Registrar débito")
         self.register_manual_debit_button.setObjectName("customerLedgerRegisterManualDebitButton")
@@ -190,7 +280,7 @@ class CustomerLedgerPage(QWidget):
             self.register_manual_debit_callback is not None
         )
         self.register_manual_debit_button.clicked.connect(self._on_register_manual_debit)
-        header_row.addWidget(self.register_manual_debit_button)
+        primary_actions.addWidget(self.register_manual_debit_button)
 
         self.register_manual_credit_button = QPushButton("Registrar crédito")
         self.register_manual_credit_button.setObjectName(
@@ -202,29 +292,101 @@ class CustomerLedgerPage(QWidget):
         self.register_manual_credit_button.clicked.connect(
             self._on_register_manual_credit
         )
-        header_row.addWidget(self.register_manual_credit_button)
+        primary_actions.addWidget(self.register_manual_credit_button)
 
+        self.view_detail_button = QPushButton("Ver detalle")
+        self.view_detail_button.setObjectName("customerLedgerViewDetailButton")
+        self.view_detail_button.setEnabled(False)
+        self.view_detail_button.setToolTip("Abrir el documento asociado al movimiento seleccionado")
+        self.view_detail_button.clicked.connect(self._on_open_document_detail)
+        primary_actions.addWidget(self.view_detail_button)
+
+        self.more_actions_button = QToolButton()
+        self.more_actions_button.setObjectName("customerLedgerMoreActionsButton")
+        self.more_actions_button.setText("Acciones  ▾")
+        self.more_actions_button.setToolTip("Imprimir, compartir o actuar sobre el movimiento seleccionado")
+        self.more_actions_button.setPopupMode(QToolButton.InstantPopup)
+
+        self.more_actions_menu = QMenu(self.more_actions_button)
+        self.more_actions_menu.setObjectName("customerLedgerMoreActionsMenu")
+
+
+        self.more_actions_menu.addSection("Extracto")
+        self.print_statement_action = self.more_actions_menu.addAction("Imprimir")
+        self.whatsapp_statement_action = self.more_actions_menu.addAction("Enviar por WhatsApp")
+        self.email_statement_action = self.more_actions_menu.addAction("Enviar por correo")
+
+        self.more_actions_menu.addSeparator()
+        self.more_actions_menu.addSection("Resumen del vendedor")
+        self.portfolio_print_action = self.more_actions_menu.addAction(
+            "Resumen de cartera (PDF)"
+        )
+        self.portfolio_whatsapp_action = self.more_actions_menu.addAction(
+            "Enviar resumen por WhatsApp"
+        )
+        self.portfolio_email_action = self.more_actions_menu.addAction(
+            "Enviar resumen por correo"
+        )
+
+        self.more_actions_menu.addSeparator()
+        self.more_actions_menu.addSection("Movimiento seleccionado")
+        self.document_detail_action = self.more_actions_menu.addAction("Ver detalle")
+        self.history_action = self.more_actions_menu.addAction("Ver historial")
+        self.whatsapp_budget_action = self.more_actions_menu.addAction(
+            "Enviar presupuesto por WhatsApp"
+        )
+        self.print_budget_action = self.more_actions_menu.addAction("Reimprimir presupuesto")
+        self.print_receipt_action = self.more_actions_menu.addAction("Imprimir recibo")
+        self.annul_payment_action = self.more_actions_menu.addAction("Anular pago")
+        self.reverse_manual_debit_action = self.more_actions_menu.addAction("Reversar débito")
+        self.reverse_manual_credit_action = self.more_actions_menu.addAction("Reversar crédito")
+        self.print_statement_action.triggered.connect(self._on_print_statement)
+        self.whatsapp_statement_action.triggered.connect(self._on_whatsapp_statement)
+        self.email_statement_action.triggered.connect(self._on_email_statement)
+        self.portfolio_print_action.triggered.connect(self._on_portfolio_print)
+        self.portfolio_whatsapp_action.triggered.connect(self._on_portfolio_whatsapp)
+        self.portfolio_email_action.triggered.connect(self._on_portfolio_email)
+        self.document_detail_action.triggered.connect(self._on_open_document_detail)
+        self.history_action.triggered.connect(self._on_history)
+        self.whatsapp_budget_action.triggered.connect(self._on_whatsapp_budget)
+        self.print_budget_action.triggered.connect(self._on_print_budget)
+        self.print_receipt_action.triggered.connect(self._on_print_receipt)
+        self.annul_payment_action.triggered.connect(self._on_annul_payment)
+        self.reverse_manual_debit_action.triggered.connect(self._on_reverse_manual_debit)
+        self.reverse_manual_credit_action.triggered.connect(self._on_reverse_manual_credit)
+        self.more_actions_button.setMenu(self.more_actions_menu)
+        primary_actions.addStretch(1)
+        primary_actions.addWidget(self.more_actions_button)
+        layout.addLayout(primary_actions)
+
+        legacy_actions = QWidget()
+        legacy_actions.setObjectName("customerLedgerLegacyActions")
+        legacy_actions.hide()
+        legacy_layout = QVBoxLayout(legacy_actions)
+        legacy_layout.setContentsMargins(0, 0, 0, 0)
+
+        statement_actions = QHBoxLayout()
         self.print_statement_button = QPushButton("Imprimir extracto")
         self.print_statement_button.setObjectName("customerLedgerPrintStatementButton")
         self.print_statement_button.setEnabled(False)
         self.print_statement_button.clicked.connect(self._on_print_statement)
-        header_row.addWidget(self.print_statement_button)
+        statement_actions.addWidget(self.print_statement_button)
 
-        self.whatsapp_statement_button = QPushButton("Abrir WhatsApp")
+        self.whatsapp_statement_button = QPushButton("Enviar por WhatsApp")
         self.whatsapp_statement_button.setObjectName("customerLedgerWhatsAppStatementButton")
         self.whatsapp_statement_button.setEnabled(False)
         self.whatsapp_statement_button.clicked.connect(self._on_whatsapp_statement)
-        header_row.addWidget(self.whatsapp_statement_button)
+        statement_actions.addWidget(self.whatsapp_statement_button)
 
         self.email_statement_button = QPushButton("Enviar por correo")
         self.email_statement_button.setObjectName("customerLedgerEmailStatementButton")
         self.email_statement_button.setEnabled(False)
         self.email_statement_button.clicked.connect(self._on_email_statement)
-        header_row.addWidget(self.email_statement_button)
-        layout.addLayout(header_row)
+        statement_actions.addWidget(self.email_statement_button)
+        statement_actions.addStretch(1)
+        legacy_layout.addLayout(statement_actions)
 
         payment_actions = QHBoxLayout()
-        payment_actions.addStretch(1)
         self.print_receipt_button = QPushButton("Imprimir recibo")
         self.print_receipt_button.setObjectName("customerLedgerPrintReceiptButton")
         self.print_receipt_button.setEnabled(False)
@@ -255,41 +417,56 @@ class CustomerLedgerPage(QWidget):
             self._on_reverse_manual_credit
         )
         payment_actions.addWidget(self.reverse_manual_credit_button)
-        layout.addLayout(payment_actions)
+        payment_actions.addStretch(1)
+        legacy_layout.addLayout(payment_actions)
+        layout.addWidget(legacy_actions)
 
-        # Highlighted balance card
-        balance_card = QFrame()
-        balance_card.setObjectName("customerLedgerBalanceCard")
-        balance_card.setFrameShape(QFrame.StyledPanel)
-        balance_layout = QHBoxLayout(balance_card)
-        balance_layout.setContentsMargins(16, 12, 16, 12)
-        balance_layout.setSpacing(24)
+        # Filtro de periodo de los movimientos (#613). Mismo patron que las
+        # consultas de cobranzas/dashboard: checkbox que habilita cada fecha.
+        movements_filter = QHBoxLayout()
+        movements_filter.setContentsMargins(0, 4, 0, 0)
+        movements_filter.setSpacing(6)
+        movements_filter.addWidget(QLabel("Movimientos:"))
 
-        saldo_block = QVBoxLayout()
-        saldo_label = QLabel("Saldo actual")
-        saldo_label.setObjectName("customerLedgerBalanceLabel")
-        self.detail_balance = QLabel("$ 0,00")
-        self.detail_balance.setObjectName("customerLedgerBalanceValue")
-        saldo_block.addWidget(saldo_label)
-        saldo_block.addWidget(self.detail_balance)
-        balance_layout.addLayout(saldo_block)
+        self.movement_date_from_enabled = QCheckBox("Desde")
+        self.movement_date_from_enabled.setObjectName("customerLedgerMovementsFromEnabled")
+        self.movement_date_from = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.movement_date_from.setObjectName("customerLedgerMovementsFrom")
+        self.movement_date_from.setCalendarPopup(True)
+        self.movement_date_from.setDisplayFormat("dd/MM/yyyy")
+        self.movement_date_from.setEnabled(False)
 
-        movimientos_block = QVBoxLayout()
-        movimientos_label = QLabel("Movimientos")
-        movimientos_label.setObjectName("customerLedgerMovementsLabel")
-        self.detail_movements = QLabel("0")
-        self.detail_movements.setObjectName("customerLedgerMovementsValue")
-        movimientos_block.addWidget(movimientos_label)
-        movimientos_block.addWidget(self.detail_movements)
-        balance_layout.addLayout(movimientos_block)
+        self.movement_date_to_enabled = QCheckBox("Hasta")
+        self.movement_date_to_enabled.setObjectName("customerLedgerMovementsToEnabled")
+        self.movement_date_to = QDateEdit(QDate.currentDate())
+        self.movement_date_to.setObjectName("customerLedgerMovementsTo")
+        self.movement_date_to.setCalendarPopup(True)
+        self.movement_date_to.setDisplayFormat("dd/MM/yyyy")
+        self.movement_date_to.setEnabled(False)
 
-        balance_layout.addStretch(1)
-        layout.addWidget(balance_card)
+        for widget in (
+            self.movement_date_from,
+            self.movement_date_to,
+        ):
+            # Ancho suficiente para "dd/MM/yyyy" mas el boton del calendario.
+            widget.setFixedWidth(126)
 
-        self.movements_table = QTableWidget(0, 6)
+        movements_filter.addWidget(self.movement_date_from_enabled)
+        movements_filter.addWidget(self.movement_date_from)
+        movements_filter.addWidget(self.movement_date_to_enabled)
+        movements_filter.addWidget(self.movement_date_to)
+        movements_filter.addStretch(1)
+        layout.addLayout(movements_filter)
+
+        self.movement_date_from_enabled.toggled.connect(self._on_movement_date_toggled)
+        self.movement_date_to_enabled.toggled.connect(self._on_movement_date_toggled)
+        self.movement_date_from.dateChanged.connect(self._on_movement_date_changed)
+        self.movement_date_to.dateChanged.connect(self._on_movement_date_changed)
+
+        self.movements_table = QTableWidget(0, 7)
         self.movements_table.setObjectName("customerLedgerMovementsTable")
         self.movements_table.setHorizontalHeaderLabels(
-            ["Fecha", "Tipo", "Referencia", "Descripción", "Importe", "Saldo"]
+            ["Fecha", "Tipo", "Referencia", "Descripción", "Debe", "Haber", "Saldo"]
         )
         movements_header = self.movements_table.horizontalHeader()
         movements_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -298,6 +475,7 @@ class CustomerLedgerPage(QWidget):
         movements_header.setSectionResizeMode(3, QHeaderView.Stretch)
         movements_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         movements_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        movements_header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.movements_table.verticalHeader().setVisible(False)
         self.movements_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.movements_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -305,6 +483,7 @@ class CustomerLedgerPage(QWidget):
         self.movements_table.setShowGrid(False)
         self.movements_table.verticalHeader().setDefaultSectionSize(26)
         self.movements_table.currentCellChanged.connect(self._on_movement_selected)
+        self.movements_table.cellDoubleClicked.connect(self._on_open_document_detail)
         layout.addWidget(self.movements_table, 1)
 
         self.empty_label = QLabel(
@@ -316,14 +495,90 @@ class CustomerLedgerPage(QWidget):
         layout.addWidget(self.empty_label)
         return panel
 
+    def _current_client_id(self) -> int | None:
+        current = self.clients_table.currentRow()
+        if current < 0:
+            return None
+        item = self.clients_table.item(current, 0)
+        return item.data(Qt.UserRole) if item is not None else None
+
     def _on_search_changed(self, *_args) -> None:
-        self.refresh()
+        # El filtro trabaja sobre el snapshot ya cargado. No recalcular saldos
+        # ni volver a MySQL por cada tecla.
+        self._render_clients(previous_id=self._current_client_id())
+
+    def _on_movement_date_toggled(self, *_args) -> None:
+        """Habilita cada fecha cuando se marca su checkbox."""
+        self.movement_date_from.setEnabled(self.movement_date_from_enabled.isChecked())
+        self.movement_date_to.setEnabled(self.movement_date_to_enabled.isChecked())
+        self._render_movements()
+
+    def _on_movement_date_changed(self, *_args) -> None:
+        # Filtrar es repintar la grilla sobre el cache: no vuelve a la base,
+        # igual que la busqueda y el vendedor con la fotografia de cartera.
+        self._render_movements()
+
+    def _movement_date_bounds(self) -> tuple[date | None, date | None]:
+        """Periodo activo. `None` en cada lado cuando ese lado no filtra."""
+        if not hasattr(self, "movement_date_from_enabled"):
+            return None, None
+        lower = _py_date(self.movement_date_from) if self.movement_date_from_enabled.isChecked() else None
+        upper = _py_date(self.movement_date_to) if self.movement_date_to_enabled.isChecked() else None
+        return lower, upper
+
+    def _visible_movements(
+        self,
+        movements: list[ClientAccountMovement],
+    ) -> list[tuple[ClientAccountMovement, int]]:
+        """`(movimiento, indice_original)` de lo que entra en el filtro.
+
+        Se devuelve el indice original porque el saldo acumulado ya esta
+        calculado: filtrar no puede recalcularlo ni correrlo desde cero.
+        """
+        lower, upper = self._movement_date_bounds()
+        if lower is None and upper is None:
+            return [(movement, index) for index, movement in enumerate(movements)]
+        visible: list[tuple[ClientAccountMovement, int]] = []
+        for index, movement in enumerate(movements):
+            moment = _movement_date_for_filter(movement)
+            if moment is None:
+                continue
+            if lower is not None and moment < lower:
+                continue
+            if upper is not None and moment > upper:
+                continue
+            visible.append((movement, index))
+        return visible
+
+    def _on_salesperson_changed(self, *_args) -> None:
+        self._direct_client_id = None
+        # El vendedor filtra la fotografía de cartera ya cargada. No volver a
+        # ejecutar agregaciones sobre MySQL por cada cambio de vendedor.
+        self._render_clients(previous_id=self._current_client_id())
+        # El resumen se habilita o se bloquea segun el vendedor del filtro.
+        self._sync_more_actions()
+
+    def _salesperson_filter_values(self) -> tuple[int | None, bool]:
+        if not hasattr(self, "salesperson_filter"):
+            return None, False
+        value = self.salesperson_filter.currentData()
+        if value == "unassigned":
+            return None, True
+        if isinstance(value, int):
+            return value, False
+        return None, False
 
     def _filter_balances(self, balances: list[dict]) -> list[dict]:
         query = self.search_input.text().strip().lower() if hasattr(self, "search_input") else ""
         only_balance = self.only_with_balance.isChecked() if hasattr(self, "only_with_balance") else False
+        salesperson_id, unassigned = self._salesperson_filter_values()
         filtered: list[dict] = []
         for entry in balances:
+            entry_salesperson_id = entry.get("salesperson_id")
+            if unassigned and entry_salesperson_id is not None:
+                continue
+            if salesperson_id is not None and entry_salesperson_id != salesperson_id:
+                continue
             if only_balance and abs(entry["balance"]) <= 0.01:
                 continue
             if query and query not in entry["client"].name.lower():
@@ -332,15 +587,12 @@ class CustomerLedgerPage(QWidget):
         return filtered
 
     def refresh(self) -> None:
-        previous_id = None
-        current = self.clients_table.currentRow()
-        if current >= 0:
-            item = self.clients_table.item(current, 0)
-            if item is not None:
-                previous_id = item.data(Qt.UserRole)
-        self.clients_table.blockSignals(True)
-        self.clients_table.clearContents()
-        all_balances = client_balances()
+        previous_id = self._current_client_id()
+        # Una sola fotografía completa: vendedor/búsqueda/saldo se filtran
+        # después en memoria. Refresh queda reservado para cambios reales de
+        # movimientos o clientes.
+        all_balances = client_portfolio_rows()
+
         if self._direct_client_id is not None and not any(
             entry["client"].id == self._direct_client_id for entry in all_balances
         ):
@@ -348,12 +600,31 @@ class CustomerLedgerPage(QWidget):
             if direct_client is not None:
                 all_balances.insert(
                     0,
-                    {"client": direct_client, "balance": 0.0, "movements": 0},
+                    {
+                        "client": direct_client,
+                        "salesperson_id": direct_client.salesperson_id,
+                        "balance": 0.0,
+                        "movements": 0,
+                        "overdue": 0.0,
+                        "due_7": 0.0,
+                    },
                 )
-        balances = self._filter_balances(all_balances)
+
+        self._all_balances = all_balances
+        # Un refresh completo significa que los movimientos pudieron cambiar.
+        self._detail_client_id = None
+        self._render_clients(previous_id=previous_id)
+
+    def _render_clients(self, *, previous_id: int | None = None) -> None:
+        self.clients_table.blockSignals(True)
+        self.clients_table.clearContents()
+        balances = self._filter_balances(self._all_balances)
         self.clients_table.setRowCount(len(balances))
         total_to_collect = 0.0
+        total_overdue = 0.0
+        total_due_7 = 0.0
         clients_with_balance = 0
+
         for row_index, entry in enumerate(balances):
             client = entry["client"]
             balance = entry["balance"]
@@ -362,10 +633,16 @@ class CustomerLedgerPage(QWidget):
                 clients_with_balance += 1
             if balance > 0.01:
                 total_to_collect += balance
+            total_overdue += float(entry.get("overdue", 0.0) or 0.0)
+            total_due_7 += float(entry.get("due_7", 0.0) or 0.0)
 
-            name_cell = QTableWidgetItem(client.name)
+            movement_label = "movimiento" if movements == 1 else "movimientos"
+            name_cell = QTableWidgetItem(
+                f"{client.name}\n{movements} {movement_label}"
+            )
             name_cell.setData(Qt.UserRole, client.id)
             name_cell.setToolTip(client.name)
+            name_cell.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.clients_table.setItem(row_index, 0, name_cell)
 
             balance_text = f"${balance:,.2f}"
@@ -375,17 +652,13 @@ class CustomerLedgerPage(QWidget):
             balance_cell.setToolTip(balance_text)
             self.clients_table.setItem(row_index, 1, balance_cell)
 
-            movements_cell = QTableWidgetItem(str(movements))
-            movements_cell.setTextAlignment(Qt.AlignCenter)
-            movements_cell.setToolTip(f"{movements} movimiento(s)")
-            self.clients_table.setItem(row_index, 2, movements_cell)
-
-        # Totals footer (sobre el conjunto filtrado para que coincida con la tabla)
         suffix = ""
-        if len(balances) != len(all_balances):
-            suffix = f"  ·  (de {len(all_balances)} totales)"
+        if len(balances) != len(self._all_balances):
+            suffix = f"  ·  (de {len(self._all_balances)} totales)"
         self.totals_label.setText(
-            f"Total a cobrar: <b>${total_to_collect:,.2f}</b>  ·  "
+            f"Cartera: <b>${total_to_collect:,.2f}</b>  ·  "
+            f"Vencido: <b>${total_overdue:,.2f}</b>  ·  "
+            f"Próx. 7 días: <b>${total_due_7:,.2f}</b><br>"
             f"Clientes con saldo: <b>{clients_with_balance}</b>  ·  "
             f"Total clientes: <b>{len(balances)}</b>{suffix}"
         )
@@ -394,25 +667,37 @@ class CustomerLedgerPage(QWidget):
             target_row = 0
             if previous_id is not None:
                 for index in range(self.clients_table.rowCount()):
-                    if self.clients_table.item(index, 0).data(Qt.UserRole) == previous_id:
+                    item = self.clients_table.item(index, 0)
+                    if item is not None and item.data(Qt.UserRole) == previous_id:
                         target_row = index
                         break
             self.clients_table.setCurrentCell(target_row, 0)
+
         self.clients_table.blockSignals(False)
         if self.clients_table.currentRow() >= 0:
             self._on_client_selected(self.clients_table.currentRow(), 0, -1, -1)
         else:
             self._clear_detail()
 
+    def _client_from_cache(self, client_id: int) -> Client | None:
+        for entry in self._all_balances:
+            client = entry["client"]
+            if client.id == client_id:
+                return client
+        return None
+
     def select_client(self, client: Client) -> None:
         """Show a client immediately when navigation originates in Clientes."""
         self._direct_client_id = client.id
         self.search_input.blockSignals(True)
         self.only_with_balance.blockSignals(True)
+        self.salesperson_filter.blockSignals(True)
         self.search_input.clear()
         self.only_with_balance.setChecked(False)
+        self.salesperson_filter.setCurrentIndex(0)
         self.search_input.blockSignals(False)
         self.only_with_balance.blockSignals(False)
+        self.salesperson_filter.blockSignals(False)
         self.refresh()
         for row in range(self.clients_table.rowCount()):
             item = self.clients_table.item(row, 0)
@@ -428,18 +713,53 @@ class CustomerLedgerPage(QWidget):
         if item is None:
             self._clear_detail()
             return
-        client = Client.get_by_id(item.data(Qt.UserRole))
+
+        client_id = item.data(Qt.UserRole)
+        # Filtrar/re-renderizar la lista no debe volver a cargar el detalle si
+        # el cliente seleccionado sigue siendo el mismo.
+        if self._detail_client_id == client_id:
+            return
+
+        client = self._client_from_cache(client_id)
+        if client is None:
+            client = Client.get_by_id(client_id)
+
         movements = movements_for_client(client)
         balances = running_balance(movements)
-        self.detail_header.setText(f"Detalle de cuenta corriente — {client.name}")
-        total = client_balance(client)
+        total = balances[-1] if balances else 0.0
+        self._detail_client_id = client_id
+        self._detail_movements_cache = movements
+        self._detail_balances_cache = balances
+
+        self.detail_header.setText(client.name)
         self.detail_balance.setText(f"${total:,.2f}")
         _apply_color_to_label(self.detail_balance, _color_for_balance(total))
-        self.detail_movements.setText(str(len(movements)))
-        self.movements_table.setRowCount(len(movements))
-        self.movements_table.setVisible(bool(movements))
-        self.empty_label.setVisible(not bool(movements))
-        for row_index, movement in enumerate(movements):
+        self._render_movements()
+
+    def _render_movements(self) -> None:
+        """Dibuja la grilla aplicando el filtro de periodo sobre lo ya cargado.
+
+        El filtro acota QUE FILAS se ven, nunca recalcula el saldo: la columna
+        Saldo de cada fila es el acumulado real del cliente desde su origen,
+        asi que el saldo del encabezado no se mueve al filtrar.
+        """
+        movements = self._detail_movements_cache
+        balances = self._detail_balances_cache
+        visible = self._visible_movements(movements)
+
+        if len(visible) == len(movements):
+            movement_label = "movimiento" if len(movements) == 1 else "movimientos"
+            self.detail_movements.setText(f"{len(movements)} {movement_label}")
+        else:
+            movement_label = "movimiento" if len(visible) == 1 else "movimientos"
+            self.detail_movements.setText(
+                f"{len(visible)} de {len(movements)} {movement_label}"
+            )
+        self.movements_table.setRowCount(len(visible))
+        self.movements_table.setVisible(bool(visible))
+        self.empty_label.setVisible(not bool(visible))
+        for row_index, (movement, movement_index) in enumerate(visible):
+            balance = balances[movement_index]
             type_label = MOVEMENT_TYPE_LABELS.get(movement.movement_type, movement.movement_type)
             if (
                 movement.movement_type == "payment"
@@ -454,26 +774,31 @@ class CustomerLedgerPage(QWidget):
                 reference = movement.payment.receipt_number
             elif movement.reference:
                 reference = movement.reference
-            importe = movement.total_amount
-            importe_text = f"${importe:,.2f}"
-            saldo_text = f"${balances[row_index]:,.2f}"
+            amount = float(movement.total_amount or 0)
+            debit = amount if amount > 0 else 0.0
+            credit = abs(amount) if amount < 0 else 0.0
+            debit_text = f"${debit:,.2f}" if debit else ""
+            credit_text = f"${credit:,.2f}" if credit else ""
+            saldo_text = f"${balance:,.2f}"
             values = (
                 _display_movement_date(movement),
                 type_label,
                 reference,
                 _display_description(movement),
-                importe_text,
+                debit_text,
+                credit_text,
                 saldo_text,
             )
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if column in (4, 5):
+                if column in (4, 5, 6):
                     cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if column == 4:
-                    cell.setForeground(QBrush(_color_for_balance(importe)))
-                if column == 5:
-                    cell.setForeground(QBrush(_color_for_balance(balances[row_index])))
-                # Tooltip con texto completo para todas las celdas
+                if column == 4 and debit:
+                    cell.setForeground(QBrush(SALDO_COLOR_OWES))
+                if column == 5 and credit:
+                    cell.setForeground(QBrush(SALDO_COLOR_CREDIT))
+                if column == 6:
+                    cell.setForeground(QBrush(_color_for_balance(balance)))
                 cell.setToolTip(value)
                 if (
                     column == 0
@@ -485,6 +810,9 @@ class CustomerLedgerPage(QWidget):
                     cell.setData(Qt.UserRole + 1, movement.id)
                 self.movements_table.setItem(row_index, column, cell)
         self.register_payment_button.setEnabled(self.register_payment_callback is not None)
+        self.create_manual_budget_button.setEnabled(
+            self.create_manual_budget_callback is not None
+        )
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
@@ -494,18 +822,19 @@ class CustomerLedgerPage(QWidget):
         self.print_statement_button.setEnabled(self.print_statement_callback is not None)
         self.whatsapp_statement_button.setEnabled(self.whatsapp_statement_callback is not None)
         self.email_statement_button.setEnabled(self.email_statement_callback is not None)
+        self._sync_more_actions()
         self._update_payment_actions()
         self._update_manual_debit_action()
         self._update_manual_credit_action()
 
     def _selected_client(self) -> Client | None:
-        current = self.clients_table.currentRow()
-        if current < 0:
+        client_id = self._current_client_id()
+        if client_id is None:
             return None
-        item = self.clients_table.item(current, 0)
-        if item is None:
-            return None
-        return Client.get_by_id(item.data(Qt.UserRole))
+        client = self._client_from_cache(client_id)
+        if client is not None:
+            return client
+        return Client.get_or_none(Client.id == client_id)
 
     def _on_print_statement(self) -> None:
         if self.print_statement_callback is None:
@@ -529,14 +858,89 @@ class CustomerLedgerPage(QWidget):
         if client is not None:
             self.email_statement_callback(client)
 
+    def portfolio_summary(self) -> dict | None:
+        """Datos del resumen de cartera tal como se ven en pantalla.
+
+        Reutiliza la fotografía ya cargada y los filtros visibles (búsqueda,
+        "Solo con saldo" y vendedor) para que el PDF respete lo que el usuario
+        está viendo sin volver a agregar saldos.
+        """
+        if not hasattr(self, "salesperson_filter"):
+            return None
+        current = self.salesperson_filter.currentData()
+        if current is None:
+            return None
+        salesperson_id, unassigned = self._salesperson_filter_values()
+        salesperson = None
+        if salesperson_id is not None:
+            salesperson = Salesperson.get_or_none(Salesperson.id == salesperson_id)
+            if salesperson is None:
+                return None
+        if unassigned:
+            label, slug = "Sin asignar", "sin_asignar"
+        elif salesperson is not None:
+            label, slug = salesperson.name or "Vendedor", None
+        else:
+            label, slug = "Todos los vendedores", "todos"
+        return {
+            "salesperson": salesperson,
+            "rows": self._filter_balances(self._all_balances),
+            "label": label,
+            "slug": slug,
+            "report_type": self._portfolio_report_type,
+        }
+
+    def _ask_portfolio_report_type(self) -> str | None:
+        """Pregunta Resumido o Detallado. `None` si el operador cancela."""
+        choice, accepted = QInputDialog.getItem(
+            self,
+            "Tipo de reporte",
+            "Tipo de reporte:",
+            REPORT_TYPE_CHOICES,
+            0,
+            False,
+        )
+        if not accepted:
+            return None
+        return REPORT_TYPE_BY_LABEL.get(choice, REPORT_TYPE_SUMMARY)
+
+    def _on_portfolio_print(self) -> None:
+        if self.portfolio_print_callback is None:
+            return
+        report_type = self._ask_portfolio_report_type()
+        if report_type is None:
+            return
+        self._portfolio_report_type = report_type
+        summary = self.portfolio_summary()
+        if summary is not None:
+            self.portfolio_print_callback(summary)
+
+    def _on_portfolio_whatsapp(self) -> None:
+        if self.portfolio_whatsapp_callback is None:
+            return
+        summary = self.portfolio_summary()
+        if summary is not None and summary["salesperson"] is not None:
+            self.portfolio_whatsapp_callback(summary)
+
+    def _on_portfolio_email(self) -> None:
+        if self.portfolio_email_callback is None:
+            return
+        summary = self.portfolio_summary()
+        if summary is not None and summary["salesperson"] is not None:
+            self.portfolio_email_callback(summary)
+
     def _clear_detail(self) -> None:
+        self._detail_client_id = None
+        self._detail_movements_cache = []
+        self._detail_balances_cache = []
         self.detail_header.setText("Seleccione un cliente de la izquierda.")
         self.detail_balance.setText("$ 0,00")
         _apply_color_to_label(self.detail_balance, SALDO_COLOR_ZERO)
-        self.detail_movements.setText("0")
+        self.detail_movements.setText("0 movimientos")
         self.movements_table.setRowCount(0)
         self.empty_label.hide()
         self.register_payment_button.setEnabled(False)
+        self.create_manual_budget_button.setEnabled(False)
         self.register_manual_debit_button.setEnabled(
             self.register_manual_debit_callback is not None
         )
@@ -550,6 +954,64 @@ class CustomerLedgerPage(QWidget):
         self.annul_payment_button.setEnabled(False)
         self.reverse_manual_debit_button.setEnabled(False)
         self.reverse_manual_credit_button.setEnabled(False)
+        self.view_detail_button.setEnabled(False)
+        self._sync_more_actions()
+
+    def _sync_more_actions(self) -> None:
+        if not hasattr(self, "more_actions_button"):
+            return
+        has_client = self._selected_client() is not None
+        self.print_statement_action.setEnabled(
+            has_client and self.print_statement_callback is not None
+        )
+        self.whatsapp_statement_action.setEnabled(
+            has_client and self.whatsapp_statement_callback is not None
+        )
+        self.email_statement_action.setEnabled(
+            has_client and self.email_statement_callback is not None
+        )
+        summary = self.portfolio_summary() if hasattr(self, "salesperson_filter") else None
+        salesperson = summary["salesperson"] if summary is not None else None
+        can_export_summary = summary is not None and self.portfolio_print_callback is not None
+        self.portfolio_print_action.setEnabled(can_export_summary)
+        # Sin un vendedor unico no hay destinatario: se puede imprimir, no enviar.
+        self.portfolio_whatsapp_action.setEnabled(
+            salesperson is not None and self.portfolio_whatsapp_callback is not None
+        )
+        self.portfolio_email_action.setEnabled(
+            salesperson is not None and self.portfolio_email_callback is not None
+        )
+        movement = self._selected_movement()
+        can_resolve_budget = (
+            movement is not None
+            and not movement.is_reversal
+            and (
+                movement.budget_id is not None
+                or movement.load_order_id is not None
+                or str(movement.source_ref or "").startswith("Budget:")
+            )
+        )
+        can_view_document = LedgerDocumentDetailDialog.supports(movement)
+        self.view_detail_button.setEnabled(can_view_document)
+        self.document_detail_action.setEnabled(can_view_document)
+        self.history_action.setEnabled(
+            FinancialHistoryDialog.supports(movement)
+        )
+        self.whatsapp_budget_action.setEnabled(
+            can_resolve_budget and self.whatsapp_budget_callback is not None
+        )
+        self.print_budget_action.setEnabled(
+            can_resolve_budget and self.print_budget_callback is not None
+        )
+        self.print_receipt_action.setEnabled(self.print_receipt_button.isEnabled())
+        self.annul_payment_action.setVisible(self.can_annul_payments)
+        self.annul_payment_action.setEnabled(self.annul_payment_button.isEnabled())
+        self.reverse_manual_debit_action.setEnabled(
+            self.reverse_manual_debit_button.isEnabled()
+        )
+        self.reverse_manual_credit_action.setEnabled(
+            self.reverse_manual_credit_button.isEnabled()
+        )
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
@@ -558,6 +1020,15 @@ class CustomerLedgerPage(QWidget):
         if client is None:
             return
         self.register_payment_callback(client)
+        self.refresh()
+
+    def _on_create_manual_budget(self) -> None:
+        if self.create_manual_budget_callback is None:
+            return
+        client = self._selected_client()
+        if client is None:
+            return
+        self.create_manual_budget_callback(client)
         self.refresh()
 
     def _on_register_manual_debit(self) -> None:
@@ -619,6 +1090,7 @@ class CustomerLedgerPage(QWidget):
             and not has_reversal
             and self.reverse_manual_debit_callback is not None
         )
+        self._sync_more_actions()
 
     def _update_manual_credit_action(self) -> None:
         movement = self._selected_movement()
@@ -640,6 +1112,7 @@ class CustomerLedgerPage(QWidget):
             and not has_reversal
             and self.reverse_manual_credit_callback is not None
         )
+        self._sync_more_actions()
 
     def _update_payment_actions(self) -> None:
         payment = self._selected_payment()
@@ -652,6 +1125,35 @@ class CustomerLedgerPage(QWidget):
             and self.can_annul_payments
             and self.annul_payment_callback is not None
         )
+        self._sync_more_actions()
+
+    def _on_open_document_detail(self, *_args) -> None:
+        movement = self._selected_movement()
+        if not LedgerDocumentDetailDialog.supports(movement):
+            return
+        LedgerDocumentDetailDialog(movement, self).exec_()
+
+    def _on_history(self) -> None:
+        movement = self._selected_movement()
+        if not FinancialHistoryDialog.supports(movement):
+            return
+        FinancialHistoryDialog(movement, self).exec_()
+
+    def _on_whatsapp_budget(self) -> None:
+        if self.whatsapp_budget_callback is None:
+            return
+        movement = self._selected_movement()
+        if movement is None or movement.is_reversal:
+            return
+        self.whatsapp_budget_callback(movement)
+
+    def _on_print_budget(self) -> None:
+        if self.print_budget_callback is None:
+            return
+        movement = self._selected_movement()
+        if movement is None or movement.is_reversal:
+            return
+        self.print_budget_callback(movement)
 
     def _on_print_receipt(self) -> None:
         payment = self._selected_payment()
@@ -669,18 +1171,29 @@ class CustomerLedgerPage(QWidget):
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_debit_callback is None:
             return
-        self.reverse_manual_debit_callback(movement)
+        try:
+            self.reverse_manual_debit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar débito", str(exc))
+            return
         self.refresh()
 
     def _on_reverse_manual_credit(self) -> None:
         movement = self._selected_movement()
         if movement is None or self.reverse_manual_credit_callback is None:
             return
-        self.reverse_manual_credit_callback(movement)
+        try:
+            self.reverse_manual_credit_callback(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reversar crédito", str(exc))
+            return
         self.refresh()
 
 
 def _display_datetime(value) -> str:
+    value = as_datetime(value)
+    if value is None:
+        return ""
     if value.tzinfo is not None:
         value = value.astimezone()
     return value.strftime("%d/%m/%Y %H:%M")
@@ -690,6 +1203,24 @@ def _display_movement_date(movement: ClientAccountMovement) -> str:
     if movement.movement_date is not None:
         return movement.movement_date.strftime("%d/%m/%Y")
     return _display_datetime(movement.created_at)
+
+
+def _movement_date_for_filter(movement: ClientAccountMovement) -> date | None:
+    """Fecha con la que se decide si un movimiento entra en el filtro (#613).
+
+    Usa la misma regla que la columna Fecha: si no hay `movement_date`, manda
+    `created_at`. Si el filtro usara otra regla, los movimientos sin fecha
+    desaparecerian de un periodo que si los contiene.
+    """
+    if movement.movement_date is not None:
+        return movement.movement_date
+    created_at = movement.created_at
+    return None if created_at is None else created_at.date()
+
+
+def _py_date(widget: QDateEdit) -> date:
+    value = widget.date()
+    return date(value.year(), value.month(), value.day())
 
 
 def _display_description(movement: ClientAccountMovement) -> str:

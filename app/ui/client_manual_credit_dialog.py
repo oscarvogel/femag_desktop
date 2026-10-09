@@ -21,6 +21,7 @@ from app.services.client_manual_credit_service import (
     ClientManualCreditService,
 )
 from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.money import configure_money_input
 
 
 class ClientManualCreditDialog(QDialog):
@@ -66,10 +67,7 @@ class ClientManualCreditDialog(QDialog):
 
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("clientManualCreditAmountInput")
-        self.amount_input.setRange(0.01, 99999999.99)
-        self.amount_input.setDecimals(2)
-        self.amount_input.setSingleStep(100.0)
-        self.amount_input.setPrefix("$ ")
+        configure_money_input(self.amount_input, minimum=0.01)
         form.addRow("Importe", self.amount_input)
 
         self.description_input = QLineEdit()

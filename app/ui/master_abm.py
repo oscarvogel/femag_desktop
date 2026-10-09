@@ -35,6 +35,8 @@ from app.models.masters import (
     ClientEmail,
     Driver,
     Product,
+    ProductCostHistory,
+    Salesperson,
     TipoIVA,
     Truck,
     client_address_has_delivery_function,
@@ -50,7 +52,9 @@ from app.services.client_opening_balance_service import (
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
+from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
+from app.utils.datetime_utils import as_datetime
 
 
 AUTO_ABM_TECHNICAL_DEBT = (
@@ -147,7 +151,7 @@ class MasterTableController:
         item = self.table.item(self.table.currentRow(), 0)
         return item.data(Qt.UserRole) if item is not None else None
 
-    def refresh(self) -> None:
+    def refresh(self, *_signal_args) -> None:
         selected_id = self.selected_id()
         rows = filter_and_sort_master_rows(
             list(self.rows_fn()),
@@ -213,6 +217,10 @@ def build_master_abm_page(
         edit_button.setToolTip("El perfil actual no permite modificar este maestro.")
     actions.addWidget(new_button)
     actions.addWidget(edit_button)
+    cost_button = None
+    if config.title == "Productos" and PermissionService().is_administrator(user):
+        cost_button = _action_button("productCostButton", "Costo / historial", secondary=True)
+        actions.addWidget(cost_button)
     actions.addStretch(1)
     layout.addLayout(actions)
     table = QTableWidget(0, len(config.columns))
@@ -256,6 +264,21 @@ def build_master_abm_page(
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
+    if cost_button is not None:
+        def open_cost() -> None:
+            row_id = table_controller.selected_id()
+            if row_id is None:
+                feedback.show_warning("Seleccione un producto para cargar su costo.", focus_widget=table)
+                return
+            dialog = ProductCostDialog(
+                user=user,
+                product_id=row_id,
+                current_user=current_user,
+                parent=parent,
+            )
+            if dialog.exec_() == QDialog.Accepted:
+                feedback.show_success("Costo actualizado y registrado en el historial.")
+        cost_button.clicked.connect(open_cost)
     page.master_table_controller = table_controller
     page.refresh = table_controller.refresh
     table_controller.refresh()
@@ -266,12 +289,21 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
     return {
         "clients": MasterAbmConfig(
             "Clientes",
-            ["Nombre", "CUIT", "Lista", "Estado"],
+            ["Nombre", "CUIT", "Vendedor", "Lista", "Estado"],
             _client_rows,
             ClientEntryDialog,
             "newClientButton",
             "editClientButton",
             search_placeholder="Buscar clientes por nombre o CUIT...",
+        ),
+        "salespeople": MasterAbmConfig(
+            "Vendedores",
+            ["Nombre", "Teléfono", "Email", "Estado"],
+            _salesperson_rows,
+            SalespersonEntryDialog,
+            "newSalespersonButton",
+            "editSalespersonButton",
+            search_placeholder="Buscar vendedores por nombre, teléfono o email...",
         ),
         "addresses": MasterAbmConfig(
             "Domicilios",
@@ -352,7 +384,23 @@ class ClientEntryDialog(QDialog):
         self.iva_input.setObjectName("clientIvaInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("clientPhoneInput")
-        self.price_list_combo = _combo("clientPriceListInput", _price_list_options(), include_empty=False)
+        current_salesperson_id = None
+        if self.record_id is not None:
+            current = Client.get_or_none(Client.id == self.record_id)
+            current_salesperson_id = current.salesperson_id if current is not None else None
+        self.salesperson_combo = _combo(
+            "clientSalespersonInput",
+            _salesperson_options(include_id=current_salesperson_id),
+            include_empty=True,
+        )
+        self.price_list_combo = _combo(
+            "clientPriceListInput", _price_list_options(), include_empty=False
+        )
+        self.active_combo = _combo(
+            "clientActiveInput",
+            [(True, "Activo"), (False, "Inactivo")],
+            include_empty=False,
+        )
         form.addWidget(QLabel("Nombre"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("CUIT"), 1, 0)
@@ -361,8 +409,12 @@ class ClientEntryDialog(QDialog):
         form.addWidget(self.iva_input, 2, 1)
         form.addWidget(QLabel("Telefono"), 3, 0)
         form.addWidget(self.phone_input, 3, 1)
-        form.addWidget(QLabel("Lista de precios"), 4, 0)
-        form.addWidget(self.price_list_combo, 4, 1)
+        form.addWidget(QLabel("Vendedor"), 4, 0)
+        form.addWidget(self.salesperson_combo, 4, 1)
+        form.addWidget(QLabel("Lista de precios"), 5, 0)
+        form.addWidget(self.price_list_combo, 5, 1)
+        form.addWidget(QLabel("Estado"), 6, 0)
+        form.addWidget(self.active_combo, 6, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveClientButton", self._save)
@@ -370,13 +422,25 @@ class ClientEntryDialog(QDialog):
     def _load_record(self) -> None:
         if self.record_id is None:
             self.iva_input.setText("RI")
+            _set_combo(self.active_combo, True)
             return
         client = Client.get_by_id(self.record_id)
         self.name_input.setText(client.name)
         self.cuit_input.setText(client.cuit)
         self.iva_input.setText(client.iva_condition)
         self.phone_input.setText(client.phone or "")
+        if client.salesperson_id is not None:
+            _set_combo(self.salesperson_combo, client.salesperson_id)
         _set_combo(self.price_list_combo, client.lista_precios)
+        _set_combo(self.active_combo, bool(client.active))
+
+    def _selected_salesperson(self) -> Salesperson | None:
+        salesperson_id = combo_current_data(self.salesperson_combo)
+        return (
+            Salesperson.get_by_id(salesperson_id)
+            if salesperson_id is not None
+            else None
+        )
 
     def _save(self) -> None:
         name = self.name_input.text().strip()
@@ -390,16 +454,21 @@ class ClientEntryDialog(QDialog):
                 if not cuit
                 else self.iva_input
             )
-            self.feedback.show_warning("Complete nombre, CUIT e IVA.", focus_widget=focus_widget)
+            self.feedback.show_warning(
+                "Complete nombre, CUIT e IVA.", focus_widget=focus_widget
+            )
             return
         try:
+            salesperson = self._selected_salesperson()
+            service = ClientService(self.current_user)
             if self.record_id is None:
-                self.saved_record = ClientService(self.current_user).create_client(
+                self.saved_record = service.create_client(
                     name,
                     cuit,
                     iva,
                     phone=self.phone_input.text().strip() or None,
                     lista_precios=int(self.price_list_combo.currentData() or 1),
+                    salesperson=salesperson,
                 )
             else:
                 client = Client.get_by_id(self.record_id)
@@ -408,7 +477,10 @@ class ClientEntryDialog(QDialog):
                 client.iva_condition = iva
                 client.phone = self.phone_input.text().strip() or None
                 client.lista_precios = int(self.price_list_combo.currentData() or 1)
+                requested_active = bool(self.active_combo.currentData())
                 client.save()
+                service.set_salesperson(client, salesperson)
+                service.set_active(client, requested_active)
                 self.saved_record = client
             self.accept()
         except Exception as exc:
@@ -521,9 +593,7 @@ class ClientOpeningBalanceDialog(QDialog):
         )
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("clientOpeningBalanceAmountInput")
-        self.amount_input.setDecimals(2)
-        self.amount_input.setRange(0.01, 999_999_999.99)
-        self.amount_input.setPrefix("$ ")
+        configure_money_input(self.amount_input, minimum=0.01)
         self.currency_input = QComboBox()
         self.currency_input.setObjectName("clientOpeningBalanceCurrencyInput")
         self.currency_input.setEditable(True)
@@ -686,11 +756,26 @@ class ClientEmailsDialog(QDialog):
 
 
 class ClientAddressEntryDialog(QDialog):
-    def __init__(self, *, current_user: str, record_id: int | None = None, client_id: int | None = None, parent=None):
+    def __init__(
+        self,
+        *,
+        current_user: str,
+        record_id: int | None = None,
+        client_id: int | None = None,
+        prefill_address: str = "",
+        is_primary: bool | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.current_user = current_user
         self.record_id = record_id
         self.client_id = client_id
+        # La orden de carga ofrece dar de alta el destino que el operador escribio y no
+        # existe (#658). La calle ya esta escrita: no se le pide retipearla.
+        self.prefill_address = prefill_address
+        # `None` mantiene la regla del ABM (un domicilio de entrega es el principal).
+        # Cuando el llamador ya pregunto al operador, manda su respuesta (#665).
+        self.is_primary = is_primary
         self.saved_record: ClientAddress | None = None
         self.setObjectName("clientAddressEntryDialog")
         self.setWindowTitle("Domicilio")
@@ -745,6 +830,8 @@ class ClientAddressEntryDialog(QDialog):
             return
         if self.client_id is not None:
             _set_combo(self.client_combo, self.client_id)
+        if self.prefill_address:
+            self.street_input.setText(self.prefill_address)
 
     def _save(self) -> None:
         client_id = self.client_combo.currentData()
@@ -775,7 +862,11 @@ class ClientAddressEntryDialog(QDialog):
                     province,
                     city,
                     street,
-                    is_primary=client_address_has_delivery_function(address_type),
+                    is_primary=(
+                        client_address_has_delivery_function(address_type)
+                        if self.is_primary is None
+                        else bool(self.is_primary)
+                    ),
                 )
             else:
                 address = ClientAddress.get_by_id(self.record_id)
@@ -791,6 +882,83 @@ class ClientAddressEntryDialog(QDialog):
             self.accept()
         except Exception as exc:
             self.feedback.show_error(str(exc))
+
+
+class SalespersonEntryDialog(QDialog):
+    def __init__(self, *, current_user: str, record_id: int | None = None, parent=None):
+        super().__init__(parent)
+        self.current_user = current_user
+        self.record_id = record_id
+        self.saved_record: Salesperson | None = None
+        self.setObjectName("salespersonEntryDialog")
+        self.setWindowTitle("Vendedor")
+        self._build()
+        self._load_record()
+
+    def _build(self) -> None:
+        layout = _entry_layout(self, "Vendedor")
+        form = QGridLayout()
+        self.name_input = QLineEdit()
+        self.name_input.setObjectName("salespersonNameInput")
+        self.phone_input = QLineEdit()
+        self.phone_input.setObjectName("salespersonPhoneInput")
+        self.email_input = QLineEdit()
+        self.email_input.setObjectName("salespersonEmailInput")
+        self.email_input.setPlaceholderText("correo@ejemplo.com")
+        self.observations_input = QLineEdit()
+        self.observations_input.setObjectName("salespersonObservationsInput")
+        self.active_combo = _combo(
+            "salespersonActiveInput",
+            [(True, "Activo"), (False, "Inactivo")],
+            include_empty=False,
+        )
+        form.addWidget(QLabel("Nombre"), 0, 0)
+        form.addWidget(self.name_input, 0, 1)
+        form.addWidget(QLabel("Teléfono"), 1, 0)
+        form.addWidget(self.phone_input, 1, 1)
+        form.addWidget(QLabel("Email"), 2, 0)
+        form.addWidget(self.email_input, 2, 1)
+        form.addWidget(QLabel("Observaciones"), 3, 0)
+        form.addWidget(self.observations_input, 3, 1)
+        form.addWidget(QLabel("Estado"), 4, 0)
+        form.addWidget(self.active_combo, 4, 1)
+        layout.addLayout(form)
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveSalespersonButton", self._save)
+
+    def _load_record(self) -> None:
+        if self.record_id is None:
+            _set_combo(self.active_combo, True)
+            return
+        salesperson = Salesperson.get_by_id(self.record_id)
+        self.name_input.setText(salesperson.name)
+        self.phone_input.setText(salesperson.phone or "")
+        self.email_input.setText(salesperson.email or "")
+        self.observations_input.setText(salesperson.observations or "")
+        _set_combo(self.active_combo, bool(salesperson.active))
+
+    def _save(self) -> None:
+        try:
+            service = MasterService(self.current_user)
+            values = {
+                "phone": self.phone_input.text(),
+                "email": self.email_input.text(),
+                "observations": self.observations_input.text(),
+                "active": bool(self.active_combo.currentData()),
+            }
+            if self.record_id is None:
+                self.saved_record = service.create_salesperson(
+                    self.name_input.text(), **values
+                )
+            else:
+                self.saved_record = service.update_salesperson(
+                    Salesperson.get_by_id(self.record_id),
+                    self.name_input.text(),
+                    **values,
+                )
+            self.accept()
+        except Exception as exc:
+            self.feedback.show_error(str(exc), focus_widget=self.name_input)
 
 
 class CarrierEntryDialog(QDialog):
@@ -1033,6 +1201,103 @@ class TruckEntryDialog(QDialog):
                 truck.active = bool(self.active_combo.currentData())
                 truck.save()
                 self.saved_record = truck
+            self.accept()
+        except Exception as exc:
+            self.feedback.show_error(str(exc))
+
+
+class ProductCostDialog(QDialog):
+    def __init__(self, *, user, product_id: int, current_user: str, parent=None):
+        super().__init__(parent)
+        PermissionService().require_administrator(user)
+        self.user = user
+        self.product = Product.get_by_id(product_id)
+        self.current_user = current_user
+        self.setObjectName("productCostDialog")
+        self.setWindowTitle("Costo del producto")
+        self.setMinimumSize(720, 520)
+        self.resize(820, 600)
+        layout = _entry_layout(self, f"Costo · {self.product.name}")
+        form = QGridLayout()
+        current = QLabel(
+            _money_text(float(self.product.costo_unitario))
+            if self.product.costo_unitario is not None
+            else "Costo no informado"
+        )
+        current.setObjectName("productCurrentCostLabel")
+        self.cost_input = QLineEdit()
+        self.cost_input.setObjectName("productCostInput")
+        self.cost_input.setPlaceholderText("Ej.: 1180,5000")
+        if self.product.costo_unitario is not None:
+            self.cost_input.setText(str(self.product.costo_unitario))
+        self.reason_input = QLineEdit()
+        self.reason_input.setObjectName("productCostReasonInput")
+        self.reason_input.setPlaceholderText("Motivo / referencia del cambio")
+        form.addWidget(QLabel("Costo vigente"), 0, 0)
+        form.addWidget(current, 0, 1)
+        form.addWidget(QLabel("Nuevo costo"), 1, 0)
+        form.addWidget(self.cost_input, 1, 1)
+        form.addWidget(QLabel("Motivo"), 2, 0)
+        form.addWidget(self.reason_input, 2, 1)
+        layout.addLayout(form)
+
+        history_title = QLabel("Historial de costos")
+        history_title.setObjectName("sectionTitle")
+        layout.addWidget(history_title)
+        self.history_table = QTableWidget(0, 4)
+        self.history_table.setObjectName("productCostHistoryTable")
+        self.history_table.setHorizontalHeaderLabels(["Fecha", "Costo anterior", "Costo nuevo", "Usuario"])
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.history_table.verticalHeader().setVisible(False)
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.setMinimumHeight(220)
+        history_header = self.history_table.horizontalHeader()
+        history_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        history_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        history_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        history_header.setSectionResizeMode(3, QHeaderView.Stretch)
+        layout.addWidget(self.history_table, 1)
+        self._load_history()
+
+        self.feedback = _entry_feedback(layout)
+        _entry_footer(layout, self, "saveProductCostButton", self._save)
+
+    @staticmethod
+    def _cost_text(value) -> str:
+        return "No informado" if value is None else str(value)
+
+    def _load_history(self) -> None:
+        rows = list(
+            ProductCostHistory.select()
+            .where(ProductCostHistory.product == self.product)
+            .order_by(ProductCostHistory.created_at.desc(), ProductCostHistory.id.desc())
+        )
+        self.history_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            values = [
+                as_datetime(row.created_at).strftime("%d/%m/%Y %H:%M"),
+                self._cost_text(row.previous_cost),
+                self._cost_text(row.new_cost),
+                row.changed_by,
+            ]
+            for column, value in enumerate(values):
+                self.history_table.setItem(row_index, column, QTableWidgetItem(value))
+
+    def _save(self) -> None:
+        value = self.cost_input.text().strip()
+        if not value:
+            self.feedback.show_warning(
+                "Ingrese el nuevo costo. El costo desconocido se conserva como 'no informado'.",
+                focus_widget=self.cost_input,
+            )
+            return
+        try:
+            MasterService(self.current_user).update_product_cost(
+                self.product,
+                value,
+                actor=self.user,
+                reason=self.reason_input.text(),
+            )
             self.accept()
         except Exception as exc:
             self.feedback.show_error(str(exc))
@@ -1332,6 +1597,34 @@ def _client_options() -> list[tuple[int, str]]:
         return []
 
 
+def _salesperson_options(
+    *,
+    include_id: int | None = None,
+    include_inactive: bool = False,
+) -> list[tuple[int, str]]:
+    try:
+        query = Salesperson.select()
+        if not include_inactive:
+            if include_id is None:
+                query = query.where(Salesperson.active == True)  # noqa: E712
+            else:
+                query = query.where(
+                    (Salesperson.active == True)  # noqa: E712
+                    | (Salesperson.id == include_id)
+                )
+        return [
+            (
+                salesperson.id,
+                salesperson.name
+                if salesperson.active
+                else f"{salesperson.name} (Inactivo)",
+            )
+            for salesperson in query.order_by(Salesperson.name)
+        ]
+    except (InterfaceError, OperationalError):
+        return []
+
+
 def _carrier_options() -> list[tuple[int, str]]:
     try:
         return [(carrier.id, carrier.name) for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name)]  # noqa: E712
@@ -1359,11 +1652,50 @@ def _normalize_domain(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", value).upper()
 
 
-def _client_rows() -> list[list[object]]:
+def _client_rows(salesperson_filter: object = None) -> list[list[object]]:
+    try:
+        query = (
+            Client.select(Client, Salesperson)
+            .join(Salesperson, JOIN.LEFT_OUTER)
+            .order_by(Client.name)
+        )
+        if salesperson_filter == "unassigned":
+            query = query.where(Client.salesperson.is_null(True))
+        elif isinstance(salesperson_filter, int):
+            query = query.where(Client.salesperson == salesperson_filter)
+        rows = []
+        for client in query:
+            salesperson_name = (
+                client.salesperson.name
+                if client.salesperson_id is not None
+                else "Sin asignar"
+            )
+            rows.append(
+                [
+                    client.id,
+                    client.name,
+                    client.cuit,
+                    salesperson_name,
+                    f"Lista {client.lista_precios}",
+                    "Activo" if client.active else "Inactivo",
+                ]
+            )
+        return rows
+    except (InterfaceError, OperationalError):
+        return []
+
+
+def _salesperson_rows() -> list[list[object]]:
     try:
         return [
-            [client.id, client.name, client.cuit, f"Lista {client.lista_precios}", "Activo" if client.active else "Inactivo"]
-            for client in Client.select().order_by(Client.name)
+            [
+                salesperson.id,
+                salesperson.name,
+                salesperson.phone or "",
+                salesperson.email or "",
+                "Activo" if salesperson.active else "Inactivo",
+            ]
+            for salesperson in Salesperson.select().order_by(Salesperson.name)
         ]
     except (InterfaceError, OperationalError):
         return []
@@ -1514,10 +1846,19 @@ def build_client_abm_page(
     client_search_input = QLineEdit()
     client_search_input.setObjectName("clientSearchInput")
     client_search_input.setClearButtonEnabled(True)
-    client_search_input.setPlaceholderText("Buscar clientes por nombre o CUIT...")
+    client_search_input.setPlaceholderText("Buscar clientes por nombre, CUIT o vendedor...")
+    client_salesperson_filter = _combo(
+        "clientSalespersonFilter",
+        [("all", "Todos"), ("unassigned", "Sin asignar")]
+        + _salesperson_options(include_inactive=True),
+        include_empty=False,
+    )
+    client_salesperson_filter.setMinimumWidth(190)
     client_search_row = QHBoxLayout()
     client_search_row.addWidget(QLabel("Buscar"))
     client_search_row.addWidget(client_search_input, 1)
+    client_search_row.addWidget(QLabel("Vendedor"))
+    client_search_row.addWidget(client_salesperson_filter)
     layout.addLayout(client_search_row)
     client_search_feedback = FormFeedback("clientSearchFeedback")
     layout.addWidget(client_search_feedback)
@@ -1544,9 +1885,11 @@ def build_client_abm_page(
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
-    client_table = QTableWidget(0, 4)
+    client_table = QTableWidget(0, 5)
     client_table.setObjectName("clientTable")
-    client_table.setHorizontalHeaderLabels(["Nombre", "CUIT", "Lista", "Estado"])
+    client_table.setHorizontalHeaderLabels(
+        ["Nombre", "CUIT", "Vendedor", "Lista", "Estado"]
+    )
     client_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     client_table.verticalHeader().setVisible(False)
     client_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1622,12 +1965,19 @@ def build_client_abm_page(
         else:
             places_feedback.clear_message()
 
+    def filtered_client_rows() -> list[list[object]]:
+        selected = client_salesperson_filter.currentData()
+        return _client_rows(None if selected == "all" else selected)
+
     client_table_controller = MasterTableController(
         table=client_table,
         search_input=client_search_input,
         search_feedback=client_search_feedback,
-        rows_fn=_client_rows,
+        rows_fn=filtered_client_rows,
     )
+    # `activated` reacts to the user's choice without firing again while Qt
+    # tears down the combo model at application shutdown.
+    client_salesperson_filter.activated.connect(client_table_controller.refresh)
     places_table_controller = MasterTableController(
         table=places_table,
         search_input=places_search_input,
