@@ -10,6 +10,7 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService, F150ValidationError
 from app.services.remittance_service import RemittanceService
+from tests.f150_support import attach_frozen_prices
 
 
 DGR_ROWS = {
@@ -66,6 +67,7 @@ def _coded_setup(**overrides):
         remittance_date=date(2026, 9, 7),
         items=[{"product": product, "quantity": Decimal("10")}],
     )
+    attach_frozen_prices(remittance, {product.id: Decimal("18600.00")})
     return service.issue(remittance)
 
 

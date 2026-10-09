@@ -9,6 +9,7 @@ from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.f150_encoder import F150ValidationError
 from app.services.remittance_service import RemittanceService
+from tests.f150_support import attach_frozen_prices
 
 
 def test_format_cuit_applies_legacy_dashes():
@@ -61,6 +62,7 @@ def _issued_remittance(*, driver_cuit="20123456789", driver_document="12345678")
         remittance_date=date(2026, 9, 7),
         items=[{"product": product, "quantity": Decimal("10")}],
     )
+    attach_frozen_prices(remittance, {product.id: Decimal("12.50")})
     return service.issue(remittance)
 
 

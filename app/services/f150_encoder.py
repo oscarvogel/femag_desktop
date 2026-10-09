@@ -1,8 +1,19 @@
 """Codificador del archivo F150 compatible con el formulario legacy.
 
-La estructura se obtuvo del formulario Visual FoxPro ``forms/f150.scx``:
-un registro ``C`` por remito y un registro ``D`` por cada renglon, con campos
-separados por ``@`` y salida ANSI (Windows-1252).
+La estructura se obtuvo del formulario Visual FoxPro ``forms/f150.scx`` y se
+verifico byte a byte contra 121 archivos F150 reales del sistema anterior
+(314 registros ``C`` y 339 registros ``D``). Contrato verificado:
+
+* un registro ``C`` de 49 campos por remito, seguido de un registro ``D`` por
+  cada renglon del mismo remito (varios ``D`` pueden compartir la misma ``C``);
+* campos separados por ``@``; la ``C`` no lleva ``@`` final y la ``D`` si, lo
+  que deja un ultimo token vacio;
+* codificacion Windows-1252 y separador ``CRLF`` entre registros, **sin**
+  ``CRLF`` al final del archivo (119 de 121 archivos reales);
+* punto de venta de 4 digitos y numero de remito fisico de 8 digitos, con
+  ceros a la izquierda;
+* entre la cuarta clasificacion DGR y la unidad hay un campo de ancho fijo de 50
+  caracteres que el legacy deja relleno de espacios (337 de 339 renglones).
 
 Este modulo no consulta la base de datos. Recibe snapshots completos para que
 la seleccion, persistencia del lote y adaptacion desde MySQL puedan evolucionar
@@ -16,6 +27,17 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Iterable
+
+
+#: Ancho del punto de venta segun el legacy (``1`` se escribe como ``0001``).
+POINT_OF_SALE_WIDTH = 4
+
+#: Ancho del numero de remito fisico (``10875`` se escribe como ``00010875``).
+PHYSICAL_NUMBER_WIDTH = 8
+
+#: Ancho del campo de descripcion del renglon, entre la 4a clasificacion y la
+#: unidad. El legacy lo deja relleno de espacios y nunca lo recorta.
+DETAIL_DESCRIPTION_WIDTH = 50
 
 
 class F150ValidationError(ValueError):
@@ -83,6 +105,9 @@ class F150Item:
     quantity: Decimal
     unit_price: Decimal
     total: Decimal
+    #: Descripcion del renglon. Va al campo de ancho fijo de 50 caracteres y
+    #: el legacy la deja vacia, por eso el snapshot llega sin completarla.
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,7 +143,7 @@ class F150Encoder:
         for header_number, remittance in enumerate(documents, start=1):
             lines.append(self._header_line(header_number, remittance))
             lines.extend(self._detail_lines(header_number, remittance))
-        return self.line_ending.join(lines) + self.line_ending
+        return self.line_ending.join(lines)
 
     def write(
         self,
@@ -152,7 +177,7 @@ class F150Encoder:
         fields = (
             "1",
             remittance.document_type,
-            remittance.point_of_sale,
+            self._point_of_sale(remittance),
             self._display_date(remittance.document_date),
             remittance.movement_type,
             origin.locality_code,
@@ -210,19 +235,21 @@ class F150Encoder:
                 "2",
                 self._display_date(remittance.document_date),
                 remittance.document_type,
-                remittance.point_of_sale,
-                remittance.number,
+                self._point_of_sale(remittance),
+                self._physical_number(remittance),
                 item.category_1,
                 item.category_2,
                 item.category_3,
                 item.category_4,
-                item.item_code,
+                item.description,
                 item.unit,
                 self._quantity(item.quantity),
                 self._money(item.unit_price),
                 self._money(item.total),
             )
-            lines.append(self._join(prefix, fields))
+            lines.append(
+                self._join(prefix, fields, fixed_width={9: DETAIL_DESCRIPTION_WIDTH})
+            )
         return lines
 
     @staticmethod
@@ -233,9 +260,45 @@ class F150Encoder:
     def _display_date(value: date) -> str:
         return value.strftime("%d-%m-%Y")
 
+    def _point_of_sale(self, remittance: F150Remittance) -> str:
+        return self._zero_padded(
+            remittance.point_of_sale, POINT_OF_SALE_WIDTH, "punto de venta"
+        )
+
+    def _physical_number(self, remittance: F150Remittance) -> str:
+        return self._zero_padded(
+            remittance.number, PHYSICAL_NUMBER_WIDTH, "numero de remito"
+        )
+
     @staticmethod
-    def _join(prefix: str, fields: tuple[str, ...], *, trailing_at: bool = True) -> str:
-        clean = [F150Encoder._clean(field) for field in fields]
+    def _zero_padded(value: str, width: int, label: str) -> str:
+        """Carga ceros a la izquierda sin truncar ni tolerar caracteres no numericos."""
+        text = str(value or "").strip()
+        if not text:
+            raise F150ValidationError(f"El {label} no puede estar vacio.")
+        if not text.isdigit():
+            raise F150ValidationError(f"El {label} debe ser numerico: {text!r}")
+        if len(text) > width:
+            raise F150ValidationError(
+                f"El {label} no puede tener mas de {width} digitos: {text!r}"
+            )
+        return text.zfill(width)
+
+    @classmethod
+    def _join(
+        cls,
+        prefix: str,
+        fields: tuple[str, ...],
+        *,
+        trailing_at: bool = True,
+        fixed_width: dict[int, int] | None = None,
+    ) -> str:
+        widths = fixed_width or {}
+        clean = []
+        for index, value in enumerate(fields):
+            text = cls._clean(value)
+            width = widths.get(index)
+            clean.append(text.ljust(width)[:width] if width else text)
         body = prefix + "@" + "@".join(clean)
         return body + "@" if trailing_at else body
 
@@ -254,8 +317,8 @@ class F150Encoder:
         rounded = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return f"{rounded:,.2f}"
 
-    @staticmethod
-    def _validate(remittances: tuple[F150Remittance, ...]) -> None:
+    @classmethod
+    def _validate(cls, remittances: tuple[F150Remittance, ...]) -> None:
         if not remittances:
             raise F150ValidationError("Debe seleccionar al menos un remito.")
         identities: set[str] = set()
@@ -263,14 +326,26 @@ class F150Encoder:
             if remittance.identity in identities:
                 raise F150ValidationError(f"El remito {remittance.identity} esta repetido.")
             identities.add(remittance.identity)
-            if not remittance.point_of_sale.strip() or not remittance.number.strip():
-                raise F150ValidationError("Todos los remitos deben tener punto de venta y numero.")
             if not remittance.items:
                 raise F150ValidationError(f"El remito {remittance.identity} no tiene detalle.")
+            for label, value, width in (
+                ("punto de venta", remittance.point_of_sale, POINT_OF_SALE_WIDTH),
+                ("numero de remito", remittance.number, PHYSICAL_NUMBER_WIDTH),
+            ):
+                text = str(value or "").strip()
+                if not text or not text.isdigit() or len(text) > width:
+                    raise F150ValidationError(
+                        f"El remito {remittance.identity} tiene un {label} invalido: "
+                        f"se esperan hasta {width} digitos."
+                    )
             for item in remittance.items:
                 if item.quantity <= 0:
                     raise F150ValidationError(
                         f"El remito {remittance.identity} contiene una cantidad no positiva."
+                    )
+                if item.unit_price < 0:
+                    raise F150ValidationError(
+                        f"El remito {remittance.identity} contiene un precio negativo."
                     )
                 expected_total = item.quantity * item.unit_price
                 if abs(item.total - expected_total) > Decimal("0.01"):

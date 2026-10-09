@@ -8,6 +8,7 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.remittance_service import RemittanceService
+from tests.f150_support import attach_frozen_prices
 
 
 DGR_ROWS = {
@@ -109,6 +110,7 @@ def test_generate_maps_master_codes_to_legacy_positions(db, tmp_path):
         items=[{"product": product, "quantity": Decimal("500")}],
     )
     issued = service.issue(remittance)
+    attach_frozen_prices(issued, {product.id: Decimal("18600.00")})
     output = tmp_path / "f150-404b.TXT"
     F150BatchService("admin").generate([issued], output)
     lines = output.read_bytes().decode("cp1252").splitlines()
@@ -123,4 +125,6 @@ def test_generate_maps_master_codes_to_legacy_positions(db, tmp_path):
     detail = lines[1]
     assert len(detail.split("@")) == 16
     assert detail.endswith("@")
-    assert "@2@2@19@0@G-300@U@500@" in detail
+    # El renglon no lleva el codigo de producto: entre la 4a clasificacion y la
+    # unidad va el campo fijo de 50 caracteres que el legacy deja en blanco.
+    assert f"@2@2@19@0@{' ' * 50}@U@500@" in detail

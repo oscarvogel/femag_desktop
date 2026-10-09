@@ -6,12 +6,14 @@ import pytest
 from app.models.audit import AuditLog
 from app.models.dgr import DgrCountry, DgrLocality
 from app.models.f150 import F150Batch, F150BatchRemittance
+from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.remittances import Remittance
 from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.f150_encoder import F150ValidationError
 from app.services.remittance_service import RemittanceService
+from tests.f150_support import attach_frozen_prices
 
 
 def _issued_remittance():
@@ -69,6 +71,8 @@ def _issued_remittance():
         remittance_date=date(2026, 8, 23),
         items=[{"product": product, "quantity": Decimal("1250")}],
     )
+    # El precio fiscal sale del renglon de la orden, no del maestro.
+    attach_frozen_prices(remittance, {product.id: Decimal("12.50")})
     return service.issue(remittance)
 
 
@@ -84,7 +88,7 @@ def test_generate_persists_batch_snapshot_audit_and_file(db, tmp_path):
     assert output.exists()
     lines = output.read_bytes().decode("cp1252").splitlines()
     assert lines[0].startswith("C1F15023082026@1@12@0001@")
-    assert lines[1].endswith("@ALM@KG@1,250@12.50@15,625.00@")
+    assert lines[1].endswith(f"@0@{' ' * 50}@KG@1,250@12.50@15,625.00@")
     inclusion = F150BatchRemittance.get()
     assert inclusion.remittance_id == remittance.id
     assert inclusion.snapshot["identity"] == "0001-00001068"
@@ -110,3 +114,88 @@ def test_validation_rejects_draft_and_missing_transport_data(db):
     issues = F150BatchService.validation_issues(remittance)
     assert "debe estar emitido" in issues
     assert "falta transportista con CUIT" in issues
+
+
+def test_price_comes_from_the_operation_not_the_master(db, tmp_path):
+    """El importe sale del precio congelado de la orden aunque el maestro cambie."""
+    remittance = _issued_remittance()
+    product = list(remittance.items)[0].product
+    product.precio_neto_base = 999.0
+    product.save()
+
+    output = tmp_path / "f150-precio-operacion.TXT"
+    F150BatchService("admin").generate([remittance], output)
+
+    detail = output.read_bytes().decode("cp1252").splitlines()[1]
+    assert detail.endswith("@1,250@12.50@15,625.00@")
+    inclusion = F150BatchRemittance.get()
+    assert inclusion.snapshot["items"][0]["unit_price"] == "12.50"
+
+
+def test_generation_is_blocked_without_frozen_price(db, tmp_path):
+    """Sin precio historico congelado no se emite: no se inventa ni el maestro."""
+    remittance = _issued_remittance()
+    remittance.source_order = None
+    remittance.save(only=[Remittance.source_order])
+
+    issues = F150BatchService.validation_issues(remittance)
+    assert any("sin precio historico congelado" in issue for issue in issues)
+    with pytest.raises(F150ValidationError, match="sin precio historico congelado"):
+        F150BatchService("admin").generate([remittance], tmp_path / "bloqueado.TXT")
+    assert not (tmp_path / "bloqueado.TXT").exists()
+    assert F150Batch.select().count() == 0
+
+
+def test_generation_is_blocked_when_frozen_price_is_zero(db, tmp_path):
+    remittance = _issued_remittance()
+    order = remittance.source_order
+    for line in order.products:
+        line.precio_neto_unitario = 0.0
+        line.save()
+
+    issues = F150BatchService.validation_issues(remittance)
+    assert any("sin precio historico congelado" in issue for issue in issues)
+    with pytest.raises(F150ValidationError, match="sin precio historico congelado"):
+        F150BatchService("admin").generate([remittance], tmp_path / "cero.TXT")
+
+
+def test_generation_is_blocked_when_frozen_price_is_ambiguous(db, tmp_path):
+    """Dos renglones de la orden con precios distintos para el mismo producto."""
+    remittance = _issued_remittance()
+    order = remittance.source_order
+    line = list(order.products)[0]
+    LoadOrderProduct.create(
+        order=order,
+        destination=line.destination,
+        product=line.product,
+        quantity=1.0,
+        unit=line.unit,
+        precio_neto_unitario=88.0,
+    )
+    issues = F150BatchService.validation_issues(remittance)
+    assert any("sin precio historico congelado" in issue for issue in issues)
+    with pytest.raises(F150ValidationError, match="sin precio historico congelado"):
+        F150BatchService("admin").generate([remittance], tmp_path / "ambiguo.TXT")
+
+
+def test_generation_is_blocked_when_order_destination_does_not_match(db, tmp_path):
+    """El precio de otro destino de la misma orden no alcanza."""
+    remittance = _issued_remittance()
+    order = remittance.source_order
+    other = ClientAddress.create(
+        client=remittance.client,
+        address_type="entrega",
+        province="Misiones",
+        city="Obera",
+        address="Ruta 12 km 20",
+    )
+    for line in list(order.products):
+        line.destination = LoadOrderDestination.create(
+            order=order, client=remittance.client, delivery_address=other
+        )
+        line.save()
+
+    issues = F150BatchService.validation_issues(remittance)
+    assert any("sin precio historico congelado" in issue for issue in issues)
+    with pytest.raises(F150ValidationError, match="sin precio historico congelado"):
+        F150BatchService("admin").generate([remittance], tmp_path / "otro.TXT")

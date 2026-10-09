@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from app.config.database import database_proxy
@@ -187,6 +187,45 @@ class F150BatchService:
             return ""
         return locality.country.abbr or ""
 
+    @staticmethod
+    def _frozen_unit_prices(remittance: Remittance) -> dict[int, Decimal]:
+        """Precios congelados por la orden que originó el remito, por producto.
+
+        El precio fiscal de un renglón es el de la operación, no el vigente del
+        maestro: el legacy lo guardaba en ``detalleremito.unitario`` y la
+        reescritura lo perdió, asi que leer ``Product.precio_neto_base`` al
+        generar produce un importe que no es el que se operó. La única fuente
+        congelada disponible hoy es el renglón de la orden de carga.
+
+        Devuelve solo precios únicos, positivos y de dos decimales. Un producto
+        ausente significa "no hay dato fiscal confiable" y bloquea la
+        generación en vez de estimar un importe.
+        """
+        order = remittance.source_order
+        if order is None:
+            return {}
+        destinations = [
+            destination
+            for destination in order.destinations
+            if destination.client_id == remittance.client_id
+            and destination.delivery_address_id == remittance.delivery_address_id
+        ]
+        prices: dict[int, Decimal] = {}
+        conflicting: set[int] = set()
+        for destination in destinations:
+            for line in destination.products:
+                price = Decimal(str(line.precio_neto_unitario or 0)).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                if price <= 0:
+                    continue
+                if line.product_id in prices and prices[line.product_id] != price:
+                    conflicting.add(line.product_id)
+                prices[line.product_id] = price
+        for product_id in conflicting:
+            prices.pop(product_id, None)
+        return prices
+
     def _to_document(self, remittance: Remittance) -> F150Remittance:
         issues = self.validation_issues(remittance)
         if issues:
@@ -202,10 +241,11 @@ class F150BatchService:
             city_fallback=remittance.delivery_city or (address.city if address else "") or "",
         )
         origin = self._origin_location()
+        frozen_prices = self._frozen_unit_prices(remittance)
         items = []
         for row in remittance.items:
             product = row.product
-            unit_price = Decimal(str(product.precio_neto_base or 0))
+            unit_price = frozen_prices[row.product_id]
             quantity = Decimal(row.quantity)
             items.append(
                 F150Item(
@@ -319,6 +359,13 @@ class F150BatchService:
                 issues.append(f"detalle: {product.name} sin rubros DGR")
             if not (product.unidad_dgr or "").strip():
                 issues.append(f"detalle: {product.name} sin unidad DGR")
+        frozen_prices = F150BatchService._frozen_unit_prices(remittance)
+        for row in remittance.items:
+            if row.product_id not in frozen_prices:
+                issues.append(
+                    f"detalle: {row.product.name} sin precio historico congelado de la "
+                    "operacion (no se usa el precio vigente del maestro)"
+                )
         return issues
 
     @staticmethod
