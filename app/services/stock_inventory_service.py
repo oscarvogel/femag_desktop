@@ -5,7 +5,12 @@ from decimal import Decimal
 
 from app.models.masters import PRODUCT_KIND_PRODUCT, Product
 from app.models.stock import StockMovement
-from app.services.stock_service import StockService
+from app.services.stock_service import (
+    StockService,
+    bag_weight_of,
+    bags_to_kg,
+    is_countable_in_bags,
+)
 
 ZERO = Decimal("0.000")
 SOURCE_PREFIX = "stock_take"
@@ -44,8 +49,14 @@ class StockInventoryService:
         """Productos que se pueden contar.
 
         Solo los de venta activos: un servicio, un interno o un articulo en
-        revision no se stockea. Se incluye a los que no tienen peso de bolsa
-        cargado porque un conteo se cuenta en kilos, no en bolsas.
+        revision no se stockea.
+
+        **No** se filtran los que no tienen peso de bolsa cargado, y la razon es
+        la misma que en Conteo fisico: si desaparecieran de la grilla, el
+        operador se preguntaria por que el producto no aparece, en vez de
+        entender que le falta cargar el dato en Productos. La pantalla los
+        muestra bloqueados y con el motivo, y el servicio igual se niega a
+        contarlos.
         """
         return list(
             Product.select()
@@ -70,26 +81,51 @@ class StockInventoryService:
 
     @classmethod
     def initial_quantities(cls, day: date) -> dict[int, Decimal]:
+        """Kilos cargados por producto en ``day``, tal como quedaron en el libro."""
         return {
             movimiento.product_id: Decimal(str(movimiento.quantity_kg or 0))
             for movimiento in cls.initial_movements_of(day)
         }
 
     @classmethod
+    def initial_counts_in_bags(cls, day: date) -> dict[int, Decimal]:
+        """Bolsas equivalentes a lo que quedo cargado en ``day``.
+
+        El libro guarda kilos, pero la pantalla cuenta en bolsas: mostrar los
+        kilos en el campo de bolsas haria que el operador escribiera un valor
+        que no significa nada. Se convierte con el peso del producto, que es el
+        mismo que se uso al cargar.
+        """
+        conteos: dict[int, Decimal] = {}
+        for movimiento in cls.initial_movements_of(day):
+            peso = bag_weight_of(movimiento.product)
+            if peso <= ZERO:
+                continue
+            conteos[movimiento.product_id] = (
+                Decimal(str(movimiento.quantity_kg or 0)) / peso
+            ).quantize(Decimal("0.001"))
+        return conteos
+
+    @classmethod
     def load_initial(
         cls,
         day: date,
-        quantities: dict,
+        counts: dict,
         *,
         current_user: str | None = None,
         observations: str | None = None,
     ) -> list[StockMovement]:
-        """Carga el conteo de ``day``.
+        """Carga el conteo de ``day`` en **bolsas**.
 
-        ``quantities`` mapea **id de producto** a kilos. Se-keys por id y no por
-        objeto a proposito: la pantalla de conteo tiene los ids, y un id es un
-        primitivo que no se puede desincronizar del registro de la base como
-        pasa con una instancia de peewee guardada en un diccionario.
+        ``counts`` mapea **id de producto** a bolsas contadas. Se-keys por id y
+        no por objeto a proposito: la pantalla de conteo tiene los ids, y un id
+        es un primitivo que no se puede desincronizar del registro de la base
+        como pasa con una instancia de peewee guardada en un diccionario.
+
+        Los kilos se derivan aca con el peso de bolsa del producto, y no en la
+        pantalla: es la misma conversion que usa Conteo fisico y partes de
+        produccion, en un solo lugar. El movimiento se sigue guardando en
+        ``quantity_kg``, asi que el libro no cambia de unidad.
 
         Las filas en cero se omiten: un movimiento de 0 kg no dice nada y
         ensucia el libro.
@@ -111,16 +147,31 @@ class StockInventoryService:
 
         movimientos = []
         with StockMovement._meta.database.atomic():
-            for producto_id, kilos in sorted(quantities.items()):
+            for producto_id, bolsas in sorted(counts.items()):
                 try:
                     producto = Product.get_by_id(producto_id)
                 except (Product.DoesNotExist, TypeError, ValueError):
                     raise StockInventoryError(
                         f"El producto {producto_id} no existe."
                     ) from None
-                cantidad = Decimal(str(kilos or 0))
-                if cantidad <= ZERO:
+                if not is_countable_in_bags(producto):
+                    # Sin peso de bolsa, N bolsas darian 0 kg como punto de
+                    # partida del libro, y el deposito arrancaria en cero. Es el
+                    # mismo motivo por el que Conteo fisico se niega (#650).
+                    raise StockInventoryError(
+                        f"{producto.name} no tiene peso de bolsa cargado, así que "
+                        "no se puede contar en bolsas. Cargá el peso de bolsa del "
+                        "producto en Productos y volvé a cargar."
+                    )
+                try:
+                    unidades = Decimal(str(bolsas or 0))
+                except (TypeError, ValueError, ArithmeticError):
+                    raise StockInventoryError(
+                        f"La cantidad contada de {producto.name} debe ser un número."
+                    ) from None
+                if unidades <= ZERO:
                     continue
+                cantidad = bags_to_kg(producto, unidades)
                 movimientos.append(
                     StockService.register(
                         product=producto,

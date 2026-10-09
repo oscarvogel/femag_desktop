@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView, QDateEdit, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QLineEdit, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -14,10 +14,20 @@ from app.services.stock_inventory_service import (
     StockInventoryError,
     StockInventoryService,
 )
-from app.services.stock_service import StockService
+from app.services.stock_service import (
+    ZERO,
+    StockService,
+    bag_weight_of,
+    is_countable_in_bags,
+)
 from app.ui.form_feedback import FormFeedback
 
-HEADERS = ("Producto", "Unidad", "Stock contado (kg)", "Stock en el libro (kg)")
+HEADERS = ("Producto", "Bolsas contadas", "Equivale a (kg)", "Stock en el libro (kg)")
+
+
+def _kg(valor: Decimal) -> str:
+    return f"{valor:,.3f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 
 class StockInitialInventoryPage(QWidget):
@@ -26,6 +36,13 @@ class StockInitialInventoryPage(QWidget):
     Es una operacion de una vez: se cuenta el deposito en una fecha de corte y se
     carga. Ahi el saldo deja de ser cero y empieza a decir la verdad. Despues
     solo se mueve con produccion, despachos y ajustes.
+
+    **Se cuenta en bolsas, igual que Conteo fisico y partes de produccion.** Los
+    kilos se derivan del peso de bolsa del producto y se muestran al lado, para
+    que el operador vea la conversion antes de confirmar. Antes esta pantalla
+    pedia kilos escritos a mano, y el mismo numero significaba una cosa u otra
+    segun donde se escribiera: 500 en Conteo fisico eran 500 bolsas, aca eran
+    500 kg. Ver #651.
 
     Si el conteo se equivoco se anula y se vuelve a cargar; cargar dos veces la
     misma fecha no reemplaza nada y la pantalla lo avisa en vez de dejar pasar un
@@ -37,7 +54,10 @@ class StockInitialInventoryPage(QWidget):
         self.service = service or StockInventoryService()
         self.current_username = current_username
         self.feedback = FormFeedback("stockInitialInventoryFeedback")
-        self.inputs: dict[int, QDoubleSpinBox] = {}
+        self.inputs: dict[int, QSpinBox] = {}
+        self.pesos: dict[int, Decimal] = {}
+        self.nombres: dict[int, str] = {}
+        self.filas: dict[int, int] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -47,10 +67,11 @@ class StockInitialInventoryPage(QWidget):
         heading.setObjectName("heading")
         layout.addWidget(heading)
         subheading = QLabel(
-            "Contá el depósito en una fecha de corte y cargalo acá. Es el punto de "
-            "partida del libro: a partir de esta carga el saldo se deriva solo de la "
-            "producción, los despachos y los ajustes. Las órdenes ya cerradas no se "
-            "cargan."
+            "Contá el depósito en una fecha de corte y cargalo acá. Contá las "
+            "bolsas, como en Conteo físico: los kilos salen del peso de bolsa del "
+            "producto. Es el punto de partida del libro: a partir de esta carga el "
+            "saldo se deriva solo de la producción, los despachos y los ajustes. "
+            "Las órdenes ya cerradas no se cargan."
         )
         subheading.setObjectName("subheading")
         subheading.setWordWrap(True)
@@ -111,98 +132,143 @@ class StockInitialInventoryPage(QWidget):
         try:
             ya_cargado = self.service.has_initial(dia)
             anulado = self.service.is_voided(dia)
-            cantidades = self.service.initial_quantities(dia)
+            conteos = self.service.initial_counts_in_bags(dia)
             productos = self.service.countable_products()
         except Exception as exc:  # noqa: BLE001
             self.feedback.show_error(f"No se pudo leer el estado del conteo: {exc}")
             return
 
+        sin_peso = [
+            producto.name for producto in productos
+            if not is_countable_in_bags(producto)
+        ]
+        aviso_sin_peso = ""
+        if sin_peso:
+            aviso_sin_peso = (
+                f" · {len(sin_peso)} producto(s) sin peso de bolsa cargado, no "
+                f"contables: {', '.join(sin_peso[:5])}"
+                f"{'…' if len(sin_peso) > 5 else ''}"
+            )
+
         if ya_cargado and not anulado:
             self.status.setText(
                 f"El {dia:%d/%m/%Y} ya tiene inventario inicial cargado. "
                 "Si el conteo estaba mal, anulalo y volvé a cargarlo: cargar dos "
-                "veces la misma fecha no reemplaza nada."
+                "veces la misma fecha no reemplaza nada." + aviso_sin_peso
             )
         elif anulado:
             self.status.setText(
                 f"El inventario inicial del {dia:%d/%m/%Y} está anulado. "
-                "Cargá el conteo en otra fecha."
+                "Cargá el conteo en otra fecha." + aviso_sin_peso
             )
         else:
             self.status.setText(
-                f"{dia:%d/%m/%Y} · cargá los kilos de cada producto. "
-                "Lo que dejes en 0 no genera movimiento. La última columna es lo "
-                "que el libro tiene hoy, y no se edita desde acá."
+                f"{dia:%d/%m/%Y} · cargá las bolsas de cada producto. "
+                "Lo que dejes en 0 no genera movimiento. La columna de kilos es la "
+                "equivalencia según el peso de bolsa del producto, y la última "
+                "columna es lo que el libro tiene hoy: no se edita desde acá."
+                + aviso_sin_peso
             )
 
-        self._fill_table(productos, cantidades, bloqueado=ya_cargado)
+        self._fill_table(productos, conteos, bloqueado=ya_cargado)
         self.load_button.setEnabled(not ya_cargado and bool(productos))
         self.void_button.setEnabled(ya_cargado and not anulado)
         self.observations.setEnabled(not ya_cargado)
 
-    def _fill_table(self, productos, cantidades: dict, *, bloqueado: bool) -> None:
+    def _fill_table(self, productos, conteos: dict, *, bloqueado: bool) -> None:
         self.entradas.setRowCount(len(productos))
         self.inputs = {}
+        self.pesos = {}
+        self.nombres = {}
+        self.filas = {}
         for indice, producto in enumerate(productos):
             self.entradas.setItem(indice, 0, QTableWidgetItem(producto.name))
-            self.entradas.setItem(indice, 1, QTableWidgetItem(producto.unit or ""))
-            entrada = QLineEdit()
-            entrada.setObjectName("stockInitialInventoryQty")
-            entrada.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            entrada.setPlaceholderText("0,000")
-            entrada.setText(
-                f"{cantidades[producto.id]:,.3f}".replace(",", "X")
-                .replace(".", ",")
-                .replace("X", ".")
-                if producto.id in cantidades
-                else ""
-            )
+            if not is_countable_in_bags(producto):
+                # Sin peso de bolsa no hay conversion, y arrancar el libro en
+                # cero porque el dato de maestro falta no es una carga: es un
+                # error. Se muestra bloqueado y con el motivo (#650, #651).
+                celda = QTableWidgetItem("falta peso de bolsa")
+                celda.setToolTip(
+                    f"{producto.name} no tiene peso de bolsa cargado. Cargalo en "
+                    "Productos para poder contar este producto en bolsas."
+                )
+                celda.setForeground(Qt.gray)
+                self.entradas.setItem(indice, 1, celda)
+                for columna in (2, 3):
+                    vacia = QTableWidgetItem("-")
+                    vacia.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    vacia.setForeground(Qt.gray)
+                    self.entradas.setItem(indice, columna, vacia)
+                continue
+            entrada = QSpinBox()
+            entrada.setObjectName("stockInitialInventoryBags")
+            entrada.setRange(0, 9_999_999)
+            entrada.setSingleStep(1)
+            entrada.setSuffix(" bolsas")
+            entrada.setValue(int(conteos[producto.id]) if producto.id in conteos else 0)
             entrada.setReadOnly(bloqueado)
-            self.entradas.setCellWidget(indice, 2, entrada)
+            entrada.valueChanged.connect(self._actualizar_equivalencia)
+            self.entradas.setCellWidget(indice, 1, entrada)
             self.inputs[producto.id] = entrada
+            self.pesos[producto.id] = bag_weight_of(producto)
+            self.nombres[producto.id] = producto.name
+            self.filas[producto.id] = indice
             # Lo que dice el libro hoy. Sin esta columna el operador carga el
             # conteo y no tiene forma de verificar que haya quedado bien.
             saldo = StockService.balance_for(producto).balance_kg
-            item = QTableWidgetItem(f"{saldo:,.3f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            item = QTableWidgetItem(_kg(saldo))
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.entradas.setItem(indice, 3, item)
+        self._actualizar_equivalencia()
 
-    @staticmethod
-    def _parsear_kilos(texto: str) -> Decimal | None:
-        """Acepta 710025, 710025,5 y 1.234,5: siempre comas decimales."""
-        limpio = (texto or "").strip().replace(" ", "")
-        if not limpio:
-            return None
-        limpio = limpio.replace(".", "").replace(",", ".")
-        try:
-            return Decimal(limpio)
-        except InvalidOperation:
-            return None
+    def _kilos_de(self, producto_id: int) -> Decimal:
+        """Kilos que representan las bolsas escritas para un producto."""
+        entrada = self.inputs.get(producto_id)
+        if entrada is None:
+            return ZERO
+        return (Decimal(entrada.value()) * self.pesos[producto_id]).quantize(
+            Decimal("0.001")
+        )
+
+    def _actualizar_equivalencia(self) -> None:
+        """Refleja los kilos de cada fila mientras el operador escribe.
+
+        El campo es de bolsas, pero el libro es en kilos. Mostrar la
+        equivalencia en vivo es lo que evita el error de escribir 500 pensando
+        en kilos y que se carguen 500 bolsas.
+        """
+        for producto_id, indice in self.filas.items():
+            entrada = self.inputs[producto_id]
+            kilos = self._kilos_de(producto_id)
+            celda = self.entradas.item(indice, 2)
+            if celda is None:
+                celda = QTableWidgetItem()
+                self.entradas.setItem(indice, 2, celda)
+            celda.setText(_kg(kilos) if entrada.value() else "-")
+            celda.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
     def load_inventory(self) -> None:
         dia = self.selected_date()
-        quantities = {}
+        conteos: dict[int, int] = {}
         for producto_id, entrada in self.inputs.items():
-            kilos = self._parsear_kilos(entrada.text())
-            if kilos is None or kilos <= 0:
-                continue
-            quantities[producto_id] = kilos
-        if not quantities:
-            inválido = any(
-                (entrada.text() or "").strip() and self._parsear_kilos(entrada.text()) is None
-                for entrada in self.inputs.values()
-            )
-            self.feedback.show_error(
-                "Hay un valor que no es un número. Usá 710025 o 710025,5."
-                if inválido
-                else "Cargá al menos un producto con kilos."
-            )
+            bolsas = entrada.value()
+            if bolsas > 0:
+                conteos[producto_id] = bolsas
+        if not conteos:
+            self.feedback.show_error("Cargá al menos un producto con bolsas.")
             return
-        total = sum(quantities.values())
+        total_bolsas = sum(conteos.values())
+        total_kg = sum((self._kilos_de(pid) for pid in conteos), ZERO)
+        detalle = "\n".join(
+            f"  · {self.nombres[pid]}: {conteos[pid]} bolsa(s) de "
+            f"{_kg(self.pesos[pid])} kg = {_kg(self._kilos_de(pid))} kg"
+            for pid in sorted(conteos)
+        )
         answer = QMessageBox.question(
             self, "Cargar inventario inicial",
             f"¿Cargar el inventario inicial del {dia:%d/%m/%Y}?\n\n"
-            f"{len(quantities)} producto(s) · {total:,.3f} kg en total.\n\n"
+            f"{len(conteos)} producto(s) · {total_bolsas} bolsa(s) = "
+            f"{_kg(total_kg)} kg\n{detalle}\n\n"
             "Es el punto de partida del libro de stock. Si el conteo se repite, "
             "anulá el anterior: cargar dos veces la misma fecha no reemplaza nada.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
@@ -211,7 +277,7 @@ class StockInitialInventoryPage(QWidget):
             return
         try:
             movimientos = self.service.load_initial(
-                dia, quantities,
+                dia, conteos,
                 current_user=self.current_username,
                 observations=self.observations.text(),
             )
@@ -223,7 +289,8 @@ class StockInitialInventoryPage(QWidget):
             return
         self.refresh()
         self.feedback.show_success(
-            f"Inventario inicial cargado: {len(movimientos)} producto(s), {total:,.3f} kg."
+            f"Inventario inicial cargado: {len(movimientos)} producto(s), "
+            f"{total_bolsas} bolsa(s) = {_kg(total_kg)} kg."
         )
 
     def void_inventory(self) -> None:
