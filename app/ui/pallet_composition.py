@@ -264,6 +264,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             item = self.guided_pallet_selector_grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
         self._guided_pallet_buttons = {}
 
