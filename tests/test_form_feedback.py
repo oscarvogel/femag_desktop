@@ -116,7 +116,8 @@ def test_known_inline_feedback_inventory_uses_form_feedback() -> None:
             "transportSetupTruckWarning",
             "transportSetupDriverWarning",
         ),
-        "app/ui/pallet_composition.py": (
+        "app/ui/pallet_composition.py": ("guidedPalletFeedback",),
+        "app/ui/pallet_composition_legacy.py": (
             "palletCompositionIssues",
             "bulkPalletAssignmentPreview",
         ),
@@ -131,4 +132,4 @@ def test_known_inline_feedback_inventory_uses_form_feedback() -> None:
     for filename, object_names in inventory.items():
         source = Path(filename).read_text(encoding="utf-8")
         for object_name in object_names:
-            assert f'FormFeedback("{object_name}")' in source, (filename, object_name)
+            assert f'FormFeedback("{object_name}"' in source, (filename, object_name)

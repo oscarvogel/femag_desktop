@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date
 from decimal import Decimal
@@ -48,6 +49,7 @@ try:  # solo presente en builds demo (PyInstaller DEMO.spec)
 except ImportError:  # pragma: no cover - build de produccion no incluye el modulo
     BUILD_DEMO_VERSION = None
 from app.config.schema import (
+    SchemaTooNewError,
     SchemaValidationError,
     ensure_runtime_schema,
     validate_runtime_schema,
@@ -96,9 +98,10 @@ from app.ui.glass_v2 import glass_v2_stylesheet
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
-from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.combo_autocomplete import enable_combo_autocomplete, matching_combo_index
 from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
+from app.services.audit_service import AuditService
 from app.ui.aviso_dropdown import AvisoDropdown
 from app.ui.aviso_center import AvisoCenterPage
 from app.ui.audit_history_dialog import LoadOrderHistoryDialog
@@ -110,7 +113,13 @@ from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
-from app.ui.master_abm import build_client_abm_page, build_master_abm_page, master_abm_configs
+from app.ui.master_abm import (
+    ClientAddressEntryDialog,
+    build_client_abm_page,
+    build_master_abm_page,
+    master_abm_configs,
+    normalize_master_text,
+)
 from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
@@ -124,6 +133,7 @@ from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
+logger = logging.getLogger("femag.desktop")
 
 
 class _AccountStatementMailSignals(QObject):
@@ -254,6 +264,99 @@ def _current_client_phone(client) -> str:
     return (getattr(current_client or client, "phone", None) or "").strip()
 
 
+class SchemaTooNewAtStartup(RuntimeError):
+    """La base compartida esta mas nueva que este build: el puesto va atrasado.
+
+    Se distingue de un error de conexion porque la accion que lo resuelve no es
+    preparar la base sino actualizar la aplicacion.
+    """
+
+
+def _recover_from_outdated_app(error: Exception) -> None:
+    """Un puesto atrasado se actualiza en el momento o avisa a soporte.
+
+    Decir "actualizate" sin dejarte actualizar es otro callejon sin salida, y aca
+    el puesto queda sin poder trabajar. Si hay una version publicada mas nueva se
+    abre el mismo flujo de descarga del actualizador; si no hay, se muestra el
+    detalle con la version instalada para que el operador pueda avisar a alguien.
+    """
+    from app.services.update_service import fetch_update_info, get_update_channel
+
+    logger.error("Puesto desactualizado, no puede abrir: %s", error)
+    info = None
+    try:
+        info = fetch_update_info(BUILD_VERSION, channel=get_update_channel())
+    except Exception:
+        logger.exception("No se pudo consultar el manifest para recuperar el puesto")
+
+    if info is None:
+        _explain_outdated_app(error)
+        return
+
+    try:
+        from app.ui.update_extension import _show_update_dialog
+
+        launched = _show_update_dialog(None, info, mandatory=True)
+    except Exception:
+        logger.exception("No se pudo lanzar la actualizacion del puesto atrasado")
+        _explain_outdated_app(error)
+        return
+
+    if not launched:
+        logger.info("El instalador no se lanzo desde el puesto atrasado")
+
+
+def _explain_outdated_app(error: Exception) -> None:
+    """Sin actualizacion disponible: deja el dato listo para avisar a soporte."""
+    detail = (
+        f"FEMAG instalado: {BUILD_VERSION}\n"
+        f"Detalle: {error}\n"
+        "Este puesto no puede trabajar hasta que se instale la version que espera "
+        "la base de datos."
+    )
+    box = QMessageBox(QMessageBox.Critical, "FEMAG Desktop - Actualización necesaria")
+    box.setText(
+        "La base de datos de FEMAG está actualizada a una versión más nueva que "
+        "este programa.\n\nEste puesto no puede entrar hasta que se instale la "
+        "versión actual. No hay una versión publicada para descargar en este "
+        "momento, o no se pudo consultar."
+    )
+    box.setInformativeText(
+        "Copie el detalle y avise a soporte o a un administrador para que instale "
+        "la versión actual en este equipo.\n\n"
+        "No se debe preparar ni revertir el esquema de la base: eso dejaría fuera "
+        "de servicio a los puestos que ya están actualizados."
+    )
+    box.setDetailedText(detail)
+    box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    box.setStandardButtons(QMessageBox.Ok)
+    box.exec_()
+    clipboard = QApplication.clipboard()
+    if clipboard is not None:
+        clipboard.setText(detail)
+        logger.info("Detalle del puesto atrasado copiado al portapapeles")
+
+
+def _destroy_desktop_window(window) -> None:
+    """Libera la ventana principal mientras la QApplication sigue viva (#674).
+
+    En Qt, ``close()`` sólo oculta la ventana: el ``QMainWindow`` y todo su
+    árbol de widgets siguen existiendo hasta que se libera su wrapper de
+    Python. Si eso recién ocurre cuando el intérprete se apaga, entonces
+    ``Py_FinalizeEx`` ya está desmontando la ``QApplication`` y el estado de
+    QtWidgets, y el destructor de la ventana toca memoria liberada: el
+    proceso cierra con ``0xC0000005`` (access violation).
+
+    Destruirla acá mantiene el orden que Qt espera: la ventana muere primero,
+    con la aplicación y el event loop todavía en pie.
+    """
+    try:
+        window.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    except Exception:  # pragma: no cover - el cierre nunca debe tapar la salida.
+        logger.exception("No se pudo destruir la ventana principal al cerrar")
+
+
 def run_desktop_app(*, demo_mode: bool = False) -> int:
     app = QApplication.instance() or QApplication([])
     app.setWindowIcon(femag_icon())
@@ -261,6 +364,9 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
     # El tema V2 global se aplica recién después de autenticar.
     try:
         database = _prepare_database(demo_mode=demo_mode)
+    except SchemaTooNewAtStartup as exc:
+        _recover_from_outdated_app(exc)
+        return 1
     except RuntimeError as exc:
         QMessageBox.critical(None, "FEMAG Desktop - Base de datos", str(exc))
         return 1
@@ -275,15 +381,31 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
         if login.show() != QDialog.Accepted:
             return 0
         user = login.authenticated_user
+        _record_workstation_version()
         app.setStyleSheet(STYLES + glass_v2_stylesheet())
         window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
         window.show()
         result = app.exec_()
-        if not window.session_closed:
+        session_closed = window.session_closed
+        _destroy_desktop_window(window)
+        if not session_closed:
             break
     if database is not None and not database.is_closed():
         database.close()
     return result
+
+
+def _record_workstation_version() -> None:
+    """Deja registrada que version esta corriendo en este puesto (#664).
+
+    Va despues del login, no antes: asi solo se registra cuando alguien abrio la
+    aplicacion de verdad. Y nunca puede tirar el puesto: registrar la version no
+    puede ser un motivo mas de que la app no abra.
+    """
+    try:
+        AuditService().record_workstation_version(BUILD_VERSION)
+    except Exception:
+        logger.exception("No se pudo registrar la version del puesto")
 
 
 def _prepare_database(*, demo_mode: bool):
@@ -303,6 +425,20 @@ def _prepare_database(*, demo_mode: bool):
 
     try:
         validate_runtime_schema(database)
+    except SchemaTooNewError as exc:
+        if not database.is_closed():
+            database.close()
+        # La base no esta incompleta: otro puesto la migro a una version mas nueva.
+        # Preparar el esquema no lo arregla (misma version, mismo resultado) y
+        # ademas dejaria fuera de servicio a los puestos ya actualizados. Lo
+        # resuelve `run_desktop_app`, que abre el flujo de actualizacion.
+        raise SchemaTooNewAtStartup(
+            f"La base de datos de FEMAG esta actualizada a una version mas nueva que "
+            f"este programa (version {BUILD_VERSION}). Hay que actualizar la aplicacion "
+            f"a la ultima version; volver a preparar las tablas no lo soluciona y "
+            f"dejaria fuera de servicio a los puestos que ya estan actualizados. "
+            f"Detalle: {exc}"
+        ) from exc
     except SchemaValidationError as exc:
         if not database.is_closed():
             database.close()
@@ -3028,6 +3164,7 @@ class LoadOrderEntryDialog(QDialog):
         self.address_combo = QComboBox()
         self.address_combo.setObjectName("loadOrderAddressInput")
         enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
+        self._keep_typed_destination()
         self.add_destination_button = _action_button(
             "addLoadOrderClientButton", "Agregar cliente/destino"
         )
@@ -3374,11 +3511,61 @@ class LoadOrderEntryDialog(QDialog):
         elif len(options) == 1:
             self.trailer_combo.setCurrentIndex(1)
 
-    def _refresh_address_options(self) -> None:
+    def _keep_typed_destination(self) -> None:
+        """El destino escrito a mano no se borra al perder el foco (#658).
+
+        `commit_combo_text` descarta todo lo que no coincide exactamente con una
+        opcion del combo, y como el destino se elige escribiendo, Enter borraba lo
+        que el operador acababa de tipear. Aca el texto sin coincidencia se
+        conserva: es el alta pendiente, no basura.
+        """
+        line_edit = self.address_combo.lineEdit()
+        if line_edit is None:
+            return
+        try:
+            line_edit.editingFinished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        line_edit.editingFinished.connect(self._commit_address_text)
+
+    def _commit_address_text(self) -> None:
+        """Solo confirma el texto que SI es un domicilio del combo.
+
+        No se toca el indice cuando no hay coincidencia: en un combo editable,
+        `setCurrentIndex(-1)` borra el texto de la pantalla, que es justamente lo
+        que hay que conservar para ofrecer el alta.
+        """
+        combo = self.address_combo
+        index = matching_combo_index(combo, combo.lineEdit().text())
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _pending_destination_text(self) -> str:
+        """Texto escrito que todavia no identifica un domicilio del combo.
+
+        El combo auto-selecciona el destino cuando el cliente tiene uno solo, asi que
+        el indice actual no dice si el operador eligio ese destino o escribio otro.
+        Manda lo que esta escrito en pantalla.
+        """
+        combo = self.address_combo
+        line_edit = combo.lineEdit()
+        if line_edit is None:
+            return ""
+        text = line_edit.text().strip()
+        if not text:
+            return ""
+        current = combo.currentIndex()
+        if current >= 0 and combo.itemText(current).strip().casefold() == text.casefold():
+            return ""
+        return text
+
+    def _refresh_address_options(self, *, preferred: int | None = None) -> None:
         client_id = self.client_combo.currentData()
         options = _address_options(client_id=client_id)
         _fill_combo(self.address_combo, options)
-        if len(options) == 1:
+        if preferred is not None and self.address_combo.findData(preferred) >= 0:
+            _set_combo(self.address_combo, preferred)
+        elif len(options) == 1:
             self.address_combo.setCurrentIndex(1)
         if client_id is not None and not options:
             self.feedback.show_warning(
@@ -3386,15 +3573,106 @@ class LoadOrderEntryDialog(QDialog):
                 focus_widget=self.client_combo,
             )
 
+    def _offer_new_delivery_address(self, client_id: int, typed: str) -> int | None:
+        """Pregunta siempre si el destino escrito se da de alta, y lo crea si dice que si.
+
+        El alta es decision del operador, no una heuristica: un cliente que entrega en
+        un lugar nuevo es el caso normal de la operacion. El domicilio nuevo queda
+        asociado al cliente seleccionado y la orden sigue sin cerrarse.
+        """
+        if not typed:
+            return None
+        client = Client.get_by_id(client_id)
+        existing = _find_client_delivery_address(client_id, typed)
+        if existing is not None:
+            self._refresh_address_options(preferred=existing.id)
+            self.feedback.show_warning(
+                f"El lugar de entrega {existing.address}, {existing.city} ya estaba "
+                f"cargado para {client.name}: se selecciono ese destino.",
+                focus_widget=self.address_combo,
+            )
+            return existing.id
+        answer = QMessageBox.question(
+            self,
+            "Nuevo lugar de entrega",
+            f'"{typed}" no es un lugar de entrega de {client.name}.\n\n'
+            "¿Quiere darlo de alta ahora, asociado a ese cliente?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        as_primary = self._ask_primary_delivery_address(client)
+        dialog = ClientAddressEntryDialog(
+            current_user=self.current_user,
+            client_id=client_id,
+            prefill_address=typed,
+            is_primary=as_primary,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.saved_record is None:
+            self.feedback.show_warning(
+                "No se dio de alta el lugar de entrega. Seleccione uno existente.",
+                focus_widget=self.address_combo,
+            )
+            return None
+        self._refresh_address_options(preferred=dialog.saved_record.id)
+        return dialog.saved_record.id
+
+    def _ask_primary_delivery_address(self, client) -> bool:
+        """El destino principal del cliente lo decide el operador, no el alta (#665).
+
+        El alta manual desde el ABM deja el domicilio nuevo como principal porque ahi
+        el operador esta de ese modo. Desde la orden de carga no: se esta cargando un destino
+        puntual para una carga y eso no dice nada sobre cual es el domicilio de siempre.
+        """
+        existing = ClientAddress.select().where(
+            (ClientAddress.client == client.id)
+            & (ClientAddress.active == True)  # noqa: E712
+            & (ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED)))
+        )
+        if not existing.exists():
+            # El cliente no tenia ningun domicilio de entrega: no hay a que sacarle
+            # el principal, asi que este pasa a serlo.
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Domicilio principal",
+            f"{client.name} ya tiene lugares de entrega cargados.\n\n"
+            "¿Querés que este nuevo sea el domicilio principal del cliente?\n\n"
+            'Si decís "No", el domicilio principal sigue siendo el que ya estaba.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
     def _add_destination(self) -> None:
         client_id = self.client_combo.currentData()
-        address_id = self.address_combo.currentData()
-        if client_id is None or address_id is None:
-            focus_widget = self.client_combo if client_id is None else self.address_combo
+        if client_id is None:
             self.feedback.show_warning(
-                "Seleccione cliente y destino.", focus_widget=focus_widget
+                "Seleccione cliente y destino.", focus_widget=self.client_combo
             )
             return
+        address_id = self.address_combo.currentData()
+        typed = self._pending_destination_text()
+        if typed:
+            # El operador escribio un destino: el indice auto-seleccionado no manda.
+            address_id = None
+        if address_id is None:
+            asked = bool(typed)
+            address_id = self._offer_new_delivery_address(client_id, typed)
+            if address_id is None:
+                # Si se pregunto, el aviso especifico ya esta en pantalla y el
+                # generico lo taparia.
+                if not asked:
+                    self.feedback.show_warning(
+                        "Seleccione cliente y destino.", focus_widget=self.address_combo
+                    )
+                return
         address = ClientAddress.get_by_id(address_id)
         if address.client.id != client_id:
             self.feedback.show_error(
@@ -4418,6 +4696,30 @@ def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
         ]
     except (InterfaceError, OperationalError):
         return []
+
+
+def _find_client_delivery_address(client_id: int, typed: str) -> ClientAddress | None:
+    """Domicilio de entrega del cliente al que corresponde el texto escrito, si existe.
+
+    El combo muestra `Cliente - calle, ciudad`, asi que escribir `Ruta A` nunca
+    coincide con la etiqueta completa. Sin esta comparacion, "siempre preguntar si se
+    da de alta" terminaria creando un domicilio duplicado de uno que el cliente ya
+    tiene. Se comparan calle, ciudad y launion de ambas, sin tildes ni mayusculas.
+    """
+    key = normalize_master_text(typed)
+    if not key:
+        return None
+    query = ClientAddress.select().where(
+        (ClientAddress.client == client_id)
+        & (ClientAddress.active == True)  # noqa: E712
+        & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
+    ).order_by(ClientAddress.id)
+    for address in query:
+        street = normalize_master_text(address.address)
+        city = normalize_master_text(address.city)
+        if key in {street, city, f"{street}{city}"}:
+            return address
+    return None
 
 
 def _product_options() -> list[tuple[int, str]]:

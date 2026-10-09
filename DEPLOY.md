@@ -21,7 +21,19 @@ Si la base esta vacia o incompleta, el asistente informa las tablas faltantes y 
 3. ejecuta la preparacion de esquema una sola vez;
 4. valida el esquema terminado antes de guardar la conexion.
 
-Los arranques normales siguen siendo read-only respecto del esquema: no crean ni alteran tablas automaticamente.
+Los arranques normales siguen siendo read-only respecto del esquema: no crean ni alteran tablas automaticamente. Esto se ubica en el codigo, no solo en el-switch `FEMAG_AUTO_MIGRATE_SCHEMA`, y vale tambien para el instalador nuevo sobre un puesto ya instalado.
+
+## Ventana de mantenimiento antes de promover un build con cambios de esquema
+
+Desde #660 el estado del esquema de la base compartida **no depende de que puesto abra primero**. Eso evita que un puesto se quede sin poder entrar, pero cambia el procedimiento de despliegue: la migracion hay que aplicarla a mano antes de que los puestos empiecen a usar la version nueva.
+
+Cuando el build que se va a promover cambia modelos, indices o columnas:
+
+1. **Antes de promover**, con la credencial administrativa, aplicar la preparacion: `scripts/init_db.py`, o `Crear o actualizar ahora las tablas de FEMAG` en el asistente de conexion de un puesto. Es idempotente y no pisa datos existentes.
+2. **Despues de promover**, los puestos abren sin migrar nada. Si encounteran un puesto con una version vieja, el mensaje dice que la base esta mas nueva y **ofrece descargar la actualizacion en el momento**; si no hay version publicada todavia, muestra el detalle copiado al portapapeles para avisar a soporte.
+3. **Nunca** revertir el esquema para destrabar un puesto atrasado: dejaria fuera de servicio a los puestos ya actualizados y romperia la funcion que motivo el cambio de esquema.
+
+Un build **sin** cambios de esquema no necesita ventana: la base ya esta como la version nueva la espera y los puestos abren directo. Para una emergencia con supervision, se puede armar la migracion desde el puesto con `FEMAG_AUTO_MIGRATE_SCHEMA=1`, siempre a mano y con la base a la vista.
 
 ## Version de cada build
 

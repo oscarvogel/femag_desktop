@@ -114,6 +114,72 @@ function Invoke-CandidateViaActions {
     Write-Host "CANDIDATE PUBLICADO CORRECTAMENTE (Actions)." -ForegroundColor Green
 }
 
+function Find-BasePython {
+    # Resuelve un Python del sistema para crear el .venv. Prioriza instalaciones
+    # reales sobre `py.exe`, que desde PowerShell no interactivo a veces apunta a
+    # otro usuario. Mismo criterio que scripts\instalar_femag_demo.ps1.
+    foreach ($candidate in @(
+            "C:\Python312\python.exe",
+            "C:\Python313\python.exe",
+            "C:\Python311\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+            "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe")) {
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    foreach ($command in @("python", "py")) {
+        if (Get-Command $command -ErrorAction SilentlyContinue) { return $command }
+    }
+    return $null
+}
+
+function Ensure-Venv {
+    # Crea el .venv si no esta. Antes esto abortaba y dejaba al operador(create el
+    # entorno a mano cada vez que se zmaba de maquina o se lo borraban; el release es
+    # reproducible, no depende de un estado previo de la maquina.
+    if (Test-Path -LiteralPath $Python) { return }
+
+    $base = Find-BasePython
+    if ($null -eq $base) {
+        throw "No existe $Python y no se encontro Python del sistema para crearlo. Instale Python 3.11+ y vuelva a correr."
+    }
+
+    Write-Host "Creando .venv con $base (puede tardar un momento)..." -ForegroundColor Yellow
+    Push-Location $RepoRoot
+    try {
+        if ($base -is [string] -and $base -eq "py") {
+            Invoke-Native -Command "py" -Arguments @("-3", "-m", "venv", ".venv") `
+                -FailureMessage "No se pudo crear el .venv con py -3."
+        }
+        else {
+            Invoke-Native -Command $base -Arguments @("-m", "venv", ".venv") `
+                -FailureMessage "No se pudo crear el .venv."
+        }
+
+        if (-not (Test-Path -LiteralPath $Python)) {
+            throw "El .venv se creo pero no tiene Scripts\python.exe: $Python"
+        }
+
+        Write-Host "Instalando dependencias de la aplicacion (requirements.txt)..." -ForegroundColor Yellow
+        Invoke-Native -Command $Python -Arguments @("-m", "pip", "install", "--upgrade", "pip") `
+            -FailureMessage "No se pudo actualizar pip en el .venv."
+        Invoke-Native -Command $Python -Arguments @("-m", "pip", "install", "-r", "requirements.txt") `
+            -FailureMessage "No se pudieron instalar las dependencias de requirements.txt."
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Assert-NoEnvFileInWorkspace {
+    # `.env` esta en .gitignore, asi que el stash que hace el release no lo levanta:
+    # se queda en el workspace y antes caia recien en el paso 6, DESPUES de haber
+    # compilado y empaquetado todo (#611). Se verifica aca, que cuesta segundos.
+    if (Test-Path -LiteralPath (Join-Path $RepoRoot ".env")) {
+        throw "Existe .env en el workspace de publicacion y el build no puede continuar.`n`nEs un archivo ignorado por git, asi que el stash del release no lo mueve.`nRenombrelo o muevalo antes de publicar (por ejemplo: Ren-Item .env .env.release-bak) y devuelvalo al terminar."
+    }
+}
+
 function Invoke-CandidateLocal {
     Require-Command "git"
     Require-Command "gh"
@@ -124,9 +190,9 @@ function Invoke-CandidateLocal {
         $env:GH_TOKEN = $env:VOGEL_RELEASES_TOKEN
     }
 
-    if (-not (Test-Path -LiteralPath $Python)) {
-        throw "No existe $Python. Active/cree el .venv antes de publicar."
-    }
+    Ensure-Venv
+
+    Assert-NoEnvFileInWorkspace
 
     $branch = Invoke-Capture -Command "git" -Arguments @("branch", "--show-current") `
         -FailureMessage "No se pudo determinar la rama actual."
@@ -256,7 +322,8 @@ function Invoke-CandidateLocal {
                 }
             }
         }
-        if (Test-Path -LiteralPath ".env") { throw "Existe .env en el workspace de publicacion." }
+        # El .env del workspace se verifica al inicio (Assert-NoEnvFileInWorkspace),
+        # donde abortar es barato. Ver #611.
         $sha256 = (Get-FileHash $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-Host "Version: $version"
         Write-Host "SHA256 : $sha256"

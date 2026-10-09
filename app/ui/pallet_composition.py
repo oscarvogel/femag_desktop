@@ -1,667 +1,353 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
     QFrame,
+    QGridLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
-    QInputDialog,
-    QLineEdit,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
     QWidget,
 )
 
-from app.models.masters import Product
 from app.services.pallet_capacity_service import PalletCapacityService
-from app.services.pallet_preparation_planner import PalletPreparationPlanner
 from app.ui.form_feedback import FormFeedback
-from app.ui.pallet_composition_legacy import *  # noqa: F401,F403
-from app.ui.pallet_composition_legacy import (
-    PalletCompositionWidget as _LegacyPalletCompositionWidget,
-    _kg_text,
-    _quantity_text,
+from app.ui.pallet_composition_guided_impl import (
+    PalletCompositionWidget as _GuidedPalletCompositionWidget,
 )
-
-# Contratos de feedback heredados del widget legacy. Se mantienen visibles en
-# este modulo porque el inventario de UX valida aqui sus objectName estables:
-# FormFeedback("palletCompositionIssues")
-# FormFeedback("bulkPalletAssignmentPreview")
+from app.ui.pallet_composition_legacy import PalletCard, _kg_text, _quantity_text
 
 
-class PalletCompositionWidget(_LegacyPalletCompositionWidget):
-    """Preparacion de pallets con propuesta automatica revisable."""
+class PalletCompositionWidget(_GuidedPalletCompositionWidget):
+    """Fachada publica del workbench guiado con compatibilidad legacy."""
 
-    def __init__(self, *, destinations: list[dict] | None = None, parent=None):
-        self._prepared_proposal = None
-        self._locked_sequences: set[int] = set()
-        self._truck_max_load_kg: Decimal | None = None
-        super().__init__(destinations=destinations, parent=parent)
-        self._capacity_source_parent = parent
-        self._install_auto_distribution_ui()
-        self.composition_changed.connect(self._invalidate_prepared_proposal)
-        self._sync_truck_capacity_from_parent()
-        self._refresh_auto_distribution_ui()
+    PALLET_SELECTOR_COLUMNS = 10
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._sync_truck_capacity_from_parent()
-        self._refresh_auto_distribution_ui()
+    def _install_guided_workbench(self) -> None:
+        super()._install_guided_workbench()
 
-    def _refresh(self) -> None:
-        super()._refresh()
-        if hasattr(self, "pending_table"):
-            self._refresh_auto_distribution_ui()
+        # Las cuatro acciones sobre mercaderia pendiente forman un unico flujo.
+        # La implementacion base dejaba "Proponer resto" en una segunda fila;
+        # lo movemos junto a agregar, carga parcial y distribucion automatica.
+        pending_group = self.guided_splitter.widget(0)
+        pending_layout = pending_group.layout()
+        pending_layout.removeWidget(self.guided_propose_rest_button)
+        for index in range(pending_layout.count()):
+            action_layout = pending_layout.itemAt(index).layout()
+            if action_layout is None:
+                continue
+            if action_layout.indexOf(self.guided_auto_button) >= 0:
+                action_layout.addWidget(self.guided_propose_rest_button, 2)
+                break
 
-    def _install_auto_distribution_ui(self) -> None:
-        total_layout = self.total_kg_label.parentWidget().layout()
-        self.order_flow_summary_label = QLabel("")
-        self.order_flow_summary_label.setObjectName("palletOrderFlowSummary")
-        self.order_flow_summary_label.setAlignment(Qt.AlignCenter)
-        self.order_flow_summary_label.setWordWrap(True)
-        self.order_flow_summary_label.setStyleSheet(
-            "color: #ffffff; background: transparent; border: 0; font-weight: 700;"
+        current_group = self.guided_splitter.widget(1)
+        current_layout = current_group.layout()
+
+        pallet_count_row = QHBoxLayout()
+        pallet_count_row.addWidget(QLabel("Total de pallets:"))
+        self.guided_total_pallets_input = QSpinBox()
+        self.guided_total_pallets_input.setObjectName("guidedTotalPalletCountInput")
+        self.guided_total_pallets_input.setRange(1, 999)
+        self.guided_total_pallets_input.setValue(max(len(self._pallets), 1))
+        self.guided_total_pallets_input.setMinimumWidth(72)
+        self.guided_total_pallets_input.setMaximumWidth(96)
+        pallet_count_row.addWidget(self.guided_total_pallets_input)
+        self.guided_create_to_total_button = QPushButton("Crear hasta total")
+        self.guided_create_to_total_button.setObjectName("guidedCreatePalletsToTotalButton")
+        self.guided_create_to_total_button.clicked.connect(self._guided_create_to_total)
+        pallet_count_row.addWidget(self.guided_create_to_total_button, 1)
+        current_layout.insertLayout(0, pallet_count_row)
+
+        capacity_row = QHBoxLayout()
+        self.guided_capacity_label = QLabel()
+        self.guided_capacity_label.setObjectName("guidedPalletCapacityLabel")
+        self.guided_capacity_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        capacity_row.addWidget(self.guided_capacity_label, 1)
+        self.guided_configure_capacity_button = QPushButton("Configurar Kg/pallet")
+        self.guided_configure_capacity_button.setObjectName("guidedConfigurePalletCapacityButton")
+        self.guided_configure_capacity_button.clicked.connect(self.configure_pallet_capacity)
+        self.guided_configure_capacity_button.setMinimumWidth(150)
+        self.guided_configure_capacity_button.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Fixed
         )
-        total_layout.addWidget(self.order_flow_summary_label)
-        self.order_flow_summary_label.setStyleSheet(
-            "color: #ffffff; background: transparent; border: 0; font-weight: 700; font-size: 11px;"
+        capacity_row.addWidget(self.guided_configure_capacity_button)
+        current_layout.insertLayout(1, capacity_row)
+
+        legacy_pallet_row = current_layout.itemAt(2).layout()
+        if legacy_pallet_row is not None:
+            label_item = legacy_pallet_row.itemAt(0)
+            if label_item is not None and label_item.widget() is not None:
+                label_item.widget().hide()
+        self.guided_pallet_combo.hide()
+        self.guided_new_pallet_button.setText("+ Nuevo pallet")
+
+        selector_frame = QFrame(current_group)
+        selector_frame.setObjectName("guidedPalletSelectorFrame")
+        selector_layout = QHBoxLayout(selector_frame)
+        selector_layout.setContentsMargins(0, 0, 0, 0)
+        selector_layout.addWidget(QLabel("Pallets:"))
+        self.guided_pallet_selector_scroll = QScrollArea(selector_frame)
+        self.guided_pallet_selector_scroll.setObjectName("guidedPalletSelectorScroll")
+        self.guided_pallet_selector_scroll.setWidgetResizable(True)
+        self.guided_pallet_selector_scroll.setFrameShape(QFrame.NoFrame)
+        self.guided_pallet_selector_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.guided_pallet_selector_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.guided_pallet_selector_scroll.setMinimumHeight(76)
+        self.guided_pallet_selector_scroll.setMaximumHeight(84)
+        self.guided_pallet_selector_container = QWidget()
+        self.guided_pallet_selector_grid = QGridLayout(self.guided_pallet_selector_container)
+        self.guided_pallet_selector_grid.setContentsMargins(0, 0, 0, 0)
+        self.guided_pallet_selector_grid.setSpacing(5)
+        self.guided_pallet_selector_scroll.setWidget(self.guided_pallet_selector_container)
+        selector_layout.addWidget(self.guided_pallet_selector_scroll, 1)
+        self.guided_pallet_selector_frame = selector_frame
+        self._guided_pallet_buttons: dict[int, QPushButton] = {}
+
+        self.guided_current_pallet_label = QLabel("PALLET ACTUAL: -")
+        self.guided_current_pallet_label.setObjectName("guidedCurrentPalletLabel")
+        self.guided_current_pallet_label.setStyleSheet(
+            "font-size: 15px; font-weight: 900; color: #173a59; padding: 4px 0;"
         )
+        current_layout.insertWidget(3, self.guided_current_pallet_label)
 
-        self.capacity_summary_label = QLabel("")
-        self.capacity_summary_label.setObjectName("palletCapacitySummary")
-        self.capacity_summary_label.setAlignment(Qt.AlignCenter)
-        self.capacity_summary_label.setWordWrap(True)
-        self.capacity_summary_label.setStyleSheet(
-            "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
-        )
-        total_layout.addWidget(self.capacity_summary_label)
-        total_frame = self.total_kg_label.parentWidget()
-        total_frame.setMaximumHeight(145)
+        self.guided_delete_pallet_button = QPushButton("Eliminar pallet")
+        self.guided_delete_pallet_button.setObjectName("guidedDeletePalletButton")
+        self.guided_delete_pallet_button.setProperty("secondary", True)
+        self.guided_delete_pallet_button.clicked.connect(self._guided_delete_current_pallet)
+        current_layout.insertWidget(4, self.guided_delete_pallet_button)
 
-        batch_frame = self.findChild(QFrame, "palletBatchActions")
-        batch_layout = batch_frame.layout()
-        self.propose_distribution_button = QPushButton("Proponer distribucion")
-        self.propose_distribution_button.setObjectName("proposePalletDistributionButton")
-        self.propose_distribution_button.clicked.connect(self.propose_distribution)
-        batch_layout.addWidget(self.propose_distribution_button, 3, 0, 1, 2)
+        self._legacy_issue_label = self.issue_label
+        self.guided_feedback = FormFeedback("guidedPalletFeedback", current_group)
+        self.issue_label = self.guided_feedback
+        current_layout.insertWidget(max(current_layout.count() - 1, 0), self.guided_feedback)
 
-        self.reorganize_pending_button = QPushButton("Reorganizar pendientes")
-        self.reorganize_pending_button.setObjectName("reorganizePendingPalletsButton")
-        self.reorganize_pending_button.setProperty("secondary", True)
-        self.reorganize_pending_button.clicked.connect(self.reorganize_pending)
-        batch_layout.addWidget(self.reorganize_pending_button, 4, 0, 1, 2)
+        pending_header = self.pending_table.horizontalHeader()
+        pending_header.setMinimumSectionSize(40)
+        pending_header.setSectionResizeMode(QHeaderView.Stretch)
+        self.pending_table.setMinimumWidth(0)
+        self.pending_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
 
-        self.recalculate_all_button = QPushButton("Recalcular toda la carga")
-        self.recalculate_all_button.setObjectName("recalculateAllPalletsButton")
-        self.recalculate_all_button.setProperty("secondary", True)
-        self.recalculate_all_button.clicked.connect(self.confirm_recalculate_all)
-        batch_layout.addWidget(self.recalculate_all_button, 5, 0, 1, 2)
+        current_header = self.guided_content_table.horizontalHeader()
+        current_header.setMinimumSectionSize(40)
+        current_header.setSectionResizeMode(QHeaderView.Stretch)
+        self.guided_content_table.setMinimumWidth(0)
+        self.guided_content_table.setMinimumHeight(150)
+        self.guided_content_table.setMaximumHeight(260)
+        self.guided_content_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-        self.configure_pallet_capacity_button = QPushButton("Kg/pallet")
-        self.configure_pallet_capacity_button.setObjectName("configurePalletMaxKgButton")
-        self.configure_pallet_capacity_button.setProperty("secondary", True)
-        self.configure_pallet_capacity_button.clicked.connect(self.configure_pallet_capacity)
-        batch_layout.addWidget(self.configure_pallet_capacity_button, 6, 0, 1, 2)
+        advanced_index = current_layout.indexOf(self.guided_advanced_button)
+        current_layout.insertWidget(max(advanced_index, 0), selector_frame)
 
-        self.configure_truck_capacity_button = QPushButton("Cap. camion")
-        self.configure_truck_capacity_button.setObjectName("configureTruckMaxKgButton")
-        self.configure_truck_capacity_button.setProperty("secondary", True)
-        self.configure_truck_capacity_button.clicked.connect(self.configure_truck_capacity)
-        batch_layout.addWidget(self.configure_truck_capacity_button, 7, 0, 1, 2)
+        for group in (self.guided_splitter.widget(0), self.guided_splitter.widget(1)):
+            group.setMinimumWidth(0)
+            group.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
 
-        # En resoluciones bajas, una sola fila horizontal aplasta el campo
-        # de cantidad. Reorganizamos las acciones en dos filas compactas.
-        batch_label = batch_layout.itemAtPosition(0, 0).widget()
-        if isinstance(batch_label, QLabel):
-            batch_label.setText("Agregar pallets:")
-        while batch_layout.count():
-            batch_layout.takeAt(0)
-        batch_frame.setMinimumHeight(104)
-        batch_frame.setMaximumHeight(116)
-        batch_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        batch_layout.setContentsMargins(0, 0, 0, 0)
-
-        first_row = QWidget(batch_frame)
-        first_row_layout = QHBoxLayout(first_row)
-        first_row_layout.setContentsMargins(0, 0, 0, 0)
-        first_row_layout.setSpacing(8)
-
-        second_row = QWidget(batch_frame)
-        second_row_layout = QHBoxLayout(second_row)
-        second_row_layout.setContentsMargins(0, 0, 0, 0)
-        second_row_layout.setSpacing(8)
-
-        if isinstance(batch_label, QLabel):
-            batch_label.setMinimumWidth(92)
-            first_row_layout.addWidget(batch_label)
-
-        # Mantener la barra utilizable en notebooks de 1280px. Los textos de
-        # los botones no deben imponer su sizeHint como ancho mínimo del widget.
-        self.bulk_pallet_count_input.setMinimumWidth(80)
-        self.bulk_pallet_count_input.setMaximumWidth(96)
-        self.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        compact_buttons = (
-            self.add_pallet_button,
-            self.propose_distribution_button,
-            self.clear_assignments_button,
-            self.reorganize_pending_button,
-            self.recalculate_all_button,
-            self.configure_pallet_capacity_button,
-            self.configure_truck_capacity_button,
-        )
-        for button in compact_buttons:
+        for button in (
+            self.guided_add_button,
+            self.guided_partial_button,
+            self.guided_auto_button,
+            self.guided_propose_rest_button,
+            self.guided_new_pallet_button,
+            self.guided_create_to_total_button,
+            self.guided_delete_pallet_button,
+            self.guided_remove_button,
+            self.guided_lock_button,
+            self.guided_advanced_button,
+        ):
             button.setMinimumWidth(0)
-            button.setMaximumHeight(34)
             button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
-        first_row_layout.addWidget(self.bulk_pallet_count_input)
-        first_row_layout.addWidget(self.add_pallet_button, 1)
-        first_row_layout.addWidget(self.propose_distribution_button, 2)
-        first_row_layout.addStretch(1)
+        # La carga parcial es parte del flujo principal: debe permanecer visible
+        # para repartir manualmente una linea entre varios pallets.
+        self.guided_partial_button.setText("Agregar cantidad...")
+        self.guided_partial_button.setMinimumWidth(160)
+        self.guided_partial_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.guided_partial_button.show()
+        self.guided_propose_rest_button.setMinimumWidth(150)
+        self.guided_propose_rest_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-        second_row_layout.addWidget(self.clear_assignments_button, 2)
-        second_row_layout.addWidget(self.reorganize_pending_button, 1)
-        second_row_layout.addWidget(self.recalculate_all_button, 1)
-        second_row_layout.addWidget(self.configure_pallet_capacity_button, 1)
-        second_row_layout.addWidget(self.configure_truck_capacity_button, 1)
-        second_row_layout.addStretch(1)
-
-        batch_layout.addWidget(first_row, 0, 0, 1, 2)
-        batch_layout.addWidget(second_row, 1, 0, 1, 2)
-
-        editor_layout = self.editor_title.parentWidget().layout()
-        self.lock_pallet_button = QPushButton("Fijar pallet")
-        self.lock_pallet_button.setObjectName("togglePalletLockButton")
-        self.lock_pallet_button.setProperty("secondary", True)
-        self.lock_pallet_button.clicked.connect(self.toggle_selected_pallet_lock)
-        editor_layout.insertWidget(1, self.lock_pallet_button)
-
-        bulk_tab = self.findChild(QWidget, "palletEditorTabBulk")
-        proposal_layout = bulk_tab.layout()
-        self.proposal_feedback = FormFeedback("palletProposalFeedback")
-        self.proposal_feedback.show_info(
-            "Genere una propuesta para revisarla antes de aplicarla."
+        self.guided_configure_capacity_button.setMinimumWidth(150)
+        self.guided_configure_capacity_button.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Fixed
         )
-        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.proposal_feedback)
-        self.proposal_table = QTableWidget(0, 6)
-        self.proposal_table.setObjectName("palletDistributionProposalTable")
-        self.proposal_table.setHorizontalHeaderLabels(
-            ("Pallet", "Kg", "Ocupacion", "Clientes", "Productos", "Estado")
-        )
-        self.proposal_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.proposal_table.verticalHeader().setVisible(False)
-        self.proposal_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.proposal_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.proposal_table, 1)
-        self.accept_proposal_button = QPushButton("Aceptar distribucion")
-        self.accept_proposal_button.setObjectName("acceptPalletDistributionButton")
-        self.accept_proposal_button.clicked.connect(self.accept_prepared_proposal)
-        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.accept_proposal_button)
-        self.cancel_proposal_button = QPushButton("Cancelar propuesta")
-        self.cancel_proposal_button.setObjectName("cancelPalletDistributionButton")
-        self.cancel_proposal_button.setProperty("secondary", True)
-        self.cancel_proposal_button.clicked.connect(self.cancel_prepared_proposal)
-        proposal_layout.insertWidget(max(proposal_layout.count() - 1, 0), self.cancel_proposal_button)
-        self._proposal_tab_index = self.editor_tabs.indexOf(bulk_tab)
 
-        allocations_tab = self.findChild(QWidget, "palletEditorTabAllocations")
-        pending_layout = allocations_tab.layout()
-        self.pending_filter_input = QLineEdit()
-        self.pending_filter_input.setObjectName("palletPendingFilterInput")
-        self.pending_filter_input.setClearButtonEnabled(True)
-        self.pending_filter_input.setPlaceholderText(
-            "Filtrar pendientes por cliente, destino o producto..."
-        )
-        self.pending_filter_input.textChanged.connect(self._render_pending_table)
-        pending_layout.addWidget(self.pending_filter_input)
-        self.pending_table = QTableWidget(0, 8)
-        self.pending_table.setObjectName("palletPendingTable")
-        self.pending_table.setHorizontalHeaderLabels(
-            ("Cliente", "Destino", "Articulo", "Pedido", "Asignado", "Suelto", "Pendiente", "Kg")
-        )
-        self.pending_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.pending_table.verticalHeader().setVisible(False)
-        self.pending_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.pending_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        pending_layout.addWidget(self.pending_table, 1)
-
-    def _planning_destinations(self) -> list[dict]:
-        loose_by_key: dict[tuple[int, int], Decimal] = {}
-        for allocation in self._loose:
-            key = (int(allocation["address_id"]), int(allocation["product_id"]))
-            loose_by_key[key] = loose_by_key.get(key, Decimal("0")) + Decimal(
-                str(allocation["quantity"])
-            )
-
-        destinations: list[dict] = []
-        for destination in self._destinations:
-            products = []
-            for product in destination.get("products") or []:
-                key = (int(destination["address_id"]), int(product["product_id"]))
-                quantity = Decimal(str(product.get("quantity") or 0)) - loose_by_key.get(
-                    key, Decimal("0")
-                )
-                if quantity <= 0:
-                    continue
-                product_copy = dict(product)
-                product_copy["quantity"] = quantity
-                products.append(product_copy)
-            destination_copy = dict(destination)
-            destination_copy["products"] = products
-            destinations.append(destination_copy)
-        return destinations
-
-    def _product_weights(self) -> dict[int, Decimal]:
-        product_ids = {
-            int(product["product_id"])
-            for destination in self._destinations
-            for product in destination.get("products") or []
-        }
-        if not product_ids:
-            return {}
-        weights = {}
-        for product in Product.select().where(Product.id.in_(product_ids)):
-            weights[int(product.id)] = Decimal(str(product.peso_unitario_kg or 0))
-        return weights
-
-    def _prepare_distribution(
-        self,
-        *,
-        preserve_current: bool,
-        respect_locked: bool = True,
-    ) -> None:
-        max_kg = PalletCapacityService.pallet_max_kg()
-        if max_kg is None:
-            self.issue_label.show_warning(
-                "Configure el maximo de kg por pallet antes de generar una distribucion automatica."
-            )
-            return
-        try:
-            prepared = PalletPreparationPlanner().propose(
-                destinations=self._planning_destinations(),
-                pallets=self.pallet_drafts(),
-                product_weights=self._product_weights(),
-                max_kg_per_pallet=max_kg,
-                locked_sequences=(set(self._locked_sequences) if respect_locked else set()),
-                preserve_unlocked_allocations=preserve_current,
-            )
-        except ValueError as exc:
-            self.issue_label.show_error(str(exc))
-            return
-        self._prepared_proposal = prepared
-        self._render_prepared_proposal()
-        self.editor_tabs.setCurrentIndex(self._proposal_tab_index)
-
-    def propose_distribution(self) -> None:
-        self._prepare_distribution(preserve_current=False)
-
-    def reorganize_pending(self) -> None:
-        self._prepare_distribution(preserve_current=True)
-
-    def confirm_recalculate_all(self) -> None:
-        if not self._pallets:
-            return
-        answer = QMessageBox.question(
-            self,
-            "Recalcular toda la carga",
-            "Se generara una propuesta nueva desde cero. Las asignaciones actuales no se modificaran hasta que acepte la propuesta. ¿Continuar?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        self._prepare_distribution(preserve_current=False, respect_locked=False)
+        self.guided_pallet_combo.setMinimumWidth(0)
+        self.guided_pallet_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.guided_splitter.setMinimumWidth(0)
+        self.guided_splitter.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
 
     def configure_pallet_capacity(self) -> None:
-        current = PalletCapacityService.pallet_max_kg() or Decimal("1000")
-        value, accepted = QInputDialog.getDouble(
-            self,
-            "Maximo kg por pallet",
-            "Maximo permitido por pallet (kg):",
-            float(current),
-            0.001,
-            999999999.0,
-            3,
-        )
-        if not accepted:
-            return
-        saved = PalletCapacityService.set_pallet_max_kg(Decimal(str(value)))
-        self.issue_label.show_success(f"Maximo por pallet actualizado a {_kg_text(saved)}.")
-        self._refresh_auto_distribution_ui()
+        super().configure_pallet_capacity()
+        if getattr(self, "_guided_ready", False):
+            self._refresh_guided_ui()
 
-    def _current_truck(self):
-        candidates = []
-        source_parent = getattr(self, "_capacity_source_parent", None)
-        if source_parent is not None:
-            candidates.append(source_parent)
-        parent = self.parentWidget()
-        while parent is not None:
-            if parent not in candidates:
-                candidates.append(parent)
-            parent = parent.parentWidget()
-        for container in candidates:
-            order = getattr(container, "order", None)
-            truck = getattr(order, "truck", None) if order is not None else None
-            if truck is not None:
-                return truck
-        return None
-
-    def configure_truck_capacity(self) -> None:
-        truck = self._current_truck()
-        if truck is None:
-            self.issue_label.show_warning("No se pudo identificar el camion de la orden actual.")
-            return
-        current = PalletCapacityService.truck_max_load_kg(truck) or Decimal("30000")
-        value, accepted = QInputDialog.getDouble(
-            self,
-            "Capacidad del camion",
-            "Capacidad maxima del camion (kg):",
-            float(current),
-            0.001,
-            999999999.0,
-            3,
-        )
-        if not accepted:
-            return
-        saved = PalletCapacityService.set_truck_max_load_kg(truck, Decimal(str(value)))
-        self.set_truck_capacity_kg(saved)
-        self.issue_label.show_success(f"Capacidad del camion actualizada a {_kg_text(saved)}.")
-
-    def _render_prepared_proposal(self) -> None:
-        prepared = self._prepared_proposal
-        self.proposal_table.setRowCount(0)
-        if prepared is None:
-            self.proposal_feedback.show_info(
-                "Genere una propuesta para revisarla antes de aplicarla."
+    def _guided_create_to_total(self) -> None:
+        target = int(self.guided_total_pallets_input.value())
+        current = len(self._pallets)
+        if target <= current:
+            self.issue_label.show_info(
+                f"La composicion ya tiene {current} pallets. No se agregaron pallets."
             )
-            self.accept_proposal_button.setEnabled(False)
-            self.cancel_proposal_button.setEnabled(False)
             return
-        max_kg = prepared.proposal.max_kg_per_pallet
-        for row, pallet in enumerate(prepared.proposal.pallets):
-            self.proposal_table.insertRow(row)
-            occupation = (pallet.total_kg / max_kg * Decimal("100")) if max_kg else Decimal("0")
-            values = (
-                str(pallet.sequence),
-                _kg_text(pallet.total_kg),
-                f"{occupation.quantize(Decimal('0.1'))}%",
-                str(pallet.client_count),
-                str(pallet.product_count),
-                "Fijado" if pallet.locked else "Propuesto",
-            )
-            for column, value in enumerate(values):
-                self.proposal_table.setItem(row, column, QTableWidgetItem(value))
-        if prepared.is_complete:
-            self.proposal_feedback.show_info(
-                "Propuesta completa. Revise los pallets y acepte para aplicar la distribucion."
-            )
-        else:
-            pending_kg = sum(
-                (Decimal(str(row["pending_kg"])) for row in prepared.pending_rows),
-                Decimal("0"),
-            )
-            self.proposal_feedback.show_warning(
-                f"La capacidad disponible no alcanza: quedan {_kg_text(pending_kg)} pendientes."
-            )
-        self.accept_proposal_button.setEnabled(prepared.is_complete)
-        self.cancel_proposal_button.setEnabled(True)
+        self.add_pallets(target - current)
+        self.issue_label.show_success(f"Se prepararon {target} pallets para la carga.")
 
-    def accept_prepared_proposal(self) -> None:
-        prepared = self._prepared_proposal
-        if prepared is None or not prepared.is_complete:
+    def _guided_select_pallet(self, sequence: int) -> None:
+        if not any(int(pallet["sequence"]) == int(sequence) for pallet in self._pallets):
             return
-        pallet_types = {
-            int(pallet["sequence"]): pallet.get("pallet_type_id") for pallet in self._pallets
-        }
-        self._pallets = []
-        self._locked_sequences = set()
-        for draft in prepared.pallet_drafts:
-            sequence = int(draft["sequence"])
-            self._pallets.append(
-                {
-                    "sequence": sequence,
-                    "pallet_type_id": draft.get("pallet_type_id") or pallet_types.get(sequence),
-                    "locked": bool(draft.get("locked")),
-                    "allocations": [dict(allocation) for allocation in draft.get("allocations") or []],
-                }
-            )
-            if draft.get("locked"):
-                self._locked_sequences.add(sequence)
-        self._prepared_proposal = None
-        self._selected_sequence = self._pallets[0]["sequence"] if self._pallets else None
-        self._refresh()
-        self.composition_changed.emit()
+        self._selected_sequence = int(sequence)
+        self._render_editor()
+        self._refresh_guided_ui()
 
-    def cancel_prepared_proposal(self) -> None:
-        self._prepared_proposal = None
-        self._render_prepared_proposal()
-
-    def _invalidate_prepared_proposal(self) -> None:
-        if self._prepared_proposal is None:
-            return
-        self._prepared_proposal = None
-        self._render_prepared_proposal()
-
-    def toggle_selected_pallet_lock(self) -> None:
+    def _guided_delete_current_pallet(self) -> None:
         sequence = self._selected_sequence
         if sequence is None:
+            self.issue_label.show_warning("Seleccione un pallet para eliminar.")
             return
-        if sequence in self._locked_sequences:
-            self._locked_sequences.remove(sequence)
-        else:
-            self._locked_sequences.add(sequence)
-        pallet = self._pallet(sequence)
-        pallet["locked"] = sequence in self._locked_sequences
-        self._refresh_auto_distribution_ui()
-        self.composition_changed.emit()
-
-    def load_pallets(self, pallets: list[dict], *, loose: list[dict] | None = None) -> None:
-        locked = {int(pallet["sequence"]) for pallet in pallets if pallet.get("locked")}
-        super().load_pallets(pallets, loose=loose)
-        self._locked_sequences = locked
-        for pallet in self._pallets:
-            pallet["locked"] = int(pallet["sequence"]) in locked
-        if hasattr(self, "pending_table"):
-            self._refresh_auto_distribution_ui()
-
-    def pallet_drafts(self) -> list[dict]:
-        drafts = super().pallet_drafts()
-        for draft in drafts:
-            draft["locked"] = int(draft["sequence"]) in self._locked_sequences
-        return drafts
-
-    def set_truck_capacity_kg(self, value) -> None:
-        if value in (None, "", 0):
-            self._truck_max_load_kg = None
-        else:
-            self._truck_max_load_kg = Decimal(str(value)).quantize(Decimal("0.001"))
-        if hasattr(self, "capacity_summary_label"):
-            self._refresh_auto_distribution_ui()
-
-    def _sync_truck_capacity_from_parent(self) -> None:
-        truck = self._current_truck()
-        if truck is None:
+        pallet = next(
+            (item for item in self._pallets if int(item["sequence"]) == int(sequence)),
+            None,
+        )
+        if pallet is None:
             return
-        self.set_truck_capacity_kg(getattr(truck, "max_load_kg", None))
-
-    def _current_rows(self) -> list[dict]:
-        assigned_by_key: dict[tuple[int, int], Decimal] = {}
-        loose_by_key: dict[tuple[int, int], Decimal] = {}
-        for pallet in self._pallets:
-            for allocation in pallet["allocations"]:
-                key = (int(allocation["address_id"]), int(allocation["product_id"]))
-                assigned_by_key[key] = assigned_by_key.get(key, Decimal("0")) + Decimal(
-                    str(allocation["quantity"])
-                )
-        for allocation in self._loose:
-            key = (int(allocation["address_id"]), int(allocation["product_id"]))
-            loose_by_key[key] = loose_by_key.get(key, Decimal("0")) + Decimal(
-                str(allocation["quantity"])
-            )
-        weights = self._product_weights()
-        rows = []
-        for destination in self._destinations:
-            for product in destination.get("products") or []:
-                key = (int(destination["address_id"]), int(product["product_id"]))
-                requested = Decimal(str(product.get("quantity") or 0))
-                assigned = assigned_by_key.get(key, Decimal("0"))
-                loose = loose_by_key.get(key, Decimal("0"))
-                pending = max(requested - assigned - loose, Decimal("0"))
-                unit_kg = weights.get(int(product["product_id"]), Decimal("0"))
-                rows.append(
-                    {
-                        "client": destination.get("client_label", ""),
-                        "destination": destination.get("address_label", ""),
-                        "product": product.get("product_label", ""),
-                        "requested": requested,
-                        "assigned": assigned,
-                        "loose": loose,
-                        "pending": pending,
-                        "pending_kg": pending * unit_kg,
-                    }
-                )
-        return rows
-
-    def _render_order_flow_summary(self, rows: list[dict]) -> None:
-        requested = sum((row["requested"] for row in rows), Decimal("0"))
-        assigned = sum((row["assigned"] for row in rows), Decimal("0"))
-        loose = sum((row["loose"] for row in rows), Decimal("0"))
-        pending = sum((row["pending"] for row in rows), Decimal("0"))
-        self.order_flow_summary_label.setText(
-            " · ".join(
+        if int(sequence) in self._locked_sequences:
+            self.issue_label.show_warning("Libere el pallet antes de eliminarlo.")
+            return
+        allocations = pallet.get("allocations") or []
+        if allocations:
+            answer = QMessageBox.question(
+                self,
+                "Eliminar pallet",
                 (
-                    f"Pedido: {_quantity_text(requested)}",
-                    f"En pallets: {_quantity_text(assigned)}",
-                    f"Suelto: {_quantity_text(loose)}",
-                    f"Pendiente: {_quantity_text(pending)}",
-                    f"Pallets: {len(self._pallets)}",
+                    f"El pallet {sequence} tiene mercaderia asignada.\n\n"
+                    "Si lo elimina, esa mercaderia volvera a quedar pendiente."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        old_locked = set(self._locked_sequences)
+        remaining = [item for item in self._pallets if int(item["sequence"]) != int(sequence)]
+        remaining.sort(key=lambda item: int(item["sequence"]))
+        sequence_map: dict[int, int] = {}
+        for new_sequence, item in enumerate(remaining, start=1):
+            old_sequence = int(item["sequence"])
+            sequence_map[old_sequence] = new_sequence
+            item["sequence"] = new_sequence
+
+        self._pallets = remaining
+        self._locked_sequences = {
+            sequence_map[old_sequence]
+            for old_sequence in old_locked
+            if old_sequence in sequence_map
+        }
+        for item in self._pallets:
+            item["locked"] = int(item["sequence"]) in self._locked_sequences
+
+        if self._pallets:
+            self._selected_sequence = min(int(sequence), len(self._pallets))
+        else:
+            self._selected_sequence = None
+        self._refresh()
+        self.composition_changed.emit()
+        self.issue_label.show_success("Pallet eliminado. La numeracion fue reordenada.")
+
+    def _rebuild_guided_pallet_selector(self) -> None:
+        while self.guided_pallet_selector_grid.count():
+            item = self.guided_pallet_selector_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+        self._guided_pallet_buttons = {}
+
+        for index, pallet in enumerate(sorted(self._pallets, key=lambda item: int(item["sequence"]))):
+            sequence = int(pallet["sequence"])
+            button = QPushButton(str(sequence))
+            button.setObjectName(f"guidedPalletSelectorButton_{sequence}")
+            button.setCheckable(True)
+            selected = sequence == self._selected_sequence
+            button.setChecked(selected)
+            button.setMinimumWidth(36)
+            button.setMaximumHeight(30)
+            if selected:
+                button.setStyleSheet(
+                    "QPushButton { background: #173a59; color: white; font-weight: 900; "
+                    "border: 2px solid #0f2e49; border-radius: 6px; }"
                 )
-            )
-        )
+            else:
+                button.setStyleSheet("")
+            suffix = " · fijado" if sequence in self._locked_sequences else ""
+            button.setToolTip(f"Pallet {sequence}{suffix} · {_kg_text(self._pallet_kg(pallet))}")
+            button.clicked.connect(lambda _checked=False, seq=sequence: self._guided_select_pallet(seq))
+            row = index // self.PALLET_SELECTOR_COLUMNS
+            column = index % self.PALLET_SELECTOR_COLUMNS
+            self.guided_pallet_selector_grid.addWidget(button, row, column)
+            self._guided_pallet_buttons[sequence] = button
 
-    def _render_pending_table(self) -> None:
-        rows = self._current_rows()
-        self._render_order_flow_summary(rows)
-        needle = (
-            self.pending_filter_input.text().strip().casefold()
-            if hasattr(self, "pending_filter_input")
-            else ""
-        )
-        visible_rows = []
-        for row in rows:
-            if row["pending"] <= 0:
-                continue
-            haystack = " ".join(
-                (str(row["client"]), str(row["destination"]), str(row["product"]))
-            ).casefold()
-            if needle and needle not in haystack:
-                continue
-            visible_rows.append(row)
+        if not self._pallets:
+            empty = QLabel("Todavia no hay pallets. Defina el total o agregue uno.")
+            empty.setWordWrap(True)
+            self.guided_pallet_selector_grid.addWidget(empty, 0, 0, 1, self.PALLET_SELECTOR_COLUMNS)
 
-        self.pending_table.setRowCount(0)
-        for row_index, row in enumerate(visible_rows):
-            self.pending_table.insertRow(row_index)
-            values = (
-                row["client"],
-                row["destination"],
-                row["product"],
-                _quantity_text(row["requested"]),
-                _quantity_text(row["assigned"]),
-                _quantity_text(row["loose"]),
-                _quantity_text(row["pending"]),
-                _kg_text(row["pending_kg"]),
-            )
-            for column, value in enumerate(values):
-                self.pending_table.setItem(row_index, column, QTableWidgetItem(str(value)))
+    def _refresh_guided_ui(self) -> None:
+        super()._refresh_guided_ui()
+        if not hasattr(self, "guided_total_pallets_input"):
+            return
 
-    def _refresh_auto_distribution_ui(self) -> None:
+        self.guided_total_pallets_input.setValue(max(len(self._pallets), 1))
+        # La pantalla se construye antes de que la base este disponible (#668).
+        # Mismo criterio que `_refresh_auto_distribution_ui` del base: si no se
+        # puede leer la capacidad, se muestra como no configurada.
         try:
             max_kg = PalletCapacityService.pallet_max_kg()
         except Exception:
             max_kg = None
-        total_kg = Decimal("0")
-        for pallet in self._pallets:
-            pallet_kg = sum(
-                (
-                    Decimal(str(allocation["quantity"]))
-                    * Decimal(str(allocation.get("peso_unitario_kg") or 0))
-                    for allocation in pallet["allocations"]
-                ),
-                Decimal("0"),
-            )
-            total_kg += pallet_kg
-            card = self._cards.get(int(pallet["sequence"]))
-            if card is not None:
-                locked = int(pallet["sequence"]) in self._locked_sequences
-                card.title_label.setText(
-                    f"PALLET {pallet['sequence']}{'  🔒' if locked else ''}"
-                )
-                if max_kg:
-                    occupation = pallet_kg / max_kg * Decimal("100")
-                    exceeded = pallet_kg > max_kg
-                    if exceeded:
-                        card.set_state("invalid")
-                        base_status = "EXCEDIDO"
-                    else:
-                        base_status = card.status_label.text().split(" · ")[0]
-                    card.status_label.setText(
-                        f"{base_status} · max {_kg_text(max_kg)} · {occupation.quantize(Decimal('1'))}%"
-                        + (" · Fijado" if locked else "")
-                    )
+        if max_kg is None:
+            self.guided_capacity_label.setText("Kg/pallet: SIN CONFIGURAR")
+            self.guided_capacity_label.setStyleSheet("font-weight: 800; color: #b42318;")
+            help_text = "Configure Kg/pallet para agregar, distribuir o proponer mercaderia."
+            for button in (
+                self.guided_add_button,
+                self.guided_partial_button,
+                self.guided_auto_button,
+                self.guided_propose_rest_button,
+            ):
+                button.setToolTip(help_text)
+        else:
+            self.guided_capacity_label.setText(f"Kg/pallet: {_kg_text(max_kg)}")
+            self.guided_capacity_label.setStyleSheet("font-weight: 800;")
+            for button in (
+                self.guided_add_button,
+                self.guided_partial_button,
+                self.guided_auto_button,
+                self.guided_propose_rest_button,
+            ):
+                button.setToolTip("")
 
-        loose_kg = sum(
-            (
-                Decimal(str(allocation["quantity"]))
-                * Decimal(str(allocation.get("peso_unitario_kg") or 0))
-                for allocation in self._loose
-            ),
-            Decimal("0"),
-        )
-        transport_kg = total_kg + loose_kg
-        parts = []
-        if max_kg:
-            parts.append(f"Maximo por pallet: {_kg_text(max_kg)}")
+        if self._selected_sequence is None:
+            self.guided_current_pallet_label.setText("PALLET ACTUAL: -")
+            self.guided_delete_pallet_button.setEnabled(False)
         else:
-            parts.append("Maximo por pallet: sin configurar")
-        truck_exceeded = False
-        if self._truck_max_load_kg:
-            margin = self._truck_max_load_kg - transport_kg
-            if margin >= 0:
-                parts.append(
-                    f"Camion: {_kg_text(transport_kg)} / {_kg_text(self._truck_max_load_kg)} · margen {_kg_text(margin)}"
-                )
-            else:
-                truck_exceeded = True
-                parts.append(
-                    f"Camion: {_kg_text(transport_kg)} / {_kg_text(self._truck_max_load_kg)} · EXCEDIDO por {_kg_text(-margin)}"
-                )
-        else:
-            parts.append(f"Camion: {_kg_text(transport_kg)} · capacidad sin configurar")
-        self.capacity_summary_label.setText(" · ".join(parts))
-        if truck_exceeded:
-            self.capacity_summary_label.setStyleSheet(
-                "color: #ffffff; background: #b53b3b; border-radius: 5px; padding: 4px; font-weight: 800;"
+            self.guided_current_pallet_label.setText(
+                f"PALLET ACTUAL: {self._selected_sequence}"
             )
-        else:
-            self.capacity_summary_label.setStyleSheet(
-                "color: #d9e7f2; background: transparent; border: 0; font-weight: 600;"
-            )
-        has_pallets = bool(self._pallets)
-        self.propose_distribution_button.setEnabled(has_pallets)
-        self.reorganize_pending_button.setEnabled(has_pallets)
-        self.recalculate_all_button.setEnabled(has_pallets)
-        self.configure_pallet_capacity_button.setEnabled(True)
-        self.configure_truck_capacity_button.setEnabled(self._current_truck() is not None)
-        self.lock_pallet_button.setEnabled(self._selected_sequence is not None)
-        if self._selected_sequence in self._locked_sequences:
-            self.lock_pallet_button.setText("Liberar pallet")
-        else:
-            self.lock_pallet_button.setText("Fijar pallet")
-        self._render_pending_table()
-        self._render_prepared_proposal()
+            self.guided_delete_pallet_button.setEnabled(True)
+
+        self.guided_partial_button.show()
+        self._rebuild_guided_pallet_selector()
+
+
+__all__ = [
+    "PalletCard",
+    "PalletCompositionWidget",
+    "_kg_text",
+    "_quantity_text",
+]
