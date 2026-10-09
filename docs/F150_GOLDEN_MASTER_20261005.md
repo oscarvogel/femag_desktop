@@ -129,35 +129,67 @@ precio en `RemittanceItem`.
 | Comando | Resultado |
 |---|---|
 | `python -m pytest tests/test_f150_*.py tests/test_issue_40{3,4b,5}_*.py` | **47 passed** |
-| `python -m pytest` (suite completa) | 797 passed, 15 failed |
+| `python -m pytest` (rama de este PR) | 799 passed, 15 failed |
+| `python -m pytest` (base del PR, worktree limpio) | 773 passed, 15 failed |
+| `python -m pytest` (`main`, worktree limpio) | 1499 passed, 7 failed |
 | `python -m compileall -q app` | OK |
 | `python -m app.main --smoke` | `FEMAG smoke OK` |
 | `git diff --check` | OK |
-| Round-trip contra la muestra real del issue | **identico byte a byte** |
-| Round-trip contra 119 archivos reales | **119/119 identicos** |
+| `python scripts/verify_f150_corpus.py` | **119/119 identicos** |
+| Round-trip contra `F.150-05-10-2026B.TXT` | **identico byte a byte** |
 
-Los 15 fallos de la suite completa **son preexistentes**: se reprodujeron igual
-sobre `origin/rebuild/issue-11-f150-clean` en un worktree limpio
-(`test_remittance_service`, `test_load_order_returns`, `test_load_order_return_credits`,
-`test_payment_receipts`, `test_account_statement_printing`, `test_customer_ledger_ui`,
-`test_update_service`). Ninguno toca F150.
+### El PR no introduce regresiones
 
-## 6. Pendientes que requieren definicion de FEMAG
+La rama del PR agrega **26 pruebas que pasan** (773 -> 799) y conserva
+**exactamente los mismos 15 fallos** que la base. Ninguno toca F150.
+
+### Los 15 fallos son de una base atrasada, no de este PR
+
+`rebuild/issue-11-f150-clean` esta **412 commits y un mes atrasada** de `main`
+(ultimo commit 2026-09-08 contra 2026-10-06). Al correr en `main` esos mismos
+archivos de prueba dan **1 solo fallo**:
+
+| | base del PR | `main` |
+|---|---|---|
+| `test_remittance_service` | 5 fallos | pasa |
+| `test_load_order_returns` | 2 fallos | pasa |
+| `test_load_order_return_credits` | 3 fallos | pasa |
+| `test_payment_receipts` | 1 fallo | pasa |
+| `test_account_statement_printing` | 1 fallo | pasa |
+| `test_customer_ledger_ui` | 2 fallos | pasa |
+| `test_update_service` | 1 fallo | **1 fallo** |
+
+O sea: **14 de los 15 ya estan resueltos en `main`**. El unico que sigue rojo
+en `main` es `test_update_service::test_fetch_update_info_returns_newer_valid_manifest`,
+que no tiene relacion con F150.
+
+Esto no se corrige en este PR, pero condiciona el avance: antes de llevar el
+trabajo F150 hacia `main` hay que rebasar o mergear `main` en la rama y volver a
+correr la suite.
+
+## 6. Estado de la habilitacion
+
+- **Compatibilidad tecnica del formato**: verificada byte a byte contra la
+  muestra real y contra 119 archivos reales.
+- **Habilitacion fiscal**: **pendiente de homologacion con el destinatario**.
+  Que el archivo sea identico a la muestra demuestra compatibilidad con ese
+  ejemplo, no que el organismo receptor acepte todos los casos.
+
+## 7. Pendientes que requieren definicion de FEMAG
 
 1. **`B` del nombre de archivo**: la muestra se llama `F.150-05-10-2026B.TXT` y
    el corpus usa `F150-AAAAMMDD[ABC].TXT`. En el corpus conviven
    `F150-20190412.TXT` y `F150-20190412A.TXT`, y `20191111`, `20191111A`,
-   `20191111B`, lo que sugiere un correlativo por reemision del mismo dia, pero
-   **no se asumio** ese significado ni se implemento. **No se cambio** el nombre
-   que sugiere la UI (`f150-YYYYMMDD.TXT`).
+   `20191111B`, lo que sugiere un correlativo por reemision del mismo dia. La
+   muestra confirma el formato del contenido pero **no explica que significa `B`**,
+   asi que **no se asumio** ni se implemento, y **no se cambio** el nombre que
+   sugiere la UI (`f150-YYYYMMDD.TXT`). Queda pendiente confirmarlo con quien
+   recibe el F150.
 2. **Remitos manuales sin orden**: con el bloqueo, un remito cargado a mano no se
-   puede emitir a F150 porque no tiene precio congelado. Resolverlo requiere
-   persistir el precio en `RemittanceItem`, que es una migracion y quedo fuera de
-   este PR.
+   puede emitir a F150 porque no tiene precio congelado. Se mantiene el bloqueo
+   por ahora y se sigue en issue propio. **No se reconstruyen importes con
+   precios actuales.**
 3. **`rh1..rh4`, `unidad_dgr` y `codigo`**: se siguen leyendo del maestro vivo y
-   tienen el mismo desvio historico que el precio. No se tocaron para no ampliar
-   el alcance.
-4. **Validacion con el destinatario**: no se ejecuto prueba de presentacion
-   fiscal, asi que la salida **no queda declarada habilitada**.
-5. **Fecha de entrega**: hoy la fecha del registro es `remittance.date`; el issue
-   no pide cambiarla y no se modifico.
+   tienen el mismo desvio historico que el precio. No se tocaron.
+4. **Fecha de entrega**: hoy la fecha del registro es `remittance.date`; no se
+   modifico.
