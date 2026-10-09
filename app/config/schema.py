@@ -20,6 +20,15 @@ class SchemaValidationError(RuntimeError):
     """Raised when a workstation finds an incomplete runtime schema."""
 
 
+class SchemaTooNewError(SchemaValidationError):
+    """La base compartida tiene un esquema mas nuevo que el de esta aplicacion.
+
+    Ocurre cuando otro puesto, con una version mas nueva, migro la base al abrir
+    (`FEMAG_AUTO_MIGRATE_SCHEMA`). No falta nada en la base: al puesto le falta la
+    aplicacion nueva, y la accion correcta es actualizar, no preparar el esquema.
+    """
+
+
 def _is_mysql_database(database) -> bool:
     """Recognize Peewee MySQL databases and lightweight test doubles."""
     return isinstance(database, MySQLDatabase) or database.__class__.__name__ == "MySQLDatabase"
@@ -57,20 +66,49 @@ def validate_runtime_schema(database) -> None:
         )
 
     missing_indexes = []
+    newer_indexes = []
     for model in ALL_MODELS:
         table_name = model._meta.table_name
-        existing_indexes = indexes_by_table.get(table_name, [])
+        # SQLite expone los indices internos (autoincrementos) con la columna en
+        # None. No son indices declarados por el modelo y no sirven para comparar.
+        existing_indexes = [
+            (index_columns, index_unique)
+            for index_columns, index_unique in indexes_by_table.get(table_name, [])
+            if all(isinstance(column, str) for column in index_columns)
+        ]
         for field_names, unique in model._meta.indexes:
             expected_columns = {
                 model._meta.fields[field_name].column_name for field_name in field_names
             }
-            if not any(
+            compatible = [
+                (index_columns, index_unique)
+                for index_columns, index_unique in existing_indexes
+                if expected_columns <= index_columns and (not unique or index_unique)
+            ]
+            if any(
                 index_columns == expected_columns and (not unique or index_unique)
                 for index_columns, index_unique in existing_indexes
             ):
-                missing_indexes.append(
-                    f"{table_name}: {', '.join(sorted(expected_columns))}"
+                continue
+            detail = f"{table_name}: {', '.join(sorted(expected_columns))}"
+            if compatible:
+                # La base tiene este indice con columnas EXTRA: es una version mas
+                # nueva escrita por otro build. No falta nada, la app esta atrasada.
+                index_columns, _index_unique = max(
+                    compatible, key=lambda item: len(item[0])
                 )
+                newer_indexes.append(
+                    f"{detail} (la base tiene ademas "
+                    f"{', '.join(sorted(index_columns))})"
+                )
+            else:
+                missing_indexes.append(detail)
+
+    if newer_indexes:
+        raise SchemaTooNewError(
+            "La base de datos tiene una version del esquema mas nueva que esta "
+            "aplicacion: " + "; ".join(newer_indexes)
+        )
 
     if missing_indexes:
         raise SchemaValidationError(

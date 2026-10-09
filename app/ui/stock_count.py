@@ -153,13 +153,34 @@ class StockCountPage(QWidget):
         self.table.setRowCount(len(productos))
         self.inputs = {}
         self.lineas = {}
+        sin_peso: list[str] = []
         for indice, producto in enumerate(productos):
             linea = lineas.get(producto.id)
             saldo = StockService.balance_for(producto).balance_kg
+            contable = self.service.is_countable_in_bags(producto)
             self.table.setItem(indice, 0, QTableWidgetItem(producto.name))
             self.table.setItem(
                 indice, 1, QTableWidgetItem(_kg(linea.calculated_kg if linea else saldo))
             )
+            if not contable and linea is None:
+                # Sin peso de bolsa no hay conversion: N bolsas serian 0 kg y al
+                # cerrar el conteo el ajuste llevaria el saldo del libro a cero
+                # (#650). No se ofrece el campo, y se dice por que, en vez de
+                # dejar que el operador cargue un numero que no significa nada.
+                sin_peso.append(producto.name)
+                celda = QTableWidgetItem("falta peso de bolsa")
+                celda.setToolTip(
+                    f"{producto.name} no tiene peso de bolsa cargado. Cargalo en "
+                    "Productos para poder contar este producto en bolsas."
+                )
+                celda.setForeground(Qt.gray)
+                self.table.setItem(indice, 2, celda)
+                for columna in (3, 4):
+                    vacia = QTableWidgetItem("-")
+                    vacia.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    vacia.setForeground(Qt.gray)
+                    self.table.setItem(indice, columna, vacia)
+                continue
             entrada = QSpinBox()
             entrada.setObjectName("stockCountBags")
             entrada.setRange(0, 9_999_999)
@@ -180,6 +201,14 @@ class StockCountPage(QWidget):
             )
             celda.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(indice, 4, celda)
+
+        if sin_peso:
+            aviso = (
+                f" · {len(sin_peso)} producto(s) sin peso de bolsa cargado, no "
+                f"contables: {', '.join(sin_peso[:5])}"
+                f"{'…' if len(sin_peso) > 5 else ''}"
+            )
+            self.status.setText(self.status.text() + aviso)
 
         editable = not cerrado
         self.save_button.setEnabled(editable)
