@@ -43,6 +43,14 @@ El arranque productivo solo conecta y valida tablas y columnas requeridas. No cr
 
 El modo DEMO conserva su inicializacion automatica de SQLite y permanece aislado del flujo productivo.
 
+## Configuración de WhatsApp por puesto
+
+En una instalación productiva, un administrador ingresa por **Sistema → WhatsApp** y configura la URL del gateway, la instancia compartida, el tiempo de espera y la API key. La API key no se guarda en `.env`: FEMAG la cifra mediante Windows DPAPI para el usuario Windows actual y la conserva junto con los metadatos locales en `%LOCALAPPDATA%\FEMAG Desktop`.
+
+La clave nunca vuelve a mostrarse. Para rotarla, se abre la misma pantalla y se ingresa la nueva clave; dejar ese campo vacío conserva la existente. La acción queda registrada en la auditoría sin incluir el secreto. Todos los puestos pueden usar la misma instancia, por ejemplo `default`, pero cada usuario Windows debe configurar su propia credencial protegida.
+
+Mientras un puesto no tenga configuración segura de WhatsApp, FEMAG conserva compatibilidad con las variables `WHATSAPP_*` de `.env`; no se recomienda ese mecanismo para producción porque expone la API key en texto plano.
+
 Las primeras pruebas MySQL deben realizarse sobre una base descartable y vacia. Nunca usar la base productiva para validar cambios de esquema.
 
 ## Validacion
@@ -72,8 +80,52 @@ La ventana debe mostrarse con el titulo `FEMAG Desktop`, que permite identificar
 ## Backups
 
 Configurar `BACKUP_DIR` y, si corresponde, `BACKUP_EXTRA_DIR`.
-Programar en Windows Task Scheduler:
+El backup manual de la base configurada se ejecuta con:
 
 ```bash
 python scripts/run_backup.py --user admin
 ```
+
+### Backup diario MySQL separado por base
+
+Para generar un dump independiente por cada base de usuario visible para la
+credencial MySQL guardada en FEMAG, ejecutar una vez desde la raiz del
+repositorio:
+
+```powershell
+.\scripts\install_daily_mysql_backups.ps1 `
+  -PythonPath C:\ruta\python.exe
+```
+
+El instalador registra la tarea `FEMAG - Backup MySQL diario` todos los dias a
+las 12:00. Cada ejecucion crea una carpeta fechada en
+`%LOCALAPPDATA%\FEMAG Desktop\backups\mysql`, con un archivo `.sql` por base y
+un `manifest.json` con el resultado. Para una ejecucion manual:
+
+```powershell
+python scripts/backup_mysql_databases.py
+```
+
+El modo predeterminado usa `mysqldump.exe` cuando esta instalado y, si no, un
+exportador implementado con Python/PyMySQL. Ambos producen un archivo por base;
+el exportador Python incluye estructura, datos, vistas, triggers, rutinas y
+eventos. Para forzar este ultimo modo:
+
+```powershell
+python scripts/backup_mysql_databases.py --dump-engine python
+```
+
+Por defecto se excluyen las bases internas `mysql`, `sys`,
+`information_schema` y `performance_schema`. Si la cuenta no tiene permiso
+`SHOW DATABASES`, indicar expresamente las bases autorizadas:
+
+```powershell
+python scripts/backup_mysql_databases.py --database femag_desktop --database otra_base
+```
+
+La tarea se ejecuta como el usuario Windows actual, en modo interactivo, porque
+la contrasena esta protegida con DPAPI para ese usuario. Por lo tanto debe tener
+la sesion iniciada a las 12:00. Para ejecutarla aunque nadie haya iniciado
+sesion, el administrador debe configurar una cuenta de servicio y un mecanismo
+de secretos apto para esa cuenta; no copiar la contrasena a argumentos, scripts
+ni archivos `.env`.

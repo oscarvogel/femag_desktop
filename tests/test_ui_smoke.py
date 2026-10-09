@@ -104,6 +104,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     assert [child.route_key for child in operations.children] == ["load_orders", "remittances", "f150"]
     assert [child.title for child in masters.children] == [
         "Clientes",
+        "Vendedores",
         "Productos",
         "Precios por lista",
         "Tipos de IVA",
@@ -113,6 +114,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
     ]
     assert [child.route_key for child in masters.children] == [
         "clients",
+        "salespeople",
         "products",
         "product_price_bulk",
         "vat_types",
@@ -191,6 +193,22 @@ def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
     assert config.route_key == "remittance_series"
 
 
+def test_admin_sidebar_exposes_whatsapp_configuration(db):
+    from app.services.auth_service import AuthService
+    from app.services.permission_service import PermissionService
+    from app.ui.menu import build_sidebar_tree_spec
+
+    PermissionService().seed_defaults()
+    user = AuthService().create_user("admin_whatsapp_menu", "clave", "Administrador")
+
+    principal = build_sidebar_tree_spec(user).sections[0]
+    system = next(item for item in principal.items if item.title == "Sistema")
+    whatsapp = next(item for item in system.children if item.title == "WhatsApp")
+
+    assert whatsapp.placeholder is False
+    assert whatsapp.route_key == "whatsapp_configuration"
+
+
 def test_sidebar_places_customer_ledger_after_managerial_block(db):
     from app.services.auth_service import AuthService
     from app.services.menu_service import set_managerial_dashboard_menu_enabled
@@ -212,6 +230,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Cuenta corriente y deuda vencida",
             "Cobranzas y movimientos",
             "Clientes",
+            "Rentabilidad por producto",
         ]
         assert [child.route_key for child in managerial.children] == [
             "managerial_dashboard",
@@ -219,6 +238,7 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "managerial_account_risk",
             "daily_collections",
             "managerial_clients",
+            "product_profitability",
         ]
         informes = next(item for item in principal.items if item.title == "Informes")
         assert [child.title for child in informes.children] == [
@@ -226,12 +246,16 @@ def test_sidebar_places_customer_ledger_after_managerial_block(db):
             "Órdenes pendientes",
             "Trazabilidad por lote",
             "Devoluciones y reclamos",
+            "Vencimientos de cobranzas",
+            "Ventas por producto",
         ]
         assert [child.route_key for child in informes.children] == [
             "daily_operations",
             "pending_orders_aging",
             "lot_traceability",
             "returns_report",
+            "collection_due_report",
+            "operational_product_sales",
         ]
         pending = next(item for item in informes.children if item.title == "Órdenes pendientes")
         assert pending.placeholder is False

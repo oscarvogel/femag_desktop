@@ -192,6 +192,14 @@ class PalletCompositionWidget(QWidget):
         # cuando el valor es 0, manteniendo la lógica de "no crear pallet".
         self.bulk_pallet_count_input.setSpecialValueText(" ")
         self.bulk_pallet_count_input.setValue(0)
+        # En resoluciones bajas el layout comprimía el spinbox hasta dejar
+        # visible un solo dígito. Reservamos ancho suficiente para 3 cifras
+        # y para los botones nativos del QSpinBox.
+        self.bulk_pallet_count_input.setMinimumWidth(86)
+        self.bulk_pallet_count_input.setMaximumWidth(110)
+        self.bulk_pallet_count_input.setAlignment(Qt.AlignCenter)
+        self.bulk_pallet_count_input.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        pallet_actions_layout.setColumnMinimumWidth(0, 96)
         pallet_actions_layout.addWidget(self.bulk_pallet_count_input, 1, 0)
         self.add_pallet_button = QPushButton("Agregar primer pallet")
         self.add_pallet_button.setObjectName("addPalletCardButton")

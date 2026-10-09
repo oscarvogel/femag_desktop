@@ -4,11 +4,9 @@ from collections import OrderedDict
 from html import escape
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
-from app.models.load_orders import LoadOrder
 from app.services.load_order_print_service import LoadOrderPrintService, _quantity
 
 
@@ -36,63 +34,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                 domains.append(domain)
         return " / ".join(domains) if domains else "-"
 
-    def _build_pdf(
-        self,
-        order,
-        target,
-        *,
-        reprint_copy: int | None = None,
-        reprinted_at=None,
-    ) -> None:
-        """Genera la orden normal y, detrás, la hoja operativa de preparación."""
-        doc = SimpleDocTemplate(
-            str(target),
-            pagesize=A4,
-            rightMargin=14 * mm,
-            leftMargin=14 * mm,
-            topMargin=12 * mm,
-            bottomMargin=14 * mm,
-            title=f"Orden de carga {order.order_number}",
-        )
-        story = [
-            Paragraph("ORDEN DE DESPACHO DE FECULA DE MANDIOCA", self.styles["title"]),
-            self._header_table(order),
-            Spacer(1, 5 * mm),
-        ]
-        if reprint_copy is not None and reprinted_at is not None:
-            story.extend(
-                [
-                    Paragraph(
-                        f"REIMPRESIÓN - copia {reprint_copy} - {reprinted_at:%d/%m/%Y %H:%M}",
-                        self.styles["reprint"],
-                    ),
-                    Spacer(1, 3 * mm),
-                ]
-            )
-        if order.status == LoadOrder.STATUS_ANNULLED:
-            story.extend([Paragraph("ANULADA", self.styles["annulled"]), Spacer(1, 3 * mm)])
-        story.extend(
-            [
-                Paragraph("1. DATOS DEL CLIENTE", self.styles["section"]),
-                self._client_table(order),
-                Spacer(1, 8 * mm),
-                Paragraph("2. DETALLE DEL PRODUCTO A DESPACHAR", self.styles["section"]),
-                *self._detail_flowables(order),
-                Spacer(1, 9 * mm),
-                Paragraph("3. DATOS DEL TRANSPORTE", self.styles["section"]),
-                self._transport_table(order),
-                Spacer(1, 13 * mm),
-                self._observations(order),
-                Spacer(1, 15 * mm),
-                Paragraph("Firma del encargado de carga: __________________________", self.styles["normal"]),
-                PageBreak(),
-                Paragraph("2. DETALLE DEL PRODUCTO A DESPACHAR", self.styles["section"]),
-                Spacer(1, 3 * mm),
-                *self._preparation_flowables(order),
-            ]
-        )
-        doc.build(story)
-
     @staticmethod
     def _allocation_row(allocation, lote: str, elab: str) -> dict[str, object]:
         row = LoadOrderPrintService._allocation_row(allocation, lote, elab)
@@ -119,17 +60,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
             if index < len(blocks) - 1:
                 flowables.append(Spacer(1, 3 * mm))
         flowables.append(Spacer(1, 4 * mm))
-        flowables.append(self._totals_table(order, blocks))
-        return flowables
-
-    def _preparation_flowables(self, order) -> list:
-        blocks = self._detail_blocks(order)
-        flowables = []
-        for index, block in enumerate(blocks):
-            flowables.append(KeepTogether(self._preparation_destination_table(block)))
-            if index < len(blocks) - 1:
-                flowables.append(Spacer(1, 2 * mm))
-        flowables.append(Spacer(1, 3 * mm))
         flowables.append(self._totals_table(order, blocks))
         return flowables
 
@@ -327,62 +257,6 @@ class ConsolidatedLoadOrderPrintService(LoadOrderPrintService):
                     ("ALIGN", (1, 0), (2, -1), "CENTER"),
                     ("SPAN", (0, 1), (4, 1)),
                     ("BACKGROUND", (0, 1), (4, 1), colors.whitesmoke),
-                ]
-            )
-        )
-        return table
-
-    def _preparation_destination_table(self, block: dict[str, object]) -> Table:
-        header = [
-            self._p("Producto / detalle", bold=True),
-            self._p("Unidad", bold=True),
-            self._p("Cant. pallets", bold=True),
-            self._p("Cantidad total", bold=True),
-            self._p("Lote", bold=True),
-            self._p("Elab.", bold=True),
-        ]
-        rows = [header]
-        rows.append(
-            [
-                Paragraph(escape(str(block["destination"] or "-")), self.styles["dest_banner"]),
-                "",
-                "",
-                "",
-                "",
-                "",
-            ]
-        )
-
-        consolidated = block.get("consolidated_rows") or self._consolidate_rows(block)
-        if consolidated:
-            for row in consolidated:
-                rows.append(
-                    [
-                        self._p(row["product"]),
-                        self._p(row.get("unit") or "-"),
-                        self._p(row["pallet_count"] if row["pallet_count"] else "-"),
-                        self._p(_quantity(row["quantity"])),
-                        self._p(row["lote"]) if row["lote"] else "",
-                        self._p(row["elab"]) if row["elab"] else "",
-                    ]
-                )
-        else:
-            rows.append([self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-"), self._p("-")])
-
-        table = Table(rows, colWidths=[60 * mm, 20 * mm, 23 * mm, 27 * mm, 25 * mm, 25 * mm], repeatRows=2)
-        table.setStyle(
-            TableStyle(
-                [
-                    ("GRID", (0, 0), (-1, -1), 0.55, colors.black),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 6.8),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
-                    ("ALIGN", (1, 0), (3, -1), "CENTER"),
-                    ("SPAN", (0, 1), (5, 1)),
-                    ("BACKGROUND", (0, 1), (5, 1), colors.whitesmoke),
                 ]
             )
         )

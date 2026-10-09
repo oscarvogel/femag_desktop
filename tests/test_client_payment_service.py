@@ -163,3 +163,27 @@ def test_payment_accepts_other_method(db):
     )
 
     assert payment.method == ClientPayment.METHOD_OTHER
+
+
+
+def test_payment_preserves_cents_in_receipt_detail_and_ledger(db):
+    from app.models.accounting import ClientAccountMovement
+    from app.models.payments import ClientPaymentDetail
+
+    client = _make_client()
+    payment = ClientPaymentService(current_user="tesoreria").register_payment(
+        client=client,
+        amount=898220.62,
+        method=ClientPayment.METHOD_RETENTION,
+        reference="GANANCIAS MISIONES",
+    )
+
+    detail = ClientPaymentDetail.get(ClientPaymentDetail.payment == payment)
+    movement = ClientAccountMovement.get(
+        ClientAccountMovement.payment == payment,
+        ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT,
+    )
+
+    assert payment.amount == approx(898220.62)
+    assert detail.amount == approx(898220.62)
+    assert movement.total_amount == approx(-898220.62)

@@ -1,5 +1,8 @@
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+
+from peewee import prefetch
 
 from app.config.database import database_proxy
 from app.models.load_orders import (
@@ -17,6 +20,7 @@ from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
 from app.services.driver_availability_service import DriverAvailabilityService
 from app.services.master_service import MasterService
+from app.services.money import compute_line_amounts, money_to_float
 from app.services.pallet_composition_service import (
     AllocationDraft,
     LooseAllocationDraft,
@@ -233,6 +237,8 @@ class LoadOrderService:
         order.status = status
         order.updated_by = self.current_user
         order.save()
+        if status in (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED):
+            self._snapshot_product_costs(order)
         LoadOrderStatusHistory.create(
             order=order,
             old_status=old_status,
@@ -253,6 +259,27 @@ class LoadOrderService:
             new_value={"status": status, "reason": reason},
         )
         return order
+
+    def _snapshot_product_costs(self, order: LoadOrder) -> int:
+        """Freeze current product costs once when an order becomes an effective dispatch."""
+        updated = 0
+        lines = (
+            LoadOrderProduct.select(LoadOrderProduct, Product)
+            .join(Product)
+            .where(
+                (LoadOrderProduct.order == order)
+                & LoadOrderProduct.costo_unitario_aplicado.is_null(True)
+            )
+        )
+        for line in lines:
+            current_cost = line.product.costo_unitario
+            if current_cost is None:
+                # Unknown stays NULL. A later close/reopen must not invent a historical cost.
+                continue
+            line.costo_unitario_aplicado = current_cost
+            line.save(only=[LoadOrderProduct.costo_unitario_aplicado])
+            updated += 1
+        return updated
 
     def annul_order(self, order: LoadOrder, *, can_annul: bool, reason: str | None = None) -> LoadOrder:
         if not can_annul:
@@ -284,6 +311,8 @@ class LoadOrderService:
         status: str | None = None,
         client: Client | None = None,
         day: date | None = None,
+        order_number: int | None = None,
+        limit: int | None = None,
     ) -> list[LoadOrder]:
         query = LoadOrder.select()
         if status is not None:
@@ -296,7 +325,408 @@ class LoadOrderService:
             query = query.where((LoadOrder.client == client) | (LoadOrder.id.in_(destination_orders)))
         if day is not None:
             query = query.where(LoadOrder.date == day)
-        return list(query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc()))
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
+        query = query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc())
+        if limit is not None:
+            query = query.limit(max(1, int(limit)))
+        return list(query)
+
+    def list_orders_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+        client: Client | None = None,
+        day: date | None = None,
+        order_number: int | None = None,
+    ) -> tuple[list[LoadOrder], int]:
+        """Devuelve una página de órdenes y el total global filtrado.
+
+        La búsqueda se resuelve en SQL sobre toda la base; nunca se limita
+        a las filas ya visibles en la grilla.
+        """
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        query = LoadOrder.select()
+        if client is not None:
+            client = self._require_instance(client, Client, "cliente")
+            destination_orders = LoadOrderDestination.select(
+                LoadOrderDestination.order
+            ).where(LoadOrderDestination.client == client)
+            query = query.where(
+                (LoadOrder.client == client) | (LoadOrder.id.in_(destination_orders))
+            )
+        if day is not None:
+            query = query.where(LoadOrder.date == day)
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
+
+        term = (search or "").strip()
+        if term:
+            carrier_ids = Carrier.select(Carrier.id).where(Carrier.name.contains(term))
+            driver_ids = Driver.select(Driver.id).where(Driver.name.contains(term))
+            truck_ids = Truck.select(Truck.id).where(Truck.domain.contains(term))
+            client_ids = Client.select(Client.id).where(Client.name.contains(term))
+            address_ids = ClientAddress.select(ClientAddress.id).where(
+                ClientAddress.address.contains(term) | ClientAddress.city.contains(term)
+            )
+            destination_orders = LoadOrderDestination.select(
+                LoadOrderDestination.order
+            ).where(
+                LoadOrderDestination.client.in_(client_ids)
+                | LoadOrderDestination.delivery_address.in_(address_ids)
+            )
+            product_ids = Product.select(Product.id).where(Product.name.contains(term))
+            product_orders = LoadOrderProduct.select(LoadOrderProduct.order).where(
+                LoadOrderProduct.product.in_(product_ids)
+            )
+
+            condition = (
+                LoadOrder.status.contains(term)
+                | LoadOrder.observations.contains(term)
+                | LoadOrder.carrier.in_(carrier_ids)
+                | LoadOrder.driver.in_(driver_ids)
+                | LoadOrder.truck.in_(truck_ids)
+                | LoadOrder.id.in_(destination_orders)
+                | LoadOrder.id.in_(product_orders)
+            )
+            normalized_number = term.upper().replace("OC-", "").strip()
+            if normalized_number.isdigit():
+                condition = condition | (LoadOrder.order_number == int(normalized_number))
+            query = query.where(condition)
+
+        total = query.count()
+        rows = list(
+            query.order_by(LoadOrder.date.desc(), LoadOrder.order_number.desc())
+            .paginate(page, page_size)
+        )
+        return rows, total
+
+    def build_grid_snapshots(self, orders: list[LoadOrder]) -> dict[int, dict]:
+        """Construye datos de grilla en bloque, sin navegar FKs/backrefs por fila."""
+        if not orders:
+            return {}
+
+        order_ids = [order.id for order in orders]
+        carrier_ids = {order.carrier_id for order in orders if order.carrier_id}
+        driver_ids = {order.driver_id for order in orders if order.driver_id}
+        truck_ids = {order.truck_id for order in orders if order.truck_id}
+
+        carriers = {
+            row.id: row.name
+            for row in Carrier.select(Carrier.id, Carrier.name).where(Carrier.id.in_(carrier_ids))
+        } if carrier_ids else {}
+        drivers = {
+            row.id: row.name
+            for row in Driver.select(Driver.id, Driver.name).where(Driver.id.in_(driver_ids))
+        } if driver_ids else {}
+        trucks = {
+            row.id: row.domain
+            for row in Truck.select(Truck.id, Truck.domain).where(Truck.id.in_(truck_ids))
+        } if truck_ids else {}
+
+        destination_rows = list(
+            LoadOrderDestination.select().where(LoadOrderDestination.order.in_(order_ids))
+        )
+        client_ids = {row.client_id for row in destination_rows if row.client_id}
+        address_ids = {
+            row.delivery_address_id for row in destination_rows if row.delivery_address_id
+        }
+        clients = {
+            row.id: row.name
+            for row in Client.select(Client.id, Client.name).where(Client.id.in_(client_ids))
+        } if client_ids else {}
+        addresses = {
+            row.id: (row.address, row.city)
+            for row in ClientAddress.select(
+                ClientAddress.id,
+                ClientAddress.address,
+                ClientAddress.city,
+            ).where(ClientAddress.id.in_(address_ids))
+        } if address_ids else {}
+
+        destinations_by_order: dict[int, list[LoadOrderDestination]] = defaultdict(list)
+        destination_meta: dict[int, tuple[int, int]] = {}
+        for row in destination_rows:
+            destinations_by_order[row.order_id].append(row)
+            destination_meta[row.id] = (row.client_id, row.delivery_address_id)
+
+        product_rows = list(
+            LoadOrderProduct.select().where(LoadOrderProduct.order.in_(order_ids))
+        )
+        product_ids = {row.product_id for row in product_rows if row.product_id}
+        products = {
+            row.id: row.name
+            for row in Product.select(Product.id, Product.name).where(Product.id.in_(product_ids))
+        } if product_ids else {}
+        products_by_order: dict[int, list[LoadOrderProduct]] = defaultdict(list)
+        for row in product_rows:
+            products_by_order[row.order_id].append(row)
+
+        pallet_rows = list(
+            LoadOrderPallet.select().where(LoadOrderPallet.order.in_(order_ids))
+        )
+        pallets_by_order: dict[int, list[LoadOrderPallet]] = defaultdict(list)
+        pallet_order: dict[int, int] = {}
+        for row in pallet_rows:
+            pallets_by_order[row.order_id].append(row)
+            pallet_order[row.id] = row.order_id
+
+        pallet_ids = list(pallet_order)
+        allocation_rows = list(
+            LoadOrderPalletAllocation.select().where(
+                LoadOrderPalletAllocation.pallet.in_(pallet_ids)
+            )
+        ) if pallet_ids else []
+        allocations_by_pallet: dict[int, list[LoadOrderPalletAllocation]] = defaultdict(list)
+        for row in allocation_rows:
+            allocations_by_pallet[row.pallet_id].append(row)
+
+        loose_rows = list(
+            LoadOrderLooseAllocation.select().where(
+                LoadOrderLooseAllocation.order.in_(order_ids)
+            )
+        )
+        loose_by_order: dict[int, list[LoadOrderLooseAllocation]] = defaultdict(list)
+        for row in loose_rows:
+            loose_by_order[row.order_id].append(row)
+
+        snapshots: dict[int, dict] = {}
+        for order in orders:
+            destinations = destinations_by_order.get(order.id, [])
+            order_products = products_by_order.get(order.id, [])
+            order_pallets = sorted(
+                pallets_by_order.get(order.id, []),
+                key=lambda row: row.sequence,
+            )
+
+            client_names = []
+            delivery_cities = []
+            destination_parts = []
+            for destination in destinations:
+                client_name = clients.get(destination.client_id, "")
+                address, city = addresses.get(destination.delivery_address_id, ("", ""))
+                if client_name and client_name not in client_names:
+                    client_names.append(client_name)
+                if city and city not in delivery_cities:
+                    delivery_cities.append(city)
+                destination_parts.append(
+                    f"{client_name}: {address}, {city}".strip()
+                )
+
+            product_names = [products.get(row.product_id, "") for row in order_products]
+            if len(product_names) == 1:
+                products_summary = product_names[0]
+            elif product_names:
+                products_summary = f"{len(product_names)} productos"
+            else:
+                products_summary = ""
+
+            requested = []
+            product_parts = []
+            for row in order_products:
+                client_id, address_id = destination_meta.get(row.destination_id, (0, 0))
+                client_name = clients.get(client_id, "")
+                address, city = addresses.get(address_id, ("", ""))
+                product_name = products.get(row.product_id, "")
+                requested.append(
+                    RequestedLine(
+                        destination_id=row.destination_id,
+                        product_id=row.product_id,
+                        quantity=row.quantity,
+                        label=f"{client_name} / {address} / {product_name}",
+                    )
+                )
+                product_parts.append(
+                    f"{client_name}: {product_name} x {row.quantity:g} {row.unit}"
+                )
+
+            pallet_drafts = []
+            for pallet in order_pallets:
+                allocations = []
+                for allocation in allocations_by_pallet.get(pallet.id, []):
+                    client_id, address_id = destination_meta.get(
+                        allocation.destination_id, (0, 0)
+                    )
+                    client_name = clients.get(client_id, "")
+                    address, _city = addresses.get(address_id, ("", ""))
+                    product_name = products.get(allocation.product_id, "")
+                    allocations.append(
+                        AllocationDraft(
+                            destination_id=allocation.destination_id,
+                            product_id=allocation.product_id,
+                            quantity=allocation.quantity,
+                            peso_unitario_kg=allocation.peso_unitario_kg,
+                            client_id=client_id,
+                            label=f"{client_name} / {address} / {product_name}",
+                        )
+                    )
+                pallet_drafts.append(
+                    PalletDraft(
+                        sequence=pallet.sequence,
+                        allocations=tuple(allocations),
+                    )
+                )
+
+            loose_drafts = []
+            for allocation in loose_by_order.get(order.id, []):
+                client_id, address_id = destination_meta.get(
+                    allocation.destination_id, (0, 0)
+                )
+                client_name = clients.get(client_id, "")
+                address, _city = addresses.get(address_id, ("", ""))
+                product_name = products.get(allocation.product_id, "")
+                loose_drafts.append(
+                    LooseAllocationDraft(
+                        destination_id=allocation.destination_id,
+                        product_id=allocation.product_id,
+                        quantity=allocation.quantity,
+                        peso_unitario_kg=allocation.peso_unitario_kg,
+                        client_id=client_id,
+                        label=f"{client_name} / {address} / {product_name}",
+                    )
+                )
+
+            composition = PalletCompositionService().reconcile(
+                requested=requested,
+                pallets=pallet_drafts,
+                loose=loose_drafts,
+            )
+            first_pallet = order_pallets[0] if order_pallets else None
+            snapshots[order.id] = {
+                "clients_summary": (
+                    f"VARIOS ({len(client_names)})"
+                    if len(client_names) > 1
+                    else (client_names[0] if client_names else "")
+                ),
+                "deliveries_summary": "; ".join(delivery_cities),
+                "products_summary": products_summary,
+                "destinations_text": "\n".join(destination_parts) or "-",
+                "products_text": "\n".join(product_parts) or "-",
+                "carrier_name": carriers.get(order.carrier_id, ""),
+                "driver_name": drivers.get(order.driver_id, ""),
+                "truck_domain": trucks.get(order.truck_id, ""),
+                "composition": composition,
+                "first_pallet_quantity": first_pallet.quantity if first_pallet else 0,
+                "first_pallet_weight": (
+                    f"{first_pallet.weight * first_pallet.quantity:g} kg"
+                    if first_pallet
+                    else "-"
+                ),
+            }
+        return snapshots
+
+
+    def list_orders_prefetched(
+        self,
+        *,
+        status: str | None = None,
+        day: date | None = None,
+        order_number: int | None = None,
+        limit: int | None = None,
+    ) -> list[LoadOrder]:
+        """Listado para UI con relaciones precargadas en bloque.
+
+        Mantiene list_orders() intacto para servicios/tests que sólo necesitan
+        cabeceras. Esta variante evita consultas N+1 al renderizar la grilla.
+        """
+        query = LoadOrder.select().order_by(
+            LoadOrder.date.desc(),
+            LoadOrder.order_number.desc(),
+        )
+        if status is not None:
+            query = query.where(LoadOrder.status == status)
+        if day is not None:
+            query = query.where(LoadOrder.date == day)
+        if order_number is not None:
+            query = query.where(LoadOrder.order_number == order_number)
+        if limit is not None:
+            query = query.limit(max(1, int(limit)))
+
+        destinations = LoadOrderDestination.select()
+        products = LoadOrderProduct.select()
+        pallets = LoadOrderPallet.select()
+        allocations = LoadOrderPalletAllocation.select()
+        loose = LoadOrderLooseAllocation.select()
+
+        return list(
+            prefetch(
+                query,
+                destinations,
+                products,
+                pallets,
+                allocations,
+                loose,
+                Client,
+                ClientAddress,
+                Product,
+                PalletType,
+            )
+        )
+
+    def composition_from_loaded(self, order: LoadOrder):
+        """Calcula composición usando relaciones ya precargadas, sin reconsultar DB."""
+        products = list(order.products)
+        pallets = sorted(list(order.pallets), key=lambda row: row.sequence)
+        loose_allocations = list(order.loose_allocations)
+
+        requested = [
+            RequestedLine(
+                destination_id=product.destination.id,
+                product_id=product.product.id,
+                quantity=product.quantity,
+                label=(
+                    f"{product.destination.client.name} / "
+                    f"{product.destination.delivery_address.address} / "
+                    f"{product.product.name}"
+                ),
+            )
+            for product in products
+            if product.destination_id is not None
+        ]
+        pallet_drafts = [
+            PalletDraft(
+                sequence=pallet.sequence,
+                allocations=tuple(
+                    AllocationDraft(
+                        destination_id=allocation.destination.id,
+                        product_id=allocation.product.id,
+                        quantity=allocation.quantity,
+                        peso_unitario_kg=allocation.peso_unitario_kg,
+                        client_id=allocation.destination.client.id,
+                        label=(
+                            f"{allocation.destination.client.name} / "
+                            f"{allocation.destination.delivery_address.address} / "
+                            f"{allocation.product.name}"
+                        ),
+                    )
+                    for allocation in list(pallet.allocations)
+                ),
+            )
+            for pallet in pallets
+        ]
+        loose = [
+            LooseAllocationDraft(
+                destination_id=allocation.destination.id,
+                product_id=allocation.product.id,
+                quantity=allocation.quantity,
+                peso_unitario_kg=allocation.peso_unitario_kg,
+                client_id=allocation.destination.client.id,
+                label=(
+                    f"{allocation.destination.client.name} / "
+                    f"{allocation.destination.delivery_address.address} / "
+                    f"{allocation.product.name}"
+                ),
+            )
+            for allocation in loose_allocations
+        ]
+        return PalletCompositionService().reconcile(
+            requested=requested,
+            pallets=pallet_drafts,
+            loose=loose,
+        )
 
     def validate_merchandise_uniqueness(self, order: LoadOrder) -> None:
         """Reject persisted orders that cannot be represented as unique pallet lines."""
@@ -409,9 +839,34 @@ class LoadOrderService:
                     **item,
                     "product": product,
                     "quantity": quantity,
+                    "cantidad_facturar_ahora": self._normalize_billing_split(
+                        item.get("cantidad_facturar_ahora"), quantity
+                    ),
                 }
             )
         return normalized
+
+    @staticmethod
+    def _normalize_billing_split(value, quantity) -> float | None:
+        """Normaliza la parte de la cantidad que se factura al contado.
+
+        Sin reparto explicito devuelve ``None``, que es el estado historico de las
+        ordenes ya emitidas: toda la cantidad se factura de una vez. Si el operador
+        carga la cantidad completa de forma explicita tambien se guarda como
+        ``None``, para no marcar como partido un renglon que no esta partido.
+        """
+        if value is None:
+            return None
+        cantidad = float(value)
+        if cantidad < 0:
+            raise ValueError("La cantidad a facturar ahora no puede ser negativa.")
+        if cantidad > float(quantity):
+            raise ValueError(
+                "La cantidad a facturar ahora no puede superar la cantidad total del renglon."
+            )
+        if cantidad == float(quantity):
+            return None
+        return cantidad
 
     def _validate_pallets(
         self,
@@ -562,7 +1017,11 @@ class LoadOrderService:
                 "client": destination.client,
                 "delivery_address": destination.delivery_address,
                 "products": [
-                    {"product": product.product, "quantity": product.quantity}
+                    {
+                        "product": product.product,
+                        "quantity": product.quantity,
+                        "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
+                    }
                     for product in destination.products
                 ],
             }
@@ -751,6 +1210,13 @@ class LoadOrderService:
             )
 
     def _calculate_product_prices(self, product_item: dict, destination_client: Client) -> dict:
+        """Calcula los importes del renglón con la rutina monetaria única.
+
+        Delega en ``compute_line_amounts`` para que la orden de carga, el
+        presupuesto y la cuenta corriente compartan exactamente la misma
+        aritmética y el mismo redondeo. Los importes se redondean a 2
+        decimales con ROUND_HALF_UP y recién al persistir pasan a float.
+        """
         product = product_item["product"]
         quantity = product_item["quantity"]
         precio = product_item.get("precio_neto_unitario")
@@ -763,20 +1229,22 @@ class LoadOrderService:
         if iva_porcentaje is None:
             tipo_iva = product.tipo_iva
             iva_porcentaje = tipo_iva.porcentaje if tipo_iva else TipoIVA.iva_default().porcentaje
-        neto_subtotal = quantity * precio
-        descuento_importe = neto_subtotal * descuento / 100.0
-        neto_gravado = neto_subtotal - descuento_importe
-        iva_importe = neto_gravado * iva_porcentaje / 100.0
-        total = neto_gravado + iva_importe
+
+        amounts = compute_line_amounts(
+            quantity=quantity,
+            unit_price=precio,
+            discount_percentage=descuento,
+            vat_percentage=iva_porcentaje,
+        )
         return {
-            "precio_neto_unitario": precio,
-            "descuento_porcentaje": descuento,
-            "neto_subtotal": neto_subtotal,
-            "descuento_importe": descuento_importe,
-            "neto_gravado": neto_gravado,
-            "iva_porcentaje": iva_porcentaje,
-            "iva_importe": iva_importe,
-            "total": total,
+            "precio_neto_unitario": money_to_float(amounts.unit_price),
+            "descuento_porcentaje": money_to_float(amounts.discount_percentage),
+            "neto_subtotal": money_to_float(amounts.net_subtotal),
+            "descuento_importe": money_to_float(amounts.discount_amount),
+            "neto_gravado": money_to_float(amounts.net_taxable),
+            "iva_porcentaje": money_to_float(amounts.vat_percentage),
+            "iva_importe": money_to_float(amounts.vat_amount),
+            "total": money_to_float(amounts.total),
         }
 
     def _price_for_client_list(self, product: Product, client: Client) -> float:
@@ -809,6 +1277,7 @@ class LoadOrderService:
                     destination=destination,
                     product=product,
                     quantity=product_item["quantity"],
+                    cantidad_facturar_ahora=product_item.get("cantidad_facturar_ahora"),
                     unit=product_item.get("unit") or product.unit,
                     observations=product_item.get("observations"),
                     **prices,

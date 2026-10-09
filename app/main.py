@@ -1,29 +1,37 @@
 import argparse
-import os
 import sys
 
 from app.config.logging_config import configure_logging
 from app.config.settings import load_settings
 from app.ui.desktop_app import run_desktop_app
+from app.ui.load_order_workspace_restore_extension import install_load_order_workspace_restore_extension
+from app.ui.load_order_quick_search_extension import install_load_order_quick_search_extension
 from app.ui.daily_collections_extension import install_daily_collections_extension
+from app.ui.collection_due_report_extension import install_collection_due_report_extension
 from app.ui.daily_operations_extension import install_daily_operations_extension
 from app.ui.lot_traceability_extension import install_lot_traceability_extension
 from app.ui.pending_orders_aging_extension import install_pending_orders_aging_extension
+from app.ui.operational_product_sales_extension import install_operational_product_sales_extension
 from app.ui.returns_report_extension import install_returns_report_extension
 from app.ui.managerial_account_risk_extension import install_managerial_account_risk_extension
 from app.ui.managerial_clients_extension import install_managerial_clients_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
+from app.ui.product_profitability_extension import install_product_profitability_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
 from app.ui.multi_station_refresh_extension import install_multi_station_refresh_extension
 from app.ui.product_code_extension import install_desktop_product_code_extension
+from app.ui.load_order_instructions_extension import install_load_order_instructions_extension
 from app.ui.update_extension import install_update_extension
 from app.ui.application_lifecycle_extension import install_application_lifecycle_extension
 
 
 install_desktop_product_code_extension()
+install_load_order_instructions_extension()
 install_update_extension()
 install_application_lifecycle_extension()
 install_multi_station_refresh_extension()
+install_load_order_workspace_restore_extension()
+install_load_order_quick_search_extension()
 
 
 def smoke_check() -> str:
@@ -57,30 +65,40 @@ def production_health_check() -> int:
 
 
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
-    if configure:
-        os.environ["FEMAG_SECURE_CONFIG"] = "1"
-    if not demo_mode and (configure or os.getenv("FEMAG_SECURE_CONFIG") == "1"):
-        from PyQt5.QtWidgets import QApplication
+    from app.config.settings import resolve_effective_connection_settings
 
+    # El preámbulo de conexión vive en ``settings`` y no acá: el auditor
+    # monetario usa la misma función para conectarse a la misma base que la app.
+    if resolve_effective_connection_settings(demo_mode=demo_mode, configure=configure):
+        from PyQt5.QtWidgets import QApplication
         from app.ui.connection_dialog import ensure_runtime_configuration
 
         qt_app = QApplication.instance() or QApplication([])
         if not ensure_runtime_configuration(force=configure):
             return 0
+
     load_settings()
     configure_logging()
     try:
+        from PyQt5.QtWidgets import QApplication
+
+        from app.ui.form_input_behavior import install_form_input_behavior
         from app.ui.window_policy import install_workspace_window_policy
 
+        qt_app = QApplication.instance() or QApplication([])
+        install_form_input_behavior(qt_app)
         install_workspace_window_policy()
         install_managerial_dashboard_extension()
+        install_product_profitability_extension()
         install_managerial_sales_dispatch_extension()
         install_managerial_account_risk_extension()
         install_managerial_clients_extension()
         install_daily_collections_extension()
+        install_collection_due_report_extension()
         install_daily_operations_extension()
         install_lot_traceability_extension()
         install_pending_orders_aging_extension()
+        install_operational_product_sales_extension()
         install_returns_report_extension()
         return run_desktop_app(demo_mode=demo_mode)
     except ImportError as exc:  # pragma: no cover - depends on workstation setup.

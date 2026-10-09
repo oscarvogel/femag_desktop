@@ -170,8 +170,10 @@ def test_customer_ledger_prints_and_annuls_selected_payment(db):
     from app.services.auth_service import AuthService
     from app.services.client_payment_service import ClientPaymentService
     from app.services.ledger_query_service import client_balance
+    from app.services.permission_service import PermissionService
     from app.ui.customer_ledger import CustomerLedgerPage
 
+    PermissionService().seed_defaults()
     app = QApplication.instance() or QApplication([])
     client = Client.create(
         name="Cliente Acciones Pago",
@@ -188,14 +190,14 @@ def test_customer_ledger_prints_and_annuls_selected_payment(db):
     printed = []
 
     def annul(selected):
-        payment_service.annul_payment(
+        ClientPaymentService(current_user=admin.username).annul_payment(
             selected,
             authorized_by=admin,
             reason="Duplicado",
         )
 
     page = CustomerLedgerPage(
-        current_user="caja",
+        current_user=admin.username,
         print_receipt_callback=printed.append,
         annul_payment_callback=annul,
         can_annul_payments=True,
@@ -295,7 +297,9 @@ def test_customer_ledger_registers_and_reverses_manual_debit(db):
     page = CustomerLedgerPage(
         current_user="caja",
         register_manual_debit_callback=register,
-        reverse_manual_debit_callback=service.reverse_manual_debit,
+        reverse_manual_debit_callback=lambda movement: service.reverse_manual_debit(
+            movement, reason="Reverso desde UI de prueba"
+        ),
     )
     # La página sólo lista clientes con movimientos; crear el primero y refrescar.
     register(client)
@@ -341,7 +345,7 @@ def test_customer_ledger_can_start_first_manual_debit_without_existing_movements
     from app.ui.customer_ledger import CustomerLedgerPage
 
     app = QApplication.instance() or QApplication([])
-    Client.create(
+    client = Client.create(
         name="Cliente Sin Movimientos",
         cuit="30777779217",
         iva_condition="RI",
@@ -353,10 +357,12 @@ def test_customer_ledger_can_start_first_manual_debit_without_existing_movements
     )
     app.processEvents()
 
-    assert page.clients_table.rowCount() == 0
+    assert page.clients_table.rowCount() == 1
+    assert "Cliente Sin Movimientos" in page.clients_table.item(0, 0).text()
+    assert page.clients_table.item(0, 1).text() == "$0.00"
     assert page.register_manual_debit_button.isEnabled()
     page.register_manual_debit_button.click()
-    assert presets == [None]
+    assert presets == [client]
 
 
 def test_desktop_wires_manual_debit_actions_into_customer_ledger(db):
@@ -413,3 +419,111 @@ def test_admin_authorization_dialog_accepts_valid_admin(db):
     assert dialog.result() == QDialog.Accepted
     assert dialog.authorized_user() == admin
     assert dialog.reason() == "Corrección de caja"
+
+
+def test_customer_ledger_compact_layout_for_real_data(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Distribuidora Paraná",
+        cuit="30777777111",
+        iva_condition="RI",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="load_order_documental",
+        total_amount=125000,
+        currency="ARS",
+        description="Despacho demo",
+        source_ref="ux-441:1",
+        created_by="admin",
+    )
+
+    page = CustomerLedgerPage(
+        current_user="admin",
+        print_statement_callback=lambda _client: None,
+        whatsapp_statement_callback=lambda _client: None,
+        email_statement_callback=lambda _client: None,
+    )
+    app.processEvents()
+
+    assert page.clients_table.columnCount() == 2
+    assert "Distribuidora Paraná" in page.clients_table.item(0, 0).text()
+    assert "1 movimiento" in page.clients_table.item(0, 0).text()
+    assert page.detail_header.text() == "Distribuidora Paraná"
+    assert page.detail_movements.text() == "1 movimiento"
+    assert page.more_actions_button.text() == "Acciones  ▾"
+    assert page.print_statement_action.isEnabled()
+    assert page.whatsapp_statement_action.isEnabled()
+    assert page.email_statement_action.isEnabled()
+    assert page.totals_label.text()
+
+
+
+def test_issue_511_customer_ledger_splits_debit_credit_and_running_balance(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Client
+    from app.ui.customer_ledger import CustomerLedgerPage
+
+    app = QApplication.instance() or QApplication([])
+    client = Client.create(
+        name="Cliente Debe Haber",
+        cuit="30777779511",
+        iva_condition="RI",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="manual_debit",
+        total_amount=1000,
+        currency="ARS",
+        description="Débito de prueba",
+        source_ref="issue-511:debit",
+        created_by="admin",
+    )
+    ClientAccountMovement.create(
+        client=client,
+        movement_type="manual_credit",
+        total_amount=-250,
+        currency="ARS",
+        description="Crédito de prueba",
+        source_ref="issue-511:credit",
+        created_by="admin",
+    )
+
+    page = CustomerLedgerPage(current_user="admin")
+    app.processEvents()
+
+    headers = [
+        page.movements_table.horizontalHeaderItem(column).text()
+        for column in range(page.movements_table.columnCount())
+    ]
+    assert headers[:7] == [
+        "Fecha",
+        "Tipo",
+        "Referencia",
+        "Descripción",
+        "Debe",
+        "Haber",
+        "Saldo",
+    ]
+    if len(headers) > 7:
+        assert headers[7] == "Vencimiento"
+
+    assert page.movements_table.rowCount() == 2
+
+    assert page.movements_table.item(0, 4).text() == "$1,000.00"
+    assert page.movements_table.item(0, 5).text() == ""
+    assert page.movements_table.item(0, 6).text() == "$1,000.00"
+
+    assert page.movements_table.item(1, 4).text() == ""
+    assert page.movements_table.item(1, 5).text() == "$250.00"
+    assert page.movements_table.item(1, 6).text() == "$750.00"
+
+    assert page.detail_balance.text() == "$750.00"

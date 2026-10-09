@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -49,32 +50,45 @@ class LoadOrderClosureDialog(QDialog):
         self.service = service or LoadOrderClosureService(current_user=current_user)
         self._closure: LoadOrderClosure | None = None
         self._payments: list[dict] = []
-        self._return_inputs: list[tuple[object, QDoubleSpinBox, QLineEdit, QTableWidgetItem]] = []
+        self._return_inputs: list[tuple] = []
+        # Con una orden partida hay dos presupuestos y el operador debe decir
+        # de cual sale cada devolucion. Sin reparto no hay nada que elegir.
+        self._split_enabled: bool = any(
+            line.cantidad_facturacion_diferida > 0 for line in self.order.products
+        )
 
         self.setWindowTitle(f"Cerrar entrega OC-{self.order.order_number:06d}")
         self.setModal(True)
-        self.resize(1050, 760)
+        self.resize(1240, 760)
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("Renglones emitidos y devoluciones"))
-        self.lines_table = QTableWidget(0, 8)
+        # Rotulos cortos: con nueve columnas los nombres largos se cortan y el
+        # selector quedaba con el texto a medias.
+        headers = [
+            "Cliente",
+            "Producto",
+            "Cantidad",
+            "P. unitario",
+            "Total",
+        ]
+        if self._split_enabled:
+            headers.append("Parte")
+        headers += ["Devuelve", "Motivo", "A acreditar"]
+        self._motivo_column = len(headers) - 2
+        self.lines_table = QTableWidget(0, len(headers))
         self.lines_table.setObjectName("loadOrderClosureLinesTable")
-        self.lines_table.setHorizontalHeaderLabels(
-            [
-                "Cliente",
-                "Producto",
-                "Cantidad",
-                "Precio unitario",
-                "Total",
-                "Cant. devuelta",
-                "Motivo devolución",
-                "A acreditar",
-            ]
-        )
+        self.lines_table.setHorizontalHeaderLabels(headers)
         self.lines_table.setMinimumHeight(170)
-        self.lines_table.horizontalHeader().setStretchLastSection(True)
+        # Anchos fijos para las columnas de dato y el resto elastico. Con
+        # ResizeToContents la tabla se pasaba del ancho y aparecia scroll
+        # horizontal, que es peor que un rotulo corto.
+        header = self.lines_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(False)
         self._load_lines()
         layout.addWidget(self.lines_table)
+        self._apply_column_widths()
 
         payment_form = QFormLayout()
         self.client_combo = QComboBox()
@@ -173,7 +187,13 @@ class LoadOrderClosureDialog(QDialog):
 
     def pending_returns(self) -> list[dict]:
         returns = []
-        for line, quantity_input, reason_input, _credit_item in self._return_inputs:
+        for (
+            line,
+            quantity_input,
+            reason_input,
+            _credit_item,
+            timing_combo,
+        ) in self._return_inputs:
             quantity = round(quantity_input.value(), 3)
             if quantity <= 0:
                 continue
@@ -182,6 +202,11 @@ class LoadOrderClosureDialog(QDialog):
                     "order_product": line,
                     "quantity": quantity,
                     "reason": reason_input.text().strip(),
+                    "timing": (
+                        timing_combo.currentData()
+                        if timing_combo is not None
+                        else "immediate"
+                    ),
                 }
             )
         return returns
@@ -204,24 +229,75 @@ class LoadOrderClosureDialog(QDialog):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.lines_table.setItem(row, column, item)
 
+            column = 5
+            timing_combo = None
+            if self._split_enabled:
+                timing_combo = QComboBox()
+                timing_combo.setObjectName(f"loadOrderClosureReturnTiming_{line.id}")
+                timing_combo.addItem("Facturado hoy", "immediate")
+                timing_combo.addItem("A facturar después", "deferred")
+                # Sin ancho minimo el combo corta "Facturado hoy" a "Factura".
+                timing_combo.setMinimumWidth(150)
+                timing_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+                self.lines_table.setCellWidget(row, column, timing_combo)
+                column += 1
+
             quantity_input = QDoubleSpinBox()
             quantity_input.setObjectName(f"loadOrderClosureReturnQuantityInput_{line.id}")
             quantity_input.setDecimals(3)
-            quantity_input.setRange(0.0, max(float(line.quantity), 0.0))
+            quantity_input.setRange(0.0, self._part_max(line, timing_combo))
             quantity_input.setSingleStep(1.0)
-            self.lines_table.setCellWidget(row, 5, quantity_input)
+            self.lines_table.setCellWidget(row, column, quantity_input)
+            column += 1
 
             reason_input = QLineEdit()
             reason_input.setObjectName(f"loadOrderClosureReturnReasonInput_{line.id}")
             reason_input.setPlaceholderText("Motivo")
-            self.lines_table.setCellWidget(row, 6, reason_input)
+            self.lines_table.setCellWidget(row, column, reason_input)
+            column += 1
 
             credit_item = QTableWidgetItem("$ 0.00")
             credit_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             credit_item.setFlags(credit_item.flags() & ~Qt.ItemIsEditable)
-            self.lines_table.setItem(row, 7, credit_item)
-            self._return_inputs.append((line, quantity_input, reason_input, credit_item))
+            self.lines_table.setItem(row, column, credit_item)
+            self._return_inputs.append(
+                (line, quantity_input, reason_input, credit_item, timing_combo)
+            )
             quantity_input.valueChanged.connect(self._refresh_return_summary)
+            if timing_combo is not None:
+                timing_combo.currentIndexChanged.connect(
+                    lambda _index, linea=line, spin=quantity_input, combo=timing_combo: (
+                        spin.setRange(0.0, self._part_max(linea, combo)),
+                        self._refresh_return_summary(),
+                    )
+                )
+
+    def _apply_column_widths(self) -> None:
+        """Ancho util por columna, con producto y motivo elasticos."""
+        table = self.lines_table
+        header = table.horizontalHeader()
+        total = table.columnCount()
+        motivo = self._motivo_column
+        widths = {0: 150, 2: 95, 3: 115, 4: 135}
+        if self._split_enabled:
+            widths[5] = 165
+        widths[total - 2] = 105   # devuelve
+        widths[total - 1] = 135   # a acreditar
+        for column, width in widths.items():
+            if column < total:
+                table.setColumnWidth(column, width)
+        for column in (1, motivo):
+            if column < total:
+                header.setSectionResizeMode(column, QHeaderView.Stretch)
+
+    @staticmethod
+    def _part_max(line, timing_combo) -> float:
+        """Cantidad disponible de la parte elegida, para acotar el ingreso."""
+        if timing_combo is None:
+            return max(float(line.quantity), 0.0)
+        if timing_combo.currentData() == "deferred":
+            return max(float(line.cantidad_facturacion_diferida), 0.0)
+        return max(float(line.cantidad_facturacion_inmediata), 0.0)
 
     def _order_clients(self) -> list[Client]:
         clients = []
@@ -294,7 +370,7 @@ class LoadOrderClosureDialog(QDialog):
     def _refresh_return_summary(self, *_args) -> None:
         total_credit = 0.0
         returned_lines = 0
-        for line, quantity_input, _reason_input, credit_item in self._return_inputs:
+        for line, quantity_input, _reason_input, credit_item, _combo in self._return_inputs:
             quantity = round(quantity_input.value(), 3)
             unit_total = float(line.total) / float(line.quantity) if line.quantity else 0.0
             credit = round(unit_total * quantity, 2)

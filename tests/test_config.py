@@ -28,6 +28,29 @@ def test_settings_load_defaults_and_env_file(tmp_path, monkeypatch):
     assert settings.backup_extra_dir == Path("//server/copia")
 
 
+def test_explicit_environment_wins_over_env_file(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "FEMAG_DB_ENGINE=sqlite\n"
+        "FEMAG_DEMO=1\n"
+        "FEMAG_SQLITE_PATH=stale_demo.sqlite3\n"
+        "DB_NAME=stale_demo\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(env_file))
+    monkeypatch.setenv("FEMAG_DB_ENGINE", "mysql")
+    monkeypatch.setenv("FEMAG_DEMO", "0")
+    monkeypatch.setenv("DB_NAME", "femag")
+
+    from app.config.settings import load_settings
+
+    settings = load_settings()
+
+    assert settings.db_engine == "mysql"
+    assert settings.demo is False
+    assert settings.db_name == "femag"
+
+
 def test_initialize_runtime_database_uses_sqlite_when_demo_env_requests_it(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     sqlite_path = tmp_path / "femag_demo.sqlite3"

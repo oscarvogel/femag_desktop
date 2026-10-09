@@ -64,6 +64,8 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
             approved_item("Órdenes pendientes", "Pendientes", route_key="pending_orders_aging"),
             approved_item("Trazabilidad por lote", "Pendientes", route_key="lot_traceability"),
             approved_item("Devoluciones y reclamos", "Pendientes", route_key="returns_report"),
+            approved_item("Vencimientos de cobranzas", "Pendientes", route_key="collection_due_report"),
+            approved_item("Ventas por producto", "Pendientes", route_key="operational_product_sales"),
         )
         if item.route_key != "placeholder" or item.action_key is not None
     ]
@@ -72,12 +74,25 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         item
         for item in (
             approved_item("Clientes"),
+            approved_item("Vendedores"),
             approved_item("Productos"),
             approved_item("Precios por lista", "Productos", route_key="product_price_bulk"),
             approved_item("Tipos de IVA"),
             approved_item("Transportistas"),
             approved_item("Choferes"),
             approved_item("Camiones"),
+        )
+        if item.route_key != "placeholder" or item.action_key is not None
+    ]
+
+    production_children = [
+        item
+        for item in (
+            approved_item("Recepciones de materia prima"),
+            approved_item("Partes de producción"),
+            approved_item("Contraste de producción"),
+            approved_item("Inventario inicial"),
+            approved_item("Conteo físico"),
         )
         if item.route_key != "placeholder" or item.action_key is not None
     ]
@@ -120,10 +135,24 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
                         action_key=managerial_dashboard.action_key,
                         route_key="managerial_clients",
                     ),
+                    *(
+                        [
+                            MenuItemView(
+                                title="Rentabilidad por producto",
+                                placeholder=False,
+                                action_key=menu_items["Rentabilidad por producto"].action_key,
+                                route_key="product_profitability",
+                            )
+                        ]
+                        if "Rentabilidad por producto" in menu_items
+                        else []
+                    ),
                 ],
             )
         )
 
+    if production_children:
+        principal_items.append(MenuItemView(title="Producción", children=production_children))
     if operations_children:
         principal_items.append(MenuItemView(title="Operaciones", children=operations_children))
     if informes_children:
@@ -137,9 +166,11 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
         item
         for item in (
             approved_item("Configuración", "Parámetros", route_key="remittance_series"),
+            approved_item("WhatsApp", "Parámetros", route_key="whatsapp_configuration"),
             approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Usuarios", route_key="user_management"),
             approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
+            approved_item("Auditoría", route_key="audit_query"),
         )
         if item.action_key is not None
     ]

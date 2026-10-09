@@ -6,6 +6,7 @@ from app.models.masters import (
     CLIENT_ADDRESS_TYPE_SHARED,
     Client,
     ClientAddress,
+    Salesperson,
     client_address_has_delivery_function,
     client_address_has_fiscal_function,
 )
@@ -27,10 +28,13 @@ class ClientService:
         contact: str | None = None,
         lista_precios: int = 1,
         dias_plazo_pago: int = 0,
+        salesperson: Salesperson | None = None,
     ) -> Client:
         if lista_precios not in (1, 2, 3, 4):
             raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
         dias_plazo_pago = self.validate_payment_term_days(dias_plazo_pago)
+        if salesperson is not None and not bool(salesperson.active):
+            raise ValueError("El vendedor seleccionado está inactivo.")
         client = Client.create(
             name=name,
             cuit=cuit,
@@ -40,6 +44,7 @@ class ClientService:
             contact=contact,
             lista_precios=lista_precios,
             dias_plazo_pago=dias_plazo_pago,
+            salesperson=salesperson,
         )
         self.audit_service.record(
             user=self.current_user,
@@ -50,7 +55,31 @@ class ClientService:
                 "name": name,
                 "cuit": cuit,
                 "dias_plazo_pago": dias_plazo_pago,
+                "salesperson_id": salesperson.id if salesperson is not None else None,
             },
+        )
+        return client
+
+    def set_salesperson(
+        self,
+        client: Client,
+        salesperson: Salesperson | None,
+    ) -> Client:
+        new_id = salesperson.id if salesperson is not None else None
+        if client.salesperson_id == new_id:
+            return client
+        if salesperson is not None and not bool(salesperson.active):
+            raise ValueError("El vendedor seleccionado está inactivo.")
+        previous_id = client.salesperson_id
+        client.salesperson = salesperson
+        client.save(only=[Client.salesperson])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Clientes",
+            action="asignar vendedor",
+            record_ref=f"Client:{client.id}",
+            old_value={"salesperson_id": previous_id},
+            new_value={"salesperson_id": new_id},
         )
         return client
 
@@ -63,6 +92,36 @@ class ClientService:
         if days < 0:
             raise ValueError("Los días de plazo de pago no pueden ser negativos.")
         return days
+
+    @staticmethod
+    def active_clients_query():
+        """Clientes habilitados para nuevas operaciones, ordenados por nombre."""
+        return Client.select().where(Client.active == True).order_by(Client.name)  # noqa: E712
+
+    @staticmethod
+    def ensure_active(client: Client) -> Client:
+        """Impide usar un cliente inactivo en una operación nueva."""
+        if not bool(client.active):
+            raise ValueError("El cliente seleccionado está inactivo y no puede usarse en nuevas operaciones.")
+        return client
+
+    def set_active(self, client: Client, active: bool) -> Client:
+        """Activa/desactiva un cliente sin eliminar su historial."""
+        active = bool(active)
+        if bool(client.active) == active:
+            return client
+        previous = bool(client.active)
+        client.active = active
+        client.save(only=[Client.active])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Clientes",
+            action="activar" if active else "desactivar",
+            record_ref=f"Client:{client.id}",
+            old_value={"active": previous},
+            new_value={"active": active},
+        )
+        return client
 
     def add_address(
         self,

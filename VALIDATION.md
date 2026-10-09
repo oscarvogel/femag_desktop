@@ -16,6 +16,17 @@ python -m pytest
 
 Ejecuta la suite de tests del proyecto.
 
+**En PowerShell hay que exportar `QT_QPA_PLATFORM=offscreen` antes de correrla:**
+
+```powershell
+$env:QT_QPA_PLATFORM="offscreen"
+python -m pytest
+```
+
+Sin esa variable, `tests/test_load_order_closure_payments.py::test_close_without_payment_requires_and_persists_reason`
+abre un dialogo modal y **la suite queda colgada indefinidamente**. El CI lo define en
+`env:` dentro de `.github/workflows/ci.yml`; localmente hay que setearlo a mano.
+
 ```bash
 python -m compileall app
 ```

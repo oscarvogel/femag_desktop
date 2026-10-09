@@ -1,9 +1,13 @@
 from datetime import timedelta
 
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus, LoadOrderDestination, LoadOrderProduct
+from app.models.budgets import Budget
+from app.models.load_orders import BILLING_TIMINGS
+from app.models.load_orders import LoadOrder, LoadOrderBudgetStatus
 from app.models.masters import Client
 from app.services.audit_service import AuditService
+from app.services.budget_service import BudgetService
+from app.services.money import money_to_float, totals_from_persisted_items
 
 
 class AccountLedgerService:
@@ -13,55 +17,107 @@ class AccountLedgerService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
+        self.budget_service = BudgetService(current_user, self.audit_service)
 
     def generate_for_load_order(self, order: LoadOrder) -> list[ClientAccountMovement]:
         order = LoadOrder.get_by_id(order.id)
         movements = []
         for client in self._clients_for_order(order):
-            totals = self._load_order_totals_for_client(order, client)
-            movement_date = order.date
-            due_date = movement_date + timedelta(days=max(int(client.dias_plazo_pago or 0), 0))
-            movement, created = ClientAccountMovement.get_or_create(
-                load_order=order,
-                client=client,
-                movement_type=ClientAccountMovement.TYPE_LOAD_ORDER,
-                is_reversal=False,
-                defaults={
-                    "amount": self.DOCUMENTAL_AMOUNT,
-                    "net_amount": totals["neto_subtotal"],
-                    "discount_amount": totals["descuento_importe"],
-                    "vat_amount": totals["iva_importe"],
-                    "total_amount": totals["total"],
-                    "currency": self.CURRENCY,
-                    "movement_date": movement_date,
-                    "due_date": due_date,
-                    "description": self._description(order, totals),
-                    "source_ref": self._source_ref(order),
-                    "created_by": self.current_user,
-                },
-            )
-            movements.append(movement)
-            if created:
-                self._update_budget_status(order, client)
-                self._record("generar", movement)
+            for timing in BILLING_TIMINGS:
+                movement = self._movement_for_client_timing(order, client, timing)
+                if movement is not None:
+                    movements.append(movement)
         return movements
+
+    def _movement_for_client_timing(
+        self, order: LoadOrder, client: Client, timing: str
+    ) -> ClientAccountMovement | None:
+        """Registra el movimiento de una parte de facturacion, o nada si no hay.
+
+        La parte que se factura hoy vence al contado; la que queda pendiente
+        vence con el plazo de pago del cliente. Si esa parte no tiene
+        mercaderia no se genera nada, y por lo tanto tampoco un movimiento.
+        """
+        budget = self.budget_service.ensure_for_load_order_client(
+            order, client, timing=timing
+        )
+        if budget is None:
+            return None
+        totals = self._load_order_totals_for_client(order, client, timing)
+        movement_date = order.date
+        immediate = timing == Budget.TIMING_IMMEDIATE
+        plazo = max(int(client.dias_plazo_pago or 0), 0)
+        # El contado solo aplica cuando la orden esta partida: si no hay nada
+        # pendiente, el cliente compra normal y su plazo de pago se respeta.
+        if immediate and not self.budget_service.has_deferred_portion(order, client):
+            due_date = movement_date + timedelta(days=plazo)
+        elif immediate:
+            due_date = movement_date
+        else:
+            due_date = movement_date + timedelta(days=plazo)
+        movement_type = (
+            ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE
+            if immediate
+            else ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED
+        )
+        movement, created = ClientAccountMovement.get_or_create(
+            load_order=order,
+            client=client,
+            movement_type=movement_type,
+            is_reversal=False,
+            defaults={
+                "budget": budget,
+                "amount": self.DOCUMENTAL_AMOUNT,
+                "net_amount": totals["neto_subtotal"],
+                "discount_amount": totals["descuento_importe"],
+                "vat_amount": totals["iva_importe"],
+                "total_amount": totals["total"],
+                "currency": self.CURRENCY,
+                "movement_date": movement_date,
+                "due_date": due_date,
+                "description": self._description(order, budget, totals),
+                "source_ref": f"Budget:{budget.id}",
+                "reference": budget.display_number,
+                "created_by": self.current_user,
+            },
+        )
+        if not created and (movement.budget_id is None or not movement.reference):
+            movement.budget = budget
+            movement.reference = budget.display_number
+            movement.save(only=[ClientAccountMovement.budget, ClientAccountMovement.reference])
+        if created:
+            self._update_budget_status(order, client, timing)
+            self._record("generar", movement)
+        return movement
 
     def reverse_for_load_order(self, order: LoadOrder) -> list[ClientAccountMovement]:
         order = LoadOrder.get_by_id(order.id)
         reversals = []
+        # Se revierten las dos partes: dejar la deuda pendiente sin reverso
+        # huerfanaria el movimiento diferido al anular la orden.
         originals = ClientAccountMovement.select().where(
             ClientAccountMovement.load_order == order,
-            ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER,
+            ClientAccountMovement.movement_type.in_(
+                (
+                    ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+                    ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
+                )
+            ),
             ClientAccountMovement.is_reversal == False,  # noqa: E712
         )
         for original in originals:
+            if original.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED:
+                reversal_type = ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED_REVERSAL
+            else:
+                reversal_type = ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE_REVERSAL
             reversal, created = ClientAccountMovement.get_or_create(
                 load_order=order,
                 client=original.client,
-                movement_type=ClientAccountMovement.TYPE_LOAD_ORDER_REVERSAL,
+                movement_type=reversal_type,
                 is_reversal=True,
                 reverses=original,
                 defaults={
+                    "budget": original.budget,
                     "amount": -original.amount,
                     "net_amount": -original.net_amount,
                     "discount_amount": -original.discount_amount,
@@ -71,7 +127,8 @@ class AccountLedgerService:
                     "movement_date": original.movement_date,
                     "due_date": original.due_date,
                     "description": f"Reverso {original.description}",
-                    "source_ref": self._source_ref(order),
+                    "source_ref": original.source_ref,
+                    "reference": original.reference,
                     "created_by": self.current_user,
                 },
             )
@@ -80,35 +137,47 @@ class AccountLedgerService:
                 self._record("revertir", reversal)
         return reversals
 
-    def _load_order_totals_for_client(self, order: LoadOrder, client: Client) -> dict:
-        from peewee import fn
+    def _load_order_totals_for_client(
+        self,
+        order: LoadOrder,
+        client: Client,
+        timing: str = Budget.TIMING_IMMEDIATE,
+    ) -> dict:
+        """Totales del renglón tomados del presupuesto ya emitido.
 
-        totals = (
-            LoadOrderProduct.select(
-                fn.COALESCE(fn.SUM(LoadOrderProduct.neto_subtotal), 0).alias("neto_subtotal"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.descuento_importe), 0).alias("descuento_importe"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.iva_importe), 0).alias("iva_importe"),
-                fn.COALESCE(fn.SUM(LoadOrderProduct.total), 0).alias("total"),
-            )
-            .join(LoadOrderDestination, on=LoadOrderProduct.destination)
-            .where(
-                (LoadOrderProduct.order == order)
-                & (LoadOrderDestination.client == client)
-            )
-            .dicts()
-            .first()
+        Antes se recalculaban con un ``SUM`` en SQL sobre los renglones de la
+        orden, por lo que la cuenta corriente podía persistir un importe
+        distinto del presupuesto impreso si la orden cambiaba después. Ahora la
+        cuenta corriente usa el presupuesto como única fuente, de modo que lo
+        cobrado sea exactamente lo impreso.
+        """
+        budget = self.budget_service.ensure_for_load_order_client(
+            order, client, timing=timing
         )
+        items = list(budget.items) if budget is not None else []
+        if not items:
+            totals = self.budget_service.totals_for_order_rows(
+                order, client, timing=timing
+            )
+        else:
+            totals = totals_from_persisted_items(items)
         return {
-            "neto_subtotal": round(totals["neto_subtotal"], 2),
-            "descuento_importe": round(totals["descuento_importe"], 2),
-            "iva_importe": round(totals["iva_importe"], 2),
-            "total": round(totals["total"], 2),
+            "neto_subtotal": money_to_float(totals.net_amount),
+            "descuento_importe": money_to_float(totals.discount_amount),
+            "iva_importe": money_to_float(totals.vat_amount),
+            "total": money_to_float(totals.total_amount),
         }
 
-    def _update_budget_status(self, order: LoadOrder, client: Client) -> None:
+    def _update_budget_status(
+        self,
+        order: LoadOrder,
+        client: Client,
+        timing: str = Budget.TIMING_IMMEDIATE,
+    ) -> None:
         LoadOrderBudgetStatus.get_or_create(
             order=order,
             client=client,
+            timing=timing,
             defaults={"status": LoadOrderBudgetStatus.STATUS_APPLIED},
         )
         updated = LoadOrderBudgetStatus.update(
@@ -116,6 +185,7 @@ class AccountLedgerService:
         ).where(
             (LoadOrderBudgetStatus.order == order)
             & (LoadOrderBudgetStatus.client == client)
+            & (LoadOrderBudgetStatus.timing == timing)
         )
         updated.execute()
         self.audit_service.record(
@@ -126,6 +196,7 @@ class AccountLedgerService:
             new_value={
                 "order_id": order.id,
                 "client_id": client.id,
+                "timing": timing,
                 "status": LoadOrderBudgetStatus.STATUS_APPLIED,
             },
         )
@@ -141,14 +212,16 @@ class AccountLedgerService:
             clients.append(order.client)
         return clients
 
-    def _description(self, order: LoadOrder, totals: dict | None = None) -> str:
+    def _description(self, order: LoadOrder, budget, totals: dict | None = None) -> str:
+        prefix = f"Presupuesto {budget.display_number} / OC-{order.order_number:06d}"
+        if budget.timing == Budget.TIMING_DEFERRED:
+            prefix = f"{prefix} (parte a facturar despues)"
         if totals and totals["total"]:
             return (
-                f"Orden de carga OC-{order.order_number:06d} - "
-                f"Neto ${totals['total']:,.2f} (neto ${totals['neto_subtotal']:,.2f}, "
+                f"{prefix} - Neto ${totals['total']:,.2f} (neto ${totals['neto_subtotal']:,.2f}, "
                 f"desc. ${totals['descuento_importe']:,.2f}, IVA ${totals['iva_importe']:,.2f})"
             )
-        return f"Orden de carga OC-{order.order_number:06d} - movimiento documental sin importe comercial"
+        return f"{prefix} - movimiento documental sin importe comercial"
 
     def _source_ref(self, order: LoadOrder) -> str:
         return f"LoadOrder:{order.id}"
@@ -162,6 +235,8 @@ class AccountLedgerService:
             new_value={
                 "client_id": movement.client.id,
                 "load_order_id": movement.load_order.id,
+                "budget_id": movement.budget_id,
+                "reference": movement.reference,
                 "movement_type": movement.movement_type,
                 "amount": movement.amount,
                 "net_amount": movement.net_amount,

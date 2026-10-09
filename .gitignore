@@ -22,6 +22,27 @@ femag_*.sqlite3
 femag_*.sqlite3-journal
 # Generated print and validation evidence
 docs/prints/
+
+# --- Local sensitive data (this repo is public) ---
+# Env files: the ".env" rule above only matches that exact filename, so named
+# env files such as managerial_summary.env stayed exposed. No .env is tracked.
+*.env
+# Database dumps. No .sql file is tracked in this repo.
+*.sql
+# Client documents: real personal and financial data, never versioned.
+# No tracked file matches these prefixes (see output/pdf/ and docs/prints/).
+extracto_*.pdf
+presupuesto_*.pdf
+recibo_*.pdf
+orden_carga_*.pdf
+# Local audit and test run outputs.
+# No .csv is tracked in this repo, so these stay predictable.
+*audit*.csv
+*audit*.txt
+/auditoria.txt
+/log_test*.txt
+/pytest_release.txt
+
 # Muestras fiscales reales: traen CUIT, DNI y domicilios, nunca se versionan.
 # Para validar contra ellas usar scripts/compare_f150_golden_master.py con una
 # copia local protegida. Los fixtures anonimizados viven en tests/fixtures/f150/.

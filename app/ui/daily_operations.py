@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client
 from app.reports.daily_operations import DailyOperationsFilters, DailyOperationsService
+from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 
 
 class DailyOperationsDialog(QDialog):
@@ -86,16 +87,22 @@ class DailyOperationsDialog(QDialog):
 
         actions = QHBoxLayout()
         consult = QPushButton("Consultar")
+        consult.setProperty("uiRole", "primary")
         consult.clicked.connect(self.refresh)
         today = QPushButton("Hoy")
+        today.setProperty("uiRole", "secondary")
         today.clicked.connect(self._today)
         yesterday = QPushButton("Ayer")
+        yesterday.setProperty("uiRole", "secondary")
         yesterday.clicked.connect(self._yesterday)
         week = QPushButton("Últimos 7 días")
+        week.setProperty("uiRole", "secondary")
         week.clicked.connect(self._week)
         month = QPushButton("Este mes")
+        month.setProperty("uiRole", "secondary")
         month.clicked.connect(self._month)
         open_order = QPushButton("Abrir orden")
+        open_order.setProperty("uiRole", "secondary")
         open_order.clicked.connect(self.open_selected_order)
         for button in (consult, today, yesterday, week, month, open_order):
             actions.addWidget(button)
@@ -125,6 +132,7 @@ class DailyOperationsDialog(QDialog):
         bottom = QHBoxLayout()
         bottom.addStretch(1)
         close = QPushButton("Cerrar")
+        close.setProperty("uiRole", "secondary")
         close.clicked.connect(self.accept)
         bottom.addWidget(close)
         root.addLayout(bottom)
@@ -151,6 +159,9 @@ class DailyOperationsDialog(QDialog):
         self.carrier_combo.addItem("Todos", None)
         for carrier in Carrier.select().order_by(Carrier.name):
             self.carrier_combo.addItem(carrier.name, carrier.id)
+        enable_combo_autocomplete(self.status_combo, placeholder="Buscar estado...")
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
+        enable_combo_autocomplete(self.carrier_combo, placeholder="Buscar transportista...")
 
     @staticmethod
     def _to_qdate(value: date) -> QDate:
@@ -186,9 +197,9 @@ class DailyOperationsDialog(QDialog):
         return DailyOperationsFilters(
             start=self._py_date(self.date_from),
             end=self._py_date(self.date_to),
-            status=self.status_combo.currentData(),
-            client_id=self.client_combo.currentData(),
-            carrier_id=self.carrier_combo.currentData(),
+            status=combo_current_data(self.status_combo),
+            client_id=combo_current_data(self.client_combo),
+            carrier_id=combo_current_data(self.carrier_combo),
         )
 
     def refresh(self):

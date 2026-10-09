@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from conftest import _master_data, _valid_order_payload
 
@@ -37,6 +38,82 @@ def _complete_order_for_issue(order, current_user):
         pallets=[{"sequence": 1, "pallet_type": None, "allocations": allocations}],
     )
     return order
+
+
+def test_load_order_page_paginates_50_rows_and_moves_to_next_page(db):
+    from datetime import date
+
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.load_orders import LoadOrder
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow, _load_order_table_order_count
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="paging_ui", password_hash="x", profile=profile)
+    data = _master_data()
+
+    for number in range(1, 56):
+        LoadOrder.create(
+            order_number=number,
+            date=date(2026, 1, 1),
+            carrier=data["carrier"],
+            driver=data["driver"],
+            truck=data["truck"],
+            status=LoadOrder.STATUS_CLOSED,
+            created_by="paging_ui",
+            updated_by="paging_ui",
+        )
+
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    page_label = window.findChild(QLabel, "loadOrderPageLabel")
+    next_button = window.findChild(QPushButton, "nextLoadOrderPageButton")
+    previous_button = window.findChild(QPushButton, "previousLoadOrderPageButton")
+
+    assert table is not None
+    assert page_label.text() == "Página 1 de 2 · 55 orden(es)"
+    assert _load_order_table_order_count(table) == 50
+    assert previous_button.isEnabled() is False
+    assert next_button.isEnabled() is True
+
+    next_button.click()
+    app.processEvents()
+
+    assert page_label.text() == "Página 2 de 2 · 55 orden(es)"
+    assert _load_order_table_order_count(table) == 5
+    assert previous_button.isEnabled() is True
+    assert next_button.isEnabled() is False
+
+
+def test_desktop_window_builds_with_prefetched_load_orders(db):
+    from PyQt5.QtWidgets import QApplication, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.services.load_order_service import LoadOrderService
+    from app.services.permission_service import PermissionService
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="perf_prefetch_ui", password_hash="x", profile=profile)
+    data = _master_data()
+    LoadOrderService(current_user=user.username).create_order(
+        **_valid_order_payload(data)
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = FemagDesktopWindow(user=user, demo_mode=True)
+    app.processEvents()
+
+    table = window.findChild(QTableWidget, "loadOrdersTable")
+    assert table is not None
+    assert table.rowCount() >= 1
 
 
 def test_load_order_product_action_uses_visible_warning_when_destination_is_missing(db):
@@ -848,7 +925,7 @@ def test_load_order_dialog_truck_filtered_by_driver_carrier(db):
 
 def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget, QDialog
 
     from app.models.accounting import ClientAccountMovement
     from app.models.load_orders import LoadOrder
@@ -884,7 +961,24 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     _complete_order_for_issue(order, user.username)
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
-    monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+    print_events = []
+    monkeypatch.setattr(
+        "app.ui.desktop_app._open_print_output",
+        lambda path: (print_events.append(("open", Path(path).suffix.lower())), opened_outputs.append(path)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: (print_events.append(("question", "excel")), QMessageBox.Yes)[1],
+    )
+    monkeypatch.setattr(
+        "app.ui.desktop_app.LoadOrderAnnulDialog.exec_",
+        lambda _dialog: QDialog.Accepted,
+    )
+    monkeypatch.setattr(
+        "app.ui.desktop_app.LoadOrderAnnulDialog.reason",
+        lambda _dialog: "Error de carga detectado en prueba",
+    )
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -912,9 +1006,12 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     assert "pdf generado correctamente" in feedback.text().lower()
     pdf_path = tmp_path / "orden_carga_1.pdf"
-    assert opened_outputs == [pdf_path]
+    excel_path = tmp_path / "orden_carga_1_armado_pallets.xlsx"
+    assert opened_outputs == [pdf_path, excel_path]
+    assert print_events[:3] == [("question", "excel"), ("open", ".pdf"), ("open", ".xlsx")]
     assert str(pdf_path) in feedback.text()
     assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert excel_path.exists()
 
     reprint_button = window.findChild(QPushButton, "reprintLoadOrderButton")
     assert reprint_button is not None
@@ -924,7 +1021,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     reprint_path = tmp_path / "orden_carga_1_reimpresion_1.pdf"
     assert "reimpresión generada correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, reprint_path]
+    assert opened_outputs == [pdf_path, excel_path, reprint_path]
     reprint_text = "\n".join(page.extract_text() or "" for page in PdfReader(str(reprint_path)).pages)
     assert "REIMPRESIÓN - copia 1 -" in reprint_text
 
@@ -943,7 +1040,7 @@ def test_load_order_page_operates_emit_print_reprint_and_annul_feedback(db, tmp_
     app.processEvents()
     annulled_reprint_path = tmp_path / "orden_carga_1_reimpresion_2.pdf"
     assert "reimpresión generada correctamente" in feedback.text().lower()
-    assert opened_outputs == [pdf_path, reprint_path, annulled_reprint_path]
+    assert opened_outputs == [pdf_path, excel_path, reprint_path, annulled_reprint_path]
     annulled_text = "\n".join(
         page.extract_text() or "" for page in PdfReader(str(annulled_reprint_path)).pages
     )
@@ -1040,7 +1137,7 @@ def test_load_order_detail_panel_keeps_long_summary_readable(db):
     assert detail_table.item(1, 2).text() == "ISSUE169 Segundo producto"
 
 
-def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path, monkeypatch):
+def test_load_order_page_opens_split_budget_pdf_for_each_client(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
 
@@ -1061,19 +1158,11 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     product_b = Product.create(name="Producto Budget B", unit="bolsas")
     client_a = Client.create(name="Cliente Budget A", cuit="30700018801", iva_condition="RI")
     address_a = ClientAddress.create(
-        client=client_a,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta Budget A",
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Budget A"
     )
     client_b = Client.create(name="Cliente Budget B", cuit="30700018802", iva_condition="RI")
     address_b = ClientAddress.create(
-        client=client_b,
-        address_type="entrega",
-        province="Misiones",
-        city="Obera",
-        address="Ruta Budget B",
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta Budget B"
     )
     LoadOrderService(current_user=user.username).create_order(
         carrier=carrier,
@@ -1098,23 +1187,27 @@ def test_load_order_page_opens_combined_budget_pdf_for_all_clients(db, tmp_path,
     monkeypatch.setattr("app.ui.desktop_app.LOAD_ORDER_PRINTS_DIR", tmp_path)
     opened_outputs = []
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", lambda path: opened_outputs.append(path))
+
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
     window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    budget_paths = sorted(tmp_path.glob("presupuestos_orden_*.pdf"))
+    assert len(opened_outputs) == 2
+    assert all(path.exists() for path in opened_outputs)
     feedback = window.findChild(QLabel, "loadOrderFeedback").text()
+    assert "2 presupuesto" in feedback
 
-    assert len(budget_paths) == 1
-    assert opened_outputs == budget_paths
-    assert "presupuestos_orden_1_" in feedback
-    reader = PdfReader(str(budget_paths[0]))
-    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    assert text.count("Observaciones: Condición comercial Cliente Budget A.") == 1
-    assert text.count("Observaciones: Condición comercial Cliente Budget B.") == 1
+    texts = []
+    for path in opened_outputs:
+        reader = PdfReader(str(path))
+        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
 
+    assert sum("Cliente Budget A" in text for text in texts) == 1
+    assert sum("Cliente Budget B" in text for text in texts) == 1
+    assert sum("Observaciones: Condición comercial Cliente Budget A." in text for text in texts) == 1
+    assert sum("Observaciones: Condición comercial Cliente Budget B." in text for text in texts) == 1
 
 def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
@@ -1138,27 +1231,15 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     product = Product.create(name="Producto Selection", unit="kg")
     client_a = Client.create(name="Cliente Selection A", cuit="30700028801", iva_condition="RI")
     address_a = ClientAddress.create(
-        client=client_a,
-        address_type="entrega",
-        province="Misiones",
-        city="Posadas",
-        address="Ruta Selection A",
+        client=client_a, address_type="entrega", province="Misiones", city="Posadas", address="Ruta Selection A"
     )
     client_b = Client.create(name="Cliente Selection B", cuit="30700028802", iva_condition="RI")
     address_b = ClientAddress.create(
-        client=client_b,
-        address_type="entrega",
-        province="Misiones",
-        city="Obera",
-        address="Ruta Selection B",
+        client=client_b, address_type="entrega", province="Misiones", city="Obera", address="Ruta Selection B"
     )
     client_c = Client.create(name="Cliente Selection C", cuit="30700028803", iva_condition="RI")
     address_c = ClientAddress.create(
-        client=client_c,
-        address_type="entrega",
-        province="Misiones",
-        city="Eldorado",
-        address="Ruta Selection C",
+        client=client_c, address_type="entrega", province="Misiones", city="Eldorado", address="Ruta Selection C"
     )
     service = LoadOrderService(current_user=user.username)
     first_order = service.create_order(
@@ -1197,33 +1278,25 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     table = window.findChild(QTableWidget, "loadOrdersTable")
 
     assert table.item(0, 0).data(256) == second_order.id
-    assert table.cellWidget(1, 0).property("detailLabels")["number"].text() == "OC-000002"
-
-    table.setCurrentCell(2, 0)
-    app.processEvents()
-
-    assert table.item(1, 0).data(256) == first_order.id
-    assert table.cellWidget(2, 0).property("detailLabels")["number"].text() == "OC-000001"
-    assert table.columnSpan(0, 0) == 1
-    assert table.columnSpan(1, 0) == 1
-    assert table.columnSpan(2, 0) == table.columnCount()
-
     table.setCurrentCell(0, 0)
     app.processEvents()
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    assert len(opened_outputs) == 1
-    reader = PdfReader(str(opened_outputs[0]))
-    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    assert "Cliente Selection B" in text
-    assert "Cliente Selection C" in text
-    assert text.count("Observaciones: Presupuesto exclusivo Selection B.") == 1
-    assert text.count("Observaciones: Presupuesto exclusivo Selection C.") == 1
+    assert len(opened_outputs) == 2
+    texts = []
+    for path in opened_outputs:
+        reader = PdfReader(str(path))
+        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
 
+    assert sum("Cliente Selection B" in text for text in texts) == 1
+    assert sum("Cliente Selection C" in text for text in texts) == 1
+    assert all("Cliente Selection A" not in text for text in texts)
+    assert sum("Observaciones: Presupuesto exclusivo Selection B." in text for text in texts) == 1
+    assert sum("Observaciones: Presupuesto exclusivo Selection C." in text for text in texts) == 1
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+    from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget
 
     from app.models.security import User, UserProfile
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -1260,6 +1333,7 @@ def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, mon
         raise OSError("visor no disponible")
 
     monkeypatch.setattr("app.ui.desktop_app._open_print_output", fail_open)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.No)
 
     window = FemagDesktopWindow(user=user, demo_mode=True)
     app.processEvents()
@@ -2077,8 +2151,91 @@ def test_product_dialog_tab_and_enter_follow_manual_input_order(db):
     QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
     assert_focus_inside(dialog.quantity_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
+    assert_focus_inside(dialog.cantidad_despues_input)
+    QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert_focus_inside(dialog.precio_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert_focus_inside(dialog.descuento_input)
     QTest.keyClick(app.focusWidget(), Qt.Key_Return)
     assert app.focusWidget() is dialog.add_button
+
+
+def test_issue_568_product_dialog_prefills_existing_line_for_edit(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.desktop_app import LoadOrderProductDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    draft = {
+        "product_id": data["product"].id,
+        "product_label": data["product"].name,
+        "quantity": 12.5,
+        "unit": data["product"].unit,
+        "precio_neto_unitario": 9500.0,
+        "descuento_porcentaje": 5.0,
+        "iva_porcentaje": 21.0,
+    }
+
+    dialog = LoadOrderProductDialog(client=data["client"], product=draft)
+    app.processEvents()
+
+    assert dialog.windowTitle() == "Editar producto"
+    assert dialog.product_combo.currentData() == data["product"].id
+    assert dialog.quantity_input.value() == 12.5
+    assert dialog.precio_input.value() == 9500.0
+    assert dialog.descuento_input.value() == 5.0
+    assert dialog.iva_input.value() == 21.0
+    assert dialog.add_button.text() == "Guardar cambios"
+
+
+def test_issue_568_edit_product_replaces_draft_and_recalculates(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QDialog
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui import desktop_app
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    dialog = LoadOrderEntryDialog(LoadOrderService(current_user="issue568"), "issue568")
+    dialog.destinations = [{
+        "client_id": data["client"].id,
+        "client_label": data["client"].name,
+        "address_id": data["address"].id,
+        "address_label": data["address"].address,
+        "observations": None,
+        "products": [{
+            "product_id": data["product"].id,
+            "product_label": data["product"].name,
+            "quantity": 10.0,
+            "unit": data["product"].unit,
+            "precio_neto_unitario": 100.0,
+            "descuento_porcentaje": 0.0,
+            "iva_porcentaje": 21.0,
+            "total": 1210.0,
+        }],
+    }]
+    dialog._render_destinations()
+    dialog.destination_table.setCurrentCell(0, 0)
+    dialog.product_table.setCurrentCell(0, 0)
+
+    class FakeProductDialog:
+        def __init__(self, parent=None, *, client=None, product=None):
+            assert product["quantity"] == 10.0
+            self.product = dict(product)
+            self.product["quantity"] = 15.0
+            self.product["total"] = 1815.0
+
+        def exec_(self):
+            return QDialog.Accepted
+
+    monkeypatch.setattr(desktop_app, "LoadOrderProductDialog", FakeProductDialog)
+    dialog._edit_product()
+    app.processEvents()
+
+    assert dialog.destinations[0]["products"][0]["quantity"] == 15.0
+    assert dialog.product_table.item(0, 1).text() == "15"
+    assert dialog.product_table.item(0, 2).text() == "15"
+    assert dialog.product_table.item(0, 3).text() == "0"
+    assert "1,815.00" in dialog.product_table.item(0, 7).text()

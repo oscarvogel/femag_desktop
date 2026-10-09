@@ -6,10 +6,13 @@ from datetime import date
 
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
 from app.models.masters import Carrier, ClientAddress
-from app.reports.managerial_dashboard import (
-    DEFAULT_EFFECTIVE_ORDER_STATUSES,
-    ManagerialDashboardService,
-    ReportPeriod,
+from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
+
+
+DEFAULT_SALES_DISPATCH_STATUSES = (
+    LoadOrder.STATUS_PENDING,
+    LoadOrder.STATUS_ISSUED,
+    LoadOrder.STATUS_CLOSED,
 )
 
 
@@ -66,9 +69,9 @@ class ManagerialSalesDispatchService:
     }
 
     def report(self, filters: SalesDispatchFilters) -> SalesDispatchReportResult:
-        statuses = tuple(filters.statuses or DEFAULT_EFFECTIVE_ORDER_STATUSES)
+        statuses = tuple(filters.statuses or DEFAULT_SALES_DISPATCH_STATUSES)
         if not statuses:
-            statuses = tuple(DEFAULT_EFFECTIVE_ORDER_STATUSES)
+            statuses = tuple(DEFAULT_SALES_DISPATCH_STATUSES)
 
         dashboard = ManagerialDashboardService(effective_statuses=statuses)
         breakdown = dashboard._dispatch_breakdown(filters.period)

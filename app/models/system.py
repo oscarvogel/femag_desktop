@@ -21,6 +21,18 @@ class ImportBatch(BaseModel):
     summary = TextField(null=True)
 
 
+class ManagerialSummaryDelivery(BaseModel):
+    run_key = CharField(null=True, unique=True)
+    mode = CharField(default="manual")
+    channel = CharField()
+    recipient = CharField()
+    status = CharField(default="pending")
+    provider_message_id = CharField(null=True)
+    error = TextField(null=True)
+    created_at = DateTimeField(default=utc_now)
+    finished_at = DateTimeField(null=True)
+
+
 class BackupLog(BaseModel):
     started_at = DateTimeField(default=utc_now)
     finished_at = DateTimeField(null=True)

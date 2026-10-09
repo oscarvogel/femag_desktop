@@ -331,8 +331,9 @@ def test_desktop_sidebar_groups_master_abms_without_breaking_routes(db):
     rows = [nav.item(row) for row in range(nav.count())]
     labels = [item.text().strip() for item in rows]
     masters_index = labels.index("Maestros")
-    assert labels[masters_index + 1 : masters_index + 8] == [
+    assert labels[masters_index + 1 : masters_index + 9] == [
         "Clientes",
+        "Vendedores",
         "Productos",
         "Precios por lista",
         "Tipos de IVA",
@@ -577,11 +578,9 @@ def test_truck_created_from_abm_can_be_used_in_load_order_grid(db, monkeypatch):
     table = window.findChild(QTableWidget, "loadOrdersTable")
     headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
     assert "Preparación de pallets" in headers
-    assert table.rowCount() == 2
-    table.setCurrentCell(0, 0)
-    app.processEvents()
-    detail = table.cellWidget(1, 0)
-    assert "ORD123" in detail.property("detailLabels")["transport"].text()
+    assert table.rowCount() == 1
+    assert dialog.created_order.truck.id == truck.id
+    assert dialog.created_order.truck.domain == "ORD123"
 
 
 def test_carriers_abm_page_creates_edits_and_refreshes_grid(db):

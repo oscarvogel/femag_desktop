@@ -214,6 +214,7 @@ def test_active_closure_payments_block_reopening_until_annulled(db):
     from app.models.load_orders import LoadOrder
     from app.models.payments import ClientPayment
     from app.models.security import User, UserProfile
+    from app.services.client_payment_service import ClientPaymentService
     from app.services.permission_service import PermissionService
     from app.services.load_order_closure_service import LoadOrderClosureError, LoadOrderClosureService
 
@@ -230,7 +231,11 @@ def test_active_closure_payments_block_reopening_until_annulled(db):
     profile = UserProfile.get(UserProfile.name == "Administrador")
     admin = User.create(username="admin_reabre_220", password_hash="x", profile=profile)
     payment = closure.payments.get()
-    service.payments.annul_payment(payment, authorized_by=admin, reason="Reabrir entrega")
+    ClientPaymentService(current_user=admin.username).annul_payment(
+        payment,
+        authorized_by=admin,
+        reason="Reabrir entrega",
+    )
     reopened = service.reopen_order(order, reason="Corregir entrega")
     reversal = ClientAccountMovement.get(
         ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_PAYMENT_REVERSAL

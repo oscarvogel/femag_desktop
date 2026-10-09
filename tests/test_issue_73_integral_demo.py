@@ -47,7 +47,10 @@ def test_issue_73_integral_demo_runs_full_documental_flow(db, tmp_path):
     assert computer_use_note in readme
 
     movements = ClientAccountMovement.select().where(ClientAccountMovement.load_order == first["order"])
-    assert {movement.source_ref for movement in movements} == {f"LoadOrder:{first['order'].id}"}
+    original_refs = {movement.source_ref for movement in movements if not movement.is_reversal}
+    assert len(original_refs) == 2
+    assert all(ref.startswith("Budget:") for ref in original_refs)
+    assert {movement.source_ref for movement in movements if movement.is_reversal} == original_refs
     assert {movement.amount for movement in movements} == {0}
 
 

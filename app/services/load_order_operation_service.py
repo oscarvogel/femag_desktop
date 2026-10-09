@@ -5,7 +5,10 @@ from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
+from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
+from app.services.load_order_pallet_excel_export_service import LoadOrderPalletExcelExportService
+from app.services.load_order_stock_service import LoadOrderStockService
 from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
 
@@ -23,7 +26,15 @@ class LoadOrderOperationService:
         self.audit_service = audit_service or AuditService()
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
         self.prints = ConsolidatedLoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.budget_prints = BudgetPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.pallet_excel = LoadOrderPalletExcelExportService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
         self.account_ledger = AccountLedgerService(current_user=current_user, audit_service=self.audit_service)
+        self.stock = LoadOrderStockService(
+            current_user=current_user, audit_service=self.audit_service
+        )
 
     def issue(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
@@ -38,13 +49,25 @@ class LoadOrderOperationService:
             details = " ".join(issue.message for issue in composition.issues)
             raise ValueError(f"No se puede emitir la orden: {details}")
         ClientCreditService.assert_can_issue(order)
+        # Se valida el descuento ANTES de tocar el estado. `_change_status` no
+        # abre transaccion, asi que fallar despues dejaria la orden emitida con
+        # presupuesto y sin salida de stock.
+        self.stock.plan_dispatch(order)
         issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
         self.account_ledger.generate_for_load_order(issued)
+        # La mercaderia sale de la planta cuando se emite la orden, no cuando se
+        # cierra la entrega: emitir es el hecho operativo que produce el
+        # presupuesto. Va aca y no en el cierre, que es un paso administrativo.
+        self.stock.register_dispatch(issued)
         return issued
 
     def print_order(self, order: LoadOrder) -> Path:
         order = self._require_printable(order)
         return self.prints.export_pdf(order, self.prints_dir)
+
+    def export_pallet_layout_xlsx(self, order: LoadOrder) -> Path:
+        order = self._require_printable(order)
+        return self.pallet_excel.export(order, self.prints_dir)
 
     def reprint_order(self, order: LoadOrder, *, can_reprint: bool) -> Path:
         if not can_reprint:
@@ -79,23 +102,52 @@ class LoadOrderOperationService:
             reprinted_at=datetime.now(),
         )
 
-    def annul(self, order: LoadOrder, *, can_annul: bool) -> LoadOrder:
+    def annul(self, order: LoadOrder, *, can_annul: bool, reason: str | None = None) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_ANNULLED:
             raise ValueError("La orden ya esta anulada.")
         if order.status == LoadOrder.STATUS_CLOSED:
             raise ValueError("No se puede anular una orden cerrada.")
-        annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason="Anulada desde pantalla")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("Debe indicar el motivo de la anulación.")
+        annulled = self.load_orders.annul_order(order, can_annul=can_annul, reason=reason)
         self.account_ledger.reverse_for_load_order(annulled)
+        # Anular una orden emitida devuelve la mercaderia: la mercaderia nunca
+        # llego a salir, asi que el stock tiene que volver. No borra nada: deja
+        # el movimiento de salida y su contrario, con el motivo de la anulacion.
+        self.stock.reverse_dispatch(annulled, reason=f"Anulación de OC-{annulled.order_number:06d}: {reason}")
         return annulled
 
-    def export_budgets(self, order: LoadOrder) -> list[Path]:
+    def budget_timings_for_order(self, order: LoadOrder) -> list[str]:
+        """Momentos de facturacion que tienen presupuesto en esta orden.
+
+        Una orden sin reparto tiene una sola parte, y en ese caso no hay nada
+        que elegir al enviar.
+        """
         order = LoadOrder.get_by_id(order.id)
-        return self.prints.export_budgets(order, self.prints_dir)
+        budgets = self.budget_prints.budget_service.ensure_for_load_order(order)
+        timings: list[str] = []
+        for budget in budgets:
+            if budget.timing not in timings:
+                timings.append(budget.timing)
+        return timings
+
+    def export_budgets(self, order: LoadOrder, timing: str | None = None) -> list[Path]:
+        """Generate one persistent, numbered budget PDF per client in the load order.
+
+        ``timing`` filtra por la parte de facturacion, para poder enviar una sola
+        de las dos sin generar la otra.
+        """
+        order = LoadOrder.get_by_id(order.id)
+        return self.budget_prints.export_for_load_order(
+            order, self.prints_dir, timing=timing
+        )
 
     def export_combined_budget(self, order: LoadOrder) -> Path:
+        """UI-compatible printable bundle: one numbered budget per client/page."""
         order = LoadOrder.get_by_id(order.id)
-        return self.prints.export_combined_budget(order, self.prints_dir)
+        return self.budget_prints.export_bundle_for_load_order(order, self.prints_dir)
 
     def _require_printable(self, order: LoadOrder) -> LoadOrder:
         order = LoadOrder.get_by_id(order.id)

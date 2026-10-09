@@ -5,12 +5,21 @@ from peewee import IntegrityError
 from app.config.database import database_proxy
 from app.models.base import utc_now
 from app.models.accounting import ClientAccountMovement
-from app.models.load_orders import LoadOrder, LoadOrderClosure, LoadOrderProduct, LoadOrderReturnLine
+from app.models.load_orders import (
+    BILLING_TIMING_DEFERRED,
+    BILLING_TIMING_IMMEDIATE,
+    BILLING_TIMINGS,
+    LoadOrder,
+    LoadOrderClosure,
+    LoadOrderProduct,
+    LoadOrderReturnLine,
+)
 from app.models.masters import Client
 from app.models.payments import ClientPayment
 from app.services.audit_service import AuditService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.load_order_return_credit_service import LoadOrderReturnCreditService
+from app.services.load_order_stock_service import LoadOrderStockService
 from app.services.load_order_service import LoadOrderService
 
 
@@ -37,6 +46,10 @@ class LoadOrderClosureService:
             audit_service=self.audit_service,
         )
         self.return_credits = LoadOrderReturnCreditService(
+            current_user=current_user,
+            audit_service=self.audit_service,
+        )
+        self.stock = LoadOrderStockService(
             current_user=current_user,
             audit_service=self.audit_service,
         )
@@ -92,6 +105,7 @@ class LoadOrderClosureService:
                     reason=return_spec["reason"],
                     unit_price=return_spec["unit_price"],
                     credit_amount=return_spec["credit_amount"],
+                    timing=return_spec["timing"],
                     created_by=self.current_user,
                 )
                 self.audit_service.record(
@@ -107,9 +121,13 @@ class LoadOrderClosureService:
                         "quantity": return_line.quantity,
                         "reason": return_line.reason,
                         "credit_amount": return_line.credit_amount,
+                        "timing": return_line.timing,
                     },
                 )
             credit_movements = self.return_credits.generate_for_closure(closure)
+            # Lo que volvio en la entrega repone stock: es mercaderia que
+            # regresa a la planta, no un ajuste contable.
+            stock_returns = self.stock.register_returns(closure)
             self.load_orders._change_status(
                 order,
                 LoadOrder.STATUS_CLOSED,
@@ -129,6 +147,7 @@ class LoadOrderClosureService:
                     "return_line_ids": [row.id for row in closure.return_lines],
                     "return_credit_amount": self.return_credit_total(closure),
                     "return_credit_movement_ids": [row.id for row in credit_movements],
+                    "stock_return_movement_ids": [row.id for row in stock_returns],
                     "payment_status": self.payment_status(closure),
                 },
             )
@@ -281,7 +300,7 @@ class LoadOrderClosureService:
 
     def _normalize_return_specs(self, order: LoadOrder, returns: list[dict]) -> list[dict]:
         normalized = []
-        seen_line_ids = set()
+        seen_parts: set[tuple[int, str]] = set()
         for spec in returns:
             line = spec.get("order_product")
             if not isinstance(line, LoadOrderProduct) or line.id is None:
@@ -292,9 +311,20 @@ class LoadOrderClosureService:
                 raise LoadOrderClosureError("El renglon indicado para la devolucion no existe.") from exc
             if line.order_id != order.id:
                 raise LoadOrderClosureError("No se puede devolver un renglon de otra orden.")
-            if line.id in seen_line_ids:
-                raise LoadOrderClosureError("Cada renglon puede registrarse una sola vez como devolucion.")
-            seen_line_ids.add(line.id)
+            # De que parte sale la devolucion. Sin reparto explicito va contra la
+            # parte facturada hoy, que es el unico presupuesto de la orden.
+            timing = (spec.get("timing") or BILLING_TIMING_IMMEDIATE).strip()
+            if timing not in BILLING_TIMINGS:
+                raise LoadOrderClosureError(
+                    "La parte indicada para la devolucion no es valida."
+                )
+            # El mismo renglon puede volver en el mismo cierre, una vez por parte.
+            clave = (line.id, timing)
+            if clave in seen_parts:
+                raise LoadOrderClosureError(
+                    "Cada renglon puede registrarse una sola vez por parte como devolucion."
+                )
+            seen_parts.add(clave)
             quantity = round(float(spec.get("quantity") or 0), 3)
             if quantity <= 0:
                 raise LoadOrderClosureError("La cantidad devuelta debe ser mayor a cero.")
@@ -305,9 +335,26 @@ class LoadOrderClosureService:
             reason = (spec.get("reason") or "").strip()
             if not reason:
                 raise LoadOrderClosureError("Debe indicar el motivo de cada devolucion.")
+            disponible = (
+                line.cantidad_facturacion_diferida
+                if timing == BILLING_TIMING_DEFERRED
+                else line.cantidad_facturacion_inmediata
+            )
+            if quantity > disponible + 0.0005:
+                if timing == BILLING_TIMING_DEFERRED:
+                    raise LoadOrderClosureError(
+                        f"La devolucion de {line.product.name} supera la cantidad "
+                        "a facturar despues."
+                    )
+                raise LoadOrderClosureError(
+                    f"La devolucion de {line.product.name} supera la cantidad "
+                    "facturada hoy."
+                )
             client = line.destination.client if line.destination_id else order.client
             if client is None:
                 raise LoadOrderClosureError("El renglon devuelto no tiene cliente asociado.")
+            # Las dos partes comparten el precio del renglon, asi que el precio
+            # unitario es el mismo y el calculo no cambia con la parte elegida.
             unit_price = round(float(line.total) / float(line.quantity), 6) if line.quantity else 0.0
             credit_amount = round(unit_price * quantity, 2)
             normalized.append(
@@ -316,6 +363,7 @@ class LoadOrderClosureService:
                     "client": client,
                     "quantity": quantity,
                     "reason": reason,
+                    "timing": timing,
                     "unit_price": unit_price,
                     "credit_amount": credit_amount,
                 }
@@ -323,15 +371,26 @@ class LoadOrderClosureService:
         return normalized
 
     def _order_totals_by_client(self, order: LoadOrder) -> dict[int, float]:
+        # Se suman las dos partes de la facturacion. Filtrar solo por el tipo
+        # historico dejaba fuera la parte diferida y hacia que una orden con la
+        # mitad pendiente se reportara cobrada.
         movements = ClientAccountMovement.select().where(
             (ClientAccountMovement.load_order == order)
-            & (ClientAccountMovement.movement_type == ClientAccountMovement.TYPE_LOAD_ORDER)
+            & (
+                ClientAccountMovement.movement_type.in_(
+                    (
+                        ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+                        ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED,
+                    )
+                )
+            )
             & (ClientAccountMovement.is_reversal == False)  # noqa: E712
         )
-        totals = {
-            movement.client_id: round(float(movement.total_amount), 2)
-            for movement in movements
-        }
+        totals: dict[int, float] = {}
+        for movement in movements:
+            totals[movement.client_id] = round(
+                totals.get(movement.client_id, 0.0) + float(movement.total_amount), 2
+            )
         if not totals:
             for line in order.products:
                 client_id = (

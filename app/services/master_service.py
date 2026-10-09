@@ -9,10 +9,14 @@ from app.models.masters import (
     OperationalService,
     PalletType,
     Product,
+    ProductCostHistory,
+    Salesperson,
     TipoIVA,
     Truck,
 )
 from app.services.audit_service import AuditService
+from app.services.client_email_service import ClientEmailService
+from app.services.permission_service import PermissionService
 
 
 class MasterService:
@@ -191,6 +195,92 @@ class MasterService:
         if query.exists():
             raise ValueError("Ya existe un tipo de IVA con ese nombre.")
 
+    @staticmethod
+    def _normalize_salesperson_email(email: str | None) -> str | None:
+        """Normaliza el email del vendedor reutilizando el criterio de los clientes."""
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return None
+        if not ClientEmailService.EMAIL_PATTERN.fullmatch(normalized):
+            raise ValueError("Ingrese un email valido.")
+        return normalized
+
+    def create_salesperson(
+        self,
+        name: str,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        observations: str | None = None,
+        active: bool = True,
+    ) -> Salesperson:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Complete el nombre del vendedor.")
+        if Salesperson.select().where(fn.LOWER(Salesperson.name) == name.lower()).exists():
+            raise ValueError("Ya existe un vendedor con ese nombre.")
+        row = Salesperson.create(
+            name=name,
+            phone=(phone or "").strip() or None,
+            email=self._normalize_salesperson_email(email),
+            observations=(observations or "").strip() or None,
+            active=bool(active),
+        )
+        self._record(
+            "Salesperson",
+            row,
+            {"name": name, "phone": row.phone, "email": row.email, "active": row.active},
+        )
+        return row
+
+    def update_salesperson(
+        self,
+        salesperson: Salesperson,
+        name: str,
+        *,
+        phone: str | None = None,
+        email: str | None = None,
+        observations: str | None = None,
+        active: bool = True,
+    ) -> Salesperson:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Complete el nombre del vendedor.")
+        duplicate = Salesperson.select().where(
+            (fn.LOWER(Salesperson.name) == name.lower())
+            & (Salesperson.id != salesperson.id)
+        )
+        if duplicate.exists():
+            raise ValueError("Ya existe un vendedor con ese nombre.")
+        old_value = {
+            "name": salesperson.name,
+            "phone": salesperson.phone,
+            "email": salesperson.email,
+            "observations": salesperson.observations,
+            "active": salesperson.active,
+        }
+        salesperson.name = name
+        salesperson.phone = (phone or "").strip() or None
+        salesperson.email = self._normalize_salesperson_email(email)
+        salesperson.observations = (observations or "").strip() or None
+        salesperson.active = bool(active)
+        salesperson.save()
+        self.audit_service.record(
+            user=self.current_user,
+            module="Maestros",
+            action="modificar",
+            record_ref=f"Salesperson:{salesperson.id}",
+            old_value=old_value,
+            new_value={
+                "name": salesperson.name,
+                "phone": salesperson.phone,
+                "email": salesperson.email,
+                "observations": salesperson.observations,
+                "active": salesperson.active,
+            },
+        )
+        return salesperson
+
     def create_driver(
         self,
         name: str,
@@ -325,3 +415,49 @@ class MasterService:
         row = OperationalService.create(name=name)
         self._record("OperationalService", row, {"name": name})
         return row
+
+
+    def update_product_cost(
+        self,
+        product: Product,
+        new_cost,
+        *,
+        actor,
+        reason: str | None = None,
+    ) -> Product:
+        """Update confidential product cost with administrator enforcement and history."""
+        PermissionService().require_administrator(actor)
+        if new_cost is None or str(new_cost).strip() == "":
+            parsed = None
+        else:
+            try:
+                parsed = Decimal(str(new_cost).strip().replace(",", ".")).quantize(Decimal("0.0001"))
+            except Exception as exc:
+                raise ValueError("El costo debe ser un número válido.") from exc
+            if parsed < 0:
+                raise ValueError("El costo no puede ser negativo.")
+
+        previous = product.costo_unitario
+        if previous == parsed:
+            return product
+
+        database = Product._meta.database
+        with database.atomic():
+            product.costo_unitario = parsed
+            product.save(only=[Product.costo_unitario])
+            ProductCostHistory.create(
+                product=product,
+                previous_cost=previous,
+                new_cost=parsed,
+                changed_by=actor.username,
+                reason=(reason or "").strip() or None,
+            )
+            self.audit_service.record(
+                user=actor.username,
+                module="Maestros",
+                action="modificar costo producto",
+                record_ref=f"Product:{product.id}",
+                old_value={"costo_unitario": str(previous) if previous is not None else None},
+                new_value={"costo_unitario": str(parsed) if parsed is not None else None},
+            )
+        return product
