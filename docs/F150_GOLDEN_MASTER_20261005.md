@@ -5,40 +5,59 @@ Rama: `fix/f150-golden-master-20261005` (base `rebuild/issue-11-f150-clean`, com
 
 ## 1. Muestra usada como autoridad
 
-El issue pide comparar contra `F.150-05-10-2026B.TXT` (05/10/2026). **Ese archivo
-no estaba en la maquina** y el issue aclarea que no se reconstruya de memoria.
+**La muestra real del issue, `F.150-05-10-2026B.TXT` (05/10/2026), fue provista
+y validada.** Esta es la seccion que quedaba pendiente en la primera entrega.
 
-Se busco en todo el disco (`C:\`) y no aparece. La autoridad usada en su lugar
-es el archivo real del mismo generador que la empresa tiene en
-`C:\Programacion\dante\contable\`: **119 archivos F150 de produccion de 2019**,
-314 registros `C` y 339 registros `D`, todos decodificables como CP1252.
+Como segunda referencia se uso el archivo real del mismo generador que la
+empresa tiene en `C:\Programacion\dante\contable`: **119 archivos F150 de
+produccion de 2019**, 314 registros `C` y 339 registros `D`.
 
-| | Muestra del issue | Corpus usado |
+| | Muestra del issue | Corpus 2019 |
 |---|---|---|
 | Archivo | `F.150-05-10-2026B.TXT` | 119 archivos `F150-AAAAMMDD[ABC].TXT` |
-| Registros | 5 `C` + 6 `D` | 314 `C` + 339 `D` |
-| Procedencia | conversacion de revision | salida del sistema anterior |
+| Bytes | 2680 | 2642 (`F150-20190708.TXT`) |
+| Registros | **5 `C` + 6 `D`** | 314 `C` + 339 `D` |
+| Renglones por remito | 1, 2, 1, 1, 1 | hasta 7 |
+| Termina con CRLF | **no** | no (119/119) |
 
-El corpus contiene `F150-20190708.TXT` con exactamente la misma forma de la
-muestra del issue (**5 `C` + 6 `D`, con un remito de dos renglones**), asi que
-todos los casos de la muestra quedan cubiertos. **Pendiente**: repetir la
-comparacion contra `F.150-05-10-2026B.TXT` cuando FEMAG haga llegar el archivo
-(con `scripts/compare_f150_golden_master.py`, sin versionar el original).
+La muestra y el corpus coinciden en todos los puntos del contrato, incluida la
+forma (5 `C` + 6 `D` con un remito de dos renglones) que describe el issue.
 
 ## 2. Metodo
 
-1. Se parsearon los 119 archivos reales a snapshots `F150Remittance`.
-2. Se re-codificaron con `F150Encoder` y se compararon **byte a byte**.
-3. Se anonimizaron dos archivos de produccion (5C/6D y 2C/3D) conservando estructura,
-   cantidad de campos, anchos, espacios, CRLF y los caracteres CP1252, sin
-   publicar CUIT, DNI, domicilios ni patentes.
-4. En CI quedan dos validaciones independientes: el codificador contra el
-   golden master, y un formateador del contrato escrito a mano contra el mismo
-   golden master.
+1. Se parsearon la muestra real y los 119 archivos reales a snapshots
+   `F150Remittance`, se re-codificaron con `F150Encoder` y se compararon
+   **byte a byte**.
+2. Se anonimizo la muestra real en `tests/fixtures/f150/golden_master_sample_20261005.*`.
+3. En CI quedan dos validaciones independientes: el codificador contra el
+   golden master, y un formateador del contrato escrito a mano que no usa
+   `F150Encoder`.
 
-**Resultado: 119 de 119 archivos reales reproducidos byte a byte.**
+**Resultados:**
+
+- **Muestra real `F.150-05-10-2026B.TXT`: identico byte a byte (2680 bytes).**
+- **Corpus 2019: 119 de 119 archivos identicos byte a byte.**
+
+### Que se anonimizo y que no
+
+Del golden master versionado se sustituyeron **solo los 19 campos de identidad
+de la cabecera** (CUIT de transporte/chofer/cliente, nombres, domicilios, DNI y
+patentes). **Los seis renglones son identicos byte a byte al archivo real**, con
+sus codigos DGR, cantidades, precios e importes (`28,050.00`, `1,683,000.00`,
+`16,601.00`, `1,743,105.00`, `19,814.00`, `297,210.00`, `33,201.00`,
+`1,992,060.00`, `43,000.00`, `2,580,000.00`, `9,000.00`, `7,560,000.00`), y los
+numeros de formulario de 8 digitos (`00010874` a `00010878`).
+
+Los caracteres CP1252 del original (`°` cinco veces, `º` cinco veces) se
+conservan en el fixture para que CI siga ejercitando la codificacion.
+
+El original **no se versiona**: quedo fuera del repositorio por `.gitignore`
+(`docs/F.150-*.TXT`) y se compara en la maquina del operador con
+`scripts/compare_f150_golden_master.py`, que reporta offset, linea, campo y una
+huella del valor sin exponer PII.
 
 ## 3. Diferencias encontradas
+
 
 | # | Campo / aspecto | Legacy (autoridad) | Codificador antes | Estado |
 |---|---|---|---|---|
@@ -51,6 +70,11 @@ comparacion contra `F.150-05-10-2026B.TXT` cuando FEMAG haga llegar el archivo
 | 7 | Cantidad y monto | `1,250`, `15,625.00` (separador de miles) | identico | Sin cambio |
 | 8 | `C` con 49 campos, sin `@` final; `D` con `@` final | confirmado en los 119 | identico | Sin cambio |
 | 9 | Encoding CP1252 con `°`, `º`, `Ñ` | presentes en 21 archivos | identico | Sin cambio |
+
+**La muestra real del issue confirma los seis puntos corregidos**: el campo de 50
+espacios en los 6 renglones, el punto de venta `0001`, los numeros de formulario
+de 8 digitos (`00010875`), la ausencia de CRLF final, el CP1252 con `°` y `º`, y
+el formato `28,050.00` / `1,683,000.00` citado en el issue.
 
 Sobre el punto 1: los dos archivos de referencia que circulaban antes
 (`C:\Programacion\ceramica\F150.txt` y `C:\Programacion\dante\f150-dos-item.txt`,
@@ -104,11 +128,12 @@ precio en `RemittanceItem`.
 
 | Comando | Resultado |
 |---|---|
-| `python -m pytest tests/test_f150_*.py tests/test_issue_40{3,4b,5}_*.py` | **45 passed** |
+| `python -m pytest tests/test_f150_*.py tests/test_issue_40{3,4b,5}_*.py` | **47 passed** |
 | `python -m pytest` (suite completa) | 797 passed, 15 failed |
 | `python -m compileall -q app` | OK |
 | `python -m app.main --smoke` | `FEMAG smoke OK` |
 | `git diff --check` | OK |
+| Round-trip contra la muestra real del issue | **identico byte a byte** |
 | Round-trip contra 119 archivos reales | **119/119 identicos** |
 
 Los 15 fallos de la suite completa **son preexistentes**: se reprodujeron igual
@@ -119,18 +144,20 @@ sobre `origin/rebuild/issue-11-f150-clean` en un worktree limpio
 
 ## 6. Pendientes que requieren definicion de FEMAG
 
-1. **`F.150-05-10-2026B.TXT`**: hace falta el archivo para confirmar la comparacion
-   contra la muestra exacta. El nombre `F.150-DD-MM-YYYY` difiere de la convencion
-   observada (`F150-AAAAMMDD`), asi que **no se cambio** el nombre sugerido.
-2. **Sufijo `B`**: en el corpus conviven `F150-20190412.TXT` y `F150-20190412A.TXT`,
-   y `20191111`, `20191111A`, `20191111B`, lo que sugiere un correlativo por
-   reemision del mismo dia, pero **no se asumio** ese significado ni se implemento.
-3. **Remitos manuales sin orden**: con el bloqueo, un remito cargado a mano no se
+1. **`B` del nombre de archivo**: la muestra se llama `F.150-05-10-2026B.TXT` y
+   el corpus usa `F150-AAAAMMDD[ABC].TXT`. En el corpus conviven
+   `F150-20190412.TXT` y `F150-20190412A.TXT`, y `20191111`, `20191111A`,
+   `20191111B`, lo que sugiere un correlativo por reemision del mismo dia, pero
+   **no se asumio** ese significado ni se implemento. **No se cambio** el nombre
+   que sugiere la UI (`f150-YYYYMMDD.TXT`).
+2. **Remitos manuales sin orden**: con el bloqueo, un remito cargado a mano no se
    puede emitir a F150 porque no tiene precio congelado. Resolverlo requiere
-   persistir el precio en `RemittanceItem`, que es una migracion y quedó fuera de
+   persistir el precio en `RemittanceItem`, que es una migracion y quedo fuera de
    este PR.
-4. **`rh1..rh4`, `unidad_dgr` y `codigo`**: se siguen leyendo del maestro vivo y
-   tienen el mismo desvío historico que el precio. No se tocaron para no ampliar
+3. **`rh1..rh4`, `unidad_dgr` y `codigo`**: se siguen leyendo del maestro vivo y
+   tienen el mismo desvio historico que el precio. No se tocaron para no ampliar
    el alcance.
-5. **Fecha de entrega**: hoy la fecha del registro es `remittance.date`; el issue no
-   pide cambiarla y no se modifico.
+4. **Validacion con el destinatario**: no se ejecuto prueba de presentacion
+   fiscal, asi que la salida **no queda declarada habilitada**.
+5. **Fecha de entrega**: hoy la fecha del registro es `remittance.date`; el issue
+   no pide cambiarla y no se modifico.

@@ -10,7 +10,7 @@
       "locality_code": "0015"
     },
     "destination": {
-      "cuit": "30-30000006-8",
+      "cuit": "30-30000004-1",
       "name": "CLIENTE ANON 01",
       "address": "DOMICILIO ANON 01",
       "door_number": "",
@@ -25,7 +25,7 @@
       "country_name": "PAIS ANON"
     },
     "carrier": {
-      "cuit": "20-30000011-9",
+      "cuit": "20-30000013-5",
       "name": "TRANSPORTISTA ANON 01",
       "carrier_type": "DIR",
       "address": "DOMICILIO ANON 01",
@@ -47,7 +47,7 @@
       "plate_country_code": "ARG"
     },
     "driver": {
-      "cuit": "20-30000012-7",
+      "cuit": "20-30000014-3",
       "document_type": "DNI",
       "document_number": "20000001",
       "name": "CHOFER ANON 01",
@@ -103,7 +103,7 @@
       "country_name": "PAIS ANON"
     },
     "carrier": {
-      "cuit": "20-30000013-5",
+      "cuit": "20-30000015-1",
       "name": "TRANSPORTISTA ANON 02",
       "carrier_type": "DIR",
       "address": "DOMICILIO ANON 02",
@@ -125,7 +125,7 @@
       "plate_country_code": "ARG"
     },
     "driver": {
-      "cuit": "20-30000014-3",
+      "cuit": "20-30000016-9",
       "document_type": "DNI",
       "document_number": "20000002",
       "name": "CHOFER ANON 02",

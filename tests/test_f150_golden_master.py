@@ -1,10 +1,14 @@
-"""Golden master F150: el archivo generado debe coincidir byte a byte con la muestra.
+﻿"""Golden master F150: el archivo generado debe coincidir byte a byte con la muestra.
 
-Las muestras de ``tests/fixtures/f150/`` son copias anonimizadas de archivos
-reales del sistema anterior: conservan estructura, cantidad de campos, anchos,
-espacios, CRLF y codificacion CP1252, pero no contienen ningun CUIT, DNI,
-domicilio ni patente real. La autoridad fiscal sigue siendo el archivo real
-``F.150-05-10-2026B.TXT``, que se compara por fuera del repositorio con
+``golden_master_sample_20261005`` es una copia anonimizada de la muestra real del
+issue #681, ``F.150-05-10-2026B.TXT`` (05/10/2026, 5 cabeceras y 6 renglones, con
+un remito de dos renglones). Solo se sustituyeron los 19 campos de identidad de
+la cabecera (CUIT, nombres, domicilios, DNI y patentes): los seis renglones, con
+sus codigos DGR, cantidades, precios e importes, son identicos a los del archivo
+real. ``golden_master_2c_3d`` cubre una segunda forma de archivo.
+
+El original trae datos personales, asi que no se versiona: queda fuera del
+repositorio por ``.gitignore`` y se compara en la maquina del operador con
 ``scripts/compare_f150_golden_master.py``.
 """
 
@@ -211,14 +215,14 @@ def _reference_encode(values: list[dict]) -> bytes:
     return "\r\n".join(lines).encode("cp1252")
 
 
-@pytest.mark.parametrize("name", ["golden_master_5c_6d", "golden_master_2c_3d"])
+@pytest.mark.parametrize("name", ["golden_master_sample_20261005", "golden_master_2c_3d"])
 def test_generated_file_matches_golden_master_byte_for_byte(name):
     expected, remittances = _load(name)
     generated = F150Encoder().encode(remittances).encode(F150Encoder.encoding)
     assert generated == expected, _first_difference(expected, generated)
 
 
-@pytest.mark.parametrize("name", ["golden_master_5c_6d", "golden_master_2c_3d"])
+@pytest.mark.parametrize("name", ["golden_master_sample_20261005", "golden_master_2c_3d"])
 def test_independent_reference_formatter_agrees_with_golden_master(name):
     """El contrato F150 reconstruido a mano debe dar los mismos bytes."""
     expected, _ = _load(name)
@@ -227,7 +231,31 @@ def test_independent_reference_formatter_agrees_with_golden_master(name):
     assert generated == expected, _first_difference(expected, generated)
 
 
-@pytest.mark.parametrize("name", ["golden_master_5c_6d", "golden_master_2c_3d"])
+def test_sample_keeps_the_amounts_cited_by_the_issue():
+    """La muestra real declara 28,050.00 y 1,683,000.00: el formato no se negocia."""
+    expected, _ = _load("golden_master_sample_20261005")
+    details = [
+        line for line in expected.decode("cp1252").split("\r\n") if line.startswith("D")
+    ]
+    assert len(details) == 6
+    assert details[0].endswith("@U@60@28,050.00@1,683,000.00@")
+    assert details[1].endswith("@U@105@16,601.00@1,743,105.00@")
+    assert details[2].endswith("@U@15@19,814.00@297,210.00@")
+    # el remito 2 es el unico con dos renglones, como en la muestra operativa
+    assert details[1][:14] == details[2][:14] == "D2F15005102026"
+
+
+def test_sample_preserves_the_eight_digit_form_numbers():
+    expected, _ = _load("golden_master_sample_20261005")
+    details = [
+        line for line in expected.decode("cp1252").split("\r\n") if line.startswith("D")
+    ]
+    numbers = [line.split("@")[5] for line in details]
+    assert numbers == ["00010875", "00010877", "00010877", "00010876", "00010874", "00010878"]
+    assert all(len(number) == 8 for number in numbers)
+
+
+@pytest.mark.parametrize("name", ["golden_master_sample_20261005", "golden_master_2c_3d"])
 def test_golden_master_shape_is_the_production_contract(name):
     """5 C + 6 D y 2 C + 3 D: una cabecera por remito, varios D por cabecera."""
     expected, remittances = _load(name)
@@ -254,13 +282,13 @@ def test_golden_master_shape_is_the_production_contract(name):
 
 def test_golden_master_keeps_cp1252_special_characters():
     """El sample real usa CP1252: los caracteres altos se escriben sin sustituciones."""
-    _, remittances = _load("golden_master_5c_6d")
+    _, remittances = _load("golden_master_sample_20261005")
     remittance = remittances[0]
     object.__setattr__(
-        remittance.destination, "name", "INDUSTRIA ANÓNIMA Nº 1"
+        remittance.destination, "name", "INDUSTRIA ANÃ“NIMA NÂº 1"
     )
     generated = F150Encoder().encode([remittance]).encode(F150Encoder.encoding)
-    assert "INDUSTRIA ANÓNIMA Nº 1".encode("cp1252") in generated
+    assert "INDUSTRIA ANÃ“NIMA NÂº 1".encode("cp1252") in generated
     assert "INDUSTRIA AN".encode("cp1252") in generated
 
 
