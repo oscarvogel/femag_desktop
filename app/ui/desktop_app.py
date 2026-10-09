@@ -125,6 +125,7 @@ from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
 from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
+from app.ui.raw_material_intake import RawMaterialIntakePage
 from app.ui.production_parts import ProductionPartPage
 from app.ui.production_contrast import ProductionContrastPage
 from app.ui.stock_count import StockCountPage
@@ -509,6 +510,10 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("raw_material_receipts", RawMaterialReceiptImportPage(parent=self))
+        self._add_page(
+            "raw_material_intake",
+            RawMaterialIntakePage(current_username=self.shell.username, parent=self),
+        )
         self._add_page("production_parts", ProductionPartPage(current_username=self.shell.username, parent=self))
         self._add_page("production_contrast", ProductionContrastPage(parent=self))
         self._add_page(

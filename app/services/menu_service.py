@@ -15,6 +15,7 @@ REAL_MODULES = {
     "Órdenes de carga": "load_orders",
     "Remitos": "remittances",
     "Recepciones de materia prima": "raw_material_receipts",
+    "Ingreso de materia prima": "raw_material_intake",
     "Partes de producción": "production_parts",
     "Contraste de producción": "production_contrast",
     "Inventario inicial": "stock_initial_inventory",

@@ -24,6 +24,7 @@ MENU = {
     "Operaciones": ["Órdenes de carga", "Remitos", "Generar F150", "Hoja resumen / sobre de carga"],
     "Producción": [
         "Recepciones de materia prima",
+        "Ingreso de materia prima",
         "Partes de producción",
         "Contraste de producción",
         "Inventario inicial",
