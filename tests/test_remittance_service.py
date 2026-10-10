@@ -63,6 +63,9 @@ def test_issue_assigns_next_configured_number_and_locks_editing(db):
     remittance = service.create_manual(
         client=data["client"],
         delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
         items=[{"product": data["product"], "quantity": 10}],
     )
 
@@ -88,6 +91,9 @@ def test_issue_without_default_series_reports_configuration_error(db):
     remittance = RemittanceService("admin").create_manual(
         client=data["client"],
         delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
         items=[{"product": data["product"], "quantity": 1}],
     )
 
@@ -134,6 +140,9 @@ def test_two_drafts_consume_consecutive_numbers_only_when_issued(db):
         service.create_manual(
             client=data["client"],
             delivery_address=data["address"],
+            carrier=data["carrier"],
+            truck=data["truck"],
+            driver=data["driver"],
             items=[{"product": data["product"], "quantity": 1}],
         )
         for _ in range(2)
@@ -164,11 +173,17 @@ def test_series_end_blocks_next_issue_after_last_available_number(db):
     first = service.create_manual(
         client=data["client"],
         delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
         items=[{"product": data["product"], "quantity": 1}],
     )
     second = service.create_manual(
         client=data["client"],
         delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
         items=[{"product": data["product"], "quantity": 1}],
     )
 
@@ -279,10 +294,16 @@ def test_annul_requires_reason_and_records_state(db):
 def test_issue_requires_transport_data_needed_by_f150(db):
     import pytest
 
-    from app.services.remittance_service import RemittanceService
+    from app.services.remittance_service import RemittanceSeriesService, RemittanceService
     from tests.conftest import _master_data
 
     data = _master_data()
+    RemittanceSeriesService("admin").save(
+        name="Talonario para F150",
+        point_of_sale="0001",
+        next_number=1,
+        is_default=True,
+    )
     service = RemittanceService("admin")
     remittance = service.create_manual(
         client=data["client"],
