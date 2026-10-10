@@ -95,6 +95,7 @@ from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
 from app.ui.glass_v2 import glass_v2_stylesheet
+from app.ui.theme import Theme, apply_dark_overrides
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
@@ -5141,3 +5142,12 @@ QComboBox QAbstractItemView {
 QTableWidget { background: #ffffff; alternate-background-color: #fbfdff; gridline-color: #edf2f7; border: 0; selection-background-color: #e8f1ff; selection-color: #0f172a; }
 QHeaderView::section { background: #ffffff; color: #334155; border: 0; border-bottom: 1px solid #d9e1ec; padding: 10px; font-weight: 700; }
 """
+
+
+def styles_for(theme: Theme) -> str:
+    """Base de estilos del tema pedido.
+
+    ``STYLES`` queda como esta para no romper a los llamadores actuales; el tema
+    oscuro es el mismo texto con la paleta invertida (``theme.DARK_OVERRIDES``).
+    """
+    return STYLES if theme is Theme.LIGHT else apply_dark_overrides(STYLES)

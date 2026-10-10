@@ -1,16 +1,32 @@
 from __future__ import annotations
 
 from app.ui.branding import branding_asset_path
+from app.ui.theme import Theme, apply_dark_overrides
 
 
-def glass_v2_stylesheet() -> str:
-    background = branding_asset_path("femag-starch-v2.svg").as_posix()
-    return f"""
+def glass_v2_stylesheet(theme: Theme = Theme.LIGHT) -> str:
+    """Devuelve el QSS glass v2 del tema pedido.
+
+    El tema claro se devuelve sin tocar. El oscuro sale de invertir el claro con
+    ``apply_dark_overrides``, para que la paleta oscura viva en un solo lugar
+    (``theme.DARK_OVERRIDES``) y no duplicada en estas ~1000 líneas.
+    La marca de agua de marca es un SVG de tonos claros: pintarla sobre el fondo
+    oscuro deja un rectángulo brillante. El tema oscuro va plano hasta que exista
+    un asset de marca para ese tema; el tema claro la sigue mostrando igual.
+    """
+    if theme is Theme.DARK:
+        root_image = ""
+    else:
+        background = branding_asset_path("femag-starch-v2.svg").as_posix()
+        root_image = (
+            f'background-image: url("{background}");\n'
+            "        background-position: center;\n"
+            "        background-repeat: no-repeat;"
+        )
+    qss = f"""
     QWidget#femagV2Root {{
         background-color: #edf3f9;
-        background-image: url("{background}");
-        background-position: center;
-        background-repeat: no-repeat;
+        {root_image}
     }}
 
     QFrame#femagV2Shell {{
@@ -1010,3 +1026,4 @@ def glass_v2_stylesheet() -> str:
         font-weight: 700;
     }}
     """
+    return qss if theme is Theme.LIGHT else apply_dark_overrides(qss)
