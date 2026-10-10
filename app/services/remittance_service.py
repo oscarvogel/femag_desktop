@@ -445,6 +445,16 @@ class RemittanceService:
             raise ValueError("Solo se pueden emitir remitos en borrador.")
         if not remittance.items.exists():
             raise ValueError("El remito no tiene productos.")
+        if not remittance.client_cuit:
+            raise ValueError("El cliente debe tener CUIT antes de emitir el remito.")
+        if remittance.carrier_id is None or not remittance.carrier_cuit:
+            raise ValueError("Debe asignar un transportista con CUIT antes de emitir el remito.")
+        if remittance.truck_id is None or not remittance.truck_domain:
+            raise ValueError("Debe asignar un camión antes de emitir el remito.")
+        if remittance.driver_id is None:
+            raise ValueError("Debe asignar un chofer antes de emitir el remito.")
+        if not (remittance.driver.cuit or remittance.driver_document):
+            raise ValueError("El chofer debe tener CUIT o documento antes de emitir el remito.")
         old_snapshot = self._snapshot(remittance)
         with database_proxy.atomic():
             if not remittance.physical_point_of_sale or not remittance.physical_number:

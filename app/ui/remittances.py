@@ -34,6 +34,7 @@ from app.models.remittances import Remittance, RemittanceSeries
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 from app.ui.audit_reason_dialog import AuditReasonDialog
+from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 
 
@@ -57,6 +58,7 @@ class RemittanceDialog(QDialog):
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
         self.client_combo = QComboBox()
+        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         self.address_combo = QComboBox()
         self.carrier_combo = QComboBox()
         self.carrier_combo.setObjectName("remittanceCarrierInput")
@@ -64,6 +66,12 @@ class RemittanceDialog(QDialog):
         self.truck_combo.setObjectName("remittanceTruckInput")
         self.driver_combo = QComboBox()
         self.driver_combo.setObjectName("remittanceDriverInput")
+        for combo, placeholder in (
+            (self.carrier_combo, "Buscar transportista..."),
+            (self.truck_combo, "Buscar camión..."),
+            (self.driver_combo, "Buscar chofer..."),
+        ):
+            enable_combo_autocomplete(combo, placeholder=placeholder)
         self.series_combo = QComboBox()
         self.series_combo.setObjectName("remittanceSeriesInput")
         self.number_preview = QLineEdit()
@@ -186,6 +194,7 @@ class RemittanceDialog(QDialog):
         row = self.items.rowCount()
         self.items.insertRow(row)
         combo = QComboBox()
+        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
         for product in Product.select().where(Product.active == True).order_by(Product.name):  # noqa: E712
             combo.addItem(product.name, product.id)
         if product_id:
