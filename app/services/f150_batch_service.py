@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import asdict
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from app.config.database import database_proxy
@@ -353,6 +354,59 @@ class F150BatchService:
             return F150Location()
         allowed = F150Location.__dataclass_fields__.keys()
         return F150Location(**{key: str(value) for key, value in values.items() if key in allowed})
+
+    @staticmethod
+    def origin_configured() -> bool:
+        """El origen DGR es obligatorio: sin el, ningun remito se puede emitir."""
+        return bool(F150BatchService._origin_location().locality_code.strip())
+
+    @staticmethod
+    def origin() -> F150Location:
+        return F150BatchService._origin_location()
+
+    @staticmethod
+    def set_origin(locality) -> F150Location:
+        """Guarda el origen DGR elegido por el operador.
+
+        Sin esto el parametro no lo escribia ninguna parte de la aplicacion y la
+        pantalla quedaba bloqueada para todos los remitos.
+        """
+        from app.models.dgr import DgrLocality
+
+        if locality is None:
+            raise ValueError("Elegi la localidad de origen.")
+        if not isinstance(locality, DgrLocality):
+            locality = DgrLocality.get_or_none(DgrLocality.id == locality)
+        if locality is None:
+            raise ValueError("La localidad de origen no existe.")
+        missing = [
+            name
+            for name, value in (
+                ("localidad", locality.dgr_code_4),
+                ("departamento", locality.department_code_4),
+                ("provincia", locality.province_code_2),
+                ("pais", locality.country),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "La localidad elegida no tiene codigos DGR completos ("
+                + ", ".join(missing)
+                + ")."
+            )
+        location = F150BatchService._dgr_location(locality)
+        parameter, _created = AppParameter.get_or_create(
+            key=F150_ORIGIN_PARAMETER,
+            defaults={"value": json.dumps(asdict(location))},
+        )
+        parameter.value = json.dumps(asdict(location))
+        parameter.save(only=[AppParameter.value])
+        return location
+
+    @staticmethod
+    def set_origin_by_id(locality_id: int) -> F150Location:
+        return F150BatchService.set_origin(locality_id)
 
     @staticmethod
     def _snapshot(remittance: Remittance, document: F150Remittance) -> dict:

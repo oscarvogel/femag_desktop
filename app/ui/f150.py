@@ -4,9 +4,12 @@ from datetime import date
 from pathlib import Path
 
 from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -30,6 +33,80 @@ from app.services.f150_encoder import F150Encoder
 
 
 F150_OUTPUT_DIR = Path("outputs") / "f150"
+
+
+class OriginLocalityDialog(QDialog):
+    """Elige la localidad DGR de la planta que sale en el F150.
+
+    El origen va en el campo 7 de cada cabecera C y es obligatorio: sin el, la
+    validacion rechaza todos los remitos.
+    """
+
+    def __init__(self, parent, localities, current, *, limit: int = 4000):
+        super().__init__(parent)
+        self.setWindowTitle("Configurar origen DGR")
+        self._localities = list(localities)[:limit]
+        self._visible: list = []
+        self._chosen = None
+        root = QVBoxLayout(self)
+        root.addWidget(
+            QLabel("Elegi la localidad de origen de la planta (campo 7 del F150).")
+        )
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Filtrar por nombre o código")
+        # textChanged emite el texto escrito. Conectarlo directo a _reload le
+        # pasaba ese string como si fuera la localidad configurada.
+        self.filter.textChanged.connect(lambda _text: self._reload())
+        root.addWidget(self.filter)
+        self.list = QComboBox()
+        self.list.setObjectName("originLocalityCombo")
+        root.addWidget(self.list)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+        self._reload(current)
+
+    def _label(self, locality) -> str:
+        country = getattr(locality, "country", None)
+        country_name = country.name if country else "sin pais"
+        return (
+            f"{locality.name} ({locality.dgr_code_4}) - "
+            f"prov. {locality.province_code_2} - {country_name}"
+        )
+
+    def _reload(self, current=None) -> None:
+        self.list.clear()
+        self._visible = []
+        needle = self.filter.text().strip().lower() if hasattr(self, "filter") else ""
+        for locality in self._localities:
+            text = self._label(locality)
+            if needle and needle not in text.lower():
+                continue
+            self._visible.append(locality)
+            self.list.addItem(text, locality.id)
+        # El indice del combo no es el indice de self._localities: el combo
+        # tiene solo las que pasan el filtro. Preseleccionar por indice
+        # apuntaria a otra localidad.
+        code = getattr(current, "locality_code", None)
+        if not code:
+            return
+        for index, locality in enumerate(self._visible):
+            if locality.dgr_code_4 == code:
+                self.list.setCurrentIndex(index)
+                return
+
+    def _accept(self) -> None:
+        self._chosen = self.list.currentData()
+        if self._chosen is None:
+            QMessageBox.warning(
+                self, "Origen DGR", "No hay localidades que coincidan con el filtro."
+            )
+            return
+        self.accept()
+
+    def selected_id(self):
+        return self._chosen
 
 
 class F150Page(QWidget):
@@ -86,7 +163,12 @@ class F150Page(QWidget):
         generate = QPushButton("Generar archivo F150")
         generate.setObjectName("generateF150Button")
         actions.addWidget(generate)
-        actions.addStretch(1)
+        self.origin_label = QLabel()
+        self.origin_label.setWordWrap(True)
+        actions.addWidget(self.origin_label, 1)
+        self.configure_origin_button = QPushButton("Configurar origen DGR")
+        self.configure_origin_button.setObjectName("configureF150OriginButton")
+        actions.addWidget(self.configure_origin_button)
         root.addLayout(actions)
 
         self.table = QTableWidget(0, 9)
@@ -108,6 +190,7 @@ class F150Page(QWidget):
 
         apply_button.clicked.connect(self.refresh)
         generate.clicked.connect(self._generate)
+        self.configure_origin_button.clicked.connect(self._configure_origin)
         self._load_clients()
         self.refresh()
 
@@ -118,6 +201,7 @@ class F150Page(QWidget):
             self.client.addItem(client.name, client.id)
 
     def refresh(self) -> None:
+        self._refresh_origin()
         rows = self.service.eligible_remittances(
             date_from=self.date_from.date().toPyDate(),
             date_to=self.date_to.date().toPyDate(),
@@ -136,11 +220,16 @@ class F150Page(QWidget):
             )
             select_item = QTableWidgetItem()
             select_item.setData(Qt.UserRole, remittance.id)
+            # El remito siempre se puede tildar: si le falta algo, el generador
+            # lo rechaza nombrando el campo. Antes el checkbox quedaba
+            # deshabilitado y el operador no podia avanzar sin saber por que.
             select_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
             select_item.setCheckState(Qt.Unchecked)
-            if issues:
-                select_item.setFlags(Qt.ItemIsUserCheckable)
-                select_item.setToolTip("; ".join(issues))
+            detail = "Listo" if not issues else "; ".join(issues)
+            select_item.setToolTip(detail)
+            select_item.setBackground(
+                self.palette().brush(QPalette.Base) if not issues else self.palette().brush(QPalette.AlternateBase)
+            )
             self.table.setItem(row_index, 0, select_item)
             values = [
                 physical,
@@ -150,11 +239,64 @@ class F150Page(QWidget):
                 remittance.truck_domain or "Sin asignar",
                 remittance.driver_name or "Sin asignar",
                 remittance.status,
-                "Listo" if not issues else "; ".join(issues),
+                detail,
             ]
             for column, value in enumerate(values, start=1):
-                self.table.setItem(row_index, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                self.table.setItem(row_index, column, item)
         self._refresh_history()
+
+    def _refresh_origin(self) -> None:
+        origin = self.service.origin()
+        if origin.locality_code.strip():
+            self.origin_label.setText(
+                f"Origen: {origin.locality_name or origin.locality_code} "
+                f"({origin.locality_code})"
+            )
+            self.origin_label.setStyleSheet("")
+            self.configure_origin_button.setVisible(False)
+            return
+        self.origin_label.setText(
+            "Falta configurar el origen DGR de la planta. Sin origen no se puede "
+            "generar ningun F150."
+        )
+        self.origin_label.setStyleSheet("color: #b00020; font-weight: bold;")
+        self.configure_origin_button.setVisible(True)
+
+    def _configure_origin(self) -> None:
+        localities = self._localities()
+        if not localities:
+            QMessageBox.warning(
+                self,
+                "Origen DGR",
+                "No hay localidades DGR cargadas. Importa las tablas de "
+                "referencia DGR antes de configurar el origen.",
+            )
+            return
+        dialog = OriginLocalityDialog(self, localities, self.service.origin())
+        if dialog.exec_() != QDialog.Accepted or dialog.selected_id() is None:
+            return
+        try:
+            self.service.set_origin_by_id(dialog.selected_id())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Origen DGR", str(exc))
+            return
+        self.refresh()
+        QMessageBox.information(
+            self, "Origen DGR", "Origen configurado. Ya podés generar el F150."
+        )
+
+    @staticmethod
+    def _localities():
+        from app.models.dgr import DgrCountry, DgrLocality
+
+        return list(
+            DgrLocality.select(DgrLocality, DgrCountry).join(DgrCountry).order_by(
+                DgrLocality.name
+            )
+        )
+
 
     def _refresh_history(self) -> None:
         batches = list(F150Batch.select().order_by(F150Batch.id.desc()))
