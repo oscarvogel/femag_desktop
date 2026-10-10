@@ -27,6 +27,17 @@ PRODUCT_KIND_LABELS = {
     PRODUCT_KIND_INTERNAL: "Interno",
     PRODUCT_KIND_REVIEW: "Revisar",
 }
+# Rol en el stock: si el producto se compra y se consume para fabricar, o si se
+# vende tal cual. Es una pregunta distinta de `product_kind`, que clasifica para
+# la venta: un big bag de almidon es "producto" comercialmente (se factura) y
+# al mismo tiempo es materia prima (se consume al fraccionar). Confundir las dos
+# cosas haria que el fraccionado no tenga de donde consumir.
+STOCK_ROLE_FINISHED = "terminado"
+STOCK_ROLE_RAW = "materia_prima"
+STOCK_ROLE_LABELS = {
+    STOCK_ROLE_FINISHED: "Producto terminado",
+    STOCK_ROLE_RAW: "Materia prima",
+}
 
 
 def client_address_type_label(address_type: str) -> str:
@@ -43,6 +54,21 @@ def client_address_has_delivery_function(address_type: str) -> bool:
 
 def product_kind_label(product_kind: str | None) -> str:
     return PRODUCT_KIND_LABELS.get(product_kind, product_kind or "Sin clasificar")
+
+
+def stock_role_label(stock_role: str | None) -> str:
+    return STOCK_ROLE_LABELS.get(
+        stock_role or STOCK_ROLE_FINISHED, stock_role or "Producto terminado"
+    )
+
+
+def product_is_raw_material(product: "Product") -> bool:
+    """Si el producto se consume para fabricar en vez de venderse tal cual.
+
+    Solo mira ``stock_role``: ``product_kind`` dice si el articulo se puede
+    cargar en una orden, no de que esta hecho.
+    """
+    return (product.stock_role or STOCK_ROLE_FINISHED) == STOCK_ROLE_RAW
 
 
 def product_is_loadable(product: "Product") -> bool:
@@ -74,7 +100,11 @@ class Salesperson(BaseModel):
 
 class Client(BaseModel):
     name = CharField()
-    cuit = CharField(unique=True)
+    # Nullable a propósito (#686): el legacy completa el CUIT con ceros y guiones
+    # cuando el cliente no lo tiene, y eso no es un CUIT. Como el campo es único,
+    # varias filas distintas caían en el mismo valor y el importador pisaba un
+    # cliente sobre otro. MySQL y SQLite admiten varios NULL en una columna UNIQUE.
+    cuit = CharField(unique=True, null=True)
     iva_condition = CharField()
     phone = CharField(null=True)
     email = CharField(null=True)
@@ -137,6 +167,7 @@ class Product(BaseModel):
     unidad_dgr = CharField(null=True)
     peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3, default=Decimal("0.000"))
     product_kind = CharField(null=True, default=PRODUCT_KIND_PRODUCT)
+    stock_role = CharField(null=True, default=STOCK_ROLE_FINISHED)
     classification_source = CharField(null=True)
     weight_source = CharField(null=True)
     review_required = BooleanField(default=True)

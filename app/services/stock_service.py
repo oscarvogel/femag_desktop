@@ -32,6 +32,44 @@ def _tipo_a_saldo(movement_type: str) -> int:
     return -1 if movement_type in StockMovement.OUTBOUND_TYPES else 1
 
 
+def bag_weight_of(product) -> Decimal:
+    """Peso de bolsa del producto, o cero si no tiene cargado.
+
+    El conteo fisico se hace en bolsas y los kilos salen de multiplicar por
+    este peso, asi que la conversion vive aca y no en cada pantalla.
+    """
+    if product is None:
+        return ZERO
+    return Decimal(str(product.peso_unitario_kg or 0))
+
+
+def is_countable_in_bags(product) -> bool:
+    """Si el producto se puede contar en bolsas.
+
+    Sin peso de bolsa cargado, N bolsas darian 0 kg: la diferencia contra el
+    libro seria -saldo y el conteo generaria un ajuste que deja el producto en
+    cero. Por eso el peso es obligatorio para contar, no una convenience.
+    """
+    if product is None or getattr(product, "id", None) is None:
+        return False
+    return bag_weight_of(product) > ZERO
+
+
+def bags_to_kg(product, bags) -> Decimal:
+    """Convierte bolsas a kilos con el peso del producto.
+
+    Devuelve cero si el producto no tiene peso cargado. Quien llame tiene que
+    haber comprobado :func:`is_countable_in_bags` antes: convertir a la fuerza
+    un producto sin peso es justamente lo que produce el ajuste que borra el
+    saldo.
+    """
+    try:
+        unidades = Decimal(str(bags or 0))
+    except (TypeError, ValueError, ArithmeticError):
+        return ZERO
+    return (unidades * bag_weight_of(product)).quantize(Decimal("0.001"))
+
+
 class StockService:
     """Libro auditable de movimientos de stock (#572).
 

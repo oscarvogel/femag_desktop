@@ -77,7 +77,9 @@ class LegacyDbfMasterImporter:
     def _import_clients(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "clients", "CODIGO", "ID", "IDLEGACY")
         name = self._required(row, "clients", "RAZON", "NOMBRE", "CLIENTE")
-        cuit = self._clean_cuit(self._required(row, "clients", "CUIT", "CUITCLI"))
+        # El CUIT es opcional a propósito (#686): el legacy no lo tiene siempre, y
+        # donde no lo tiene pone un relleno que comparten varias filas.
+        cuit = self._clean_cuit(self._value(row, "CUIT", "CUITCLI"))
         values = {
             "name": name,
             "cuit": cuit,
@@ -86,10 +88,79 @@ class LegacyDbfMasterImporter:
             "email": self._value(row, "EMAIL", "MAIL"),
             "contact": self._value(row, "CONTACTO"),
         }
-        action = self._upsert(Client, {"cuit": cuit}, values, source_system, source_id, batch)
-        client = Client.get(Client.cuit == cuit)
+        action, client, warnings = self._upsert_client(values, source_system, source_id, batch)
         self._ensure_client_addresses(client, row)
-        return ImportOutcome(action)
+        return ImportOutcome(action, tuple(warnings))
+
+    def _upsert_client(
+        self,
+        values: dict[str, Any],
+        source_system: str,
+        source_id: str,
+        batch: ImportBatch,
+    ) -> tuple[str, Client, list[dict[str, str]]]:
+        """Guarda el cliente buscándolo primero por su CODIGO del legacy (#686).
+
+        La identidad es ``(source_system, source_id)``, que es lo que el legacy
+        garantiza: un CODIGO por fila. Antes de esto la clave natural era el CUIT,
+        y eso rompía con los clientes sin CUIT: el legacy los completa con ceros y
+        guiones, ese relleno lo comparten varias filas distintas y todas terminaban
+        en el mismo registro. Una se pisaba sobre otra y la importación abortaba
+        con ``Duplicate entry '00000000000' for key 'client.client_cuit'``.
+
+        Cuando la fila **no** tiene CUIT real no hay nada con qué adoptar: se crea
+        el cliente y listo. Cuando sí lo tiene, se sigue adoptando un cliente que
+        ya exista con ese CUIT, que es el comportamiento previo y evita duplicar
+        clientes ya cargados a mano en FEMAG.
+
+        Devuelve la acción, el cliente y los avisos.
+        """
+        now = utc_now()
+        warnings: list[dict[str, str]] = []
+        cuit = values.get("cuit")
+
+        client = (
+            Client.select()
+            .where((Client.source_system == source_system) & (Client.source_id == source_id))
+            .first()
+        )
+        if client is None and cuit:
+            adopted = Client.select().where(Client.cuit == cuit).first()
+            if adopted is not None:
+                client = adopted
+                # Dos filas distintas del legacy con el mismo CUIT real: la segunda
+                # se pierde la primera. No es motivo para abortar toda la
+                # importacion, pero el operador tiene que verlo en el resumen.
+                if client.source_system or client.source_id:
+                    warnings.append(
+                        {
+                            "code": "client_cuit_shared_by_two_rows",
+                            "source_id": source_id,
+                            "message": (
+                                f"el CUIT {cuit} ya identifica a {client.source_system}:"
+                                f"{client.source_id}; esta fila actualiza ese cliente "
+                                "y la anterior queda absorbida"
+                            ),
+                        }
+                    )
+
+        if client is None:
+            action = "created"
+            client = Client(**values)
+            client.imported_at = now
+        else:
+            action = "updated"
+            for field, value in values.items():
+                setattr(client, field, value)
+            if client.imported_at is None:
+                client.imported_at = now
+
+        client.source_system = source_system
+        client.source_id = source_id
+        client.updated_from_source_at = now
+        client.last_import_batch = batch
+        client.save()
+        return action, client, warnings
 
     def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> None:
         address = self._value(row, "DOMICILIO", "DIRECCION", "ADDRESS")
@@ -386,8 +457,24 @@ class LegacyDbfMasterImporter:
     def _normalize_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         return {str(key).upper().strip(): value for key, value in row.items()}
 
-    def _clean_cuit(self, value: str) -> str:
-        return re.sub(r"\D", "", value)
+    def _clean_cuit(self, value: str) -> str | None:
+        """Devuelve el CUIT sin separadores, o ``None`` cuando el legacy no trae uno real.
+
+        El legacy completa el campo con ceros y guiones cuando el cliente no
+        tiene CUIT (``'  -        -0'``, ``'00-00000000-0'``). Limpiado eso da
+        ``'0'`` y ``'00000000000'``, que son valores de relleno, no CUITs: los
+        comparten varias filas distintas. Como ``Client.cuit`` es único, guardar
+        el relleno hacía que el importador resolviera todos esos clientes al
+        mismo registro y los pisara entre sí (#686).
+
+        Solo se descarta lo que no tiene ningún dígito con valor: un CUIT real
+        empieza con 20, 23, 24, 27, 30, 33 o 34, así que la prueba de "no es todo
+        ceros" alcanza para separar relleno de dato.
+        """
+        digits = re.sub(r"\D", "", value or "")
+        if not digits or not digits.strip("0"):
+            return None
+        return digits
 
     def _clean_domain(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9]", "", value).upper()

@@ -29,6 +29,9 @@ from app.models.masters import (
     CLIENT_ADDRESS_TYPE_FISCAL,
     CLIENT_ADDRESS_TYPE_SHARED,
     PRODUCT_KIND_LABELS,
+    STOCK_ROLE_FINISHED,
+    STOCK_ROLE_LABELS,
+    STOCK_ROLE_RAW,
     Carrier,
     Client,
     ClientAddress,
@@ -43,6 +46,7 @@ from app.models.masters import (
     client_address_type_label,
     product_is_loadable,
     product_kind_label,
+    stock_role_label,
 )
 from app.services.client_service import ClientService
 from app.services.client_email_service import ClientEmailService
@@ -316,7 +320,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "products": MasterAbmConfig(
             "Productos",
-            ["Producto", "Unidad", "Peso", "Clasificación", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
+            ["Producto", "Unidad", "Peso", "Clasificación", "Rol en el stock", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             _product_rows,
             ProductEntryDialog,
             "newProductButton",
@@ -426,7 +430,7 @@ class ClientEntryDialog(QDialog):
             return
         client = Client.get_by_id(self.record_id)
         self.name_input.setText(client.name)
-        self.cuit_input.setText(client.cuit)
+        self.cuit_input.setText(client.cuit or "")
         self.iva_input.setText(client.iva_condition)
         self.phone_input.setText(client.phone or "")
         if client.salesperson_id is not None:
@@ -1331,6 +1335,14 @@ class ProductEntryDialog(QDialog):
         enable_combo_autocomplete(self.kind_input, placeholder="Buscar tipo...")
         for value, label in PRODUCT_KIND_LABELS.items():
             self.kind_input.addItem(label, value)
+        self.stock_role_input = QComboBox()
+        self.stock_role_input.setObjectName("productStockRoleInput")
+        for value, label in STOCK_ROLE_LABELS.items():
+            self.stock_role_input.addItem(label, value)
+        self.stock_role_hint = QLabel()
+        self.stock_role_hint.setObjectName("subheading")
+        self.stock_role_hint.setWordWrap(True)
+        self.stock_role_input.currentIndexChanged.connect(self._sync_stock_role_hint)
         self.iva_input = QComboBox()
         self.iva_input.setObjectName("productIvaTypeInput")
         enable_combo_autocomplete(self.iva_input, placeholder="Buscar IVA...")
@@ -1352,27 +1364,51 @@ class ProductEntryDialog(QDialog):
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Clasificación"), 1, 0)
         form.addWidget(self.kind_input, 1, 1)
-        form.addWidget(QLabel("Unidad"), 2, 0)
-        form.addWidget(self.unit_input, 2, 1)
-        form.addWidget(QLabel("Peso unitario"), 3, 0)
-        form.addWidget(self.weight_input, 3, 1)
-        form.addWidget(QLabel("Tipo de IVA"), 4, 0)
-        form.addWidget(self.iva_input, 4, 1)
-        form.addWidget(QLabel("Lista 1"), 5, 0)
-        form.addWidget(self.price_list_1_input, 5, 1)
-        form.addWidget(QLabel("Lista 2"), 6, 0)
-        form.addWidget(self.price_list_2_input, 6, 1)
-        form.addWidget(QLabel("Lista 3"), 7, 0)
-        form.addWidget(self.price_list_3_input, 7, 1)
-        form.addWidget(QLabel("Lista 4"), 8, 0)
-        form.addWidget(self.price_list_4_input, 8, 1)
+        form.addWidget(QLabel("Rol en el stock"), 2, 0)
+        form.addWidget(self.stock_role_input, 2, 1)
+        form.addWidget(self.stock_role_hint, 3, 0, 1, 2)
+        form.addWidget(QLabel("Unidad"), 4, 0)
+        form.addWidget(self.unit_input, 4, 1)
+        form.addWidget(QLabel("Peso unitario"), 5, 0)
+        form.addWidget(self.weight_input, 5, 1)
+        form.addWidget(QLabel("Tipo de IVA"), 6, 0)
+        form.addWidget(self.iva_input, 6, 1)
+        form.addWidget(QLabel("Lista 1"), 7, 0)
+        form.addWidget(self.price_list_1_input, 7, 1)
+        form.addWidget(QLabel("Lista 2"), 8, 0)
+        form.addWidget(self.price_list_2_input, 8, 1)
+        form.addWidget(QLabel("Lista 3"), 9, 0)
+        form.addWidget(self.price_list_3_input, 9, 1)
+        form.addWidget(QLabel("Lista 4"), 10, 0)
+        form.addWidget(self.price_list_4_input, 10, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveProductButton", self._save)
 
+    def _sync_stock_role_hint(self) -> None:
+        """Aclara que el peso unitario significa una cosa u otra.
+
+        En un producto terminado es el peso de la bolsa. En materia prima es el
+        peso de un big bag, y es el dato que despues convierte los big bags que
+        cuenta el operador en kilos para el libro de stock. Sin esta aclaracion
+        el mismo campo significa dos cosas distintas y el ingreso quedaria mal.
+        """
+        if self.stock_role_input.currentData() == STOCK_ROLE_RAW:
+            self.stock_role_hint.setText(
+                "Materia prima: se compra en big bags y se fracciona en bolsas. "
+                "El «Peso unitario» es el peso de un big bag, y el ingreso cuenta "
+                "big bags, no kilos sueltos."
+            )
+        else:
+            self.stock_role_hint.setText(
+                "Producto terminado: se vende tal cual. El «Peso unitario» es el "
+                "peso de una bolsa o unidad de venta."
+            )
+
     def _load_record(self) -> None:
         if self.record_id is None:
             self.unit_input.setText("kg")
+            self._sync_stock_role_hint()
             return
         product = Product.get_by_id(self.record_id)
         if product.tipo_iva_id is not None and self.iva_input.findData(product.tipo_iva_id) < 0:
@@ -1385,6 +1421,10 @@ class ProductEntryDialog(QDialog):
         self.unit_input.setText(product.unit)
         self.weight_input.setValue(float(product.peso_unitario_kg))
         self.kind_input.setCurrentIndex(max(self.kind_input.findData(product.product_kind or "revisar"), 0))
+        self.stock_role_input.setCurrentIndex(
+            max(self.stock_role_input.findData(product.stock_role or STOCK_ROLE_FINISHED), 0)
+        )
+        self._sync_stock_role_hint()
         if product.tipo_iva_id is not None:
             self.iva_input.setCurrentIndex(self.iva_input.findData(product.tipo_iva_id))
         self.price_list_1_input.setText(_money_text(product.precio_lista_1 or product.precio_neto_base))
@@ -1414,6 +1454,7 @@ class ProductEntryDialog(QDialog):
                     unit,
                     peso_unitario_kg=Decimal(str(self.weight_input.value())),
                     product_kind=self.kind_input.currentData(),
+                    stock_role=self.stock_role_input.currentData(),
                     tipo_iva=tipo_iva,
                     **prices,
                 )
@@ -1422,6 +1463,7 @@ class ProductEntryDialog(QDialog):
                     Product.get_by_id(self.record_id), name, unit,
                     peso_unitario_kg=Decimal(str(self.weight_input.value())),
                     product_kind=self.kind_input.currentData(),
+                    stock_role=self.stock_role_input.currentData(),
                     tipo_iva=tipo_iva,
                     **prices,
                 )
@@ -1733,6 +1775,7 @@ def _product_rows() -> list[list[object]]:
                     else "Peso pendiente"
                 ),
                 product_kind_label(product.product_kind),
+                stock_role_label(product.stock_role),
                 "Sí" if product_is_loadable(product) else "No",
                 "Pendiente" if product.review_required else "Confirmado",
                 _money_text(product.precio_lista_1 or product.precio_neto_base),
