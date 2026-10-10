@@ -62,7 +62,11 @@ def _fake_desktop_environment(monkeypatch, events, *, session_closed: bool = Fal
     monkeypatch.setattr(desktop_app, "LoginWindow", FakeLoginWindow)
     monkeypatch.setattr(desktop_app, "FemagDesktopWindow", FakeDesktopWindow)
     monkeypatch.setattr(desktop_app, "femag_icon", lambda: None)
-    monkeypatch.setattr(desktop_app, "glass_v2_stylesheet", lambda: "")
+    monkeypatch.setattr(desktop_app, "stylesheet_for", lambda theme: "")
+    # `run_desktop_app` arma el tema con `load_theme()`, que lee del
+    # `%LOCALAPPDATA%` del operador. Sin esto el test dependeria de la
+    # preferencia de tema que tenga en esa maquina.
+    monkeypatch.setattr(desktop_app, "load_theme", lambda: desktop_app.Theme.LIGHT)
     monkeypatch.setattr(desktop_app, "_prepare_database", lambda **kwargs: None)
     monkeypatch.setattr(desktop_app, "PermissionService", FakePermissionService)
     monkeypatch.setattr(desktop_app, "_ensure_demo_user", lambda **kwargs: None)

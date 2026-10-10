@@ -94,7 +94,14 @@ from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
-from app.ui.glass_v2 import glass_v2_stylesheet
+from app.ui.theme import (
+    Theme,
+    apply_dark_overrides,
+    load_theme,
+    save_theme,
+    stylesheet_for,
+    toggle_theme,
+)
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
@@ -383,7 +390,7 @@ def run_desktop_app(*, demo_mode: bool = False) -> int:
             return 0
         user = login.authenticated_user
         _record_workstation_version()
-        app.setStyleSheet(STYLES + glass_v2_stylesheet())
+        app.setStyleSheet(stylesheet_for(load_theme()))
         window = FemagDesktopWindow(user=user, demo_mode=demo_mode or database is None)
         window.show()
         result = app.exec_()
@@ -462,6 +469,8 @@ class FemagDesktopWindow(QMainWindow):
         super().__init__()
         self.user = user
         self.session_closed = False
+        self.theme = load_theme()
+        self.theme_button = None
         self.shell = ShellBuilder(user=user, demo_mode=demo_mode).shell_spec
         version_label = BUILD_DEMO_VERSION if demo_mode and BUILD_DEMO_VERSION else BUILD_VERSION
         self.setWindowTitle(f"FEMAG Desktop {version_label}")
@@ -470,7 +479,7 @@ class FemagDesktopWindow(QMainWindow):
         if app is not None:
             app.setWindowIcon(femag_icon())
         self.resize(1440, 900)
-        self.setStyleSheet(STYLES + glass_v2_stylesheet())
+        self.setStyleSheet(stylesheet_for(self.theme))
         self.stack = QStackedWidget()
         self.stack.setObjectName("mainStack")
         self.nav = QListWidget()
@@ -584,11 +593,17 @@ class FemagDesktopWindow(QMainWindow):
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
         change_password = QPushButton("Cambiar clave")
+        theme_button = QPushButton()
         logout = QPushButton("Cerrar sesión")
-        for button in (notifications, help_button, settings, change_password, logout):
+        for button in (notifications, help_button, settings, change_password, theme_button, logout):
             button.setObjectName("topbarIconButton")
         notifications.setObjectName("avisoButton")
         help_button.setObjectName("helpButton")
+        # Comparte el estilo del resto del topbar a proposito: asi el boton del
+        # tema no necesita reglas propias y hereda las claras y las oscuras.
+        self.theme_button = theme_button
+        self._update_theme_button(self.theme)
+        theme_button.clicked.connect(self._toggle_theme)
 
         self.aviso_service = AvisoService()
         self.aviso_dropdown = AvisoDropdown(
@@ -629,9 +644,57 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(help_button)
         layout.addWidget(settings)
         layout.addWidget(change_password)
+        layout.addWidget(theme_button)
         layout.addWidget(logout)
         layout.addWidget(user)
         return bar
+
+    def _update_theme_button(self, theme: Theme) -> None:
+        """El botón muestra el tema que está puesto, no el que va a poner.
+
+        Un botón rotulado con la acción ("Oscuro") se lee al revés la mitad de
+        las veces. Decir el estado actual no se puede malinterpretar.
+        """
+        if self.theme_button is None:
+            return
+        actual = "Oscuro" if theme is Theme.DARK else "Claro"
+        destino = "claro" if theme is Theme.DARK else "oscuro"
+        self.theme_button.setText(f"Tema: {actual}")
+        self.theme_button.setToolTip(f"Cambiar al tema {destino}")
+
+    def _aplicar_tema(self, theme: Theme) -> None:
+        """Aplica el tema a la ventana y a la aplicación.
+
+        Hay que tocar las dos: la ventana lleva su propia hoja y pisa la de la
+        aplicación para todo lo que cuelgue de ella.
+        """
+        qss = stylesheet_for(theme)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(qss)
+        self.setStyleSheet(qss)
+        self.theme = theme
+        self._update_theme_button(theme)
+
+    def _toggle_theme(self) -> None:
+        nuevo = toggle_theme(self.theme)
+        guardado = True
+        try:
+            save_theme(nuevo)
+        except OSError:
+            logger.exception("No se pudo guardar la preferencia de tema del puesto")
+            guardado = False
+        # Se aplica igual aunque no se haya podido guardar: el botón tiene que
+        # hacer algo ahora, y el aviso dice la verdad sobre lo que va a pasar
+        # la próxima vez.
+        self._aplicar_tema(nuevo)
+        if not guardado:
+            QMessageBox.warning(
+                self,
+                "Tema",
+                "Se cambió el tema, pero no se pudo guardar la preferencia. "
+                "La próxima vez que abra la aplicación va a volver al tema claro.",
+            )
 
     def _toggle_avisos(self):
         if self.aviso_dropdown.isVisible():
@@ -5141,3 +5204,12 @@ QComboBox QAbstractItemView {
 QTableWidget { background: #ffffff; alternate-background-color: #fbfdff; gridline-color: #edf2f7; border: 0; selection-background-color: #e8f1ff; selection-color: #0f172a; }
 QHeaderView::section { background: #ffffff; color: #334155; border: 0; border-bottom: 1px solid #d9e1ec; padding: 10px; font-weight: 700; }
 """
+
+
+def styles_for(theme: Theme) -> str:
+    """Base de estilos del tema pedido.
+
+    ``STYLES`` queda como esta para no romper a los llamadores actuales; el tema
+    oscuro es el mismo texto con la paleta invertida (``theme.DARK_OVERRIDES``).
+    """
+    return STYLES if theme is Theme.LIGHT else apply_dark_overrides(STYLES)
