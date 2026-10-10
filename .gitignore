@@ -42,3 +42,10 @@ orden_carga_*.pdf
 /auditoria.txt
 /log_test*.txt
 /pytest_release.txt
+
+# Muestras fiscales reales: traen CUIT, DNI y domicilios, nunca se versionan.
+# Para validar contra ellas usar scripts/compare_f150_golden_master.py con una
+# copia local protegida. Los fixtures anonimizados viven en tests/fixtures/f150/.
+docs/F.150-*.TXT
+docs/F150-*.TXT
+F.150-*.TXT
