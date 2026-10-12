@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable
 
-from peewee import fn
+from peewee import JOIN, fn
 
 from app.config.database import database_proxy
 from app.models.accounting import ClientAccountMovement
@@ -17,7 +17,7 @@ from app.models.load_orders import (
     LoadOrderPalletAllocation,
     LoadOrderProduct,
 )
-from app.models.masters import Client, Product
+from app.models.masters import Client, Product, Salesperson
 
 
 DEFAULT_EFFECTIVE_ORDER_STATUSES = (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED)
@@ -43,6 +43,12 @@ def _day_in_month(year: int, month: int, day: int) -> date:
 
 def _previous_month(year: int, month: int) -> tuple[int, int]:
     return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
+def _variation_percent(current: float, previous: float) -> float | None:
+    if previous == 0:
+        return None if current != 0 else 0.0
+    return round(((current - previous) / abs(previous)) * 100, 1)
 
 
 @dataclass(frozen=True)
@@ -235,10 +241,13 @@ class ManagerialDashboardService:
                 LoadOrderProduct.product.alias("product_id"),
                 LoadOrderProduct.quantity.alias("quantity"),
                 LoadOrderProduct.total.alias("total"),
+                LoadOrder.date.alias("order_date"),
                 Product.name.alias("product_name"),
                 Product.peso_unitario_kg.alias("fallback_weight"),
                 Client.id.alias("client_id"),
                 Client.name.alias("client_name"),
+                Salesperson.id.alias("salesperson_id"),
+                Salesperson.name.alias("salesperson_name"),
             )
             .join(LoadOrder)
             .switch(LoadOrderProduct)
@@ -246,6 +255,7 @@ class ManagerialDashboardService:
             .switch(LoadOrderProduct)
             .join(LoadOrderDestination, on=(LoadOrderProduct.destination == LoadOrderDestination.id))
             .join(Client, on=(LoadOrderDestination.client == Client.id))
+            .join(Salesperson, JOIN.LEFT_OUTER, on=(Client.salesperson == Salesperson.id))
             .where(self._effective_order_filter(period))
             .dicts()
         )
@@ -369,7 +379,7 @@ class ManagerialDashboardService:
         total = sum(min(balance, overdue.get(client_id, 0.0)) for client_id, balance in balances.items())
         return round(total, 2)
 
-    def top_clients(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
+    def _client_aggregates(self, period: ReportPeriod) -> dict[int, dict]:
         aggregated: dict[int, dict] = {}
         for row in self._dispatch_breakdown(period):
             client_id = int(row["client_id"])
@@ -379,18 +389,9 @@ class ManagerialDashboardService:
             )
             target["total"] += float(row["total"] or 0)
             target["kilos"] += float(row["kilos"] or 0)
-        ordered = sorted(aggregated.values(), key=lambda row: row["total"], reverse=True)[:limit]
-        return [
-            {
-                "client_id": row["client_id"],
-                "name": row["name"],
-                "total": round(row["total"], 2),
-                "tonnes": round(row["kilos"] / 1000.0, 3),
-            }
-            for row in ordered
-        ]
+        return aggregated
 
-    def top_products(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
+    def _product_aggregates(self, period: ReportPeriod) -> dict[int, dict]:
         aggregated: dict[int, dict] = {}
         for row in self._dispatch_breakdown(period):
             product_id = int(row["product_id"])
@@ -400,16 +401,263 @@ class ManagerialDashboardService:
             )
             target["total"] += float(row["total"] or 0)
             target["kilos"] += float(row["kilos"] or 0)
-        ordered = sorted(aggregated.values(), key=lambda row: row["kilos"], reverse=True)[:limit]
+        return aggregated
+
+    def top_clients(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
+        current = self._client_aggregates(period)
+        previous = self._client_aggregates(period.previous_equivalent())
+        ordered = sorted(current.values(), key=lambda row: row["total"], reverse=True)[:limit]
+        return [
+            {
+                "client_id": row["client_id"],
+                "name": row["name"],
+                "total": round(row["total"], 2),
+                "tonnes": round(row["kilos"] / 1000.0, 3),
+                "previous_total": round(previous.get(row["client_id"], {}).get("total", 0.0), 2),
+                "previous_tonnes": round(previous.get(row["client_id"], {}).get("kilos", 0.0) / 1000.0, 3),
+                "variation_percent": _variation_percent(
+                    row["total"], previous.get(row["client_id"], {}).get("total", 0.0)
+                ),
+            }
+            for row in ordered
+        ]
+
+    def top_products(self, period: ReportPeriod, *, limit: int = 10) -> list[dict]:
+        current = self._product_aggregates(period)
+        previous = self._product_aggregates(period.previous_equivalent())
+        ordered = sorted(current.values(), key=lambda row: row["kilos"], reverse=True)[:limit]
         return [
             {
                 "product_id": row["product_id"],
                 "name": row["name"],
                 "total": round(row["total"], 2),
                 "tonnes": round(row["kilos"] / 1000.0, 3),
+                "previous_total": round(previous.get(row["product_id"], {}).get("total", 0.0), 2),
+                "previous_tonnes": round(previous.get(row["product_id"], {}).get("kilos", 0.0) / 1000.0, 3),
+                "variation_percent": _variation_percent(
+                    row["total"], previous.get(row["product_id"], {}).get("total", 0.0)
+                ),
             }
             for row in ordered
         ]
+
+    def product_client_repurchase(
+        self,
+        current: ReportPeriod,
+        previous: ReportPeriod | None = None,
+        *,
+        product_id: int | None = None,
+        client_id: int | None = None,
+        salesperson_id: int | None = None,
+        client_query: str | None = None,
+        limit: int | None = None,
+        order_by: str = "default",
+    ) -> list[dict]:
+        """Compara cliente x artículo entre dos períodos equivalentes.
+
+        Fuente única: :meth:`_dispatch_breakdown` (órdenes efectivas
+        ``Emitida``/``Cerrada``, kilos físicos de pallets + suelto con fallback
+        a peso configurado, sin duplicar por destinos). Criterio principal:
+        kilos (toneladas); el valorizado es contexto y no clasifica.
+
+        Clasificación por kilos con tolerancia de 0,5 kg para ruido de redondeo:
+
+        - ``sin_recompra``: kilos antes > 0,5 y ahora <= 0,5;
+        - ``compro_menos``: kilos en ambos períodos y actual < anterior;
+        - ``compro_mas``: kilos en ambos períodos y actual > anterior;
+        - ``nuevo``: kilos antes <= 0,5 y ahora > 0,5 (nuevo *en el período
+          comparado*, no necesariamente cliente nuevo de FEMAG);
+        - ``igual``: diferencia dentro de la tolerancia.
+
+        Devoluciones: viven en ``LoadOrderReturnLine`` (circuito de cierre) y
+        hoy no descuentan el KPI valorizado ni los kilos del breakdown, que
+        además fija pisos en 0. Por eso no existen netos negativos: una fila
+        con kilos negativos futuros se clasifica por la misma regla numérica
+        (actual <= 0,5 con anterior > 0,5 → ``sin_recompra``).
+
+        Vendedor: ``LoadOrder`` no guarda vendedor histórico; se informa la
+        asignación *actual* ``Client.salesperson`` como proxy operativo y se
+        documenta como tal en UI/export. El filtro ``salesperson_id`` usa esa
+        misma asignación actual.
+
+        Si ``product_id`` es None se comparan todos los artículos.
+        ``order_by`` admite ``"default"`` (estado + TN anterior desc),
+        ``"previous_tonnes"``, ``"variation"`` y ``"client"``.
+        """
+        previous = previous or current.previous_equivalent()
+        wanted = (client_query or "").strip().lower()
+
+        def aggregate(period: ReportPeriod) -> dict[tuple[int, int], dict]:
+            agg: dict[tuple[int, int], dict] = {}
+            for row in self._dispatch_breakdown(period):
+                pid = int(row["product_id"])
+                if product_id is not None and pid != product_id:
+                    continue
+                cid = int(row["client_id"])
+                if client_id is not None and cid != client_id:
+                    continue
+                row_sales = int(row["salesperson_id"]) if row.get("salesperson_id") else None
+                if salesperson_id is not None and row_sales != salesperson_id:
+                    continue
+                if wanted and wanted not in str(row["client_name"] or "").lower():
+                    continue
+                key = (cid, pid)
+                target = agg.setdefault(
+                    key,
+                    {
+                        "client_id": cid,
+                        "client_name": row["client_name"],
+                        "product_id": pid,
+                        "product_name": row["product_name"],
+                        "salesperson_id": row_sales,
+                        "salesperson_name": row.get("salesperson_name") or "",
+                        "quantity": 0.0,
+                        "kilos": 0.0,
+                        "total": 0.0,
+                        "orders": set(),
+                        "last_date": None,
+                    },
+                )
+                target["quantity"] += float(row["quantity"] or 0)
+                target["kilos"] += float(row["kilos"] or 0)
+                target["total"] += float(row["total"] or 0)
+                target["orders"].add(int(row["order_id"]))
+                candidate = row.get("order_date")
+                if candidate is not None and (target["last_date"] is None or candidate > target["last_date"]):
+                    target["last_date"] = candidate
+                if row_sales is not None and target.get("salesperson_id") is None:
+                    target["salesperson_id"] = row_sales
+                    target["salesperson_name"] = row.get("salesperson_name") or ""
+            return agg
+
+        def iso(d) -> str | None:
+            return d.isoformat() if hasattr(d, "isoformat") else (str(d) if d else None)
+
+        cur = aggregate(current)
+        prev = aggregate(previous)
+        rows: list[dict] = []
+        for key in sorted(cur.keys() | prev.keys()):
+            c = cur.get(key, {"quantity": 0.0, "kilos": 0.0, "total": 0.0, "orders": set(), "last_date": None})
+            p = prev.get(key, {"quantity": 0.0, "kilos": 0.0, "total": 0.0, "orders": set(), "last_date": None})
+            base = cur.get(key) or prev.get(key) or {}
+            cur_kg = float(c["kilos"])
+            prev_kg = float(p["kilos"])
+            if prev_kg > 0.5 and cur_kg <= 0.5:
+                status = "sin_recompra"
+            elif prev_kg <= 0.5 and cur_kg > 0.5:
+                status = "nuevo"
+            elif abs(cur_kg - prev_kg) <= 0.5:
+                status = "igual"
+            elif cur_kg < prev_kg:
+                status = "compro_menos"
+            else:
+                status = "compro_mas"
+            rows.append(
+                {
+                    "client_id": key[0],
+                    "client_name": base.get("client_name", ""),
+                    "product_id": key[1],
+                    "product_name": base.get("product_name", ""),
+                    "salesperson_id": base.get("salesperson_id"),
+                    "salesperson_name": base.get("salesperson_name", ""),
+                    "salesperson_is_current_assignment": True,
+                    "previous_quantity": round(float(p["quantity"]), 3),
+                    "previous_kilos": round(prev_kg, 3),
+                    "previous_tonnes": round(prev_kg / 1000.0, 3),
+                    "previous_total": round(float(p["total"]), 2),
+                    "previous_orders": len(p.get("orders") or set()),
+                    "previous_last_date": iso(p.get("last_date")),
+                    "current_quantity": round(float(c["quantity"]), 3),
+                    "current_kilos": round(cur_kg, 3),
+                    "current_tonnes": round(cur_kg / 1000.0, 3),
+                    "current_total": round(float(c["total"]), 2),
+                    "current_orders": len(c.get("orders") or set()),
+                    "current_last_date": iso(c.get("last_date")),
+                    "diff_kilos": round(cur_kg - prev_kg, 3),
+                    "diff_tonnes": round((cur_kg - prev_kg) / 1000.0, 3),
+                    "variation_kilos_percent": _variation_percent(cur_kg, prev_kg),
+                    "variation_total_percent": _variation_percent(float(c["total"]), float(p["total"])),
+                    "status": status,
+                }
+            )
+        if order_by == "previous_tonnes":
+            rows.sort(key=lambda r: (-r["previous_kilos"], -r["current_kilos"], r["client_name"]))
+        elif order_by == "variation":
+            rows.sort(
+                key=lambda r: (
+                    -(r["variation_kilos_percent"] if r["variation_kilos_percent"] is not None else -999999.0),
+                    -r["previous_kilos"],
+                )
+            )
+        elif order_by == "client":
+            rows.sort(key=lambda r: (r["client_name"] or "", r["product_name"] or ""))
+        else:
+            order = {"sin_recompra": 0, "compro_menos": 1, "igual": 2, "compro_mas": 3, "nuevo": 4}
+            rows.sort(key=lambda r: (order.get(r["status"], 9), -r["previous_kilos"], -r["current_kilos"]))
+        if limit is not None and limit >= 0:
+            rows = rows[:limit]
+        return rows
+
+    def product_repurchase_summary(
+        self,
+        current: ReportPeriod,
+        previous: ReportPeriod | None = None,
+        *,
+        product_id: int | None = None,
+    ) -> dict:
+        """Resumen gerencial por producto con conciliación exacta en TN.
+
+        Variación neta = pérdidas por sin recompra + reducciones recurrentes
+        + aumentos recurrentes + incorporaciones del período. Los ``igual``
+        aportan 0 por definición (dentro de tolerancia) y se informan aparte.
+        """
+        previous = previous or current.previous_equivalent()
+        rows = self.product_client_repurchase(current, previous, product_id=product_id)
+        by_status: dict[str, list[dict]] = {}
+        for row in rows:
+            by_status.setdefault(row["status"], []).append(row)
+
+        def tons(items: list[dict], field: str) -> float:
+            return round(sum(float(r[field]) for r in items), 3)
+
+        prev_tn = round(sum(r["previous_tonnes"] for r in rows), 3)
+        cur_tn = round(sum(r["current_tonnes"] for r in rows), 3)
+        prev_total = round(sum(r["previous_total"] for r in rows), 2)
+        cur_total = round(sum(r["current_total"] for r in rows), 2)
+        lost = by_status.get("sin_recompra", [])
+        less = by_status.get("compro_menos", [])
+        more = by_status.get("compro_mas", [])
+        new = by_status.get("nuevo", [])
+        same = by_status.get("igual", [])
+        lost_tn = tons(lost, "previous_tonnes")
+        reduction_tn = round(sum(r["diff_tonnes"] for r in less), 3)
+        increase_tn = round(sum(r["diff_tonnes"] for r in more), 3)
+        new_tn = tons(new, "current_tonnes")
+        reconciled = round(-lost_tn + reduction_tn + increase_tn + new_tn, 3)
+        return {
+            "product_id": product_id,
+            "current_range": current.describe_range(),
+            "previous_range": previous.describe_range(),
+            "previous_tonnes": prev_tn,
+            "current_tonnes": cur_tn,
+            "diff_tonnes": round(cur_tn - prev_tn, 3),
+            "variation_percent": _variation_percent(cur_tn * 1000.0, prev_tn * 1000.0),
+            "previous_total": prev_total,
+            "current_total": cur_total,
+            "buyers_previous": len({r["client_id"] for r in rows if r["previous_kilos"] > 0.5}),
+            "buyers_current": len({r["client_id"] for r in rows if r["current_kilos"] > 0.5}),
+            "count_sin_recompra": len(lost),
+            "count_redujeron": len(less),
+            "count_aumentaron": len(more),
+            "count_nuevos": len(new),
+            "count_sin_cambios": len(same),
+            "lost_tonnes": lost_tn,
+            "reduction_tonnes": reduction_tn,
+            "increase_tonnes": increase_tn,
+            "new_tonnes": new_tn,
+            "reconciled_diff_tonnes": reconciled,
+            "reconciliation_ok": abs(reconciled - round(cur_tn - prev_tn, 3)) < 0.002,
+        }
 
     def order_status_distribution(self, period: ReportPeriod) -> list[dict]:
         if database_proxy.obj is None:
@@ -441,7 +689,14 @@ class ManagerialDashboardService:
             else:
                 next_month = date(start.year, start.month + 1, 1)
             month_end = min(next_month - timedelta(days=1), end)
-            metrics = self._period_metrics(ReportPeriod(start, month_end, start.strftime("%m/%Y")))
+            period = ReportPeriod(start, month_end, start.strftime("%m/%Y"))
+            metrics = self._period_metrics(period)
+            # Comparación día por día: el mes parcial actual (ej. 01/10 → 12/10)
+            # se compara contra el mismo corte del mes anterior (01/09 → 12/09),
+            # no contra el mes anterior completo. Los meses completos se comparan
+            # contra el mes anterior completo gracias a previous_equivalent().
+            previous = period.previous_equivalent()
+            previous_metrics = self._period_metrics(previous)
             points.append(
                 {
                     "period": start.strftime("%Y-%m"),
@@ -449,6 +704,19 @@ class ManagerialDashboardService:
                     "total": metrics["valued_dispatches"],
                     "tonnes": metrics["tonnes"],
                     "orders": int(metrics["orders"]),
+                    "previous_total": previous_metrics["valued_dispatches"],
+                    "previous_tonnes": previous_metrics["tonnes"],
+                    "previous_orders": int(previous_metrics["orders"]),
+                    "previous_range": previous.describe_range(),
+                    "variation_percent": _variation_percent(
+                        metrics["valued_dispatches"], previous_metrics["valued_dispatches"]
+                    ),
+                    "variation_tonnes": _variation_percent(
+                        metrics["tonnes"], previous_metrics["tonnes"]
+                    ),
+                    "variation_orders": _variation_percent(
+                        metrics["orders"], previous_metrics["orders"]
+                    ),
                 }
             )
         return points

@@ -117,6 +117,19 @@ class ManagerialDeliveryConfig:
         )
 
 
+@dataclass(frozen=True)
+class CommercialAlert:
+    product_id: int
+    product_name: str
+    variation_percent: float | None
+    lost_count: int
+    lost_tonnes: float
+    top_client_name: str
+    top_client_tonnes: float
+    current_range: str
+    previous_range: str
+
+
 class ManagerialSummaryService:
     def __init__(
         self,
@@ -163,6 +176,69 @@ class ManagerialSummaryService:
             attention_lines=tuple(attention),
         )
 
+    def commercial_followup(
+        self,
+        summary: ManagerialSummary,
+        *,
+        min_drop_percent: float = 15.0,
+        min_lost_tonnes: float = 1.0,
+        top_n_products: int = 10,
+        max_alerts: int = 3,
+    ) -> list[CommercialAlert]:
+        """Alertas de recompra para el resumen diario, sin proceso de envío propio.
+
+        Criterio configurable: caída de TN >= ``min_drop_percent`` frente al
+        período equivalente **y** al menos un cliente sin recompra con
+        referencia >= ``min_lost_tonnes``. Si no hay datos o no se cumple el
+        criterio, devuelve [] y el render no inventa conclusiones.
+        """
+        period = summary.month_snapshot.period
+        previous = summary.month_snapshot.previous_period
+        try:
+            current_tops = self.dashboard_service.top_products(period, limit=top_n_products)
+            previous_tops = self.dashboard_service.top_products(previous, limit=top_n_products)
+        except Exception:
+            return []
+        # Un producto que se fugó por completo tiene 0 TN actual y nunca entra
+        # al top del período actual: hay que unir ambos tops por product_id.
+        tops: dict[int, dict] = {}
+        for top in (*current_tops, *previous_tops):
+            tops.setdefault(int(top["product_id"]), top)
+        ordered = sorted(
+            tops.values(),
+            key=lambda t: -max(float(t.get("tonnes") or 0), float(t.get("previous_tonnes") or 0)),
+        )[:top_n_products]
+        alerts: list[CommercialAlert] = []
+        for top in ordered:
+            pid = int(top["product_id"])
+            rep = self.dashboard_service.product_repurchase_summary(period, previous, product_id=pid)
+            var = rep["variation_percent"]
+            if var is None or var > -abs(min_drop_percent):
+                continue
+            if rep["count_sin_recompra"] <= 0 or rep["lost_tonnes"] < min_lost_tonnes:
+                continue
+            rows = self.dashboard_service.product_client_repurchase(period, previous, product_id=pid)
+            lost = sorted(
+                [r for r in rows if r["status"] == "sin_recompra"],
+                key=lambda r: -r["previous_kilos"],
+            )
+            top_client = lost[0] if lost else None
+            alerts.append(
+                CommercialAlert(
+                    product_id=pid,
+                    product_name=top["name"],
+                    variation_percent=var,
+                    lost_count=rep["count_sin_recompra"],
+                    lost_tonnes=rep["lost_tonnes"],
+                    top_client_name=top_client["client_name"] if top_client else "",
+                    top_client_tonnes=top_client["previous_tonnes"] if top_client else 0.0,
+                    current_range=period.describe_range(),
+                    previous_range=previous.describe_range(),
+                )
+            )
+        alerts.sort(key=lambda a: -a.lost_tonnes)
+        return alerts[:max_alerts]
+
     def render_whatsapp(self, summary: ManagerialSummary) -> str:
         t = summary.today_snapshot
         m = summary.month_snapshot
@@ -200,6 +276,20 @@ class ManagerialSummaryService:
             ]
         elif summary.attention_lines:
             lines += ["", "*Atención*", f"🟢 {summary.attention_lines[0]}"]
+        for alert in self.commercial_followup(summary):
+            var = f"{alert.variation_percent:.1f}%".replace(".", ",")
+            lines += [
+                "",
+                "📉 *Seguimiento comercial*",
+                f"{alert.product_name}: {var} en TN vs. período equivalente "
+                f"({alert.previous_range} → {alert.current_range}).",
+                f"{alert.lost_count} cliente(s) sin recompra "
+                f"({_localized_number(alert.lost_tonnes, 2)} TN de referencia).",
+                f"Mayor oportunidad: {alert.top_client_name} — "
+                f"{_localized_number(alert.top_client_tonnes, 2)} TN.",
+                "Consultar informe completo en FEMAG.",
+            ]
+            break  # una sola alerta en WhatsApp para no sobrecargar el mensaje
         lines += ["", "_FEMAG · Información gerencial_"]
         return "\n".join(lines)
 
@@ -229,6 +319,38 @@ class ManagerialSummaryService:
         ) or "<tr><td colspan='6' style='padding:12px;color:#64748b'>Sin deuda vencida.</td></tr>"
         attention = "".join(
             f"<li style='margin:6px 0'>{html.escape(line)}</li>" for line in summary.attention_lines
+        )
+        alerts = self.commercial_followup(summary)
+        commercial_blocks = []
+        for alert in alerts:
+            rows = self.dashboard_service.product_client_repurchase(
+                summary.month_snapshot.period,
+                summary.month_snapshot.previous_period,
+                product_id=alert.product_id,
+            )
+            lost = sorted(
+                [r for r in rows if r["status"] == "sin_recompra"],
+                key=lambda r: -r["previous_kilos"],
+            )[:5]
+            items = "".join(
+                f"<li style='margin:4px 0'>{html.escape(r['client_name'])} — "
+                f"{r['previous_tonnes']:.3f} TN de referencia "
+                f"(últ. {r['previous_last_date'] or '—'})</li>"
+                for r in lost
+            ) or "<li>Sin detalle.</li>"
+            var = f"{alert.variation_percent:.1f}%".replace(".", ",")
+            commercial_blocks.append(
+                f"<h3 style='font-size:14px;margin:12px 0 6px'>{html.escape(alert.product_name)} · {var} TN</h3>"
+                f"<p style='color:#64748b;margin:0 0 6px'>{html.escape(alert.previous_range)} → "
+                f"{html.escape(alert.current_range)} · {alert.lost_count} sin recompra "
+                f"({alert.lost_tonnes:.3f} TN). Ver informe completo en FEMAG.</p>"
+                f"<ul style='padding-left:20px;margin:0'>{items}</ul>"
+            )
+        commercial_section = (
+            "<div style='background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:18px;margin-top:12px'>"
+            "<h2 style='font-size:17px;margin:0 0 10px'>Seguimiento comercial (recompra)</h2>"
+            + ("".join(commercial_blocks) if commercial_blocks else "<p style='color:#64748b'>Sin alertas de recompra con el criterio actual.</p>")
+            + "</div>"
         )
         return f"""<!doctype html>
 <html lang="es"><body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#172033">
@@ -269,6 +391,7 @@ class ManagerialSummaryService:
 <h2 style="font-size:17px;margin:0 0 10px">Situaciones que requieren atención</h2>
 <ul style="padding-left:20px;margin:0">{attention}</ul>
 </div>
+{commercial_section}
 <div style="color:#64748b;font-size:11px;margin-top:16px">Generado automáticamente por FEMAG. Los indicadores usan la misma lógica del Dashboard Gerencial.</div>
 </div></body></html>"""
 
