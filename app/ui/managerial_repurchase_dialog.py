@@ -76,7 +76,7 @@ class RepurchaseBarChart(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("repurchaseChart")
-        self.setMinimumHeight(190)
+        self.setMinimumHeight(160)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.prev_tn = 0.0
         self.cur_tn = 0.0
@@ -203,7 +203,12 @@ class ManagerialRepurchaseDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("managerialRepurchaseDialog")
         self.setWindowTitle("Análisis de recompra por producto (períodos equivalentes)")
-        self.resize(1100, 660)
+        self.setWindowFlags(
+            self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint
+        )
+        self.setSizeGripEnabled(True)
+        self.resize(1240, 820)
+        self.setMinimumSize(900, 600)
         self.service = service or ManagerialDashboardService()
         current = current or ReportPeriod.preset("este mes")
         previous = current.previous_equivalent()
@@ -273,9 +278,9 @@ class ManagerialRepurchaseDialog(QDialog):
         export.setObjectName("repurchaseExportButton")
         export.clicked.connect(self.export_excel)
         second.addWidget(export)
-        export_html = QPushButton("Exportar HTML")
+        export_html = QPushButton("Abrir informe web")
         export_html.setObjectName("repurchaseExportHtmlButton")
-        export_html.setToolTip("Genera un informe HTML con gráficos y tablas, listo para compartir")
+        export_html.setToolTip("Genera el informe en una carpeta temporal y lo abre en el navegador")
         export_html.clicked.connect(self.export_html)
         second.addWidget(export_html)
         root.addLayout(second)
@@ -319,8 +324,16 @@ class ManagerialRepurchaseDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, header.Stretch)
+        for column in range(1, self.table.columnCount()):
+            header.setSectionResizeMode(column, header.Interactive)
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(80)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         root.addWidget(self.table, 1)
 
         close = QPushButton("Cerrar")
@@ -418,7 +431,6 @@ class ManagerialRepurchaseDialog(QDialog):
                 if row["status"] == "sin_recompra":
                     item.setBackground(QColor("#fdf0ef"))
                 self.table.setItem(i, j, item)
-        self.table.resizeColumnsToContents()
 
     @staticmethod
     def _fmt_date(value: str | None) -> str:
@@ -458,24 +470,25 @@ class ManagerialRepurchaseDialog(QDialog):
         QMessageBox.information(self, "Exportar recompra", f"Exportado:\n{out}")
 
     def export_html(self) -> None:
-        from app.reports.managerial_repurchase_export import export_repurchase_html
+        from app.reports.managerial_repurchase_export import ManagerialRepurchaseHtmlReport
 
         current, previous = self._current_periods()
         product_id = self.product_combo.currentData()
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar recompra HTML", "recompra_por_producto.html", "HTML (*.html)"
-        )
-        if not path:
-            return
         try:
-            out = export_repurchase_html(
-                self.service, current, path, previous=previous, product_id=product_id,
+            report = ManagerialRepurchaseHtmlReport(
+                service=self.service,
+                current=current,
+                previous=previous,
+                product_id=product_id,
                 product_label=self.product_combo.currentText(),
             )
+            out = report.open()
         except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
-            QMessageBox.warning(self, "Exportar recompra", f"No se pudo exportar:\n{exc}")
+            QMessageBox.warning(self, "Informe web de recompra", f"No se pudo generar:\n{exc}")
             return
-        QMessageBox.information(self, "Exportar recompra", f"Exportado:\n{out}")
+        QMessageBox.information(
+            self, "Informe web de recompra", f"Informe abierto en el navegador:\n{out}"
+        )
 
     def _chart_temp_png(self) -> str | None:
         try:

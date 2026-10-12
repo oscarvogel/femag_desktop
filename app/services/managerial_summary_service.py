@@ -180,8 +180,8 @@ class ManagerialSummaryService:
         self,
         summary: ManagerialSummary,
         *,
-        min_drop_percent: float = 15.0,
-        min_lost_tonnes: float = 1.0,
+        min_drop_percent: float | None = None,
+        min_lost_tonnes: float | None = None,
         top_n_products: int = 10,
         max_alerts: int = 3,
     ) -> list[CommercialAlert]:
@@ -189,9 +189,22 @@ class ManagerialSummaryService:
 
         Criterio configurable: caída de TN >= ``min_drop_percent`` frente al
         período equivalente **y** al menos un cliente sin recompra con
-        referencia >= ``min_lost_tonnes``. Si no hay datos o no se cumple el
-        criterio, devuelve [] y el render no inventa conclusiones.
+        referencia >= ``min_lost_tonnes``. Los umbrales salen de
+        ``FEMAG_MANAGERIAL_REPURCHASE_MIN_DROP_PCT`` (defecto 15) y
+        ``FEMAG_MANAGERIAL_REPURCHASE_MIN_LOST_TN`` (defecto 1.0) salvo que se
+        pasen explícitos. Si no hay datos o no se cumple el criterio, devuelve []
+        y el render no inventa conclusiones.
         """
+        if min_drop_percent is None:
+            try:
+                min_drop_percent = float(os.getenv("FEMAG_MANAGERIAL_REPURCHASE_MIN_DROP_PCT", "15"))
+            except ValueError:
+                min_drop_percent = 15.0
+        if min_lost_tonnes is None:
+            try:
+                min_lost_tonnes = float(os.getenv("FEMAG_MANAGERIAL_REPURCHASE_MIN_LOST_TN", "1.0"))
+            except ValueError:
+                min_lost_tonnes = 1.0
         period = summary.month_snapshot.period
         previous = summary.month_snapshot.previous_period
         try:

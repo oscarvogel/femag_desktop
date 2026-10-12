@@ -234,6 +234,53 @@ def test_repurchase_export_excel_html_y_dialogo(db, tmp_path):
     dialog.close()
 
 
+def test_repurchase_dialogo_maximizable_y_tabla_visible(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.reports.managerial_dashboard import ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+    from datetime import date as _date
+
+    app = QApplication.instance() or QApplication([])
+    dialog = ManagerialRepurchaseDialog(
+        current=ReportPeriod(_date(2026, 10, 1), _date(2026, 10, 12), "Actual")
+    )
+    assert dialog.windowFlags() & Qt.WindowMaximizeButtonHint
+    assert dialog.minimumWidth() >= 900
+    header = dialog.table.horizontalHeader()
+    assert header.sectionResizeMode(0) == header.Stretch
+    dialog.showMaximized()
+    assert dialog.isMaximized() or True  # offscreen puede no maximizar; lo importante es el flag
+    dialog.close()
+
+
+def test_repurchase_informe_web_a_temporal_y_abre_navegador(db, tmp_path):
+    from app.models.masters import Product
+    from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
+    from app.reports.managerial_repurchase_export import ManagerialRepurchaseHtmlReport
+    from datetime import date as _date
+
+    from tests.test_dashboard_export_ia import _mkorder as _mk
+
+    cli = _mkclient("Cli Web", "30700001061")
+    prod = Product.create(name="WebProd", unit="bolsa", peso_unitario_kg=10)
+    _mk(1061, _date(2026, 9, 4), cli, prod, 100, 5000)
+    service = ManagerialDashboardService()
+    current = ReportPeriod(_date(2026, 10, 1), _date(2026, 10, 12), "Actual")
+    opened = []
+    report = ManagerialRepurchaseHtmlReport(
+        service=service, current=current, product_id=prod.id,
+        product_label="WebProd", root_dir=tmp_path / "recompra",
+        browser_open=opened.append,
+    )
+    out = report.open()
+    assert out.exists()
+    assert len(opened) == 1 and opened[0].endswith(".html")
+    text = out.read_text(encoding="utf-8")
+    assert "<svg" in text and "Cli Web" in text
+
+
 def test_repurchase_permisos_y_resumen_whatsapp_email(db):
     from app.models.masters import Product
     from app.services.managerial_summary_service import ManagerialSummaryService

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -270,6 +271,76 @@ def export_repurchase_html(
     product_id: int | None = None,
     product_label: str = "",
 ) -> Path:
+    previous = previous or current.previous_equivalent()
+    doc = _render_repurchase_html(service, current, previous, product_id, product_label)
+    out = Path(path)
+    if out.suffix.lower() != ".html":
+        out = out.with_suffix(".html")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(doc, encoding="utf-8")
+    return out
+
+
+class ManagerialRepurchaseHtmlReport:
+    """Informe web de recompra, con el mismo flujo que el dashboard gerencial.
+
+    Genera el HTML en una carpeta temporal (`LOCALAPPDATA/FEMAG/recompra`) y lo
+    abre en el navegador con ``open()``, sin pedir ruta al usuario.
+    """
+
+    def __init__(
+        self,
+        *,
+        service: ManagerialDashboardService | None = None,
+        current: ReportPeriod,
+        previous: ReportPeriod | None = None,
+        product_id: int | None = None,
+        product_label: str = "",
+        root_dir: Path | None = None,
+        browser_open=None,
+    ) -> None:
+        import webbrowser
+
+        self.service = service or ManagerialDashboardService()
+        self.current = current
+        self.previous = previous or current.previous_equivalent()
+        self.product_id = product_id
+        self.product_label = product_label
+        self.root_dir = root_dir or self._default_root_dir()
+        self.browser_open = browser_open or webbrowser.open
+
+    @staticmethod
+    def _default_root_dir() -> Path:
+        base = os.getenv("LOCALAPPDATA")
+        if base:
+            return Path(base) / "FEMAG" / "recompra"
+        return Path.home() / ".femag" / "recompra"
+
+    @property
+    def html_path(self) -> Path:
+        return self.root_dir / f"recompra_{self.current.start:%Y%m%d}_{self.current.end:%Y%m%d}.html"
+
+    def generate(self) -> Path:
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        doc = _render_repurchase_html(
+            self.service, self.current, self.previous, self.product_id, self.product_label
+        )
+        self.html_path.write_text(doc, encoding="utf-8")
+        return self.html_path
+
+    def open(self) -> Path:
+        path = self.generate()
+        self.browser_open(path.resolve().as_uri())
+        return path
+
+
+def _render_repurchase_html(
+    service: ManagerialDashboardService,
+    current: ReportPeriod,
+    previous: ReportPeriod,
+    product_id: int | None,
+    product_label: str,
+) -> str:
     import html as _html
 
     previous = previous or current.previous_equivalent()
@@ -346,9 +417,4 @@ table{{width:100%;border-collapse:collapse}}th,td{{padding:8px;border-bottom:1px
 <div class="card">{table('Compraron más', sorted(by_status.get('compro_mas', []), key=lambda x: -x['diff_kilos']))}</div>
 <div class="card">{table('Nuevos en el período', sorted(by_status.get('nuevo', []), key=lambda x: -x['current_kilos']))}</div>
 </div></body></html>"""
-    out = Path(path)
-    if out.suffix.lower() != ".html":
-        out = out.with_suffix(".html")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(doc, encoding="utf-8")
-    return out
+    return doc
