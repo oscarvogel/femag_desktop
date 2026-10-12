@@ -319,7 +319,7 @@ class ManagerialRepurchaseDialog(QDialog):
         self.table = QTableWidget(0, 9)
         self.table.setObjectName("repurchaseTable")
         self.table.setHorizontalHeaderLabels(
-            ("Cliente", "Vendedor", "Últ. compra ant.", "TN ant.", "TN actual", "Dif. TN", "Var. kilos %", "Valorizado actual", "Situación")
+            ("Cliente", "Vendedor", "Últ. compra ant.", "TN ant.", "TN actual", "Dif. TN", "Var. %", "Val. actual", "Situación")
         )
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -412,6 +412,7 @@ class ManagerialRepurchaseDialog(QDialog):
             f"({'cuadra' if summary['reconciliation_ok'] else 'NO cuadra'})."
         )
         self.table.setRowCount(len(rows))
+        alert_bg, alert_fg = self._alert_colors()
         for i, row in enumerate(rows):
             values = (
                 row["client_name"],
@@ -429,8 +430,29 @@ class ManagerialRepurchaseDialog(QDialog):
                 if j in (3, 4, 5, 6, 7):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if row["status"] == "sin_recompra":
-                    item.setBackground(QColor("#fdf0ef"))
+                    # Fondo y texto explícitos: el fondo claro fijo con el texto
+                    # claro del tema oscuro quedaba ilegible. Se eligen según el
+                    # tema activo para mantener contraste en modo claro y oscuro.
+                    item.setBackground(alert_bg)
+                    item.setForeground(alert_fg)
                 self.table.setItem(i, j, item)
+
+    def _alert_colors(self, *, dark: bool | None = None) -> tuple[QColor, QColor]:
+        """Fondo y texto de la fila 'sin recompra' con contraste en ambos temas.
+
+        El tema FEMAG es por stylesheet (no por paleta), así que se consulta la
+        preferencia guardada; la luminosidad de la paleta queda como respaldo.
+        """
+        if dark is None:
+            try:
+                from app.ui.theme import Theme, load_theme
+
+                dark = load_theme() is Theme.DARK
+            except Exception:
+                dark = self.palette().window().color().lightness() < 128
+        if dark:
+            return QColor("#5a2326"), QColor("#ffd9d4")
+        return QColor("#fdf0ef"), QColor("#8a1f24")
 
     @staticmethod
     def _fmt_date(value: str | None) -> str:

@@ -255,6 +255,46 @@ def test_repurchase_dialogo_maximizable_y_tabla_visible(db):
     dialog.close()
 
 
+def test_repurchase_alerta_con_contraste_en_tema_claro_y_oscuro(db):
+    from PyQt5.QtGui import QColor
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Product
+    from app.reports.managerial_dashboard import ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+    from datetime import date as _date
+
+    from tests.test_dashboard_export_ia import _mkorder as _mk
+
+    app = QApplication.instance() or QApplication([])
+    cli = _mkclient("Cli Contraste", "30700001071")
+    prod = Product.create(name="ContProd", unit="bolsa", peso_unitario_kg=10)
+    _mk(1071, _date(2026, 9, 4), cli, prod, 100, 5000)
+    current = ReportPeriod(_date(2026, 10, 1), _date(2026, 10, 12), "Actual")
+    dialog = ManagerialRepurchaseDialog(current=current)
+    try:
+        # Los pares de cada tema tienen contraste por construcción
+        for dark in (False, True):
+            bg, fg = dialog._alert_colors(dark=dark)
+            assert abs(bg.lightness() - fg.lightness()) > 90
+        # Con tema oscuro guardado, el refresh usa el par oscuro en la tabla
+        import app.ui.theme as _theme
+
+        original = _theme.load_theme
+        _theme.load_theme = lambda *a, **k: _theme.Theme.DARK
+        try:
+            dialog.refresh()
+        finally:
+            _theme.load_theme = original
+        assert dialog.table.rowCount() >= 1
+        item = dialog.table.item(0, 0)
+        dark_bg, dark_fg = dialog._alert_colors(dark=True)
+        assert item.background().color() == dark_bg
+        assert item.foreground().color() == dark_fg
+    finally:
+        dialog.close()
+
+
 def test_repurchase_informe_web_a_temporal_y_abre_navegador(db, tmp_path):
     from app.models.masters import Product
     from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
