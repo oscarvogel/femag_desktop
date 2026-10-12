@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 
 from app.models.security import User
 from app.services.menu_service import MenuNode, MenuService, PLACEHOLDER_MESSAGE
@@ -209,3 +210,131 @@ def _to_item(node: MenuNode) -> MenuItemView:
         disabled_reason=node.disabled_reason,
         children=[_to_item(child) for child in node.children],
     )
+
+
+# -- Buscador del menu lateral --------------------------------------------
+#
+# Por que la coincidencia no distingue tildes ni mayusculas
+# ------------------------------------------------------
+# El menu esta lleno de palabras acentuadas ("Configuración", "Producción",
+# "Auditoría") y el operador las teclea como las escribe de memoria. Sin
+# normalizar, buscar "configuracion" no encuentra "Configuración" y el operador
+# concluye que la pantalla no existe. Es el mismo criterio que usan las demas
+# busquedas del proyecto (``master_abm.normalize_master_text``,
+# ``permission_service``), asi que el menu no puede ser el unico que exija
+# acentos.
+#
+# Por que NO se busca tambien por ``route_key``
+# -------------------------------------------
+# PyFE matchea contra la clave tecnica de cada boton. Aca eso dejaria pasar
+# cosas que el operador nunca escribio: "product_profitability" apareceria como
+# resultado de "profit". Se matchea solo por titulo, que es lo que se ve.
+
+
+def normalizar_texto_menu(texto: object) -> str:
+    """Minusculas y sin tildes: 'Configuración' -> 'configuracion'.
+
+    A diferencia de ``normalize_master_text`` (que saca los espacios y todo lo
+    que no es alfanumerico porque ordena columnas), aca se conservan los espacios
+    y la puntuacion: la busqueda es por *contiene*, y "cuenta corriente" tiene
+    que seguir siendo una frase buscable.
+    """
+    descompuesto = unicodedata.normalize("NFD", str(texto or "").casefold())
+    return "".join(c for c in descompuesto if not unicodedata.combining(c)).strip()
+
+
+def _coincide(consulta: str, titulo: str) -> bool:
+    return consulta in normalizar_texto_menu(titulo)
+
+
+def _contar_acciones(sections: list[MenuSectionView]) -> int:
+    """Cuantas acciones hay en total, sin contar dos veces los titulos de grupo.
+
+    Un grupo no es una accion: es la carpeta que la contiene. Contarlo como
+    resultado haria que el menu nunca se viera vacio.
+    """
+    total = 0
+    for section in sections:
+        for item in section.items:
+            total += len(item.children) if item.children else 1
+    return total
+
+
+@dataclass(frozen=True)
+class SidebarSearchResult:
+    """Lo que el menu muestra para una consulta, y cuantas acciones quedaron."""
+
+    sections: list[MenuSectionView]
+    matches: int
+    query: str
+
+    @property
+    def empty(self) -> bool:
+        """Si hay que avisar que no se encontro nada.
+
+        Con el menu entero no hay nada que avisar aunque `matches` valga cero
+        (que no puede, pero el contrato no depende de eso): el aviso es de "no
+        coincide con lo que escribiste", y sin escribir no hay consulta.
+        """
+        return bool(self.query) and self.matches == 0
+
+
+def filtrar_sidebar(sections: list[MenuSectionView], consulta: str) -> SidebarSearchResult:
+    """Deja solo las acciones que coinciden con ``consulta``.
+
+    Reglas, que son las de PyFE adaptadas a los grupos de FEMAG:
+
+    - **Sin consulta** devuelve el menu tal como estaba. El buscador no toca el
+      estado del acordeon: si no se escribe nada, no cambio nada.
+    - **Una accion suelta** se muestra si su titulo coincide.
+    - **El titulo de un grupo** muestra el grupo entero, no solo los hijos que
+      coinciden. Buscar "maestros" tiene que mostrar todos los maestros.
+    - **El titulo de un hijo** muestra el grupo con ese hijo, y solo ese. Un
+      grupo desplegado por un unico resultado es ruido: si el operador escribio
+      "f150", quiere ver F150, no las ocho pantallas de Operaciones.
+
+    El filtro no consulta la base ni revisa permisos: opera sobre el spec que ya
+    se construyo para ese usuario, asi que no puede revelar nada que el menu no
+    mostrara antes.
+    """
+    consulta = normalizar_texto_menu(consulta)
+
+    if not consulta:
+        return SidebarSearchResult(
+            sections=list(sections),
+            matches=_contar_acciones(sections),
+            query=consulta,
+        )
+
+    secciones_filtradas: list[MenuSectionView] = []
+    matches = 0
+
+    for section in sections:
+        items_filtrados: list[MenuItemView] = []
+
+        for item in section.items:
+            if not item.children:
+                if _coincide(consulta, item.title):
+                    items_filtrados.append(item)
+                    matches += 1
+                continue
+
+            grupo_coincide = _coincide(consulta, item.title)
+            hijos = [
+                hijo for hijo in item.children
+                if grupo_coincide or _coincide(consulta, hijo.title)
+            ]
+            if not grupo_coincide and not hijos:
+                continue
+
+            items_filtrados.append(replace(item, children=hijos))
+            matches += len(hijos)
+
+        # Una seccion sin items no se agrega: si no, el sidebar dibujaria un
+        # grupo vacio y el operador veria que "algo" coincide sin poder llegar.
+        if items_filtrados:
+            secciones_filtradas.append(
+                MenuSectionView(title=section.title, items=items_filtrados)
+            )
+
+    return SidebarSearchResult(sections=secciones_filtradas, matches=matches, query=consulta)
