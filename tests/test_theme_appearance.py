@@ -14,8 +14,12 @@ import pytest
 
 #: SHA256 del QSS claro con la ruta del asset neutralizada. Si cambia, alguien
 #: toco un color de `glass_v2.py` a proposito y hay que actualizarlo a mano.
+#:
+#: Ultimo cambio: #694 agrego las reglas de `#sidebarSearch` y
+#: `#sidebarSearchEmpty`. El diff de `glass_v2.py` en ese PR fue de 33 linezas
+#: agregadas y 0 borradas: el claro no cambio, se le sumo el buscador del menu.
 LIGHT_STYLESHEET_SHA256 = (
-    "b9129a8c72b875177087067dc0b828ad93e9308f394bb51175c373333d28c65c"
+    "a53cb116afe956746996c1521811e1a4cd40cae4d90f84d5aa7133df3e42eb16"
 )
 
 _URL_RE = re.compile(r'url\("[^"]*"\)')

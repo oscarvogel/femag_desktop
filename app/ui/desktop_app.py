@@ -9,6 +9,7 @@ import webbrowser
 
 from peewee import InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, QEvent, QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -32,6 +33,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QShortcut,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -120,6 +122,7 @@ from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
+from app.ui.menu import filtrar_sidebar
 from app.ui.master_abm import (
     ClientAddressEntryDialog,
     build_client_abm_page,
@@ -485,6 +488,11 @@ class FemagDesktopWindow(QMainWindow):
         self.nav = QListWidget()
         self._route_indexes: dict[str, int] = {}
         self._expanded_sidebar_groups: set[str] = set()
+        # Texto del buscador del menu. Vive aca, y no en el QLineEdit, porque
+        # `_populate_sidebar` lo necesita para repoblar el menu despues de que el
+        # operador colapse un grupo o vuelva a una ruta: si solo existiera en el
+        # widget, cada repoblado perderia el filtro.
+        self._sidebar_query = ""
         self._current_route = "dashboard"
         self._build()
 
@@ -755,15 +763,102 @@ class FemagDesktopWindow(QMainWindow):
         self.nav.setObjectName("sidebar")
         container.setFixedWidth(215)
         self.nav.setSpacing(2)
+        layout.addWidget(self._sidebar_search_widget())
         self._populate_sidebar()
         layout.addWidget(self.nav, 1)
         return container
 
+    def _sidebar_search_widget(self) -> QWidget:
+        """El buscador del menu lateral, con el aviso de sin resultados (#694).
+
+        Va arriba de la lista y no en el topbar a proposito: el topbar ya tiene
+        `#globalSearch`, que busca datos (ordenes, clientes, choferes) y abre un
+        dialogo de resultados. Este busca *menu*: escribe "ventas" y quedan a la
+        vista las pantallas que tiene. Dos buscan cosas distintas y el operador
+        tiene que saber cual es cual antes de escribir.
+        """
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self.sidebar_search = QLineEdit()
+        self.sidebar_search.setObjectName("sidebarSearch")
+        self.sidebar_search.setPlaceholderText("Buscar en el menú...")
+        self.sidebar_search.setClearButtonEnabled(True)
+        self.sidebar_search.textChanged.connect(self._on_sidebar_search_changed)
+        self.sidebar_search.returnPressed.connect(self._ir_al_primer_resultado_menu)
+        layout.addWidget(self.sidebar_search)
+
+        escape = QShortcut(QKeySequence(Qt.Key_Escape), self.sidebar_search)
+        # WidgetShortcut y no WindowShortcut: Escape limpia el buscador solo si
+        # el foco esta en el. Si no, se comeria el Escape de los formularios.
+        escape.setContext(Qt.WidgetShortcut)
+        escape.activated.connect(self._limpiar_buscador_menu)
+
+        self.sidebar_search_empty = QLabel("")
+        self.sidebar_search_empty.setObjectName("sidebarSearchEmpty")
+        self.sidebar_search_empty.setWordWrap(True)
+        self.sidebar_search_empty.setVisible(False)
+        layout.addWidget(self.sidebar_search_empty)
+
+        return box
+
+    def _on_sidebar_search_changed(self, texto: str) -> None:
+        """Filtra el menu mientras se escribe.
+
+        No navega: `_populate_sidebar` repuebla la lista dentro de un
+        ``QSignalBlocker``, y la navegacion del shell sale de
+        ``currentRowChanged``. Escribir "clientes" no puede cambiar de pantalla
+        solo porque el indice marcado quedara en otro lado.
+        """
+        self._sidebar_query = texto or ""
+        self._populate_sidebar()
+
+    def _limpiar_buscador_menu(self) -> None:
+        """Vuelve al menu completo con el acordeon como estaba.
+
+        Se restaura el estado de grupos anterior en vez de dejar el que dejaria
+        el filtro: si el operador busco "f150", abrio un grupo y quiere seguir
+        trabajando, el menu tiene que volver a como estaba antes de buscar.
+        """
+        if not self._sidebar_query:
+            return
+        # clear() dispara textChanged con "" y por lo tanto vuelve a poblar; se
+        # deja que lo haga esa via y no se llama dos veces a _populate_sidebar.
+        self.sidebar_search.clear()
+
+    def _ir_al_primer_resultado_menu(self) -> None:
+        """Enter lleva al primer resultado, para no tener que usar el mouse.
+
+        Salta los titulos de grupo: son carpeta, no una pantalla a la que entrar.
+        """
+        for row in range(self.nav.count()):
+            item = self.nav.item(row)
+            if not item:
+                continue
+            route = item.data(Qt.UserRole)
+            if isinstance(route, str) and route.startswith("group:"):
+                continue
+            # El setCurrentRow emite currentRowChanged, que ya llama a _navigate.
+            # Se bloquea para no recorrer la pagina dos veces por un solo Enter.
+            with QSignalBlocker(self.nav):
+                self.nav.setCurrentRow(row)
+            self._navigate(row)
+            return
+
     def _populate_sidebar(self) -> None:
+        secciones = self.shell.sidebar.sections if self.shell.sidebar else []
+        resultado = filtrar_sidebar(secciones, self._sidebar_query)
+        buscando = bool(resultado.query)
+
         with QSignalBlocker(self.nav):
             self.nav.clear()
-            current_row = 0
-            for section in self.shell.sidebar.sections if self.shell.sidebar else []:
+            # Buscando, la fila 0 es casi siempre el titulo de un grupo: marcarlo
+            # hace creer al operador que esta dentro de ese grupo. Con el menu
+            # entero, en cambio, siempre hay algo marcado, que es como venía antes.
+            current_row = -1 if buscando else 0
+            for section in resultado.sections:
                 for item in section.items:
                     row_index = self.nav.count()
                     row = QListWidgetItem(item.title)
@@ -772,10 +867,14 @@ class FemagDesktopWindow(QMainWindow):
                         row.setData(Qt.UserRole, group_key)
                         row.setToolTip("Mostrar u ocultar opciones relacionadas.")
                         self.nav.addItem(row)
-                        child_routes = {child.route_key for child in item.children}
-                        if self._current_route in child_routes:
-                            self._expanded_sidebar_groups.add(item.title)
-                        if item.title in self._expanded_sidebar_groups:
+                        # Buscando, todos los grupos se despliegan. El filtro ya
+                        # decidio que hijos mostrar, y colapsar el grupo que
+                        # coincide taparia justo el resultado que se buscó.
+                        if not buscando:
+                            child_routes = {child.route_key for child in item.children}
+                            if self._current_route in child_routes:
+                                self._expanded_sidebar_groups.add(item.title)
+                        if buscando or item.title in self._expanded_sidebar_groups:
                             for child in item.children:
                                 child_row_index = self.nav.count()
                                 child_row = QListWidgetItem(f"    {child.title}")
@@ -796,10 +895,19 @@ class FemagDesktopWindow(QMainWindow):
                     self.nav.addItem(row)
                     if route == self._current_route:
                         current_row = row_index
-            if self.nav.count():
+            if self.nav.count() and current_row >= 0:
                 self.nav.setCurrentRow(current_row)
 
+        # El aviso se escribe siempre, y solo se muestra cuando no quedo nada:
+        # borrarlo al primer caracter es como parpadea el sidebar.
+        self.sidebar_search_empty.setText(f"Sin resultados para «{resultado.query}»")
+        self.sidebar_search_empty.setVisible(resultado.empty)
+
     def _toggle_sidebar_group(self, group_title: str) -> None:
+        # Con el buscador puesto, un titulo de grupo es solo una carpeta de
+        # resultados: colapsarla esconderia lo que el operador acaba de buscar.
+        if self._sidebar_query:
+            return
         if group_title in self._expanded_sidebar_groups:
             self._expanded_sidebar_groups.remove(group_title)
         else:
@@ -836,6 +944,12 @@ class FemagDesktopWindow(QMainWindow):
             self._refresh_route(route)
 
     def _navigate_to_route(self, route: str) -> None:
+        # Llegar aca con un filtro puesto significa que el operador quiere ir a
+        # una pantalla puntual (un aviso, por ejemplo). Si esa pantalla esta
+        # filtrada fuera, la fila no existe y la navegacion se pierde en
+        # silencio: primero se levanta el filtro.
+        if self._sidebar_query:
+            self.sidebar_search.clear()
         for i in range(self.nav.count()):
             item = self.nav.item(i)
             if item and item.data(Qt.UserRole) == route:

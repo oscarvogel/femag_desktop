@@ -72,6 +72,39 @@ def glass_v2_stylesheet(theme: Theme = Theme.LIGHT) -> str:
         font-weight: 700;
     }}
 
+    /* Buscador del menu lateral (#694).
+
+       Toma los mismos tokens que #globalSearch a proposito: son los que ya
+       tienen su version oscura en theme.DARK_OVERRIDES, asi que el buscador se
+       ve igual de bien en los dos temas sin duplicar la paleta. */
+    QLineEdit#sidebarSearch {{
+        min-height: 34px;
+        background-color: rgba(255,255,255,220);
+        border: 1px solid #cbd9e8;
+        border-radius: 10px;
+        padding: 0 10px;
+        color: #294b70;
+    }}
+
+    QLineEdit#sidebarSearch:focus {{
+        border: 1px solid #6b9fe0;
+        background-color: rgba(255,255,255,245);
+    }}
+
+    QLineEdit#sidebarSearch::placeholder {{
+        color: #64748b;
+    }}
+
+    /* El aviso de "sin resultados" es informacion, no un error: por eso va en
+       el color secundario y no en el color de las alertas. */
+    QLabel#sidebarSearchEmpty {{
+        background: transparent;
+        border: none;
+        color: #64748b;
+        font-size: 12px;
+        padding: 2px 4px 0 4px;
+    }}
+
     QFrame#topbar {{
         background: transparent;
         border: none;
