@@ -36,6 +36,19 @@ def _compact_money(value: float) -> str:
     return _money(amount)
 
 
+def _variation_text(metric) -> str:
+    """Variación contra el período equivalente, con el texto del Dashboard Gerencial.
+
+    ``variation_percent`` es ``None`` cuando el período anterior fue 0 y el actual no:
+    ahí no hay contra qué comparar y se dice, en vez de inventar un porcentaje.
+    """
+    variation = metric.variation_percent
+    if variation is None:
+        return "Sin base comparable" if metric.current else "0,0% vs período anterior"
+    prefix = "+" if variation > 0 else ""
+    return f"{prefix}{_localized_number(variation, 1)}% vs período anterior"
+
+
 @dataclass(frozen=True)
 class ManagerialSummary:
     as_of: date
@@ -164,7 +177,8 @@ class ManagerialSummaryService:
             "",
             "*Actividad*",
             f"💰 Despachos hoy: {_compact_money(t.valued_dispatches.current)}",
-            f"📅 Acumulado del mes: {_compact_money(m.valued_dispatches.current)}",
+            f"📅 Acumulado del mes: {_compact_money(m.valued_dispatches.current)} "
+            f"({_variation_text(m.valued_dispatches)})",
             activity_line,
             "",
             "*Cartera*",
