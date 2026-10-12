@@ -67,34 +67,51 @@ def _valued_dispatch(
 
 
 def test_variation_text_cubre_alza_baja_ideas_y_sin_base_comparable():
-    from app.reports.managerial_dashboard import MetricComparison
+    from types import SimpleNamespace
+
+    from app.reports.managerial_dashboard import MetricComparison, ReportPeriod
     from app.services.managerial_summary_service import _variation_text
 
-    # El -32,2% es el que marco el dueno en el Dashboard Gerencial.
-    assert _variation_text(MetricComparison(67_800.0, 100_000.0)) == "-32,2% vs período anterior"
-    assert _variation_text(MetricComparison(112_300.0, 100_000.0)) == "+12,3% vs período anterior"
-    assert _variation_text(MetricComparison(0.0, 0.0)) == "0,0% vs período anterior"
-    assert _variation_text(MetricComparison(50_000.0, 0.0)) == "Sin base comparable"
+    snapshot = SimpleNamespace(
+        previous_period=ReportPeriod(date(2026, 8, 1), date(2026, 8, 20), "Este mes anterior")
+    )
+
+    # El -32,2% es el que marco el dueno en el Dashboard Gerencial. El texto
+    # lleva el rango comparado para que el numero se pueda auditar por WhatsApp,
+    # donde no esta la tarjeta del dashboard al lado.
+    assert _variation_text(MetricComparison(67_800.0, 100_000.0), snapshot) == (
+        "-32,2% vs 01/08/2026 → 20/08/2026"
+    )
+    assert _variation_text(MetricComparison(112_300.0, 100_000.0), snapshot) == (
+        "+12,3% vs 01/08/2026 → 20/08/2026"
+    )
+    assert _variation_text(MetricComparison(0.0, 0.0), snapshot) == (
+        "0,0% vs 01/08/2026 → 20/08/2026"
+    )
+    assert _variation_text(MetricComparison(50_000.0, 0.0), snapshot) == "Sin base comparable"
 
 
 def test_whatsapp_informa_la_variacion_de_despachos_del_mes(db):
     from app.services.managerial_summary_service import ManagerialSummaryService
 
     # Corte 20/09/2026: el mes va del 01/09 al 20/09 y el período equivalente
-    # anterior del 12/08 al 31/08, por eso las dos órdenes caen en esas ventanas.
+    # anterior del 01/08 al 20/08 (mismo rango de días del mes anterior, no los
+    # 20 días previos), por eso las dos órdenes caen en esas ventanas.
     _valued_dispatch(number=1, order_date=date(2026, 8, 20), total=100_000.0)
     _valued_dispatch(number=2, order_date=date(2026, 9, 10), total=67_800.0)
 
     service = ManagerialSummaryService()
     summary = service.build(as_of=date(2026, 9, 20))
 
+    assert summary.month_snapshot.previous_period.start == date(2026, 8, 1)
+    assert summary.month_snapshot.previous_period.end == date(2026, 8, 20)
     assert summary.month_snapshot.valued_dispatches.previous == 100_000.0
     assert summary.month_snapshot.valued_dispatches.variation_percent == -32.2
 
     whatsapp = service.render_whatsapp(summary)
 
     assert (
-        "📅 Acumulado del mes: $ 67,8 mil (-32,2% vs período anterior)" in whatsapp
+        "📅 Acumulado del mes: $ 67,8 mil (-32,2% vs 01/08/2026 → 20/08/2026)" in whatsapp
     )
 
 

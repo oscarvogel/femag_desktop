@@ -39,11 +39,11 @@ def _number(value: float, decimals: int = 2) -> str:
     return f"{value:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _variation_text(current: float, previous: float, variation: float | None) -> str:
+def _variation_text(current: float, variation: float | None, compared_range: str) -> str:
     if variation is None:
-        return "Sin base comparable" if current else "0,0% vs período anterior"
+        return "Sin base comparable" if current else f"0,0% vs {compared_range}"
     prefix = "+" if variation > 0 else ""
-    return f"{prefix}{_number(variation, 1)}% vs período anterior"
+    return f"{prefix}{_number(variation, 1)}% vs {compared_range}"
 
 
 class _KpiCard(QFrame):
@@ -255,21 +255,22 @@ class ManagerialDashboardPage(QWidget):
             + ", ".join(snapshot.effective_statuses)
             + ". Las devoluciones se muestran en su circuito operativo y no se descuentan todavía del KPI valorizado."
         )
+        compared = snapshot.previous_period.describe_range()
         self.valued_card.set_metric(
             _money(snapshot.valued_dispatches.current),
             _variation_text(
                 snapshot.valued_dispatches.current,
-                snapshot.valued_dispatches.previous,
                 snapshot.valued_dispatches.variation_percent,
+                compared,
             ),
         )
         self.tonnes_card.set_metric(
             f"{_number(snapshot.tonnes.current, 3)} TN",
-            _variation_text(snapshot.tonnes.current, snapshot.tonnes.previous, snapshot.tonnes.variation_percent),
+            _variation_text(snapshot.tonnes.current, snapshot.tonnes.variation_percent, compared),
         )
         self.orders_card.set_metric(
             str(int(snapshot.orders.current)),
-            _variation_text(snapshot.orders.current, snapshot.orders.previous, snapshot.orders.variation_percent),
+            _variation_text(snapshot.orders.current, snapshot.orders.variation_percent, compared),
         )
         self.receivables_card.set_metric(_money(snapshot.total_receivables), "Saldo consolidado actual")
         self.overdue_card.set_metric(_money(snapshot.overdue_receivables), f"Vencido al {snapshot.period.end:%d/%m/%Y}")
@@ -277,8 +278,8 @@ class ManagerialDashboardPage(QWidget):
             _money(snapshot.average_ticket.current),
             _variation_text(
                 snapshot.average_ticket.current,
-                snapshot.average_ticket.previous,
                 snapshot.average_ticket.variation_percent,
+                compared,
             ),
         )
 

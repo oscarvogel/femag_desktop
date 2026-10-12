@@ -23,6 +23,27 @@ from app.models.masters import Client, Product
 DEFAULT_EFFECTIVE_ORDER_STATUSES = (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED)
 DEFAULT_CURRENCY = "ARS"
 
+_ONE_DAY = timedelta(days=1)
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        return 31
+    return (date(year, month + 1, 1) - _ONE_DAY).day
+
+
+def _day_in_month(year: int, month: int, day: int) -> date:
+    """Resolve a day-of-month in another month, clamping to its real length.
+
+    ``day_in_month(2025, 2, 31)`` is 28/02/2025: February never has 31 days,
+    and comparing against it must not raise.
+    """
+    return date(year, month, min(day, _days_in_month(year, month)))
+
+
+def _previous_month(year: int, month: int) -> tuple[int, int]:
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
 
 @dataclass(frozen=True)
 class ReportPeriod:
@@ -38,10 +59,59 @@ class ReportPeriod:
     def days(self) -> int:
         return (self.end - self.start).days + 1
 
+    @property
+    def month_span(self) -> int:
+        """How many calendar months the period touches, counting both ends."""
+        return (self.end.year - self.start.year) * 12 + (self.end.month - self.start.month) + 1
+
     def previous_equivalent(self) -> "ReportPeriod":
-        previous_end = self.start - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=self.days - 1)
-        return ReportPeriod(previous_start, previous_end, "Período anterior")
+        """Equivalent calendar period, not the N days immediately before it.
+
+        Comparing "este mes" (01/10 → 12/10) against the preceding 12 days
+        (19/09 → 30/09) mixes a partial month with the tail of the previous one,
+        so the percentage moves with the day the dashboard is opened. The
+        equivalent period is the same calendar slice one period back:
+
+        - one day → the day before;
+        - a period inside a single month → the same day range of the previous
+          month, clamping to its real length;
+        - a full calendar month → the previous full month, with its own length;
+        - an accumulation starting on day 1 across months (such as "este año")
+          → the same accumulation of the previous year, so the comparison never
+          overlaps the period it is comparing.
+        """
+        label = f"{self.label} anterior"
+
+        if self.days == 1:
+            previous = self.start - _ONE_DAY
+            return ReportPeriod(previous, previous, label)
+
+        if self.start.day == 1 and self.month_span > 1:
+            return ReportPeriod(
+                _day_in_month(self.start.year - 1, self.start.month, self.start.day),
+                _day_in_month(self.end.year - 1, self.end.month, self.end.day),
+                label,
+            )
+
+        target_year, target_month = _previous_month(self.start.year, self.start.month)
+        if self.start.day == 1 and self.end.day == _days_in_month(self.end.year, self.end.month):
+            return ReportPeriod(
+                date(target_year, target_month, 1),
+                date(target_year, target_month, _days_in_month(target_year, target_month)),
+                label,
+            )
+
+        previous_start = _day_in_month(target_year, target_month, self.start.day)
+        previous_end = _day_in_month(target_year, target_month, self.end.day)
+        if previous_end < previous_start:
+            previous_end = date(target_year, target_month, _days_in_month(target_year, target_month))
+        return ReportPeriod(previous_start, previous_end, label)
+
+    def describe_range(self) -> str:
+        """Human readable range, used to make the comparison auditable."""
+        if self.start == self.end:
+            return f"{self.start:%d/%m/%Y}"
+        return f"{self.start:%d/%m/%Y} → {self.end:%d/%m/%Y}"
 
     @classmethod
     def preset(cls, key: str, *, today: date | None = None) -> "ReportPeriod":

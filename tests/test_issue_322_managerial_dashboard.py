@@ -83,13 +83,49 @@ def test_report_period_presets_and_previous_equivalent():
 
     assert period.start == date(2026, 8, 1)
     assert period.end == today
+    # Mismo rango de días del mes anterior, no los 21 días previos: comparar
+    # contra 11/07 → 31/07 mezclaba la cola de julio con un mes a medias y el
+    # porcentaje se movía según el día en que se abría el dashboard.
     previous = period.previous_equivalent()
-    assert previous.start == date(2026, 7, 11)
-    assert previous.end == date(2026, 7, 31)
+    assert previous.start == date(2026, 7, 1)
+    assert previous.end == date(2026, 7, 21)
 
     previous_month = ReportPeriod.preset("mes anterior", today=today)
     assert previous_month.start == date(2026, 7, 1)
     assert previous_month.end == date(2026, 7, 31)
+    # Mes completo contra el mes anterior completo, con su duración real
+    # (junio tiene 30 días, no los 31 que tenía la ventana corrida de 31 días).
+    assert previous_month.previous_equivalent().describe_range() == "01/06/2026 → 30/06/2026"
+
+
+def test_previous_equivalent_es_el_periodo_calendario_equivalente():
+    # Hoy contra ayer.
+    assert ReportPeriod(date(2026, 10, 12), date(2026, 10, 12), "Hoy").previous_equivalent().describe_range() == (
+        "11/10/2026"
+    )
+    # Acumulado del año contra el mismo acumulado del año anterior, sin pisarse.
+    year = ReportPeriod.preset("este año", today=date(2026, 10, 12))
+    assert year.previous_equivalent().describe_range() == "01/01/2025 → 12/10/2025"
+    # Un mes de 31 días contra febrero, que tiene 28.
+    assert ReportPeriod(date(2026, 3, 1), date(2026, 3, 31), "Marzo").previous_equivalent().describe_range() == (
+        "01/02/2026 → 28/02/2026"
+    )
+    # Rango suelto dentro de un mes.
+    assert ReportPeriod(
+        date(2026, 10, 5), date(2026, 10, 12), "Personalizado"
+    ).previous_equivalent().describe_range() == ("05/09/2026 → 12/09/2026")
+
+
+def test_previous_equivalent_no_falla_con_bisiesto():
+    # 29/02 no existe en 2023: se recorta a 28/02 en vez de levantar ValueError.
+    leap = ReportPeriod(date(2024, 1, 1), date(2024, 2, 29), "Este año")
+    assert leap.previous_equivalent().describe_range() == "01/01/2023 → 28/02/2023"
+
+    # Un rango que pide el 31 contra febrero, que no lo tiene: el final se
+    # recorta al 28/02 en vez de desbordar el mes.
+    assert ReportPeriod(
+        date(2025, 3, 10), date(2025, 3, 31), "Personalizado"
+    ).previous_equivalent().describe_range() == "10/02/2025 → 28/02/2025"
 
 
 def test_report_period_rejects_inverted_dates():
@@ -313,7 +349,10 @@ def test_snapshot_contains_comparison_evolution_and_statuses(db):
     client = _client("Cliente Snapshot", "30700000327")
     product = Product.create(name="Producto Snapshot", unit="bolsa", peso_unitario_kg=25)
     _closed_order(number=32220, order_date=date(2026, 8, 20), client=client, product=product, quantity=40, total=100000)
-    _closed_order(number=32221, order_date=date(2026, 7, 30), client=client, product=product, quantity=20, total=40000)
+    # El 15/07 cae dentro del período equivalente (01/07 → 21/07). Antes vivía
+    # en la ventana corrida (11/07 → 31/07) y una orden del 30/07 contaba como
+    # "mes anterior" de un período que ni siquiera empieza el 01/08.
+    _closed_order(number=32221, order_date=date(2026, 7, 15), client=client, product=product, quantity=20, total=40000)
 
     snapshot = ManagerialDashboardService().snapshot(ReportPeriod(date(2026, 8, 1), date(2026, 8, 21)))
 

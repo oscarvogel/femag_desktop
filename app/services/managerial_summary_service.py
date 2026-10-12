@@ -36,17 +36,21 @@ def _compact_money(value: float) -> str:
     return _money(amount)
 
 
-def _variation_text(metric) -> str:
+def _variation_text(metric, snapshot) -> str:
     """Variación contra el período equivalente, con el texto del Dashboard Gerencial.
 
     ``variation_percent`` es ``None`` cuando el período anterior fue 0 y el actual no:
     ahí no hay contra qué comparar y se dice, en vez de inventar un porcentaje.
+
+    El rango comparado viaja explícito para que el número sea auditable: el
+    resumen se lee por WhatsApp, sin la tarjeta del dashboard al lado.
     """
     variation = metric.variation_percent
+    compared = snapshot.previous_period.describe_range()
     if variation is None:
-        return "Sin base comparable" if metric.current else "0,0% vs período anterior"
+        return "Sin base comparable" if metric.current else f"0,0% vs {compared}"
     prefix = "+" if variation > 0 else ""
-    return f"{prefix}{_localized_number(variation, 1)}% vs período anterior"
+    return f"{prefix}{_localized_number(variation, 1)}% vs {compared}"
 
 
 @dataclass(frozen=True)
@@ -178,7 +182,7 @@ class ManagerialSummaryService:
             "*Actividad*",
             f"💰 Despachos hoy: {_compact_money(t.valued_dispatches.current)}",
             f"📅 Acumulado del mes: {_compact_money(m.valued_dispatches.current)} "
-            f"({_variation_text(m.valued_dispatches)})",
+            f"({_variation_text(m.valued_dispatches, m)})",
             activity_line,
             "",
             "*Cartera*",
