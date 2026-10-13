@@ -482,7 +482,9 @@ class ManagerialDashboardService:
 
         Si ``product_id`` es None se comparan todos los artículos.
         ``order_by`` admite ``"default"`` (estado + TN anterior desc),
-        ``"previous_tonnes"``, ``"variation"`` y ``"client"``.
+        ``"previous_tonnes"``, ``"current_tonnes"`` (mayor TN actual primero,
+        pensado para el drill-down "a quién se le vendió en este período"),
+        ``"variation"`` y ``"client"``.
         """
         previous = previous or current.previous_equivalent()
         wanted = (client_query or "").strip().lower()
@@ -582,6 +584,8 @@ class ManagerialDashboardService:
             )
         if order_by == "previous_tonnes":
             rows.sort(key=lambda r: (-r["previous_kilos"], -r["current_kilos"], r["client_name"]))
+        elif order_by == "current_tonnes":
+            rows.sort(key=lambda r: (-r["current_kilos"], -r["previous_kilos"], r["client_name"]))
         elif order_by == "variation":
             rows.sort(
                 key=lambda r: (

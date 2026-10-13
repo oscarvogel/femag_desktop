@@ -57,6 +57,7 @@ STATUS_OPTIONS = (
 
 ORDER_OPTIONS = (
     ("Sin recompra primero", "default"),
+    ("Mayor TN actual", "current_tonnes"),
     ("Mayor TN anterior", "previous_tonnes"),
     ("Mayor variación", "variation"),
     ("Cliente A–Z", "client"),
@@ -199,6 +200,9 @@ class ManagerialRepurchaseDialog(QDialog):
         service: ManagerialDashboardService | None = None,
         current: ReportPeriod | None = None,
         parent=None,
+        initial_product_id: int | None = None,
+        initial_client_query: str | None = None,
+        initial_order_by: str | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("managerialRepurchaseDialog")
@@ -342,7 +346,42 @@ class ManagerialRepurchaseDialog(QDialog):
         footer.addStretch(1)
         footer.addWidget(close)
         root.addLayout(footer)
+        self._apply_initial_filters(
+            product_id=initial_product_id,
+            client_query=initial_client_query,
+            order_by=initial_order_by,
+        )
         self.refresh()
+
+    def _apply_initial_filters(
+        self,
+        *,
+        product_id: int | None,
+        client_query: str | None,
+        order_by: str | None,
+    ) -> None:
+        """Preselección para el drill-down desde el dashboard gerencial.
+
+        Se aplica con señales bloqueadas para hacer un único refresh al final
+        del __init__: el producto queda visible en el combo, el cliente en el
+        buscador y el orden en su combo, todo editable por el usuario.
+        """
+        if product_id is not None:
+            index = self.product_combo.findData(product_id)
+            if index >= 0:
+                self.product_combo.blockSignals(True)
+                self.product_combo.setCurrentIndex(index)
+                self.product_combo.blockSignals(False)
+        if order_by:
+            index = self.order_combo.findData(order_by)
+            if index >= 0:
+                self.order_combo.blockSignals(True)
+                self.order_combo.setCurrentIndex(index)
+                self.order_combo.blockSignals(False)
+        if client_query:
+            self.search_input.blockSignals(True)
+            self.search_input.setText(client_query)
+            self.search_input.blockSignals(False)
 
     def _load_products(self) -> None:
         self.product_combo.addItem("Todos los artículos", None)

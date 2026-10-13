@@ -211,6 +211,19 @@ class ManagerialDashboardPage(QWidget):
         detail_grid.setColumnStretch(1, 1)
         root.addLayout(detail_grid, 1)
 
+        hint = QLabel(
+            "Tip: doble clic en un producto para ver a quién se le vendió en el período; "
+            "doble clic en un cliente para ver qué productos compró."
+        )
+        hint.setObjectName("managerialDrilldownHint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        self.products_table.setToolTip("Doble clic en un producto para ver a quién se le vendió en el período")
+        self.clients_table.setToolTip("Doble clic en un cliente para ver qué productos compró en el período")
+        self.products_table.cellDoubleClicked.connect(self._open_product_buyers)
+        self.clients_table.cellDoubleClicked.connect(self._open_client_products)
+
     @staticmethod
     def _section(title: str, child: QWidget) -> QWidget:
         frame = QFrame()
@@ -272,6 +285,42 @@ class ManagerialDashboardPage(QWidget):
 
     def _open_repurchase(self) -> None:
         dialog = ManagerialRepurchaseDialog(service=self.service, current=self.selected_period(), parent=self)
+        dialog.exec_()
+
+    def _open_product_buyers(self, row: int, _column: int) -> None:
+        """Drill-down pedido por Dante: a quién se le vendió el producto en el rango."""
+        item = self.products_table.item(row, 0)
+        if item is None:
+            return
+        product_id = item.data(Qt.UserRole)
+        if product_id is None:
+            return
+        dialog = ManagerialRepurchaseDialog(
+            service=self.service,
+            current=self.selected_period(),
+            parent=self,
+            initial_product_id=int(product_id),
+            initial_order_by="current_tonnes",
+        )
+        dialog.setWindowTitle(f"A quién se le vendió: {item.text()} (período seleccionado)")
+        dialog.exec_()
+
+    def _open_client_products(self, row: int, _column: int) -> None:
+        """Drill-down inverso: qué productos compró el cliente en el rango."""
+        item = self.clients_table.item(row, 0)
+        if item is None:
+            return
+        client_name = item.text().strip()
+        if not client_name:
+            return
+        dialog = ManagerialRepurchaseDialog(
+            service=self.service,
+            current=self.selected_period(),
+            parent=self,
+            initial_client_query=client_name,
+            initial_order_by="current_tonnes",
+        )
+        dialog.setWindowTitle(f"Qué compró: {client_name} (período seleccionado)")
         dialog.exec_()
 
     def _export_excel(self) -> None:
@@ -398,6 +447,14 @@ class ManagerialDashboardPage(QWidget):
             self.status_table,
             [(row["status"], str(row["count"])) for row in snapshot.order_statuses],
         )
+        for row_index, row in enumerate(snapshot.top_clients):
+            item = self.clients_table.item(row_index, 0)
+            if item is not None:
+                item.setData(Qt.UserRole, int(row["client_id"]))
+        for row_index, row in enumerate(snapshot.top_products):
+            item = self.products_table.item(row_index, 0)
+            if item is not None:
+                item.setData(Qt.UserRole, int(row["product_id"]))
 
     @staticmethod
     def _fill_table(
