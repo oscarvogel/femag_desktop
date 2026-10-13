@@ -6,10 +6,12 @@ from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -19,6 +21,7 @@ from PyQt5.QtWidgets import (
 
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 from app.reports.managerial_dashboard_html import ManagerialDashboardHtmlReport
+from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
 from app.ui.managerial_summary_send import ManagerialSummarySendDialog
 
 
@@ -44,6 +47,13 @@ def _variation_text(current: float, variation: float | None, compared_range: str
         return "Sin base comparable" if current else f"0,0% vs {compared_range}"
     prefix = "+" if variation > 0 else ""
     return f"{prefix}{_number(variation, 1)}% vs {compared_range}"
+
+
+def _variation_short(current: float, variation: float | None) -> str:
+    if variation is None:
+        return "Nuevo" if current else "—"
+    prefix = "+" if variation > 0 else ""
+    return f"{prefix}{_number(variation, 1)}%"
 
 
 class _KpiCard(QFrame):
@@ -135,6 +145,18 @@ class ManagerialDashboardPage(QWidget):
         send_summary.setObjectName("managerialSendSummaryButton")
         send_summary.clicked.connect(self._open_send_summary)
         header.addWidget(send_summary)
+
+        export_excel = QPushButton("Exportar Excel IA")
+        export_excel.setObjectName("managerialExportExcelButton")
+        export_excel.setToolTip("Exporta KPIs, tops, todos los clientes/artículos y detalle por cliente, carga y transportista")
+        export_excel.clicked.connect(self._export_excel)
+        header.addWidget(export_excel)
+
+        repurchase = QPushButton("Comparar recompra")
+        repurchase.setObjectName("managerialRepurchaseButton")
+        repurchase.setToolTip("Compara cliente x artículo entre dos períodos equivalentes por kilos")
+        repurchase.clicked.connect(self._open_repurchase)
+        header.addWidget(repurchase)
         root.addLayout(header)
 
         self.policy_label = QLabel()
@@ -167,27 +189,40 @@ class ManagerialDashboardPage(QWidget):
         detail_grid = QGridLayout()
         self.monthly_table = self._table(
             "managerialMonthlyEvolution",
-            ("Mes", "Despachos valorizados", "TN", "Órdenes"),
+            ("Mes", "Despachos valorizados", "Mes ant. mismo corte", "Var %", "TN", "Órdenes"),
         )
         self.clients_table = self._table(
             "managerialTopClients",
-            ("Cliente", "Despachos valorizados", "TN"),
+            ("Cliente", "Despachos valorizados", "Mes ant. mismo corte", "Var %", "TN"),
         )
         self.products_table = self._table(
             "managerialTopProducts",
-            ("Producto", "Despachos valorizados", "TN"),
+            ("Producto", "Despachos valorizados", "Mes ant. mismo corte", "Var %", "TN"),
         )
         self.status_table = self._table(
             "managerialOrderStatuses",
             ("Estado", "Órdenes"),
         )
-        detail_grid.addWidget(self._section("Evolución mensual", self.monthly_table), 0, 0)
-        detail_grid.addWidget(self._section("Top clientes", self.clients_table), 0, 1)
-        detail_grid.addWidget(self._section("Top productos", self.products_table), 1, 0)
+        detail_grid.addWidget(self._section("Evolución mensual (vs mes anterior, mismo día)", self.monthly_table), 0, 0)
+        detail_grid.addWidget(self._section("Top clientes (vs mes anterior, mismo corte)", self.clients_table), 0, 1)
+        detail_grid.addWidget(self._section("Top productos (vs mes anterior, mismo corte)", self.products_table), 1, 0)
         detail_grid.addWidget(self._section("Estado de órdenes", self.status_table), 1, 1)
         detail_grid.setColumnStretch(0, 1)
         detail_grid.setColumnStretch(1, 1)
         root.addLayout(detail_grid, 1)
+
+        hint = QLabel(
+            "Tip: doble clic en un producto para ver a quién se le vendió en el período; "
+            "doble clic en un cliente para ver qué productos compró."
+        )
+        hint.setObjectName("managerialDrilldownHint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
+
+        self.products_table.setToolTip("Doble clic en un producto para ver a quién se le vendió en el período")
+        self.clients_table.setToolTip("Doble clic en un cliente para ver qué productos compró en el período")
+        self.products_table.cellDoubleClicked.connect(self._open_product_buyers)
+        self.clients_table.cellDoubleClicked.connect(self._open_client_products)
 
     @staticmethod
     def _section(title: str, child: QWidget) -> QWidget:
@@ -248,14 +283,80 @@ class ManagerialDashboardPage(QWidget):
         dialog = ManagerialSummarySendDialog(parent=self)
         dialog.exec_()
 
+    def _open_repurchase(self) -> None:
+        dialog = ManagerialRepurchaseDialog(service=self.service, current=self.selected_period(), parent=self)
+        dialog.exec_()
+
+    def _open_product_buyers(self, row: int, _column: int) -> None:
+        """Drill-down pedido por Dante: a quién se le vendió el producto en el rango."""
+        item = self.products_table.item(row, 0)
+        if item is None:
+            return
+        product_id = item.data(Qt.UserRole)
+        if product_id is None:
+            return
+        dialog = ManagerialRepurchaseDialog(
+            service=self.service,
+            current=self.selected_period(),
+            parent=self,
+            initial_product_id=int(product_id),
+            initial_order_by="current_tonnes",
+        )
+        dialog.setWindowTitle(f"A quién se le vendió: {item.text()} (período seleccionado)")
+        dialog.exec_()
+
+    def _open_client_products(self, row: int, _column: int) -> None:
+        """Drill-down inverso: qué productos compró el cliente en el rango."""
+        item = self.clients_table.item(row, 0)
+        if item is None:
+            return
+        client_name = item.text().strip()
+        if not client_name:
+            return
+        dialog = ManagerialRepurchaseDialog(
+            service=self.service,
+            current=self.selected_period(),
+            parent=self,
+            initial_client_query=client_name,
+            initial_order_by="current_tonnes",
+        )
+        dialog.setWindowTitle(f"Qué compró: {client_name} (período seleccionado)")
+        dialog.exec_()
+
+    def _export_excel(self) -> None:
+        from datetime import datetime
+        from pathlib import Path
+
+        from app.reports.managerial_dashboard_export import ALL_SHEETS, export_dashboard_xlsx
+
+        period = self.selected_period()
+        default_name = f"dashboard_gerencial_{period.start:%Y%m%d}_{period.end:%Y%m%d}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar dashboard para análisis IA", default_name, "Excel (*.xlsx)"
+        )
+        if not path:
+            return
+        try:
+            out = export_dashboard_xlsx(self.service, period, Path(path))
+        except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
+            QMessageBox.warning(self, "Exportar Excel IA", f"No se pudo exportar:\n{exc}")
+            return
+        QMessageBox.information(
+            self,
+            "Exportar Excel IA",
+            f"Exportado:\n{out}\n\nHojas: {', '.join(ALL_SHEETS)}\nPeríodo: {period.describe_range()}",
+        )
+
     def refresh(self) -> None:
         snapshot = self.service.snapshot(self.selected_period())
+        compared = snapshot.previous_period.describe_range()
         self.policy_label.setText(
             "Criterio V1: se consideran despachos efectivos las órdenes en estado "
             + ", ".join(snapshot.effective_statuses)
-            + ". Las devoluciones se muestran en su circuito operativo y no se descuentan todavía del KPI valorizado."
+            + ". Las devoluciones se muestran en su circuito operativo y no se descuentan todavía del KPI valorizado. "
+            + f"Comparaciones contra el período equivalente anterior ({compared}): mismo corte día por día "
+            + "(ej. 12/10 vs 01/09 → 12/09) en KPIs, evolución mensual, top clientes y top productos."
         )
-        compared = snapshot.previous_period.describe_range()
         self.valued_card.set_metric(
             _money(snapshot.valued_dispatches.current),
             _variation_text(
@@ -286,30 +387,91 @@ class ManagerialDashboardPage(QWidget):
         self._fill_table(
             self.monthly_table,
             [
-                (row["label"], _money(row["total"]), _number(row["tonnes"], 3), str(row["orders"]))
+                (
+                    row["label"],
+                    _money(row["total"]),
+                    _money(row.get("previous_total", 0.0)),
+                    _variation_short(row["total"], row.get("variation_percent")),
+                    _number(row["tonnes"], 3),
+                    str(row["orders"]),
+                )
+                for row in snapshot.monthly_evolution
+            ],
+            tooltips=[
+                [
+                    "",
+                    "",
+                    f"Rango comparable: {row.get('previous_range', compared)}",
+                    f"Rango comparable: {row.get('previous_range', compared)}",
+                    "",
+                    "",
+                ]
                 for row in snapshot.monthly_evolution
             ],
         )
         self._fill_table(
             self.clients_table,
-            [(row["name"], _money(row["total"]), _number(row["tonnes"], 3)) for row in snapshot.top_clients],
+            [
+                (
+                    row["name"],
+                    _money(row["total"]),
+                    _money(row.get("previous_total", 0.0)),
+                    _variation_short(row["total"], row.get("variation_percent")),
+                    _number(row["tonnes"], 3),
+                )
+                for row in snapshot.top_clients
+            ],
+            tooltips=[
+                ["", "", f"Rango comparable: {compared}", f"Rango comparable: {compared}", ""]
+                for _ in snapshot.top_clients
+            ],
         )
         self._fill_table(
             self.products_table,
-            [(row["name"], _money(row["total"]), _number(row["tonnes"], 3)) for row in snapshot.top_products],
+            [
+                (
+                    row["name"],
+                    _money(row["total"]),
+                    _money(row.get("previous_total", 0.0)),
+                    _variation_short(row["total"], row.get("variation_percent")),
+                    _number(row["tonnes"], 3),
+                )
+                for row in snapshot.top_products
+            ],
+            tooltips=[
+                ["", "", f"Rango comparable: {compared}", f"Rango comparable: {compared}", ""]
+                for _ in snapshot.top_products
+            ],
         )
         self._fill_table(
             self.status_table,
             [(row["status"], str(row["count"])) for row in snapshot.order_statuses],
         )
+        for row_index, row in enumerate(snapshot.top_clients):
+            item = self.clients_table.item(row_index, 0)
+            if item is not None:
+                item.setData(Qt.UserRole, int(row["client_id"]))
+        for row_index, row in enumerate(snapshot.top_products):
+            item = self.products_table.item(row_index, 0)
+            if item is not None:
+                item.setData(Qt.UserRole, int(row["product_id"]))
 
     @staticmethod
-    def _fill_table(table: QTableWidget, rows: list[tuple[str, ...]]) -> None:
+    def _fill_table(
+        table: QTableWidget,
+        rows: list[tuple[str, ...]],
+        *,
+        tooltips: list[list[str]] | None = None,
+    ) -> None:
         table.setRowCount(len(rows))
         for row_index, values in enumerate(rows):
             for column_index, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 if column_index > 0:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if tooltips and row_index < len(tooltips):
+                    tip = tooltips[row_index][column_index] if column_index < len(tooltips[row_index]) else ""
+                    if tip:
+                        item.setToolTip(tip)
                 table.setItem(row_index, column_index, item)
         table.resizeColumnsToContents()
