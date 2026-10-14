@@ -171,13 +171,22 @@ function Ensure-Venv {
     }
 }
 
-function Assert-NoEnvFileInWorkspace {
+function Move-EnvFileAside {
     # `.env` esta en .gitignore, asi que el stash que hace el release no lo levanta:
     # se queda en el workspace y antes caia recien en el paso 6, DESPUES de haber
-    # compilado y empaquetado todo (#611). Se verifica aca, que cuesta segundos.
-    if (Test-Path -LiteralPath (Join-Path $RepoRoot ".env")) {
-        throw "Existe .env en el workspace de publicacion y el build no puede continuar.`n`nEs un archivo ignorado por git, asi que el stash del release no lo mueve.`nRenombrelo o muevalo antes de publicar (por ejemplo: Ren-Item .env .env.release-bak) y devuelvalo al terminar."
+    # compilado y empaquetado todo (#611). Se aparta aca, ANTES del stash, para que
+    # el propio stash lo incluya como untracked y `git clean -fd` del finally no
+    # pueda borrarlo. Se restaura en el finally, despues del `stash pop`.
+    # Retorna $true si aparto el archivo, $false si no habia nada que apartar.
+    $envFile = Join-Path $RepoRoot ".env"
+    $backupFile = Join-Path $RepoRoot ".env.release-bak"
+    if (-not (Test-Path -LiteralPath $envFile)) { return $false }
+    if (Test-Path -LiteralPath $backupFile) {
+        throw "Existe .env y tambien .env.release-bak. Uno de los dos es un resto anterior: resolvelo a mano y volve a correr."
     }
+    Write-Host "Apartando .env a .env.release-bak durante el release (se restaura al final)..." -ForegroundColor Yellow
+    Move-Item -LiteralPath $envFile -Destination $backupFile
+    return $true
 }
 
 function Invoke-CandidateLocal {
@@ -192,7 +201,8 @@ function Invoke-CandidateLocal {
 
     Ensure-Venv
 
-    Assert-NoEnvFileInWorkspace
+    $envMovedAside = $false
+    $envMovedAside = Move-EnvFileAside
 
     $branch = Invoke-Capture -Command "git" -Arguments @("branch", "--show-current") `
         -FailureMessage "No se pudo determinar la rama actual."
@@ -322,8 +332,8 @@ function Invoke-CandidateLocal {
                 }
             }
         }
-        # El .env del workspace se verifica al inicio (Assert-NoEnvFileInWorkspace),
-        # donde abortar es barato. Ver #611.
+        # El .env del workspace se aparta al inicio (Move-EnvFileAside) y se
+        # restaura en el finally, donde recuperarlo es barato. Ver #611.
         $sha256 = (Get-FileHash $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-Host "Version: $version"
         Write-Host "SHA256 : $sha256"
@@ -435,6 +445,19 @@ function Invoke-CandidateLocal {
                 & git stash pop
                 if ($LASTEXITCODE -ne 0) {
                     Write-Warning "No se pudieron restaurar automaticamente todos los cambios locales. Revise: git stash list (su trabajo sigue en el stash, no se perdio nada)."
+                }
+            }
+
+            if ($envMovedAside) {
+                $envFile = Join-Path $RepoRoot ".env"
+                $backupFile = Join-Path $RepoRoot ".env.release-bak"
+                if ((Test-Path -LiteralPath $backupFile) -and -not (Test-Path -LiteralPath $envFile)) {
+                    Move-Item -LiteralPath $backupFile -Destination $envFile
+                    Write-Host "Restaurado .env (estaba apartado como .env.release-bak)." -ForegroundColor Green
+                } elseif (Test-Path -LiteralPath $envFile) {
+                    Write-Warning ".env ya existe y .env.release-bak no se restauro: revise ambos archivos a mano."
+                } else {
+                    Write-Warning "No se pudo restaurar .env automaticamente (.env.release-bak no esta en el workspace; puede seguir en el stash 'femag-release-auto')."
                 }
             }
         } finally {
