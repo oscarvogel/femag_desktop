@@ -4,8 +4,13 @@ Dos cosas que lo hacian depender del estado previo de la maquina y que rompieron
 produccion: abortaba si no habia `.venv`, y abortaba por un `.env` del workspace recien en
 el paso 6, cuando ya habia compilado y empaquetado todo.
 
-Los tests no se quedan en assert sobre el texto del script: **ejecutan** la guarda con
-PowerShell y miran que falle, porque un assert textual solo detecta regresion, no omision.
+El `.env` ya no corta el release: `Move-EnvFileAside` lo aparta a `.env.release-bak`
+antes del stash (para que el propio stash lo cubra) y el `finally` lo restaura despues
+del `stash pop`. Solo corta si ya existe un `.env.release-bak`, para no pisar nada.
+
+Los tests no se quedan en assert sobre el texto del script: **ejecutan** la funcion con
+PowerShell contra un directorio de mentira, porque un assert textual solo detecta
+regresion, no omision.
 """
 
 import json
@@ -75,9 +80,8 @@ foreach ($name in $wanted) {{
 }}
 $result = @{{ 'functions' = @($found.Keys) }}
 try {{
-    if ($found.ContainsKey('Assert-NoEnvFileInWorkspace')) {{
-        Assert-NoEnvFileInWorkspace
-        $result['threw'] = $false
+    if ($found.ContainsKey('Move-EnvFileAside')) {{
+        $result['returned'] = Move-EnvFileAside
     }}
     $result['threw'] = $false
 }}
@@ -97,7 +101,8 @@ def test_release_defines_the_two_guards():
     content = RELEASE.read_text(encoding="utf-8")
 
     assert "function Ensure-Venv" in content
-    assert "function Assert-NoEnvFileInWorkspace" in content
+    assert "function Move-EnvFileAside" in content
+    assert "function Assert-NoEnvFileInWorkspace" not in content
 
 
 def test_release_no_longer_demands_a_venv_created_by_hand():
@@ -113,7 +118,7 @@ def test_env_file_is_no_longer_checked_at_the_end_of_the_build():
 
     late_check = 'throw "Existe .env en el workspace de publicacion."'
     assert late_check not in content
-    assert "Assert-NoEnvFileInWorkspace" in content
+    assert "Move-EnvFileAside" in content
 
 
 @requires_powershell
@@ -124,60 +129,83 @@ def test_release_script_parses(tmp_path):
     assert result["json"].get("parse_errors", 0) == 0
 
 
-# --- comportamiento real de la guarda --------------------------------------------
+# --- comportamiento real del apartado ------------------------------------------------
 
 
 @requires_powershell
-def test_env_file_guard_throws_and_says_what_to_do(tmp_path):
-    """Con `.env` presente tiene que cortar, y decir como se resuelve.
+def test_env_file_is_moved_aside_instead_of_blocking(tmp_path):
+    """Con `.env` presente lo aparta a `.env.release-bak` en vez de cortar.
 
     Se ejecuta la funcion real del script contra un directorio con `.env`.
+    (La restauracion vive en el `finally` de `Invoke-CandidateLocal`, que aca no
+    se ejecuta: se verifica el apartado, que es lo que esta funcion promete.)
     """
     (tmp_path / ".env").write_text("DB_PASSWORD=secreto\n", encoding="utf-8")
 
-    result = _extract_functions(
-        ["Assert-NoEnvFileInWorkspace"], f"'{tmp_path}'"
+    result = _extract_functions(["Move-EnvFileAside"], f"'{tmp_path}'")
+
+    assert result["json"] is not None, result["stderr"]
+    assert result["json"]["threw"] is False
+    assert result["json"]["returned"] is True
+    assert not (tmp_path / ".env").exists()
+    assert (tmp_path / ".env.release-bak").read_text(encoding="utf-8") == (
+        "DB_PASSWORD=secreto\n"
     )
+
+
+@requires_powershell
+def test_env_file_move_refuses_to_overwrite_an_existing_backup(tmp_path):
+    """Con `.env` y `.env.release-bak` tiene que cortar con mensaje accionable,
+    sin pisar ninguno de los dos."""
+    (tmp_path / ".env").write_text("DB_PASSWORD=secreto\n", encoding="utf-8")
+    (tmp_path / ".env.release-bak").write_text("resto anterior\n", encoding="utf-8")
+
+    result = _extract_functions(["Move-EnvFileAside"], f"'{tmp_path}'")
 
     assert result["json"] is not None, result["stderr"]
     assert result["json"]["threw"] is True
     message = result["json"].get("message", "")
-    # El mensaje tiene que ser accionable: decir el problema sin decir qué hacer
-    # devuelve al operador al mismo punto de partida del que ya salió.
-    assert ".env" in message
-    assert "release-bak" in message
+    assert ".env.release-bak" in message
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "DB_PASSWORD=secreto\n"
+    assert (tmp_path / ".env.release-bak").read_text(encoding="utf-8") == (
+        "resto anterior\n"
+    )
 
 
 @requires_powershell
-def test_env_file_guard_lets_the_release_through_without_env(tmp_path):
-    result = _extract_functions(
-        ["Assert-NoEnvFileInWorkspace"], f"'{tmp_path}'"
-    )
+def test_env_file_move_lets_the_release_through_without_env(tmp_path):
+    result = _extract_functions(["Move-EnvFileAside"], f"'{tmp_path}'")
 
     assert result["json"] is not None, result["stderr"]
     assert result["json"]["threw"] is False
+    assert result["json"]["returned"] is False
 
 
 @requires_powershell
-def test_env_file_guard_looks_at_the_repo_root_not_the_current_dir(tmp_path):
-    """El guard mira `$RepoRoot`: correr el script desde otro lado no lo esquiva."""
+def test_env_file_move_looks_at_the_repo_root_not_the_current_dir(tmp_path):
+    """La funcion mira `$RepoRoot`: correr el script desde otro lado no la esquiva."""
     workspace = tmp_path / "repo"
     workspace.mkdir()
     other = tmp_path / "otro"
     other.mkdir()
     (other / ".env").write_text("DB_PASSWORD=secreto\n", encoding="utf-8")
 
-    result = _extract_functions(["Assert-NoEnvFileInWorkspace"], f"'{workspace}'")
+    result = _extract_functions(["Move-EnvFileAside"], f"'{workspace}'")
 
     assert result["json"] is not None, result["stderr"]
-    # No hay `.env` en el repo: el que esta en otro directorio no bloquea.
+    # No hay `.env` en el repo: el que esta en otro directorio no se toca.
     assert result["json"]["threw"] is False
+    assert result["json"]["returned"] is False
+    assert (other / ".env").exists()
 
     (workspace / ".env").write_text("DB_PASSWORD=secreto\n", encoding="utf-8")
-    blocked = _extract_functions(["Assert-NoEnvFileInWorkspace"], f"'{workspace}'")
+    moved = _extract_functions(["Move-EnvFileAside"], f"'{workspace}'")
 
-    assert blocked["json"] is not None, blocked["stderr"]
-    assert blocked["json"]["threw"] is True
+    assert moved["json"] is not None, moved["stderr"]
+    assert moved["json"]["threw"] is False
+    assert moved["json"]["returned"] is True
+    assert not (workspace / ".env").exists()
+    assert (workspace / ".env.release-bak").exists()
 
 
 @requires_powershell
