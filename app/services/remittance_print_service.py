@@ -56,12 +56,12 @@ class RemittancePrintTemplate:
     first_detail_y: float = 186
     detail_step: float = 7.2
     max_detail_rows: int = 16
-    carrier_x: float = 47
-    carrier_y: float = 53
-    carrier_cuit_x: float = 118
-    carrier_cuit_y: float = 53
+    carrier_x: float = 57
+    carrier_y: float = 58
+    carrier_cuit_x: float = 128
+    carrier_cuit_y: float = 58
     truck_x: float = 160
-    truck_y: float = 53
+    truck_y: float = 58
     driver_x: float = 37
     driver_y: float = 47
     driver_document_x: float = 155

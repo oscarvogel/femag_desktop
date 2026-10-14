@@ -364,6 +364,11 @@ def test_remittance_print_template_matches_requested_layout(db):
     assert (template.iva_x, template.iva_y) == (45, 202)
     # 4) detalle 8mm mas arriba.
     assert template.first_detail_y == 186
+    # Transportista 5mm arriba y 10mm a la derecha.
+    assert (template.carrier_x, template.carrier_y) == (57, 58)
+    assert (template.carrier_cuit_x, template.carrier_cuit_y) == (128, 58)
+    # Patente del camion 5mm mas arriba.
+    assert (template.truck_x, template.truck_y) == (160, 58)
     # 5) chofer 5mm arriba y 10mm a la izquierda.
     assert (template.driver_x, template.driver_y) == (37, 47)
     assert (template.driver_document_x, template.driver_document_y) == (155, 47)
