@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, Qt
@@ -12,11 +14,13 @@ from PyQt5.QtWidgets import (
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -225,6 +229,13 @@ def build_master_abm_page(
     if config.title == "Productos" and PermissionService().is_administrator(user):
         cost_button = _action_button("productCostButton", "Costo / historial", secondary=True)
         actions.addWidget(cost_button)
+    export_button = None
+    if config.title == "Clientes":
+        export_button = _action_button(
+            "exportClientsExcelButton", "Exportar a Excel", secondary=True
+        )
+        export_button.setToolTip("Exporta a Excel los clientes visibles con su lista de precios.")
+        actions.addWidget(export_button)
     actions.addStretch(1)
     layout.addLayout(actions)
     table = QTableWidget(0, len(config.columns))
@@ -268,6 +279,47 @@ def build_master_abm_page(
 
     new_button.clicked.connect(open_new)
     edit_button.clicked.connect(open_edit)
+    if export_button is not None:
+        def export_clients() -> None:
+            from app.reports.client_list_export import export_clients_xlsx, fetch_ordered_clients
+
+            visible_rows = filter_and_sort_master_rows(
+                list(config.rows_fn()),
+                query=search_input.text(),
+                sort_column=table_controller.sort_column,
+                descending=table_controller.sort_order == Qt.DescendingOrder,
+            )
+            client_ids = [row[0] for row in visible_rows]
+            if not client_ids:
+                feedback.show_info("No hay clientes para exportar con el filtro actual.")
+                return
+            default_name = f"clientes_{date.today():%Y%m%d}.xlsx"
+            path, _ = QFileDialog.getSaveFileName(
+                parent,
+                "Exportar clientes a Excel",
+                str(Path.home() / default_name),
+                "Excel (*.xlsx)",
+            )
+            if not path:
+                return
+            try:
+                exported = export_clients_xlsx(fetch_ordered_clients(client_ids), path)
+            except Exception as exc:
+                feedback.show_error(f"No se pudo exportar a Excel: {exc}")
+                QMessageBox.critical(
+                    parent,
+                    "Exportar a Excel",
+                    f"No se pudo generar el archivo Excel:\n{exc}",
+                )
+                return
+            feedback.show_success(f"Excel generado: {exported}")
+            QMessageBox.information(
+                parent,
+                "Exportar a Excel",
+                f"Archivo generado correctamente:\n{exported}",
+            )
+
+        export_button.clicked.connect(export_clients)
     if cost_button is not None:
         def open_cost() -> None:
             row_id = table_controller.selected_id()
