@@ -20,6 +20,16 @@ from app.services.update_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clean_update_channel(monkeypatch):
+    """Aisla FEMAG_UPDATE_CHANNEL (#698): el canal por defecto de
+    `fetch_update_info` sale de esa variable y un valor heredado del entorno
+    rompia los tests que esperan el canal latest. Los tests que necesitan un
+    valor la setean con `monkeypatch.setenv` en su cuerpo (corre despues de
+    esta fixture, asi que no los afecta)."""
+    monkeypatch.delenv("FEMAG_UPDATE_CHANNEL", raising=False)
+
+
 class _Response(io.BytesIO):
     def __enter__(self):
         return self
