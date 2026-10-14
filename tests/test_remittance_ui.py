@@ -315,9 +315,14 @@ def test_print_fields_move_up_five_points_except_date_and_include_both_domains(d
     class RecordingPdf:
         def __init__(self):
             self.calls = []
+            self.fonts = []
 
         def drawString(self, x, y, value):
             self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            self.fonts.append(args)
+            return None
 
     data = _master_data()
     data["truck"].trailer_domain = "AC456EF"
@@ -340,6 +345,170 @@ def test_print_fields_move_up_five_points_except_date_and_include_both_domains(d
     assert calls_by_value[remittance.client_name][1] == printer.template.client_y * MM + 5
     assert calls_by_value["760"][1] == printer.template.first_detail_y * MM + 5
     assert calls_by_value["AB123CD / AC456EF"][1] == printer.template.truck_y * MM + 5
+
+
+def test_remittance_print_template_matches_requested_layout(db):
+    from app.services.remittance_print_service import RemittancePrintTemplate
+
+    template = RemittancePrintTemplate()
+
+    # 1) fecha 12mm mas arriba y mas grande.
+    assert template.date_y == 264
+    assert template.date_font_size == 12
+    # 2) bloque cliente 5mm arriba y 10mm a la izquierda.
+    assert (template.client_x, template.client_y) == (20, 234)
+    assert (template.address_x, template.address_y) == (20, 223)
+    assert (template.city_x, template.city_y) == (95, 223)
+    assert (template.province_x, template.province_y) == (148, 223)
+    assert (template.cuit_x, template.cuit_y) == (20, 212)
+    assert (template.iva_x, template.iva_y) == (20, 202)
+    # 4) detalle 8mm mas arriba.
+    assert template.first_detail_y == 186
+    # 5) chofer 5mm arriba y 10mm a la izquierda.
+    assert (template.driver_x, template.driver_y) == (37, 47)
+    assert (template.driver_document_x, template.driver_document_y) == (155, 47)
+
+
+def test_print_draws_date_bigger_than_body(db):
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+            self.fonts = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            self.fonts.append(args)
+            return None
+
+    data = _master_data()
+    remittance = RemittanceService(current_user="ui_print_date").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_print_date")
+
+    printer._draw_variable_fields(pdf, remittance, list(remittance.items))
+
+    assert ("Helvetica", 12) in [tuple(font) for font in pdf.fonts]
+
+
+def test_print_shows_full_iva_description(db):
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            return None
+
+    data = _master_data()
+    data["client"].iva_condition = "RI"
+    data["client"].save()
+    remittance = RemittanceService(current_user="ui_print_iva").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_print_iva")
+
+    printer._draw_variable_fields(pdf, remittance, list(remittance.items))
+
+    values = [value for _, _, value in pdf.calls]
+    assert "Responsable Inscripto" in values
+    assert "RI" not in values
+    assert printer._iva_condition_text("MT") == "Responsable Monotributo"
+    assert printer._iva_condition_text("Responsable Inscripto") == "Responsable Inscripto"
+    assert printer._iva_condition_text(None) == ""
+
+
+def test_print_leaves_unspecified_address_blank(db):
+    from app.models.masters import ClientAddress
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            return None
+
+    data = _master_data()
+    address = ClientAddress.create(
+        client=data["client"],
+        address_type="entrega",
+        province="Sin especificar",
+        city="Sin especificar",
+        address="Ruta 12",
+    )
+    remittance = RemittanceService(current_user="ui_print_blank").create_manual(
+        client=data["client"],
+        delivery_address=address,
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_print_blank")
+
+    printer._draw_variable_fields(pdf, remittance, list(remittance.items))
+
+    values = [value for _, _, value in pdf.calls]
+    assert not any("Sin especificar" in value for value in values)
+    assert "Ruta 12" in values
+
+
+def test_print_driver_document_falls_back_to_live_driver(db):
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            return None
+
+    data = _master_data()
+    data["driver"].document = "30123456"
+    data["driver"].save()
+    remittance = RemittanceService(current_user="ui_print_driver").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        driver=data["driver"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+    # Snapshot viejo/vacio: igual debe salir el DNI del maestro.
+    remittance.driver_document = ""
+    remittance.save()
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_print_driver")
+
+    printer._draw_variable_fields(pdf, remittance, list(remittance.items))
+
+    values = [value for _, _, value in pdf.calls]
+    assert "30123456" in values
 
 
 def test_preview_summary_exposes_transport_cuits_and_domains(db):
