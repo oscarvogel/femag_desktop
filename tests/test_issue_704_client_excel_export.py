@@ -82,14 +82,16 @@ def test_client_export_prefers_primary_contact_email(db, tmp_path):
 def test_clients_page_has_export_excel_button(db):
     from PyQt5.QtWidgets import QApplication, QPushButton
 
-    from app.ui.master_abm import build_master_abm_page, master_abm_configs
+    from app.services.permission_service import PermissionService
+    from app.ui.master_abm import build_client_abm_page
 
+    PermissionService().seed_defaults()
     app = QApplication.instance() or QApplication([])
     admin = _user("admin-clientes-excel-704")
-    page = build_master_abm_page(
-        config=master_abm_configs()["clients"],
+    page = build_client_abm_page(
         user=admin,
         current_user=admin.username,
+        view_ledger_callback=lambda _client: None,
     )
     app.processEvents()
 
