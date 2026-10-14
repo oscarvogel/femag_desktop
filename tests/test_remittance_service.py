@@ -83,13 +83,13 @@ def test_issue_assigns_next_configured_number_and_locks_editing(db):
         service.update_draft(emitted, observations="No permitido")
 
 
-def test_issue_without_default_series_reports_configuration_error(db):
+def test_issue_without_number_and_series_requires_manual_number(db):
     from app.services.remittance_service import RemittanceService
     from tests.conftest import _master_data
 
     data = _master_data()
     # Sin datos de transporte, `issue()` corta antes y el error seria el de
-    # transporte, no el del talonario que este test quiere comprobar.
+    # transporte, no el del numero manual que este test quiere comprobar.
     remittance = RemittanceService("admin").create_manual(
         client=data["client"],
         delivery_address=data["address"],
@@ -99,7 +99,7 @@ def test_issue_without_default_series_reports_configuration_error(db):
         items=[{"product": data["product"], "quantity": 1}],
     )
 
-    with pytest.raises(ValueError, match="talonario predeterminado"):
+    with pytest.raises(ValueError, match="numero de remito"):
         RemittanceService("admin").issue(remittance)
 
 
@@ -325,3 +325,152 @@ def test_issue_requires_transport_data_needed_by_f150(db):
     emitted = service.issue(remittance)
 
     assert emitted.status == emitted.STATUS_ISSUED
+
+
+def test_manual_number_must_be_unique_on_create(db):
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    service = RemittanceService("admin")
+    service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+        physical_point_of_sale="0009",
+        physical_number="42",
+    )
+
+    with pytest.raises(ValueError, match="ya fue utilizado"):
+        service.create_manual(
+            client=data["client"],
+            delivery_address=data["address"],
+            items=[{"product": data["product"], "quantity": 1}],
+            physical_point_of_sale="0009",
+            physical_number="00000042",
+        )
+
+
+def test_manual_number_must_be_unique_on_update_but_self_is_allowed(db):
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    service = RemittanceService("admin")
+    first = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+        physical_point_of_sale="0009",
+        physical_number="100",
+    )
+    second = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+        physical_point_of_sale="0009",
+        physical_number="101",
+    )
+
+    with pytest.raises(ValueError, match="ya fue utilizado"):
+        service.update_draft(
+            second,
+            physical_point_of_sale="0009",
+            physical_number="100",
+        )
+
+    updated = service.update_draft(
+        first,
+        physical_point_of_sale="0009",
+        physical_number="100",
+        observations="Sigue siendo el mismo remito",
+    )
+    assert updated.physical_number == "00000100"
+
+
+def test_issue_with_manual_number_keeps_it_without_series(db):
+    from app.models.remittances import Remittance
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    service = RemittanceService("admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+        items=[{"product": data["product"], "quantity": 1}],
+        physical_point_of_sale="3",
+        physical_number="987654",
+    )
+
+    emitted = service.issue(remittance)
+
+    assert emitted.status == Remittance.STATUS_ISSUED
+    assert emitted.physical_point_of_sale == "0003"
+    assert emitted.physical_number == "00987654"
+
+
+def test_driver_snapshot_prefers_cuit_over_document(db):
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    data["driver"].cuit = "20123456789"
+    data["driver"].save()
+    service = RemittanceService("admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        driver=data["driver"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+
+    assert remittance.driver_document == "20123456789"
+
+
+def test_trailer_override_is_normalized_and_wins_over_truck(db):
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
+    service = RemittanceService("admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        truck=data["truck"],
+        trailer_domain="ac 789 xy",
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+
+    assert remittance.trailer_domain == "AC789XY"
+
+    updated = service.update_draft(remittance, trailer_domain="zz 000 yy")
+
+    assert updated.trailer_domain == "ZZ000YY"
+
+
+def test_update_truck_without_trailer_override_keeps_truck_trailer(db):
+    from app.models.masters import Truck
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    with_trailer = Truck.create(domain="CHASIS09", trailer_domain="AC999ZZ")
+    service = RemittanceService("admin")
+    remittance = service.create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+
+    updated = service.update_draft(
+        remittance, truck=with_trailer, trailer_domain=None
+    )
+
+    assert updated.truck_domain == "CHASIS09"
+    assert updated.trailer_domain == "AC999ZZ"

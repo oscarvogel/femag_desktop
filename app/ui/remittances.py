@@ -34,7 +34,11 @@ from app.models.remittances import Remittance, RemittanceSeries
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 from app.ui.audit_reason_dialog import AuditReasonDialog
-from app.ui.combo_autocomplete import enable_combo_autocomplete
+from app.ui.combo_autocomplete import (
+    combo_current_data,
+    commit_combo_text,
+    enable_combo_autocomplete,
+)
 from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 
 
@@ -60,6 +64,7 @@ class RemittanceDialog(QDialog):
         self.client_combo = QComboBox()
         enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
         self.address_combo = QComboBox()
+        enable_combo_autocomplete(self.address_combo, placeholder="Buscar domicilio...")
         self.carrier_combo = QComboBox()
         self.carrier_combo.setObjectName("remittanceCarrierInput")
         self.truck_combo = QComboBox()
@@ -72,21 +77,41 @@ class RemittanceDialog(QDialog):
             (self.driver_combo, "Buscar chofer..."),
         ):
             enable_combo_autocomplete(combo, placeholder=placeholder)
-        self.series_combo = QComboBox()
-        self.series_combo.setObjectName("remittanceSeriesInput")
-        self.number_preview = QLineEdit()
-        self.number_preview.setObjectName("remittanceNumberPreview")
-        self.number_preview.setReadOnly(True)
+        # Numero de remito manual: no se usa talonario correlativo. Se acepta
+        # cualquier numero libre y se valida que no este usado (solo al emitir
+        # es obligatorio).
+        self.point_input = QLineEdit()
+        self.point_input.setObjectName("remittancePointInput")
+        self.point_input.setPlaceholderText("0001")
+        self.point_input.setMaxLength(4)
+        self.point_input.setMinimumWidth(60)
+        self.point_input.setMaximumWidth(80)
+        self.number_input = QLineEdit()
+        self.number_input.setObjectName("remittanceNumberInput")
+        self.number_input.setPlaceholderText("N° aleatorio del formulario")
+        self.number_input.setMaxLength(9)
+        number_box = QHBoxLayout()
+        number_box.setContentsMargins(0, 0, 0, 0)
+        number_box.setSpacing(4)
+        number_box.addWidget(self.point_input)
+        number_box.addWidget(QLabel("-"))
+        number_box.addWidget(self.number_input, 1)
+        self.trailer_input = QLineEdit()
+        self.trailer_input.setObjectName("remittanceTrailerInput")
+        self.trailer_input.setPlaceholderText("Patente del acoplado (opcional)")
+        self.trailer_input.setMaxLength(10)
         self.reference_input = QLineEdit()
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("remittanceObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones opcionales")
         form.addWidget(QLabel("Fecha"), 0, 0)
         form.addWidget(self.date_input, 0, 1)
-        form.addWidget(QLabel("Talonario"), 0, 2)
-        form.addWidget(self.series_combo, 0, 3)
-        form.addWidget(QLabel("Próximo remito"), 0, 4)
-        form.addWidget(self.number_preview, 0, 5)
+        point_number_widget = QWidget()
+        point_number_widget.setLayout(number_box)
+        form.addWidget(QLabel("N° remito"), 0, 2)
+        form.addWidget(point_number_widget, 0, 3)
+        form.addWidget(QLabel("Acoplado"), 0, 4)
+        form.addWidget(self.trailer_input, 0, 5)
         form.addWidget(QLabel("Cliente"), 1, 0)
         form.addWidget(self.client_combo, 1, 1, 1, 2)
         form.addWidget(QLabel("Domicilio"), 1, 3)
@@ -131,24 +156,31 @@ class RemittanceDialog(QDialog):
         root.addWidget(buttons)
 
         self.client_combo.currentIndexChanged.connect(self._refresh_addresses)
+        self.truck_combo.currentIndexChanged.connect(self._suggest_trailer)
+        self.point_input.editingFinished.connect(self._refresh_number_availability)
+        self.number_input.editingFinished.connect(self._refresh_number_availability)
         self._load_clients()
         self._load_transport()
-        self._load_series()
         if self.remittance is not None:
             self._load_remittance()
         elif self.items.rowCount() == 0:
             self._add_item_row()
+        self._refresh_number_availability()
 
     def _load_clients(self) -> None:
         self.client_combo.clear()
         for client in Client.select().where(Client.active == True).order_by(Client.name):  # noqa: E712
             self.client_combo.addItem(client.name, client.id)
+        self._resync_completer(self.client_combo)
         self._refresh_addresses()
 
     def _refresh_addresses(self) -> None:
         self.address_combo.clear()
-        client_id = self.client_combo.currentData()
+        client_id = combo_current_data(self.client_combo)
+        if client_id is None:
+            client_id = self.client_combo.currentData()
         if not client_id:
+            self._resync_completer(self.address_combo)
             return
         query = (
             ClientAddress.select()
@@ -158,45 +190,102 @@ class RemittanceDialog(QDialog):
         for address in query:
             label = f"{address.address} - {address.city}, {address.province}"
             self.address_combo.addItem(label, address.id)
+        self._resync_completer(self.address_combo)
+
+    @staticmethod
+    def _resync_completer(combo: QComboBox) -> None:
+        """Reata el completer al modelo actual del combo.
+
+        Los items se cargan despues de habilitar el autocomplete; reatar el
+        modelo deja el filtrado funcionando aunque el combo se recargue.
+        """
+        completer = combo.completer()
+        if completer is not None:
+            completer.setModel(combo.model())
 
     def _load_transport(self) -> None:
         for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
+            combo.clear()
             combo.addItem("Sin asignar", None)
         for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name):  # noqa: E712
-            self.carrier_combo.addItem(carrier.name, carrier.id)
+            label = carrier.name
+            if carrier.cuit:
+                label += f" · {carrier.cuit}"
+            self.carrier_combo.addItem(label, carrier.id)
         for truck in Truck.select().where(Truck.active == True).order_by(Truck.domain):  # noqa: E712
-            self.truck_combo.addItem(truck.domain, truck.id)
+            label = truck.domain
+            if truck.trailer_domain:
+                label += f" / {truck.trailer_domain}"
+            if truck.carrier:
+                label += f" · {truck.carrier.name}"
+            self.truck_combo.addItem(label, truck.id)
         for driver in Driver.select().where(Driver.active == True).order_by(Driver.name):  # noqa: E712
-            self.driver_combo.addItem(driver.name, driver.id)
+            label = driver.name
+            document = driver.cuit or driver.document
+            if document:
+                label += f" · {document}"
+            self.driver_combo.addItem(label, driver.id)
+        for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
+            self._resync_completer(combo)
 
-    def _load_series(self) -> None:
-        self.series_combo.clear()
-        for series in (
-            RemittanceSeries.select()
-            .where(RemittanceSeries.active == True)  # noqa: E712
-            .order_by(RemittanceSeries.is_default.desc(), RemittanceSeries.name)
-        ):
-            self.series_combo.addItem(series.name, series.id)
-        self.series_combo.currentIndexChanged.connect(self._refresh_number_preview)
-        self._refresh_number_preview()
-
-    def _refresh_number_preview(self) -> None:
-        series_id = self.series_combo.currentData()
-        series = RemittanceSeries.get_by_id(series_id) if series_id else None
-        self.number_preview.setText(RemittanceSeriesService.preview(series))
+    def _suggest_trailer(self) -> None:
+        """Prefill del acoplado con el del camion, editable por el usuario."""
+        if self.trailer_input.text().strip():
+            return
+        truck_id = combo_current_data(self.truck_combo)
+        if not truck_id:
+            return
+        try:
+            truck = Truck.get_by_id(truck_id)
+        except Truck.DoesNotExist:
+            return
+        if truck.trailer_domain:
+            self.trailer_input.setText(truck.trailer_domain)
 
     @staticmethod
     def _selected_model(combo: QComboBox, model):
-        record_id = combo.currentData()
+        record_id = combo_current_data(combo)
         return model.get_by_id(record_id) if record_id else None
+
+    def _normalized_number(self) -> tuple[str | None, str | None]:
+        point = self.point_input.text().strip().replace("-", "")
+        number = self.number_input.text().strip().replace("-", "")
+        point = point.zfill(4) if point and point.isdigit() else None
+        number = number.zfill(8) if number and number.isdigit() else None
+        if point is not None and len(self.point_input.text().strip().replace("-", "")) > 4:
+            point = None
+        if number is not None and len(self.number_input.text().strip().replace("-", "")) > 8:
+            number = None
+        return point, number
+
+    def _refresh_number_availability(self) -> None:
+        """Aviso en vivo si el numero de remito ya fue utilizado."""
+        for field in (self.point_input, self.number_input):
+            field.setStyleSheet("")
+            field.setToolTip("")
+        point, number = self._normalized_number()
+        if not point or not number:
+            return
+        query = Remittance.select().where(
+            (Remittance.physical_point_of_sale == point)
+            & (Remittance.physical_number == number)
+        )
+        if self.remittance is not None:
+            query = query.where(Remittance.id != self.remittance.id)
+        if query.exists():
+            message = f"El remito {point}-{number} ya fue utilizado. Cargue otro numero."
+            for field in (self.point_input, self.number_input):
+                field.setStyleSheet("border: 1px solid #c0392b;")
+                field.setToolTip(message)
 
     def _add_item_row(self, product_id=None, quantity="", description="") -> None:
         row = self.items.rowCount()
         self.items.insertRow(row)
         combo = QComboBox()
-        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
         for product in Product.select().where(Product.active == True).order_by(Product.name):  # noqa: E712
             combo.addItem(product.name, product.id)
+        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
+        self._resync_completer(combo)
         if product_id:
             index = combo.findData(product_id)
             if index >= 0:
@@ -223,14 +312,9 @@ class RemittanceDialog(QDialog):
         if index >= 0:
             self.address_combo.setCurrentIndex(index)
         self.date_input.setDate(QDate(r.date.year, r.date.month, r.date.day))
-        if r.series_id:
-            index = self.series_combo.findData(r.series_id)
-            if index >= 0:
-                self.series_combo.setCurrentIndex(index)
-        if r.physical_point_of_sale and r.physical_number:
-            self.number_preview.setText(f"{r.physical_point_of_sale}-{r.physical_number}")
-        else:
-            self._refresh_number_preview()
+        self.point_input.setText(r.physical_point_of_sale or "")
+        self.number_input.setText(r.physical_number or "")
+        self.trailer_input.setText(r.trailer_domain or "")
         self.reference_input.setText(r.document_reference or "")
         self.observations_input.setText(r.observations or "")
         for combo, record_id in (
@@ -248,19 +332,24 @@ class RemittanceDialog(QDialog):
         self.client_combo.setEnabled(editable)
         self.address_combo.setEnabled(editable)
         self.date_input.setEnabled(editable)
-        self.series_combo.setEnabled(editable)
+        self.point_input.setEnabled(editable)
+        self.number_input.setEnabled(editable)
+        self.trailer_input.setEnabled(editable)
         self.reference_input.setEnabled(editable)
         self.observations_input.setEnabled(editable)
         self.carrier_combo.setEnabled(editable)
         self.truck_combo.setEnabled(editable)
         self.driver_combo.setEnabled(editable)
         self.items.setEnabled(editable)
+        self._refresh_number_availability()
 
     def _payload_items(self) -> list[dict]:
         payload = []
         for row in range(self.items.rowCount()):
             combo = self.items.cellWidget(row, 0)
-            product_id = combo.currentData() if combo else None
+            if combo is not None:
+                commit_combo_text(combo)
+            product_id = combo_current_data(combo) if combo else None
             quantity_input = self.items.cellWidget(row, 1)
             description_input = self.items.cellWidget(row, 2)
             quantity_text = (quantity_input.text() if quantity_input else "").strip()
@@ -282,14 +371,30 @@ class RemittanceDialog(QDialog):
 
     def _save(self) -> None:
         try:
-            client = Client.get_by_id(self.client_combo.currentData())
-            address = ClientAddress.get_by_id(self.address_combo.currentData())
+            for combo in (
+                self.client_combo,
+                self.address_combo,
+                self.carrier_combo,
+                self.truck_combo,
+                self.driver_combo,
+            ):
+                commit_combo_text(combo)
+            client_id = combo_current_data(self.client_combo)
+            address_id = combo_current_data(self.address_combo)
+            if not client_id:
+                raise ValueError("Debe seleccionar un cliente.")
+            if not address_id:
+                raise ValueError("Debe seleccionar un domicilio.")
+            client = Client.get_by_id(client_id)
+            address = ClientAddress.get_by_id(address_id)
             items = self._payload_items()
             date_value = self.date_input.date().toPyDate()
             carrier = self._selected_model(self.carrier_combo, Carrier)
             truck = self._selected_model(self.truck_combo, Truck)
             driver = self._selected_model(self.driver_combo, Driver)
-            series = self._selected_model(self.series_combo, RemittanceSeries)
+            point = self.point_input.text().strip() or None
+            number = self.number_input.text().strip() or None
+            trailer_domain = self.trailer_input.text().strip() or None
             service = RemittanceService(self.current_user)
             if self.remittance is None:
                 self.remittance = service.create_manual(
@@ -301,8 +406,10 @@ class RemittanceDialog(QDialog):
                     observations=self.observations_input.text().strip() or None,
                     carrier=carrier,
                     truck=truck,
+                    trailer_domain=trailer_domain,
                     driver=driver,
-                    series=series,
+                    physical_point_of_sale=point,
+                    physical_number=number,
                 )
             else:
                 self.remittance = service.update_draft(
@@ -315,8 +422,10 @@ class RemittanceDialog(QDialog):
                     observations=self.observations_input.text().strip() or None,
                     carrier=carrier,
                     truck=truck,
+                    trailer_domain=trailer_domain,
                     driver=driver,
-                    series=series,
+                    physical_point_of_sale=point,
+                    physical_number=number,
                 )
         except Exception as exc:
             QMessageBox.warning(self, "Remito", str(exc))

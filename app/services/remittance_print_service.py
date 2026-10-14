@@ -115,6 +115,7 @@ class RemittancePrintService:
         pdf.drawString(17 * MM, 52 * MM, "TRANSPORTE")
 
         pdf.setFont("Helvetica", 9)
+        self._draw_preview_summary(pdf, remittance)
         self._draw_variable_fields(pdf, remittance, items)
         pdf.showPage()
         pdf.save()
@@ -146,6 +147,37 @@ class RemittancePrintService:
                 f"hasta {self.template.max_detail_rows}."
             )
         return items
+
+    def _draw_preview_summary(self, pdf, remittance: Remittance) -> None:
+        """Bloque etiquetado solo para la vista previa.
+
+        El PDF preimpreso dibuja valores en coordenadas del formulario sin
+        etiquetas; este resumen permite verificar CUIT de transporte,
+        CUIT/DNI del chofer y patentes de tractor y remolque antes de
+        imprimir el formulario real.
+        """
+        pdf.setFont("Helvetica", 7.5)
+        lines = [
+            f"Remito: {self._physical_number(remittance) or remittance.remittance_number}"
+            f"   Fecha: {remittance.date.strftime('%d/%m/%Y')}"
+            f"   Estado: {remittance.status}",
+            f"Cliente: {remittance.client_name or ''}"
+            f"   CUIT: {remittance.client_cuit or ''}"
+            f"   IVA: {remittance.client_iva_condition or ''}",
+            f"Destino: {remittance.delivery_address_text or ''}"
+            f", {remittance.delivery_city or ''}"
+            f" ({remittance.delivery_province or ''})",
+            f"Transporte: {remittance.carrier_name or 'Sin asignar'}"
+            f"   CUIT: {remittance.carrier_cuit or ''}",
+            f"Chofer: {remittance.driver_name or 'Sin asignar'}"
+            f"   CUIT/DNI: {remittance.driver_document or ''}"
+            f"   Tractor: {remittance.truck_domain or ''}"
+            f"   Acoplado: {remittance.trailer_domain or ''}",
+        ]
+        y = 278.0
+        for line in lines:
+            pdf.drawString(17 * MM, y * MM, line)
+            y -= 2.5
 
     def _draw_variable_fields(self, pdf, remittance: Remittance, items) -> None:
         self._text(

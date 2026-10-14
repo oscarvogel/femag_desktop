@@ -49,10 +49,10 @@ def test_manual_dialog_exposes_transport_and_observations(db):
     assert buttons.button(QDialogButtonBox.Cancel).text() == "Cancelar"
 
 
-def test_manual_dialog_previews_default_series_without_consuming_number(db):
-    from PyQt5.QtWidgets import QApplication, QComboBox, QLineEdit
+def test_manual_dialog_accepts_free_number_without_series(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit
 
-    from app.models.remittances import RemittanceSeries
+    from app.models.remittances import Remittance, RemittanceSeries
     from app.services.remittance_service import RemittanceSeriesService
     from app.ui.remittances import RemittanceDialog
     from tests.conftest import _master_data
@@ -68,12 +68,17 @@ def test_manual_dialog_previews_default_series_without_consuming_number(db):
     dialog = RemittanceDialog(current_user="ui_series")
     app.processEvents()
 
-    selector = dialog.findChild(QComboBox, "remittanceSeriesInput")
-    preview = dialog.findChild(QLineEdit, "remittanceNumberPreview")
-    assert selector.currentData() == series.id
-    assert preview.isReadOnly()
-    assert preview.text() == "0001-00010678 (se asigna al emitir)"
+    point = dialog.findChild(QLineEdit, "remittancePointInput")
+    number = dialog.findChild(QLineEdit, "remittanceNumberInput")
+    assert point is not None and not point.isReadOnly()
+    assert number is not None and not number.isReadOnly()
+    # El numero manual es libre: se puede cargar cualquiera, no el del talonario.
+    point.setText("0002")
+    number.setText("00005555")
+    assert dialog.findChild(QLineEdit, "remittanceSeriesInput") is None
+    assert dialog.findChild(QLineEdit, "remittanceNumberPreview") is None
     assert RemittanceSeries.get_by_id(series.id).next_number == 10678
+    assert Remittance.select().count() == 0
 
 
 def test_series_configuration_page_lists_numbering_and_actions(db):
@@ -104,8 +109,8 @@ def test_series_configuration_page_lists_numbering_and_actions(db):
     assert page.table.item(0, 3).text() == "00000045"
 
 
-def test_manual_dialog_persists_transport_and_observations(db):
-    from PyQt5.QtWidgets import QApplication
+def test_manual_dialog_persists_manual_number_and_trailer(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit
 
     from app.models.remittances import Remittance
     from app.ui.remittances import RemittanceDialog
@@ -119,6 +124,9 @@ def test_manual_dialog_persists_transport_and_observations(db):
     dialog.carrier_combo.setCurrentIndex(dialog.carrier_combo.findData(data["carrier"].id))
     dialog.truck_combo.setCurrentIndex(dialog.truck_combo.findData(data["truck"].id))
     dialog.driver_combo.setCurrentIndex(dialog.driver_combo.findData(data["driver"].id))
+    dialog.findChild(QLineEdit, "remittancePointInput").setText("0007")
+    dialog.findChild(QLineEdit, "remittanceNumberInput").setText("12345678")
+    dialog.findChild(QLineEdit, "remittanceTrailerInput").setText("ac 789 xy")
     dialog.items.cellWidget(0, 0).setCurrentIndex(
         dialog.items.cellWidget(0, 0).findData(data["product"].id)
     )
@@ -134,6 +142,74 @@ def test_manual_dialog_persists_transport_and_observations(db):
     assert remittance.truck_id == data["truck"].id
     assert remittance.driver_id == data["driver"].id
     assert remittance.observations == "Entregar por portón lateral"
+    assert remittance.physical_point_of_sale == "0007"
+    assert remittance.physical_number == "12345678"
+    assert remittance.trailer_domain == "AC789XY"
+
+
+def test_manual_dialog_warns_when_number_is_already_used(db):
+    from PyQt5.QtWidgets import QApplication, QLineEdit
+
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    RemittanceService("ui_dup").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        items=[{"product": data["product"], "quantity": 1}],
+        physical_point_of_sale="0007",
+        physical_number="00007777",
+    )
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_dup")
+    dialog.findChild(QLineEdit, "remittancePointInput").setText("0007")
+    dialog.findChild(QLineEdit, "remittanceNumberInput").setText("7777")
+
+    dialog._refresh_number_availability()
+
+    number = dialog.findChild(QLineEdit, "remittanceNumberInput")
+    assert number.styleSheet() != ""
+    assert "ya fue utilizado" in number.toolTip()
+
+
+def test_manual_dialog_transport_labels_expose_searchable_data(db):
+    from PyQt5.QtWidgets import QApplication, QComboBox
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_labels")
+    app.processEvents()
+
+    truck_combo = dialog.findChild(QComboBox, "remittanceTruckInput")
+    truck_texts = [truck_combo.itemText(i) for i in range(truck_combo.count())]
+    assert any("AB123CD" in text and "AC456EF" in text for text in truck_texts)
+    carrier_combo = dialog.findChild(QComboBox, "remittanceCarrierInput")
+    carrier_texts = [carrier_combo.itemText(i) for i in range(carrier_combo.count())]
+    assert any("30777777770" in text for text in carrier_texts)
+
+
+def test_manual_dialog_address_has_autocomplete(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittance_address_autocomplete")
+    app.processEvents()
+
+    assert dialog.address_combo.isEditable()
+    assert dialog.address_combo.completer() is not None
+    assert dialog.address_combo.completer().filterMode() == Qt.MatchContains
 
 
 def test_detail_quantity_and_description_are_direct_editors(db):
@@ -264,6 +340,46 @@ def test_print_fields_move_up_five_points_except_date_and_include_both_domains(d
     assert calls_by_value[remittance.client_name][1] == printer.template.client_y * MM + 5
     assert calls_by_value["760"][1] == printer.template.first_detail_y * MM + 5
     assert calls_by_value["AB123CD / AC456EF"][1] == printer.template.truck_y * MM + 5
+
+
+def test_preview_summary_exposes_transport_cuits_and_domains(db):
+    from app.services.remittance_print_service import RemittancePrintService
+    from app.services.remittance_service import RemittanceService
+    from tests.conftest import _master_data
+
+    class RecordingPdf:
+        def __init__(self):
+            self.calls = []
+
+        def drawString(self, x, y, value):
+            self.calls.append((x, y, value))
+
+        def setFont(self, *args, **kwargs):
+            return None
+
+    data = _master_data()
+    data["truck"].trailer_domain = "AC456EF"
+    data["truck"].save()
+    data["driver"].cuit = "20123456789"
+    data["driver"].save()
+    remittance = RemittanceService(current_user="ui_preview_summary").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+        items=[{"product": data["product"], "quantity": 760}],
+    )
+    pdf = RecordingPdf()
+    printer = RemittancePrintService(current_user="ui_preview_summary")
+
+    printer._draw_preview_summary(pdf, remittance)
+
+    values = " ".join(value for _, _, value in pdf.calls)
+    assert "30777777770" in values
+    assert "20123456789" in values
+    assert "AB123CD" in values
+    assert "AC456EF" in values
 
 
 def test_preview_pdf_is_generated_for_draft_and_is_audited(db, tmp_path):
