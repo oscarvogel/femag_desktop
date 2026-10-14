@@ -355,13 +355,13 @@ def test_remittance_print_template_matches_requested_layout(db):
     # 1) fecha 12mm mas arriba y mas grande.
     assert template.date_y == 264
     assert template.date_font_size == 12
-    # 2) bloque cliente 5mm arriba y 10mm a la izquierda.
-    assert (template.client_x, template.client_y) == (20, 234)
-    assert (template.address_x, template.address_y) == (20, 223)
-    assert (template.city_x, template.city_y) == (95, 223)
-    assert (template.province_x, template.province_y) == (148, 223)
-    assert (template.cuit_x, template.cuit_y) == (20, 212)
-    assert (template.iva_x, template.iva_y) == (20, 202)
+    # 2) bloque cliente 5mm arriba y 25mm a la derecha.
+    assert (template.client_x, template.client_y) == (45, 234)
+    assert (template.address_x, template.address_y) == (45, 223)
+    assert (template.city_x, template.city_y) == (120, 223)
+    assert (template.province_x, template.province_y) == (173, 223)
+    assert (template.cuit_x, template.cuit_y) == (45, 212)
+    assert (template.iva_x, template.iva_y) == (45, 202)
     # 4) detalle 8mm mas arriba.
     assert template.first_detail_y == 186
     # 5) chofer 5mm arriba y 10mm a la izquierda.
