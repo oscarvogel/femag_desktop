@@ -98,3 +98,30 @@ def test_clients_page_has_export_excel_button(db):
     button = page.findChild(QPushButton, "exportClientsExcelButton")
     assert button is not None
     assert button.text() == "Exportar a Excel"
+
+
+def test_open_generated_file_uses_default_app(tmp_path, monkeypatch):
+    import os
+
+    from app.reports.client_list_export import open_generated_file
+
+    target = tmp_path / "clientes.xlsx"
+    target.write_bytes(b"fake")
+    opened = []
+    monkeypatch.setattr(os, "startfile", lambda path: opened.append(path), raising=False)
+
+    assert open_generated_file(target) is True
+    assert opened == [str(target.resolve())]
+
+
+def test_open_generated_file_never_raises(tmp_path, monkeypatch):
+    import os
+
+    from app.reports.client_list_export import open_generated_file
+
+    def _boom(_path):
+        raise OSError("sin app asociada")
+
+    monkeypatch.setattr(os, "startfile", _boom, raising=False)
+
+    assert open_generated_file(tmp_path / "clientes.xlsx") is False

@@ -2103,7 +2103,11 @@ def build_client_abm_page(
             client_feedback.show_success("Saldo inicial registrado.")
 
     def export_clients_to_excel() -> None:
-        from app.reports.client_list_export import export_clients_xlsx, fetch_ordered_clients
+        from app.reports.client_list_export import (
+            export_clients_xlsx,
+            fetch_ordered_clients,
+            open_generated_file,
+        )
 
         visible_rows = filter_and_sort_master_rows(
             filtered_client_rows(),
@@ -2135,10 +2139,12 @@ def build_client_abm_page(
             )
             return
         client_feedback.show_success(f"Excel generado: {exported}")
+        opened = open_generated_file(exported)
         QMessageBox.information(
             parent,
             "Exportar a Excel",
-            f"Archivo generado correctamente:\n{exported}",
+            f"Archivo generado correctamente:\n{exported}"
+            + (" Se abrió automáticamente." if opened else ""),
         )
 
     def open_new_place() -> None:

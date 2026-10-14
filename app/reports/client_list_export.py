@@ -98,3 +98,23 @@ def export_clients_xlsx(clients, destination: str | Path) -> Path:
         ws.column_dimensions[get_column_letter(idx)].width = width
     wb.save(path)
     return path
+
+
+def open_generated_file(destination: str | Path) -> bool:
+    """Abre el xlsx con la app por defecto (misma idea que _open_print_output).
+
+    Devuelve True si pudo lanzar la apertura. Nunca levanta: si falla,
+    el Excel igual quedó generado y el llamador lo informa con la ruta.
+    """
+    import os
+    import webbrowser
+
+    target = Path(destination).resolve()
+    try:
+        startfile = getattr(os, "startfile", None)
+        if startfile is not None:
+            startfile(str(target))
+            return True
+        return bool(webbrowser.open(target.as_uri()))
+    except Exception:
+        return False
