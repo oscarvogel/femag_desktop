@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from peewee import JOIN, InterfaceError, OperationalError
 from PyQt5.QtCore import QDate, Qt
@@ -12,11 +14,13 @@ from PyQt5.QtWidgets import (
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -1916,6 +1920,12 @@ def build_client_abm_page(
     opening_balance_btn = _action_button(
         "addClientOpeningBalanceButton", "Agregar saldo inicial", secondary=True
     )
+    export_clients_btn = _action_button(
+        "exportClientsExcelButton", "Exportar a Excel", secondary=True
+    )
+    export_clients_btn.setToolTip(
+        "Exporta a Excel los clientes visibles con su lista de precios."
+    )
     new_client_btn.setEnabled(can_create)
     edit_client_btn.setEnabled(can_modify)
     emails_btn.setEnabled(False)
@@ -1925,6 +1935,7 @@ def build_client_abm_page(
     client_actions.addWidget(emails_btn)
     client_actions.addWidget(view_ledger_btn)
     client_actions.addWidget(opening_balance_btn)
+    client_actions.addWidget(export_clients_btn)
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
@@ -2091,6 +2102,51 @@ def build_client_abm_page(
             refresh_clients()
             client_feedback.show_success("Saldo inicial registrado.")
 
+    def export_clients_to_excel() -> None:
+        from app.reports.client_list_export import (
+            export_clients_xlsx,
+            fetch_ordered_clients,
+            open_generated_file,
+        )
+
+        visible_rows = filter_and_sort_master_rows(
+            filtered_client_rows(),
+            query=client_search_input.text(),
+            sort_column=client_table_controller.sort_column,
+            descending=client_table_controller.sort_order == Qt.DescendingOrder,
+        )
+        client_ids = [row[0] for row in visible_rows]
+        if not client_ids:
+            client_feedback.show_info("No hay clientes para exportar con el filtro actual.")
+            return
+        default_name = f"clientes_{date.today():%Y%m%d}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            parent,
+            "Exportar clientes a Excel",
+            str(Path.home() / default_name),
+            "Excel (*.xlsx)",
+        )
+        if not path:
+            return
+        try:
+            exported = export_clients_xlsx(fetch_ordered_clients(client_ids), path)
+        except Exception as exc:
+            client_feedback.show_error(f"No se pudo exportar a Excel: {exc}")
+            QMessageBox.critical(
+                parent,
+                "Exportar a Excel",
+                f"No se pudo generar el archivo Excel:\n{exc}",
+            )
+            return
+        client_feedback.show_success(f"Excel generado: {exported}")
+        opened = open_generated_file(exported)
+        QMessageBox.information(
+            parent,
+            "Exportar a Excel",
+            f"Archivo generado correctamente:\n{exported}"
+            + (" Se abrió automáticamente." if opened else ""),
+        )
+
     def open_new_place() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2135,6 +2191,7 @@ def build_client_abm_page(
     emails_btn.clicked.connect(open_client_emails)
     view_ledger_btn.clicked.connect(open_client_ledger)
     opening_balance_btn.clicked.connect(open_opening_balance)
+    export_clients_btn.clicked.connect(export_clients_to_excel)
     add_place_btn.clicked.connect(open_new_place)
     edit_place_btn.clicked.connect(open_edit_place)
     toggle_place_btn.clicked.connect(toggle_place_active)
