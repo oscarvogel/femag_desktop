@@ -212,6 +212,48 @@ class RemittanceService:
         return normalized.zfill(size)
 
     @staticmethod
+    def _normalize_trailer_domain(value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("El semi/acoplado debe ser una patente valida.")
+        cleaned = "".join(ch for ch in value.strip().upper() if ch.isalnum())
+        return cleaned or None
+
+    @staticmethod
+    def _ensure_physical_unique(
+        point: str | None,
+        number: str | None,
+        *,
+        exclude_id: int | None = None,
+    ) -> None:
+        """Rechaza con mensaje claro un numero de remito ya utilizado.
+
+        El numero no es correlativo: se acepta cualquier valor libre, pero
+        nunca uno que ya exista en otro remito (incluidos anios/talonarios
+        distintos que compartan punto y numero).
+        """
+        if not point or not number:
+            return
+        query = Remittance.select().where(
+            (Remittance.physical_point_of_sale == point)
+            & (Remittance.physical_number == number)
+        )
+        if exclude_id is not None:
+            query = query.where(Remittance.id != exclude_id)
+        if query.exists():
+            raise ValueError(
+                f"El remito {point}-{number} ya fue utilizado. "
+                "Cargue otro numero."
+            )
+
+    @staticmethod
+    def _driver_snapshot_document(driver: Driver | None) -> str | None:
+        if driver is None:
+            return None
+        return driver.cuit or driver.document or None
+
+    @staticmethod
     def _validate_header(client: Client, delivery_address: ClientAddress) -> None:
         if client is None:
             raise ValueError("Debe seleccionar un cliente.")
@@ -278,6 +320,10 @@ class RemittanceService:
         number = self._normalize_physical_number(physical_number, size=8)
         if bool(point) != bool(number):
             raise ValueError("Punto de venta y numero fisico deben cargarse juntos.")
+        self._ensure_physical_unique(point, number)
+        trailer_snapshot = self._normalize_trailer_domain(trailer_domain)
+        if trailer_snapshot is None and truck is not None:
+            trailer_snapshot = self._normalize_trailer_domain(truck.trailer_domain)
 
         with database_proxy.atomic():
             remittance = Remittance.create(
@@ -303,9 +349,9 @@ class RemittanceService:
                 carrier_name=carrier.name if carrier else None,
                 carrier_cuit=carrier.cuit if carrier else None,
                 truck_domain=truck.domain if truck else None,
-                trailer_domain=trailer_domain or (truck.trailer_domain if truck else None),
+                trailer_domain=trailer_snapshot,
                 driver_name=driver.name if driver else None,
-                driver_document=driver.document if driver else None,
+                driver_document=self._driver_snapshot_document(driver),
                 observations=observations,
                 created_by=self.current_user,
                 updated_by=self.current_user,
@@ -387,6 +433,7 @@ class RemittanceService:
             )
             if bool(point) != bool(number):
                 raise ValueError("Punto de venta y numero fisico deben cargarse juntos.")
+            self._ensure_physical_unique(point, number, exclude_id=remittance.id)
             remittance.physical_point_of_sale = point
             remittance.physical_number = number
 
@@ -419,10 +466,19 @@ class RemittanceService:
                 remittance.carrier_cuit = value.cuit if value else None
             elif relation == "truck":
                 remittance.truck_domain = value.domain if value else None
-                remittance.trailer_domain = value.trailer_domain if value else None
+                remittance.trailer_domain = (
+                    self._normalize_trailer_domain(value.trailer_domain) if value else None
+                )
             elif relation == "driver":
                 remittance.driver_name = value.name if value else None
-                remittance.driver_document = value.document if value else None
+                remittance.driver_document = self._driver_snapshot_document(value)
+
+        if "trailer_domain" in changes:
+            # El override manual del acoplado gana sobre el del camion. Un
+            # vacio explicito no borra: conserva el del camion o el actual.
+            override = self._normalize_trailer_domain(changes["trailer_domain"])
+            if override is not None:
+                remittance.trailer_domain = override
 
         remittance.updated_by = self.current_user
         with database_proxy.atomic():
@@ -460,11 +516,20 @@ class RemittanceService:
             if not remittance.physical_point_of_sale or not remittance.physical_number:
                 series = remittance.series or RemittanceSeriesService.default()
                 if series is None:
-                    raise ValueError("Debe configurar un talonario predeterminado antes de emitir.")
+                    raise ValueError(
+                        "Debe cargar el numero de remito "
+                        "(punto de venta y numero) antes de emitir."
+                    )
                 point, number = RemittanceSeriesService(self.current_user).allocate(series)
                 remittance.series = series
                 remittance.physical_point_of_sale = point
                 remittance.physical_number = number
+            else:
+                self._ensure_physical_unique(
+                    remittance.physical_point_of_sale,
+                    remittance.physical_number,
+                    exclude_id=remittance.id,
+                )
             remittance.status = Remittance.STATUS_ISSUED
             remittance.issued_by = self.current_user
             remittance.updated_by = self.current_user
