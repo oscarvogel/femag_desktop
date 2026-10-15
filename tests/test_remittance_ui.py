@@ -27,6 +27,165 @@ def test_remittance_page_exposes_operational_actions(db, tmp_path):
     assert page.table.columnCount() == 7
 
 
+def _f150_ready_draft(current_user: str):
+    """Remito en borrador con todos los datos que exige el F150."""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.models.dgr import DgrCountry, DgrLocality
+    from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+    from app.models.system import AppParameter
+    from app.services.remittance_service import RemittanceService
+
+    country = DgrCountry.create(legacy_id=200, name="ARGENTINA", abbr="ARG")
+    locality = DgrLocality.create(
+        code="0061",
+        name="PUERTO RICO",
+        dgr_id=61,
+        dgr_code=61,
+        department_code=10,
+        province_code=14,
+        country=country,
+    )
+    AppParameter.create(key="f150.origin", value='{"locality_code": "0002"}')
+    client = Client.create(name="Cliente F150", cuit="30712345678", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12 km 8",
+        locality=locality,
+    )
+    carrier = Carrier.create(
+        name="Transporte F150",
+        cuit="30777777770",
+        codigo="0001",
+        tipo="DIR",
+        locality=locality,
+    )
+    truck = Truck.create(
+        domain="AB123CD",
+        trailer_domain="AC456EF",
+        carrier=carrier,
+        chassis_type="1",
+        trailer_type="1",
+    )
+    driver = Driver.create(
+        name="Chofer F150",
+        carrier=carrier,
+        usual_truck=truck,
+        cuit="20123456789",
+        document="12345678",
+        locality=locality,
+    )
+    product = Product.create(
+        codigo="ALM",
+        name="Almidon F150",
+        unit="KG",
+        precio_neto_base=12.5,
+        rh1="2",
+        rh2="2",
+        rh3="19",
+        rh4="0",
+        unidad_dgr="KG",
+    )
+    return RemittanceService(current_user).create_manual(
+        client=client,
+        delivery_address=address,
+        carrier=carrier,
+        truck=truck,
+        driver=driver,
+        physical_point_of_sale="0001",
+        physical_number="1068",
+        remittance_date=date(2026, 8, 23),
+        items=[{"product": product, "quantity": Decimal("1250")}],
+    )
+
+
+def test_issue_action_offers_f150_after_emit(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.models.remittances import Remittance
+    from app.services.remittance_service import RemittanceService
+    from app.ui import remittances as remittances_ui
+    from tests.conftest import _master_data
+
+    data = _master_data()
+    remittance = RemittanceService("ui_issue_f150").create_manual(
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        truck=data["truck"],
+        driver=data["driver"],
+        physical_point_of_sale="0001",
+        physical_number="1068",
+        items=[{"product": data["product"], "quantity": 1}],
+    )
+    app = QApplication.instance() or QApplication([])
+    page = remittances_ui.RemittancesPage(
+        current_user="ui_issue_f150", output_dir=tmp_path, f150_output_dir=tmp_path
+    )
+    page.table.selectRow(0)
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
+    offered = []
+    monkeypatch.setattr(page, "_offer_f150", offered.append)
+
+    page._issue()
+
+    assert Remittance.get_by_id(remittance.id).status == Remittance.STATUS_ISSUED
+    assert [row.id for row in offered] == [remittance.id]
+
+
+def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.f150_batch_service import F150BatchService
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    remittance = RemittanceService("ui_f150_save").issue(_f150_ready_draft("ui_f150_save"))
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(
+        current_user="ui_f150_save", output_dir=tmp_path, f150_output_dir=tmp_path
+    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *_args, **_kwargs: warnings.append(_args[2])
+    )
+
+    page._offer_f150(remittance)
+
+    assert warnings == []
+    expected = tmp_path / "F150-0001-00001068.txt"
+    assert expected.exists()
+    content = expected.read_bytes().decode("cp1252")
+    assert content.startswith("C1F15023082026@1@12@0001@")
+    inclusion = F150BatchService.is_included(remittance)
+    assert inclusion is True
+
+
+def test_offer_f150_skips_file_when_user_declines(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    remittance = RemittanceService("ui_f150_decline").issue(_f150_ready_draft("ui_f150_decline"))
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(
+        current_user="ui_f150_decline", output_dir=tmp_path, f150_output_dir=tmp_path
+    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.No)
+
+    page._offer_f150(remittance)
+
+    assert list(tmp_path.glob("F150-*")) == []
+
+
+
 def test_manual_dialog_exposes_transport_and_observations(db):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QGroupBox, QLineEdit
 

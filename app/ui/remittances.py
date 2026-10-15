@@ -31,6 +31,7 @@ from PyQt5.QtWidgets import (
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.remittances import Remittance, RemittanceSeries
+from app.services.f150_batch_service import F150BatchService
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 from app.ui.audit_reason_dialog import AuditReasonDialog
@@ -43,6 +44,7 @@ from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 
 
 REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
+F150_OUTPUT_DIR = Path("outputs") / "f150"
 
 
 class RemittanceDialog(QDialog):
@@ -643,10 +645,18 @@ class RemittanceSeriesPage(QWidget):
 
 
 class RemittancesPage(QWidget):
-    def __init__(self, *, current_user: str, parent=None, output_dir: Path | None = None):
+    def __init__(
+        self,
+        *,
+        current_user: str,
+        parent=None,
+        output_dir: Path | None = None,
+        f150_output_dir: Path | None = None,
+    ):
         super().__init__(parent)
         self.current_user = current_user
         self.output_dir = output_dir or REMITTANCE_PRINTS_DIR
+        self.f150_output_dir = f150_output_dir or F150_OUTPUT_DIR
         layout = QVBoxLayout(self)
         title = QLabel("Remitos")
         title.setObjectName("pageTitle")
@@ -785,6 +795,33 @@ class RemittancesPage(QWidget):
             self,
             "Remito emitido",
             f"{emitted.remittance_number} quedó emitido y ya no puede editarse.",
+        )
+        self._offer_f150(emitted)
+
+    def _offer_f150(self, remittance: Remittance) -> None:
+        if not remittance.physical_point_of_sale or not remittance.physical_number:
+            return
+        identity = f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+        answer = QMessageBox.question(
+            self,
+            "Generar F150",
+            f"¿Desea generar el archivo F150 del remito {identity}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        file_name = f"F150-{remittance.physical_point_of_sale}-{remittance.physical_number}.txt"
+        output = self.f150_output_dir / file_name
+        try:
+            batch = F150BatchService(self.current_user).generate([remittance], output)
+        except Exception as exc:
+            QMessageBox.warning(self, "Generar F150", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "F150 generado",
+            f"Se generó {batch.file_name} en:\n{output}",
         )
 
     def _print_selected(self) -> None:
