@@ -1,12 +1,33 @@
 import os
 import socket
 
-from peewee import DatabaseProxy, MySQLDatabase, SqliteDatabase
+from peewee import (
+    DatabaseProxy,
+    InterfaceError,
+    MySQLDatabase,
+    OperationalError,
+    SqliteDatabase,
+)
 
 from app.config.settings import Settings, load_settings
 
 
 database_proxy = DatabaseProxy()
+
+# Codigos de MySQL que significan "la conexion quedo inservible" y por lo tanto
+# admiten reabrir y reintentar. Las credenciales/esquema invalidos (1045, 1049)
+# y los errores de SQL quedan afuera: reintentar no los arregla.
+_LOST_CONNECTION_CODES = frozenset({2003, 2006, 2013, 2055})
+
+
+def _is_lost_connection(exc: Exception) -> bool:
+    args = getattr(exc, "args", ())
+    code = args[0] if args else None
+    if isinstance(exc, InterfaceError):
+        return code == 0
+    if isinstance(exc, OperationalError):
+        return code in _LOST_CONNECTION_CODES
+    return False
 
 
 class FemagMySQLDatabase(MySQLDatabase):
@@ -39,6 +60,32 @@ class FemagMySQLDatabase(MySQLDatabase):
             ClientPaymentService.ensure_default_payment_methods()
             self._femag_schema_prepared = True
         return result
+
+    def execute_sql(self, sql, params=None, commit=None):
+        """Reabre la conexion y reintenta si el servidor cerro la anterior.
+
+        El puesto comparte una unica conexion durante horas. Si MySQL la cierra
+        por inactividad (o la corta la red), peewee sigue apuntando al socket
+        muerto y la siguiente consulta falla con ``InterfaceError(0, '')``. Sin
+        esto, cualquier accion posterior -hasta un simple contador de avisos-
+        revienta. No se reintenta dentro de una transaccion: reconectar la
+        perderia en silencio.
+        """
+        try:
+            return super().execute_sql(sql, params, commit)
+        except (InterfaceError, OperationalError) as exc:
+            if not _is_lost_connection(exc) or self.in_transaction():
+                raise
+            self._reconnect()
+            return super().execute_sql(sql, params, commit)
+
+    def _reconnect(self) -> None:
+        try:
+            if not self.is_closed():
+                self.close()
+        except Exception:
+            pass
+        self.connect(reuse_if_open=False)
 
 
 def resolve_mysql_host_ipv4(host: str) -> str:

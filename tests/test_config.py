@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from peewee import MySQLDatabase, SqliteDatabase
 
 
@@ -116,3 +117,64 @@ def test_database_can_bind_sqlite_for_tests(db):
     profile = UserProfile.create(name="Administrador", description="Acceso total")
 
     assert profile.id is not None
+
+
+def test_lost_connection_classification():
+    from peewee import InterfaceError, OperationalError
+
+    from app.config.database import _is_lost_connection
+
+    assert _is_lost_connection(InterfaceError(0, ""))
+    assert _is_lost_connection(OperationalError(2006, "MySQL server has gone away"))
+    assert _is_lost_connection(OperationalError(2013, "Lost connection during query"))
+    assert not _is_lost_connection(OperationalError(1045, "Access denied"))
+    assert not _is_lost_connection(OperationalError(1049, "Unknown database"))
+    assert not _is_lost_connection(InterfaceError("bad parameters"))
+
+
+def test_execute_sql_reconnects_once_on_lost_connection(monkeypatch):
+    from peewee import InterfaceError
+
+    from app.config import database as database_config
+
+    database = database_config.FemagMySQLDatabase(
+        "femag", host="127.0.0.1", port=3306, user="puesto", password="secreta"
+    )
+    calls = {"queries": 0, "reconnects": 0}
+
+    def fake_execute_sql(self, sql, params=None, commit=None):
+        calls["queries"] += 1
+        if calls["queries"] == 1:
+            raise InterfaceError(0, "")
+        return "cursor"
+
+    monkeypatch.setattr(MySQLDatabase, "execute_sql", fake_execute_sql)
+    monkeypatch.setattr(database, "in_transaction", lambda: False)
+    monkeypatch.setattr(
+        database, "_reconnect", lambda: calls.__setitem__("reconnects", calls["reconnects"] + 1)
+    )
+
+    assert database.execute_sql("SELECT 1") == "cursor"
+    assert calls == {"queries": 2, "reconnects": 1}
+
+
+def test_execute_sql_does_not_reconnect_inside_transaction(monkeypatch):
+    from peewee import InterfaceError
+
+    from app.config import database as database_config
+
+    database = database_config.FemagMySQLDatabase(
+        "femag", host="127.0.0.1", port=3306, user="puesto", password="secreta"
+    )
+
+    def fake_execute_sql(self, sql, params=None, commit=None):
+        raise InterfaceError(0, "")
+
+    monkeypatch.setattr(MySQLDatabase, "execute_sql", fake_execute_sql)
+    monkeypatch.setattr(database, "in_transaction", lambda: True)
+    monkeypatch.setattr(
+        database, "_reconnect", lambda: pytest.fail("no debe reconectar en transaccion")
+    )
+
+    with pytest.raises(InterfaceError):
+        database.execute_sql("SELECT 1")
