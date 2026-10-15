@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -56,6 +57,7 @@ from app.config.schema import (
     ensure_runtime_schema,
     validate_runtime_schema,
 )
+from app.importers.dgr_reference import DgrReferenceImporter
 from app.importers.legacy_dbf import LegacyDbfMasterImporter
 from app.models.audit import AuditLog
 from app.models.budgets import Budget
@@ -624,14 +626,7 @@ class FemagDesktopWindow(QMainWindow):
         help_button.clicked.connect(
             lambda: QMessageBox.information(self, "Ayuda", future_module_message())
         )
-        QTimer.singleShot(
-            60000,
-            lambda: self.notifications.setText(
-                f"Avisos ({self.aviso_service.count_unread(self.user)})"
-                if self.aviso_service.count_unread(self.user)
-                else "Avisos"
-            ),
-        )
+        QTimer.singleShot(60000, self._refresh_aviso_badge)
 
         change_password.clicked.connect(self._open_change_password)
         can_configure = PermissionService.is_administrator(self.user)
@@ -703,6 +698,20 @@ class FemagDesktopWindow(QMainWindow):
                 "Se cambió el tema, pero no se pudo guardar la preferencia. "
                 "La próxima vez que abra la aplicación va a volver al tema claro.",
             )
+
+    def _refresh_aviso_badge(self) -> None:
+        """Actualiza el contador de avisos sin tumbar la ventana.
+
+        Corre desde un QTimer sobre la ventana ya abierta: si la base falla, se
+        registra y se deja el texto anterior en lugar de propagar la excepcion
+        al bucle de Qt.
+        """
+        try:
+            n = self.aviso_service.count_unread(self.user)
+        except (InterfaceError, OperationalError):
+            logger.warning("No se pudo actualizar el contador de avisos", exc_info=True)
+            return
+        self.notifications.setText(f"Avisos ({n})" if n else "Avisos")
 
     def _toggle_avisos(self):
         if self.aviso_dropdown.isVisible():
@@ -2557,6 +2566,82 @@ class FemagDesktopWindow(QMainWindow):
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(table, 1)
 
+        dgr_group = QGroupBox("Referencia DGR (archivo F150)")
+        dgr_layout = QGridLayout(dgr_group)
+        dgr_layout.setContentsMargins(12, 12, 12, 12)
+        dgr_layout.setHorizontalSpacing(10)
+        dgr_layout.setVerticalSpacing(8)
+        dgr_inputs: dict[str, QLineEdit] = {}
+        for row, (entity, label, object_name) in enumerate(_dgr_reference_entities()):
+            dgr_layout.addWidget(QLabel(label), row, 0)
+            path_input = QLineEdit()
+            path_input.setObjectName(object_name)
+            path_input.setPlaceholderText(r"C:\legacy\archivo.dbf")
+            browse = _action_button(f"{object_name}BrowseButton", "Examinar", secondary=True)
+            browse.clicked.connect(lambda _checked=False, target=path_input: _select_dbf_file(target, self))
+            dgr_layout.addWidget(path_input, row, 1)
+            dgr_layout.addWidget(browse, row, 2)
+            dgr_inputs[entity] = path_input
+        layout.addWidget(dgr_group)
+
+        dgr_actions = QHBoxLayout()
+        dgr_button = _action_button("runDgrImportButton", "Importar referencia DGR")
+        dgr_actions.addWidget(dgr_button)
+        dgr_actions.addStretch(1)
+        layout.addLayout(dgr_actions)
+
+        dgr_feedback = FormFeedback("dgrReferenceFeedback")
+        dgr_feedback.show_info(
+            "Seleccione los DBF de referencia DGR (países, provincias, localidades y códigos) "
+            "para habilitar el F150."
+        )
+        layout.addWidget(dgr_feedback)
+
+        dgr_table = QTableWidget(0, 6)
+        dgr_table.setObjectName("dgrReferenceSummaryTable")
+        dgr_table.setHorizontalHeaderLabels(
+            ["Entidad", "Creados", "Actualizados", "Omitidos", "Advertencias", "Errores"]
+        )
+        dgr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(dgr_table, 1)
+
+        def run_dgr_import() -> None:
+            paths = {entity: field.text().strip() for entity, field in dgr_inputs.items() if field.text().strip()}
+            if not paths:
+                dgr_feedback.show_warning(
+                    "Indicar al menos un archivo DBF de referencia DGR.",
+                    focus_widget=next(iter(dgr_inputs.values())),
+                )
+                dgr_table.setRowCount(0)
+                return
+            try:
+                summary = DgrReferenceImporter().import_dbf_files(
+                    paths,
+                    source_system=source_input.text().strip() or "legacy_dbf",
+                    encoding=encoding_input.text().strip() or "cp1252",
+                )
+            except Exception as exc:
+                dgr_feedback.show_error(f"No se pudo importar la referencia DGR: {exc}")
+                return
+            _fill_legacy_import_summary(dgr_table, summary)
+            self._refresh_master_routes()
+            warning_count = sum(
+                len(values.get("warnings", []))
+                for values in summary.values()
+                if isinstance(values, dict)
+            )
+            warning_label = "advertencia" if warning_count == 1 else "advertencias"
+            message = (
+                f"Referencia DGR importada con {warning_count} {warning_label}. "
+                "Revise el resumen y configure el origen del F150."
+            )
+            if warning_count:
+                dgr_feedback.show_warning(message)
+            else:
+                dgr_feedback.show_success(message)
+
+        dgr_button.clicked.connect(run_dgr_import)
+
         def run_import() -> None:
             paths = {entity: field.text().strip() for entity, field in path_inputs.items() if field.text().strip()}
             if not paths:
@@ -2828,19 +2913,36 @@ def _legacy_dbf_entities() -> list[tuple[str, str, str]]:
     ]
 
 
+def _dgr_reference_entities() -> list[tuple[str, str, str]]:
+    return [
+        ("paises", "Países", "dgrPaisesPathInput"),
+        ("provincias", "Provincias", "dgrProvinciasPathInput"),
+        ("localidades", "Localidades", "dgrLocalidadesPathInput"),
+        ("locdgr", "Códigos DGR", "dgrLocdgrPathInput"),
+    ]
+
+
 def _select_dbf_file(target: QLineEdit, parent=None) -> None:
     file_path, _ = QFileDialog.getOpenFileName(parent, "Seleccionar DBF", "", "DBF (*.dbf);;Todos (*.*)")
     if file_path:
         target.setText(file_path)
 
 
+_IMPORT_SUMMARY_LABELS = {
+    "clients": "Clientes",
+    "carriers": "Transportistas",
+    "drivers": "Choferes",
+    "trucks": "Camiones",
+    "products": "Productos",
+    "paises": "Países",
+    "provincias": "Provincias",
+    "localidades": "Localidades",
+}
+
+
 def _fill_legacy_import_summary(table: QTableWidget, summary: dict) -> None:
     labels = {
-        "clients": "Clientes",
-        "carriers": "Transportistas",
-        "drivers": "Choferes",
-        "trucks": "Camiones",
-        "products": "Productos",
+        entity: label for entity, label in _IMPORT_SUMMARY_LABELS.items() if entity in summary
     }
     table.setRowCount(len(labels))
     for row, (entity, label) in enumerate(labels.items()):

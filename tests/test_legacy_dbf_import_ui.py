@@ -106,6 +106,110 @@ def test_legacy_dbf_import_page_runs_importer_and_shows_summary(db, monkeypatch)
     assert not feedback.isHidden()
 
 
+def test_legacy_dbf_import_page_exposes_dgr_reference_section(db):
+    from PyQt5.QtWidgets import QLineEdit, QPushButton
+
+    app, window = _admin_window("admin_dgr_reference_ui")
+    window._navigate_to_route("legacy_dbf_import")
+    app.processEvents()
+
+    for object_name in (
+        "dgrPaisesPathInput",
+        "dgrProvinciasPathInput",
+        "dgrLocalidadesPathInput",
+        "dgrLocdgrPathInput",
+    ):
+        assert window.findChild(QLineEdit, object_name) is not None
+    assert window.findChild(QPushButton, "runDgrImportButton") is not None
+
+
+def test_dgr_reference_import_runs_and_shows_summary(db, monkeypatch):
+    from PyQt5.QtWidgets import QLineEdit, QPushButton, QTableWidget
+
+    from app.ui import desktop_app
+    from app.ui.form_feedback import FormFeedback
+
+    calls = []
+
+    class FakeDgrImporter:
+        def import_dbf_files(self, paths_by_entity, *, source_system, encoding):
+            calls.append((paths_by_entity, source_system, encoding))
+            return {
+                "paises": {
+                    "created": 2,
+                    "updated": 1,
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": [],
+                    "warnings": [],
+                },
+                "provincias": {
+                    "created": 1,
+                    "updated": 0,
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": [],
+                    "warnings": [{"code": "province_without_code", "source_id": "-"}],
+                },
+                "localidades": {
+                    "created": 5,
+                    "updated": 2,
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": [],
+                    "warnings": [],
+                },
+            }
+
+    monkeypatch.setattr(desktop_app, "DgrReferenceImporter", FakeDgrImporter)
+
+    app, window = _admin_window("admin_dgr_run_ui")
+    window._navigate_to_route("legacy_dbf_import")
+    app.processEvents()
+
+    window.findChild(QLineEdit, "dgrPaisesPathInput").setText(r"C:\legacy\paises.dbf")
+    window.findChild(QLineEdit, "dgrLocalidadesPathInput").setText(r"C:\legacy\localidades.dbf")
+    window.findChild(QLineEdit, "dbfEncodingInput").setText("cp850")
+    window.findChild(QPushButton, "runDgrImportButton").click()
+    app.processEvents()
+
+    assert calls == [
+        (
+            {"paises": r"C:\legacy\paises.dbf", "localidades": r"C:\legacy\localidades.dbf"},
+            "legacy_dbf",
+            "cp850",
+        )
+    ]
+    feedback = window.findChild(FormFeedback, "dgrReferenceFeedback")
+    table = window.findChild(QTableWidget, "dgrReferenceSummaryTable")
+    assert "Referencia DGR importada" in feedback.text()
+    assert table.rowCount() == 3
+    assert table.columnCount() == 6
+    assert table.item(0, 0).text() == "Países"
+    assert table.item(0, 1).text() == "2"
+    assert table.item(1, 4).text() == "1"
+    assert "1 advertencia" in feedback.text()
+    assert feedback.kind == "warning"
+
+
+def test_dgr_reference_import_requires_at_least_one_file(db):
+    from PyQt5.QtWidgets import QPushButton, QTableWidget
+
+    from app.ui.form_feedback import FormFeedback
+
+    app, window = _admin_window("admin_dgr_empty_ui")
+    window._navigate_to_route("legacy_dbf_import")
+    app.processEvents()
+
+    window.findChild(QPushButton, "runDgrImportButton").click()
+    app.processEvents()
+
+    feedback = window.findChild(FormFeedback, "dgrReferenceFeedback")
+    table = window.findChild(QTableWidget, "dgrReferenceSummaryTable")
+    assert feedback.kind == "warning"
+    assert table.rowCount() == 0
+
+
 def test_legacy_dbf_import_refreshes_master_grids(db, monkeypatch):
     from PyQt5.QtWidgets import QLineEdit, QPushButton, QTableWidget
 
