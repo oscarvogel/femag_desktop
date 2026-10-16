@@ -422,7 +422,14 @@ class LoadOrderPrintService:
         return Paragraph(f"<b>Observaciones:</b> {escape(value)}", self.styles["normal"])
 
     def _used_pallet_total(self, order: LoadOrder) -> int:
-        return sum(1 for pallet in order.pallets if pallet.allocations.exists())
+        return (
+            LoadOrderPallet.select(LoadOrderPallet.id)
+            .join(LoadOrderPalletAllocation)
+            .join(LoadOrderDestination)
+            .where(LoadOrderDestination.order == order)
+            .distinct()
+            .count()
+        )
 
     def _merchandise_kg_total(self, order: LoadOrder):
         return sum((pallet.kilos for pallet in order.pallets), 0) + sum(
