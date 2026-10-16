@@ -123,4 +123,7 @@ def test_generate_maps_master_codes_to_legacy_positions(db, tmp_path):
     detail = lines[1]
     assert len(detail.split("@")) == 16
     assert detail.endswith("@")
-    assert "@2@2@19@0@G-300@U@500@" in detail
+    # La posicion del codigo de producto es en el legacy una descripcion de ancho
+    # fijo de 50 caracteres que queda vacia. El F150 no lleva el codigo "G-300".
+    assert f"@2@2@19@0@{'':<50}@U@500@" in detail
+    assert "G-300" not in detail

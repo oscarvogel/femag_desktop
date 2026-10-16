@@ -84,7 +84,9 @@ def test_generate_persists_batch_snapshot_audit_and_file(db, tmp_path):
     assert output.exists()
     lines = output.read_bytes().decode("cp1252").splitlines()
     assert lines[0].startswith("C1F15023082026@1@12@0001@")
-    assert lines[1].endswith("@ALM@KG@1,250@12.50@15,625.00@")
+    # El legacy escribe entre la 4a clasificacion y la unidad una descripcion de
+    # ancho fijo de 50 caracteres que deja vacia: el codigo del producto no va al F150.
+    assert lines[1].endswith(f"@{'':<50}@KG@1,250@12.50@15,625.00@")
     inclusion = F150BatchRemittance.get()
     assert inclusion.remittance_id == remittance.id
     assert inclusion.snapshot["identity"] == "0001-00001068"
