@@ -159,6 +159,17 @@ class F150Page(QWidget):
         grid.addWidget(apply_button, 3, 3)
         root.addWidget(filters)
 
+        # Resumen de pendientes: al emitir se genera el F150 solo, pero si
+        # falta un dato del formato el remito queda esperando. Conviene que el
+        # operador lo vea de entrada, no que lo descubra por un aviso.
+        self.pending_label = QLabel()
+        self.pending_label.setObjectName("f150PendingLabel")
+        self.pending_label.setWordWrap(True)
+        #: Ultimo resumen calculado. Se guarda aparte del widget para poder
+        #: verificarlo sin depender del ciclo de vida de Qt.
+        self.pending_summary = ""
+        root.addWidget(self.pending_label)
+
         actions = QHBoxLayout()
         generate = QPushButton("Generar archivo F150")
         generate.setObjectName("generateF150Button")
@@ -211,8 +222,11 @@ class F150Page(QWidget):
             included=self.inclusion.currentData(),
         )
         self.table.setRowCount(len(rows))
+        pendientes = 0
         for row_index, remittance in enumerate(rows):
             issues = self.service.validation_issues(remittance)
+            if issues:
+                pendientes += 1
             physical = (
                 f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
                 if remittance.physical_point_of_sale and remittance.physical_number
@@ -245,7 +259,39 @@ class F150Page(QWidget):
                 item = QTableWidgetItem(str(value))
                 item.setToolTip(str(value))
                 self.table.setItem(row_index, column, item)
+        self._refresh_pending_summary(len(rows), pendientes)
         self._refresh_history()
+
+    def _refresh_pending_summary(self, total: int, pendientes: int) -> None:
+        """Pone en pantalla cuantos remitos del rango estan listos y cuantos parados."""
+        self.pending_summary = F150Page._pending_summary_text(total, pendientes)
+        self.pending_label.setText(self.pending_summary)
+        style = "" if not pendientes else "color: #b00020; font-weight: bold;"
+        if not total:
+            style = ""
+        self.pending_label.setStyleSheet(style)
+
+    @staticmethod
+    def _pending_summary_text(total: int, pendientes: int) -> str:
+        """Al emitir el F150 sale solo, asi que lo raro es que queden pendientes.
+
+        Los pendientes dicen que les falta en la columna Validacion. El operador
+        tiene que verlo de entrada, sin recorrer fila por fila.
+        """
+        if not total:
+            return "No hay remitos en el rango filtrado."
+        listos = total - pendientes
+        if not pendientes:
+            return (
+                f"{listos} remito{'s' if total > 1 else ''} listo"
+                f"{'s' if total > 1 else ''} para el F150 en el rango filtrado."
+            )
+        return (
+            f"{listos} listo{'s' if listos != 1 else ''} y {pendientes} pendiente"
+            f"{'s' if pendientes != 1 else ''} en el rango filtrado. "
+            "Los pendientes dicen qué les falta en la columna Validación: "
+            "completalo y volvé a emitir el F150."
+        )
 
     def _refresh_origin(self) -> None:
         origin = self.service.origin()
