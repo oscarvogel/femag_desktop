@@ -45,6 +45,10 @@ from PyQt5.QtWidgets import (
 )
 
 from app.config.database import initialize_demo_database, initialize_runtime_database
+from app.config.secure_credentials import (
+    SecureConfigurationError,
+    load_runtime_connection,
+)
 from app.build_version import BUILD_VERSION
 
 try:  # solo presente en builds demo (PyInstaller DEMO.spec)
@@ -94,6 +98,7 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services import salesperson_portfolio_print_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.ui.connection_dialog import ConnectionDialog
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
@@ -455,9 +460,19 @@ def _prepare_database(*, demo_mode: bool):
     except SchemaValidationError as exc:
         if not database.is_closed():
             database.close()
+        # La base esta atrasada, no rota. Antes esto era un callejon sin salida
+        # para el operador con la conexion ya guardada: el unico camino a la
+        # migracion estaba en el asistente de conexion, que solo aparece en la
+        # primera configuracion. Desde #717 se ofrece aqui, con la credencial
+        # administrativa que el mismo operador ingresa.
+        if _offer_schema_preparation(exc):
+            return _prepare_database(demo_mode=demo_mode)
         raise RuntimeError(
-            f"El esquema de la base de datos no es compatible: {exc}. "
-            "Un administrador debe ejecutar scripts/init_db.py antes de abrir los puestos."
+            f"La base de datos de FEMAG esta una version atrasada y hay que "
+            f"actualizarla antes de entrar.\n\n{exc}\n\n"
+            "Para hacerlo hace falta un usuario MySQL administrador. Puede "
+            "aplicarla desde otro puesto del mismo cliente, en el asistente de "
+            "conexion, con 'Crear o actualizar ahora las tablas de FEMAG'."
         ) from exc
     except Exception as exc:
         if not database.is_closed():
@@ -467,6 +482,39 @@ def _prepare_database(*, demo_mode: bool):
             "Revise los permisos del usuario operativo y la disponibilidad de MySQL."
         ) from exc
     return database
+
+
+def _offer_schema_preparation(exc: SchemaValidationError) -> bool:
+    """Ofrece actualizar el esquema con una credencial administrativa.
+
+    Devuelve ``True`` cuando el esquema quedo preparado y el puesto puede
+    reintentar entrar. La credencial que se ingresa **no se guarda**: el dialogo
+    corre con ``save_connection=False`` justamente para eso, porque la
+    administrativa sirve para un ``ALTER`` y no debe quedar en disco como la
+    credencial de todos los dias.
+
+    La garantia de #660 sigue intacta: esto no altera el arranque diario. Solo
+    corre cuando el esquema ya no valida y el operador lo acepta.
+    """
+    answer = QMessageBox.question(
+        None,
+        "Actualizar base de datos de FEMAG",
+        "La base de datos de FEMAG esta una version atrasada y hay que "
+        "actualizarla antes de entrar.\n\n"
+        f"{exc}\n\n"
+        "¿Actualizarla ahora? Necesita un usuario MySQL administrador. Esa "
+        "credencial no se guarda: el puesto sigue usando la de operacion.",
+        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.Yes,
+    )
+    if answer != QMessageBox.Yes:
+        return False
+    try:
+        current = load_runtime_connection()
+    except SecureConfigurationError:
+        current = None
+    dialog = ConnectionDialog(current=current, save_connection=False)
+    return dialog.exec_() == QDialog.Accepted
 
 
 class FemagDesktopWindow(QMainWindow):

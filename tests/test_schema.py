@@ -425,11 +425,16 @@ def test_optional_update_dialog_still_asks_before_downloading(monkeypatch):
     assert "¿Desea descargar el instalador ahora?" in asked[0]
 
 
-def test_startup_message_for_incomplete_schema_still_says_init_db(monkeypatch):
-    """El caso de base incompleta conserva la accion correcta: init_db.py."""
+def test_startup_offers_migration_instead_of_saying_init_db(monkeypatch):
+    """#717: la base atrasada se ofrece migrar, no se remite a un script.
+
+    Antes el mensaje de arranque mandaba a ejecutar scripts/init_db.py, que
+    un operador de un puesto instalado no tiene ni puede ejecutar.
+    """
     import pytest
 
     from app.config import schema as schema_module
+    from app.ui import desktop_app
     from app.ui.desktop_app import _prepare_database
 
     class _Closed:
@@ -447,13 +452,69 @@ def test_startup_message_for_incomplete_schema_still_says_init_db(monkeypatch):
 
     monkeypatch.setattr("app.ui.desktop_app.initialize_runtime_database", lambda: _Closed())
     monkeypatch.setattr("app.ui.desktop_app.validate_runtime_schema", _raise, raising=False)
+    # Sin esto el QMessageBox es modal y el proceso de pytest se cuelga.
+    monkeypatch.setattr(
+        desktop_app.QMessageBox, "question", lambda *_a, **_k: desktop_app.QMessageBox.No
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         _prepare_database(demo_mode=False)
 
     message = str(exc_info.value)
-    assert "init_db.py" in message
-    assert "actualizar la aplicacion" not in message
+    assert "init_db.py" not in message, "el mensaje no debe mandar a un script de desarrollo"
+    assert "una version atrasada" in message
+    assert "Crear o actualizar ahora las tablas de FEMAG" in message
+
+
+def test_startup_applies_migration_and_enters_when_the_operator_accepts(monkeypatch):
+    """Si el operador acepta y la migracion queda aplicada, el puesto entra."""
+    from PyQt5.QtWidgets import QDialog
+
+    from app.config import schema as schema_module
+    from app.ui import desktop_app
+    from app.ui.desktop_app import _prepare_database
+
+    class _Database:
+        def __init__(self):
+            self.conectada = False
+
+        def connect(self, *args, **kwargs):
+            self.conectada = True
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            pass
+
+    base = _Database()
+    intentos = {"n": 0}
+
+    def _validate(_database):
+        intentos["n"] += 1
+        if intentos["n"] == 1:
+            raise schema_module.SchemaValidationError("Faltan columnas requeridas: carrier.address")
+
+    monkeypatch.setattr("app.ui.desktop_app.initialize_runtime_database", lambda: base)
+    monkeypatch.setattr("app.ui.desktop_app.validate_runtime_schema", _validate, raising=False)
+    monkeypatch.setattr(
+        desktop_app.QMessageBox, "question", lambda *_a, **_k: desktop_app.QMessageBox.Yes
+    )
+    monkeypatch.setattr(desktop_app, "load_runtime_connection", lambda: None)
+
+    class _DialogoAceptado:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def exec_(self):
+            return QDialog.Accepted
+
+    monkeypatch.setattr(desktop_app, "ConnectionDialog", _DialogoAceptado)
+
+    resultado = _prepare_database(demo_mode=False)
+
+    assert resultado is base, "tiene que reintentar y devolver la base"
+    assert intentos["n"] == 2, "valida, migra y valida de nuevo"
 
 
 def test_connection_dialog_does_not_offer_to_prepare_a_newer_schema(monkeypatch):

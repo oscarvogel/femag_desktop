@@ -1,3 +1,5 @@
+import logging
+
 from peewee import (
     BooleanField,
     CharField,
@@ -14,6 +16,9 @@ from peewee import (
 from playhouse.migrate import SqliteMigrator, migrate
 
 from app.models import ALL_MODELS
+
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaValidationError(RuntimeError):
@@ -351,7 +356,8 @@ def _ensure_pallet_sequence_index(database) -> None:
         for index in database.get_indexes(table_name)
     ):
         return
-    database.execute_sql(
+    _execute_schema_statement(
+        database,
         "CREATE UNIQUE INDEX `loadorderpallet_order_id_sequence` "
         "ON `loadorderpallet` (`order_id`, `sequence`)"
     )
@@ -373,7 +379,8 @@ def _ensure_account_movement_source_index(database) -> None:
                 database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
     if any(index.unique and set(index.columns) == expected_columns for index in indexes):
         return
-    database.execute_sql(
+    _execute_schema_statement(
+        database,
         "CREATE UNIQUE INDEX `clientaccountmovement_source_client_type_reversal` "
         "ON `clientaccountmovement` (`source_ref`, `client_id`, `movement_type`, `is_reversal`)"
     )
@@ -385,8 +392,8 @@ def _ensure_client_salesperson_index(database) -> None:
     indexes = database.get_indexes(table_name)
     if any(set(index.columns) == expected_columns for index in indexes):
         return
-    database.execute_sql(
-        "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    _execute_schema_statement(
+        database, "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
     )
 
 
@@ -415,7 +422,8 @@ def _ensure_budget_timing_index(database) -> None:
                 database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
     if any(index.unique and set(index.columns) == expected_columns for index in indexes):
         return
-    database.execute_sql(
+    _execute_schema_statement(
+        database,
         "CREATE UNIQUE INDEX `budget_load_order_client_origin_timing` "
         "ON `budget` (`load_order_id`, `client_id`, `origin`, `timing`)"
     )
@@ -442,7 +450,8 @@ def _ensure_return_line_timing_index(database) -> None:
                 )
             else:
                 database.execute_sql(f"DROP INDEX IF EXISTS `{escaped_name}`")
-    database.execute_sql(
+    _execute_schema_statement(
+        database,
         "CREATE UNIQUE INDEX `loadorderreturnline_closure_order_product_timing` "
         "ON `loadorderreturnline` (`closure_id`, `order_product_id`, `timing`)"
     )
@@ -571,6 +580,45 @@ def _repair_payment_movement_amounts(database) -> None:
             ])
 
 
+def _mysql_error_code(exc: Exception) -> int | None:
+    args = getattr(exc, "args", ())
+    if args and isinstance(args[0], int):
+        return args[0]
+    return None
+
+
+#: MySQL responde estos codigos cuando la sentencia no fallo: otra sentencia
+#: equivalente ya se aplico. 1060 columna duplicada, 1061 indice duplicado,
+#: 1062 entrada duplicada al agregar un indice unico.
+MYSQL_ALREADY_APPLIED = {1060, 1061, 1062}
+
+
+def _execute_schema_statement(database, sql: str, params=None) -> bool:
+    """Ejecuta una sentencia de esquema tolerando la carrera entre puestos.
+
+    Desde #717 la migracion se puede aplicar desde el arranque. Dos puestos de
+    un mismo cliente pueden abrir la actualizacion al mismo tiempo y correr la
+    misma migracion: el segundo llega y la columna ya esta. MySQL responde 1060
+    y, sin este manejo, el operador ve un error confuso en vez de entrar.
+
+    Devuelve ``False`` cuando la sentencia no hizo falta porque otro puesto la
+    aplico primero. Cualquier otro error se propaga.
+    """
+    try:
+        if params is None:
+            database.execute_sql(sql)
+        else:
+            database.execute_sql(sql, params)
+        return True
+    except Exception as exc:
+        if _mysql_error_code(exc) in MYSQL_ALREADY_APPLIED:
+            logger.info(
+                "Otro puesto aplico antes la sentencia de esquema: %s", sql
+            )
+            return False
+        raise
+
+
 def _ensure_model_columns(database, model) -> None:
     table_name = model._meta.table_name
     existing_columns = {column.name: column for column in database.get_columns(table_name)}
@@ -580,11 +628,12 @@ def _ensure_model_columns(database, model) -> None:
         column_name = field.column_name
         existing_column = existing_columns.get(column_name)
         if existing_column is None:
-            database.execute_sql(
+            if _execute_schema_statement(
+                database,
                 f"ALTER TABLE `{_escape_identifier(table_name)}` "
-                f"ADD COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL"
-            )
-            _backfill_column_default(database, table_name, column_name, field)
+                f"ADD COLUMN `{_escape_identifier(column_name)}` {_field_sql(field)} NULL",
+            ):
+                _backfill_column_default(database, table_name, column_name, field)
             continue
         if not field.null and existing_column.null:
             _backfill_column_default(database, table_name, column_name, field)

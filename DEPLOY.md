@@ -21,19 +21,29 @@ Si la base esta vacia o incompleta, el asistente informa las tablas faltantes y 
 3. ejecuta la preparacion de esquema una sola vez;
 4. valida el esquema terminado antes de guardar la conexion.
 
-Los arranques normales siguen siendo read-only respecto del esquema: no crean ni alteran tablas automaticamente. Esto se ubica en el codigo, no solo en el-switch `FEMAG_AUTO_MIGRATE_SCHEMA`, y vale tambien para el instalador nuevo sobre un puesto ya instalado.
+Los arranques normales siguen siendo read-only respecto del esquema: no crean ni alteran tablas automaticamente. Esto se ubica en el codigo, no solo en el switch `FEMAG_AUTO_MIGRATE_SCHEMA`, y vale tambien para el instalador nuevo sobre un puesto ya instalado. Desde #717 el arranque **ofrece** la migracion cuando el esquema no valida, pero no la hace por su cuenta: hace falta que el operador la acepte.
 
 ## Ventana de mantenimiento antes de promover un build con cambios de esquema
 
-Desde #660 el estado del esquema de la base compartida **no depende de que puesto abra primero**. Eso evita que un puesto se quede sin poder entrar, pero cambia el procedimiento de despliegue: la migracion hay que aplicarla a mano antes de que los puestos empiecen a usar la version nueva.
+Desde #660 el estado del esquema de la base compartida **no depende de que puesto abra primero**. Eso evita que un puesto se quede sin poder entrar, pero cambia el procedimiento de despliegue: la migracion hay que aplicarla antes de que los puestos empiecen a usar la version nueva.
+
+Desde **#717** esa aplicacion tiene camino desde la propia aplicacion. Cuando el esquema de la base no valida contra el modelo del puesto, el arranque ofrece actualizarla, pide una credencial MySQL administrativa y aplica la preparacion; si queda bien, el puesto entra. La credencial administrativa **no se guarda**: sirve para el `ALTER` y el puesto sigue usando la de operacion.
 
 Cuando el build que se va a promover cambia modelos, indices o columnas:
 
-1. **Antes de promover**, con la credencial administrativa, aplicar la preparacion: `scripts/init_db.py`, o `Crear o actualizar ahora las tablas de FEMAG` en el asistente de conexion de un puesto. Es idempotente y no pisa datos existentes.
+1. **Antes de promover**, con la credencial administrativa, aplicar la preparacion: `scripts/init_db.py`, o el ofrecimiento del arranque / del asistente de conexion (`Crear o actualizar ahora las tablas de FEMAG`). Es idempotente y no pisa datos existentes.
 2. **Despues de promover**, los puestos abren sin migrar nada. Si encounteran un puesto con una version vieja, el mensaje dice que la base esta mas nueva y **ofrece descargar la actualizacion en el momento**; si no hay version publicada todavia, muestra el detalle copiado al portapapeles para avisar a soporte.
 3. **Nunca** revertir el esquema para destrabar un puesto atrasado: dejaria fuera de servicio a los puestos ya actualizados y romperia la funcion que motivo el cambio de esquema.
 
+Que la aplicacion ofrezca la migracion **no elimina la ventana de mantenimiento**: aplicarla desde el puesto significa que el primer operador que abre despues de la actualizacion es quien la ejecuta. Cuando se puede, conviene aplicar `scripts/init_db.py` antes de promover, para que ningun puesto tenga que hacerlo.
+
+La migracion es **a prueba de carrera**: si dos puestos la aplican al mismo tiempo, el segundo encuentra las columnas ya creadas y entra igual, en vez de ver un error. Los puestos con el esquema al dia no entran por ningun camino nuevo: el arranque diario sigue siendo read-only.
+
 Un build **sin** cambios de esquema no necesita ventana: la base ya esta como la version nueva la espera y los puestos abren directo. Para una emergencia con supervision, se puede armar la migracion desde el puesto con `FEMAG_AUTO_MIGRATE_SCHEMA=1`, siempre a mano y con la base a la vista.
+
+### Cuando el puesto no tiene credencial administrativa disponible
+
+La credencial administrativa hace falta siempre: el usuario operativo de cada puesto solo tiene `SELECT`, `INSERT`, `UPDATE` y `DELETE`. Si en el momento de actualizar no hay nadie con `ALTER`, el puesto no entra y el mensaje dice por donde puede hacerlo un administrador. No hay atajo, y no deberia haberlo.
 
 ## Version de cada build
 
