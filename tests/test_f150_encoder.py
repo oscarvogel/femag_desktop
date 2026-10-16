@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.services.f150_encoder import (
+    DETAIL_DESCRIPTION_WIDTH,
     F150Carrier,
     F150Driver,
     F150Encoder,
@@ -43,8 +44,13 @@ def test_encode_generates_header_and_detail():
     lines = content.splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("C1F15023082026@1@12@0001@23-08-2026@SAL@")
-    assert lines[1].endswith("@ALM@KG@1,250@12.50@15,625.00@")
-    assert content.endswith("\r\n")
+    # El renglon lleva el campo fijo de 50 caracteres antes de la unidad: el
+    # legacy no manda el codigo de producto, manda 50 espacios.
+    assert lines[1].endswith(
+        f"@04@{' ' * DETAIL_DESCRIPTION_WIDTH}@KG@1,250@12.50@15,625.00@"
+    )
+    # El archivo real no termina con CRLF.
+    assert not content.endswith("\r\n")
 
 
 def test_encode_rejects_duplicates():
@@ -69,8 +75,9 @@ LEGACY_HEADER = (
     "0000@@0001@CAPITAL FEDERAL@01@ARG@ARGENTINA"
 )
 LEGACY_DETAIL = (
-    "D1F15001102018@2@01-10-2018@12@0001@00003894@2@2@19@0@@U@900@700.00@"
-    "630,000.00@"
+    "D1F15001102018@2@01-10-2018@12@0001@00003894@2@2@19@0@"
+    + " " * DETAIL_DESCRIPTION_WIDTH
+    + "@U@900@700.00@630,000.00@"
 )
 
 
@@ -145,11 +152,16 @@ def _legacy_like_remittance():
 
 
 def test_encode_header_matches_legacy_layout_byte_for_byte():
-    """La C legacy tiene 49 campos y termina sin @ (ver f150.scx Imprimir1.Click)."""
+    """La C legacy tiene 49 campos y termina sin @ (ver f150.scx Imprimir1.Click).
+
+    El campo de 50 espacios del renglon se corrigio contra los archivos reales
+    del sistema anterior: los 119 archivos de produccion lo traen relleno de
+    espacios, no vacio.
+    """
     content = F150Encoder().encode([_legacy_like_remittance()])
     lines = content.splitlines()
     assert len(lines) == 2
     assert lines[0] == LEGACY_HEADER
     assert not lines[0].endswith("@")
     assert lines[1] == LEGACY_DETAIL
-    assert content.endswith("\r\n")
+    assert not content.endswith("\r\n")
