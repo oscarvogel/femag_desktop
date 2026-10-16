@@ -206,7 +206,10 @@ class F150BatchService:
         items = []
         for row in remittance.items:
             product = row.product
-            unit_price = Decimal(str(product.precio_neto_base or 0))
+            # El precio sale del renglón, congelado al emitir. Nunca del
+            # maestro: un F150 de un remito emitido tiene que llevar el
+            # importe que se operó, no el que la lista diga hoy.
+            unit_price = Decimal(str(row.unit_price or 0))
             quantity = Decimal(row.quantity)
             items.append(
                 F150Item(
@@ -326,6 +329,11 @@ class F150BatchService:
                 issues.append(f"detalle: {product.name} sin rubros DGR")
             if not (product.unidad_dgr or "").strip():
                 issues.append(f"detalle: {product.name} sin unidad DGR")
+            if row.unit_price is None or row.unit_price <= 0:
+                issues.append(
+                    f"detalle: {product.name} sin precio de operacion "
+                    "(el remito tiene que estar emitido con el precio cargado)"
+                )
         return issues
 
     @staticmethod

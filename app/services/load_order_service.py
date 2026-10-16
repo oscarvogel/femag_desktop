@@ -28,6 +28,7 @@ from app.services.pallet_composition_service import (
     PalletDraft,
     RequestedLine,
 )
+from app.services.pricing import price_for_client_list
 
 
 class LoadOrderService:
@@ -1248,13 +1249,13 @@ class LoadOrderService:
         }
 
     def _price_for_client_list(self, product: Product, client: Client) -> float:
-        price_list = client.lista_precios or 1
-        if price_list not in (1, 2, 3, 4):
-            raise ValueError("La lista de precios del cliente debe ser 1, 2, 3 o 4.")
-        value = getattr(product, f"precio_lista_{price_list}") or 0.0
-        if value:
-            return value
-        return product.precio_neto_base or 0.0
+        """Precio del producto segun la lista del cliente.
+
+        La regla vive en ``app.services.pricing`` para que los remitos usen
+        exactamente la misma y no divergan de las ordenes de carga. Acá se
+        devuelve ``float`` porque ``LoadOrderProduct`` guarda en coma flotante.
+        """
+        return float(price_for_client_list(product, client))
 
     def _replace_destinations(self, order: LoadOrder, destinations: list[dict]) -> None:
         LoadOrderProduct.delete().where(LoadOrderProduct.order == order).execute()

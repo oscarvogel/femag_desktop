@@ -292,7 +292,7 @@ def test_manual_dialog_persists_manual_number_and_trailer(db):
         dialog.items.cellWidget(0, 0).findData(data["product"].id)
     )
     dialog.items.cellWidget(0, 1).setText("25")
-    dialog.items.cellWidget(0, 2).setText("Producto de prueba")
+    dialog.items.cellWidget(0, 3).setText("Producto de prueba")
     dialog.observations_input.setText("Entregar por portón lateral")
 
     dialog._save()
@@ -385,13 +385,18 @@ def test_detail_quantity_and_description_are_direct_editors(db):
     app.processEvents()
 
     quantity = dialog.items.cellWidget(0, 1)
-    description = dialog.items.cellWidget(0, 2)
+    price = dialog.items.cellWidget(0, 2)
+    description = dialog.items.cellWidget(0, 3)
     assert isinstance(quantity, QLineEdit)
+    assert isinstance(price, QLineEdit)
     assert isinstance(description, QLineEdit)
     assert quantity.validator() is not None
+    assert price.validator() is not None
     quantity.setText("12,5")
+    price.setText("2500.00")
     description.setText("Producto cargado con un clic")
     assert quantity.text() == "12,5"
+    assert price.text() == "2500.00"
     assert description.text() == "Producto cargado con un clic"
 
 

@@ -81,6 +81,12 @@ class RemittanceItem(BaseModel):
     product_name = CharField()
     printed_description = CharField()
     quantity = DecimalField(max_digits=14, decimal_places=3)
+    #: Precio unitario congelado de la operacion. El legacy lo guardaba en
+    #: ``detalleremito.unitario`` y la reescritura lo perdio: sin esto, el F150
+    #: tiene que leer el precio vigente del maestro y produce un importe que
+    #: nunca se opero. Se calcula con la lista de precios del cliente y queda
+    #: fijo al emitir; un renglon en NULL sigue bloqueado para el F150.
+    unit_price = DecimalField(max_digits=14, decimal_places=4, null=True)
     unit = CharField()
     lot = CharField(null=True)
     production_date = DateField(null=True)

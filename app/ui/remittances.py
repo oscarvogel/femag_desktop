@@ -32,6 +32,7 @@ from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.remittances import Remittance, RemittanceSeries
 from app.services.f150_batch_service import F150BatchService
+from app.services.pricing import price_for_client_list
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 from app.ui.audit_reason_dialog import AuditReasonDialog
@@ -136,13 +137,16 @@ class RemittanceDialog(QDialog):
         detail_label.setObjectName("remittanceDetailTitle")
         root.addWidget(detail_label)
 
-        self.items = QTableWidget(0, 3)
+        self.items = QTableWidget(0, 4)
         self.items.setObjectName("remittanceItemsTable")
         self.items.setMinimumHeight(280)
-        self.items.setHorizontalHeaderLabels(["Producto", "Cantidad", "Descripción impresa"])
+        self.items.setHorizontalHeaderLabels(
+            ["Producto", "Cantidad", "Precio unit.", "Descripción impresa"]
+        )
         self.items.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.items.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.items.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.items.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.items.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         root.addWidget(self.items, 1)
 
         add_row = QPushButton("+ Agregar producto")
@@ -280,7 +284,7 @@ class RemittanceDialog(QDialog):
                 field.setStyleSheet("border: 1px solid #c0392b;")
                 field.setToolTip(message)
 
-    def _add_item_row(self, product_id=None, quantity="", description="") -> None:
+    def _add_item_row(self, product_id=None, quantity="", description="", unit_price=None) -> None:
         row = self.items.rowCount()
         self.items.insertRow(row)
         combo = QComboBox()
@@ -297,12 +301,42 @@ class RemittanceDialog(QDialog):
         quantity_input.setPlaceholderText("0,000")
         quantity_input.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         quantity_input.setValidator(QDoubleValidator(0.001, 99999999999.999, 3, quantity_input))
+        # El precio se autocompleta con la lista del cliente y queda editable:
+        # el operador negocia y el valor corregido es el que se congela al emitir.
+        price_input = QLineEdit("" if unit_price is None else f"{unit_price:.2f}")
+        price_input.setObjectName(f"remittanceItemPriceInput{row}")
+        price_input.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        price_input.setValidator(QDoubleValidator(0, 99999999999.99, 2, price_input))
+        price_input.editingFinished.connect(
+            lambda r=row, w=price_input: self._autofill_price(r, w)
+        )
         description_input = QLineEdit(description)
         description_input.setObjectName(f"remittanceItemDescriptionInput{row}")
         description_input.setPlaceholderText("Descripción que se imprimirá")
         self.items.setCellWidget(row, 0, combo)
         self.items.setCellWidget(row, 1, quantity_input)
-        self.items.setCellWidget(row, 2, description_input)
+        self.items.setCellWidget(row, 2, price_input)
+        self.items.setCellWidget(row, 3, description_input)
+        if unit_price is None:
+            self._autofill_price(row, price_input)
+
+    def _autofill_price(self, row: int, price_input: QLineEdit) -> None:
+        """Sugiere el precio de la lista del cliente si el campo esta vacio."""
+        if price_input.text().strip():
+            return
+        product_widget = self.items.cellWidget(row, 0)
+        product_id = combo_current_data(product_widget) if product_widget is not None else None
+        client_id = combo_current_data(self.client_combo)
+        if not product_id or not client_id:
+            return
+        try:
+            price = price_for_client_list(
+                Product.get_by_id(product_id), Client.get_by_id(client_id)
+            )
+        except Exception:
+            return
+        if price:
+            price_input.setText(f"{price:.2f}")
 
     def _load_remittance(self) -> None:
         r = self.remittance
@@ -329,7 +363,12 @@ class RemittanceDialog(QDialog):
                 combo.setCurrentIndex(index)
         self.items.setRowCount(0)
         for item in r.items:
-            self._add_item_row(item.product_id, item.quantity, item.printed_description)
+            self._add_item_row(
+                item.product_id,
+                item.quantity,
+                item.printed_description,
+                item.unit_price,
+            )
         editable = r.status == Remittance.STATUS_DRAFT
         self.client_combo.setEnabled(editable)
         self.address_combo.setEnabled(editable)
@@ -353,8 +392,10 @@ class RemittanceDialog(QDialog):
                 commit_combo_text(combo)
             product_id = combo_current_data(combo) if combo else None
             quantity_input = self.items.cellWidget(row, 1)
-            description_input = self.items.cellWidget(row, 2)
+            price_input = self.items.cellWidget(row, 2)
+            description_input = self.items.cellWidget(row, 3)
             quantity_text = (quantity_input.text() if quantity_input else "").strip()
+            price_text = (price_input.text() if price_input else "").strip()
             description = (description_input.text() if description_input else "").strip()
             if not product_id and not quantity_text and not description:
                 continue
@@ -362,10 +403,21 @@ class RemittanceDialog(QDialog):
                 quantity = Decimal(quantity_text.replace(",", "."))
             except (InvalidOperation, ValueError):
                 raise ValueError(f"Cantidad inválida en la fila {row + 1}.") from None
+            unit_price = None
+            if price_text:
+                try:
+                    unit_price = Decimal(price_text)
+                except (InvalidOperation, ValueError):
+                    # Acepta tambien el formato con punto de miles y coma decimal.
+                    try:
+                        unit_price = Decimal(price_text.replace(".", "").replace(",", "."))
+                    except (InvalidOperation, ValueError):
+                        raise ValueError(f"Precio inválido en la fila {row + 1}.") from None
             payload.append(
                 {
                     "product": Product.get_by_id(product_id),
                     "quantity": quantity,
+                    "unit_price": unit_price,
                     "printed_description": description,
                 }
             )

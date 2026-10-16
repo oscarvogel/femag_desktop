@@ -7,6 +7,7 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
+from app.services.pricing import as_money, price_for_client_list
 
 
 class RemittanceSeriesService:
@@ -265,7 +266,13 @@ class RemittanceService:
             raise ValueError("El domicilio seleccionado esta inactivo.")
 
     @staticmethod
-    def _normalize_items(items: list[dict] | None) -> list[dict]:
+    def _normalize_items(items: list[dict] | None, client: Client) -> list[dict]:
+        """Prepara los renglones y les resuelve el precio de la lista del cliente.
+
+        El precio se congela aqui y queda fijo al emitir: el F150 lo lee del
+        renglon y nunca del maestro. Si el renglon trae un precio explicito,
+        ese gana, que es como el operador corrige una negociacion.
+        """
         if not items:
             raise ValueError("El remito debe contener al menos un producto.")
         normalized = []
@@ -282,12 +289,24 @@ class RemittanceService:
             description = str(row.get("printed_description") or product.name).strip()
             if not description:
                 raise ValueError("Cada renglon debe tener una descripcion para imprimir.")
+            if row.get("unit_price") is None:
+                unit_price = price_for_client_list(product, client)
+            else:
+                try:
+                    unit_price = as_money(Decimal(str(row.get("unit_price"))))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValueError(
+                        "El precio unitario del renglon debe ser numerico."
+                    ) from None
+            if unit_price < 0:
+                raise ValueError("El precio unitario del renglon no puede ser negativo.")
             normalized.append(
                 {
                     "product": product,
                     "product_name": product.name,
                     "printed_description": description,
                     "quantity": quantity,
+                    "unit_price": unit_price,
                     "unit": str(row.get("unit") or product.unit),
                     "lot": row.get("lot"),
                     "production_date": row.get("production_date"),
@@ -315,7 +334,7 @@ class RemittanceService:
         series: RemittanceSeries | None = None,
     ) -> Remittance:
         self._validate_header(client, delivery_address)
-        normalized_items = self._normalize_items(items)
+        normalized_items = self._normalize_items(items, client)
         point = self._normalize_physical_number(physical_point_of_sale, size=4)
         number = self._normalize_physical_number(physical_number, size=8)
         if bool(point) != bool(number):
@@ -388,6 +407,9 @@ class RemittanceService:
             {
                 "product": line.product,
                 "quantity": line.quantity,
+                # El precio de la orden ya esta congelado por operacion: se
+                # copia tal cual en vez de recalcularlo desde el maestro.
+                "unit_price": line.precio_neto_unitario,
                 "unit": line.unit,
                 "printed_description": line.product.name,
                 "lot": line.lote,
@@ -418,11 +440,12 @@ class RemittanceService:
             raise ValueError("Solo se pueden editar remitos en borrador.")
         old_snapshot = self._snapshot(remittance)
         items = changes.pop("items", None)
-        normalized_items = self._normalize_items(items) if items is not None else None
-
+        # El cliente se resuelve antes que los renglones porque el precio de
+        # cada uno sale de la lista de precios de ese cliente.
         client = changes.pop("client", remittance.client)
         delivery_address = changes.pop("delivery_address", remittance.delivery_address)
         self._validate_header(client, delivery_address)
+        normalized_items = self._normalize_items(items, client) if items is not None else None
 
         if "physical_point_of_sale" in changes or "physical_number" in changes:
             point = self._normalize_physical_number(
@@ -533,6 +556,7 @@ class RemittanceService:
             remittance.status = Remittance.STATUS_ISSUED
             remittance.issued_by = self.current_user
             remittance.updated_by = self.current_user
+            self._freeze_item_prices(remittance)
             remittance.save()
             self.audit_service.record(
                 user=self.current_user,
@@ -572,6 +596,20 @@ class RemittanceService:
         RemittanceItem.delete().where(RemittanceItem.remittance == remittance).execute()
         for row in items:
             RemittanceItem.create(remittance=remittance, **row)
+
+    @staticmethod
+    def _freeze_item_prices(remittance: Remittance) -> None:
+        """Congela el precio de cada renglon al momento de emitir.
+
+        Los renglones cargados antes de que existiera la columna llegan sin
+        precio: se resuelve aca con la lista del cliente, que es el precio
+        vigente en el momento de emitir. A partir de aca el remito ya no se
+        edita, asi que el valor queda fijo, que es lo que necesita el F150.
+        """
+        for row in remittance.items:
+            if row.unit_price is None:
+                row.unit_price = price_for_client_list(row.product, remittance.client)
+            row.save(only=[RemittanceItem.unit_price])
 
     @staticmethod
     def _snapshot(remittance: Remittance) -> dict:
