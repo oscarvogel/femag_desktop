@@ -63,6 +63,7 @@ def _f150_ready_draft(current_user: str):
         codigo="0001",
         tipo="DIR",
         locality=locality,
+        address="Ruta 12 km 8",
     )
     truck = Truck.create(
         domain="AB123CD",
@@ -78,6 +79,7 @@ def _f150_ready_draft(current_user: str):
         cuit="20123456789",
         document="12345678",
         locality=locality,
+        address="Posadas",
     )
     product = Product.create(
         codigo="ALM",

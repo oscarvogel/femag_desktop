@@ -41,7 +41,7 @@ def _issued_remittance(*, driver_cuit="20123456789", driver_document="12345678")
     )
     carrier = Carrier.create(
         name="Transporte 403", cuit="30777777770", codigo="0001",
-        tipo="DIR", locality=locality,
+        tipo="DIR", locality=locality, address="Ruta 12 km 8",
     )
     truck = Truck.create(
         domain="AB123CD", carrier=carrier, chassis_type="1", trailer_type="1",
@@ -49,6 +49,7 @@ def _issued_remittance(*, driver_cuit="20123456789", driver_document="12345678")
     driver = Driver.create(
         name="Chofer 403", carrier=carrier, usual_truck=truck,
         cuit=driver_cuit, document=driver_document, locality=locality,
+        address="Posadas",
     )
     product = Product.create(
         codigo="ALM", name="Almidon 403", unit="KG", precio_neto_base=12.5,

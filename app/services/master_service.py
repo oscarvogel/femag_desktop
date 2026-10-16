@@ -304,6 +304,7 @@ class MasterService:
         usual_truck: Truck | None = None,
         document: str | None = None,
         phone: str | None = None,
+        address: str | None = None,
     ) -> Driver:
         if carrier is None:
             raise ValueError("El chofer debe estar asociado a un transportista.")
@@ -313,6 +314,7 @@ class MasterService:
             usual_truck=usual_truck,
             document=document,
             phone=phone,
+            address=address,
         )
         self._record(
             "Driver",
@@ -325,8 +327,14 @@ class MasterService:
         )
         return row
 
-    def create_carrier(self, name: str, cuit: str | None = None, phone: str | None = None) -> Carrier:
-        row = Carrier.create(name=name, cuit=cuit, phone=phone)
+    def create_carrier(
+        self,
+        name: str,
+        cuit: str | None = None,
+        phone: str | None = None,
+        address: str | None = None,
+    ) -> Carrier:
+        row = Carrier.create(name=name, cuit=cuit, phone=phone, address=address)
         self._record("Carrier", row, {"name": name, "cuit": cuit})
         return row
 

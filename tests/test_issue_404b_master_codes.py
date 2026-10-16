@@ -82,7 +82,7 @@ def _coded_setup():
     )
     carrier = Carrier.create(
         name="Transporte 404b", cuit="20-23737702-9", codigo="0004",
-        tipo="DIR", locality=locality,
+        tipo="DIR", locality=locality, address="Ruta 12 km 8",
     )
     truck = Truck.create(
         domain="GET683", trailer_domain="KKV479", carrier=carrier,
@@ -91,6 +91,7 @@ def _coded_setup():
     driver = Driver.create(
         name="Chofer 404b", carrier=carrier, usual_truck=truck,
         cuit="20-30717891-6", document="30717891", locality=locality,
+        address="Garuhape",
     )
     product = Product.create(
         codigo="G-300", name="Almidon 404b", unit="bolsa", precio_neto_base=18600.0,

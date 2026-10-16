@@ -41,6 +41,7 @@ def _coded_setup(**overrides):
         codigo=None if overrides.get("carrier_without_codigo") else "0004",
         tipo=None if overrides.get("carrier_without_tipo") else "DIR",
         locality=locality,
+        address=None if overrides.get("carrier_without_domicilio") else "Ruta 12",
     )
     truck = Truck.create(
         domain="GET683", trailer_domain="KKV479", carrier=carrier,
@@ -50,6 +51,7 @@ def _coded_setup(**overrides):
     driver = Driver.create(
         name="Chofer 405", carrier=carrier, usual_truck=truck,
         cuit="20-30717891-6", document="30717891", locality=locality,
+        address=None if overrides.get("driver_without_domicilio") else "Posadas",
     )
     product = Product.create(
         codigo="G-300", name="Almidon 405", unit="bolsa", precio_neto_base=18600.0,

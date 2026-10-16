@@ -989,12 +989,17 @@ class CarrierEntryDialog(QDialog):
         self.cuit_input.setObjectName("carrierCuitInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("carrierPhoneInput")
+        self.address_input = QLineEdit()
+        self.address_input.setObjectName("carrierAddressInput")
+        self.address_input.setPlaceholderText("Lo que va al F150")
         form.addWidget(QLabel("Nombre"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("CUIT"), 1, 0)
         form.addWidget(self.cuit_input, 1, 1)
         form.addWidget(QLabel("Telefono"), 2, 0)
         form.addWidget(self.phone_input, 2, 1)
+        form.addWidget(QLabel("Domicilio"), 3, 0)
+        form.addWidget(self.address_input, 3, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveCarrierButton", self._save)
@@ -1006,6 +1011,7 @@ class CarrierEntryDialog(QDialog):
         self.name_input.setText(carrier.name)
         self.cuit_input.setText(carrier.cuit or "")
         self.phone_input.setText(carrier.phone or "")
+        self.address_input.setText(carrier.address or "")
 
     def _save(self) -> None:
         name = self.name_input.text().strip()
@@ -1020,12 +1026,14 @@ class CarrierEntryDialog(QDialog):
                     name,
                     cuit=self.cuit_input.text().strip() or None,
                     phone=self.phone_input.text().strip() or None,
+                    address=self.address_input.text().strip() or None,
                 )
             else:
                 carrier = Carrier.get_by_id(self.record_id)
                 carrier.name = name
                 carrier.cuit = self.cuit_input.text().strip() or None
                 carrier.phone = self.phone_input.text().strip() or None
+                carrier.address = self.address_input.text().strip() or None
                 carrier.save()
                 self.saved_record = carrier
             self.accept()
@@ -1055,6 +1063,9 @@ class DriverEntryDialog(QDialog):
         self.document_input.setObjectName("driverDocumentInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("driverPhoneInput")
+        self.address_input = QLineEdit()
+        self.address_input.setObjectName("driverAddressInput")
+        self.address_input.setPlaceholderText("Lo que va al F150")
         form.addWidget(QLabel("Transportista"), 0, 0)
         form.addWidget(self.carrier_combo, 0, 1)
         form.addWidget(QLabel("Nombre"), 1, 0)
@@ -1065,6 +1076,8 @@ class DriverEntryDialog(QDialog):
         form.addWidget(self.document_input, 3, 1)
         form.addWidget(QLabel("Telefono"), 4, 0)
         form.addWidget(self.phone_input, 4, 1)
+        form.addWidget(QLabel("Domicilio"), 5, 0)
+        form.addWidget(self.address_input, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveDriverButton", self._save)
@@ -1093,6 +1106,7 @@ class DriverEntryDialog(QDialog):
         self.name_input.setText(driver.name)
         self.document_input.setText(driver.document or "")
         self.phone_input.setText(driver.phone or "")
+        self.address_input.setText(driver.address or "")
 
     def _save(self) -> None:
         carrier_id = combo_current_data(self.carrier_combo)
@@ -1120,6 +1134,7 @@ class DriverEntryDialog(QDialog):
                     usual_truck=usual_truck,
                     document=self.document_input.text().strip() or None,
                     phone=self.phone_input.text().strip() or None,
+                    address=self.address_input.text().strip() or None,
                 )
             else:
                 driver = Driver.get_by_id(self.record_id)
@@ -1128,6 +1143,7 @@ class DriverEntryDialog(QDialog):
                 driver.usual_truck = usual_truck
                 driver.document = self.document_input.text().strip() or None
                 driver.phone = self.phone_input.text().strip() or None
+                driver.address = self.address_input.text().strip() or None
                 driver.save()
                 self.saved_record = driver
             self.accept()
