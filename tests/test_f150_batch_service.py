@@ -32,7 +32,7 @@ def _issued_remittance():
     )
     carrier = Carrier.create(
         name="Transporte F150", cuit="30777777770", codigo="0001",
-        tipo="DIR", locality=locality,
+        tipo="DIR", locality=locality, address="Ruta 12 km 8",
     )
     truck = Truck.create(
         domain="AB123CD", trailer_domain="AC456EF", carrier=carrier,
@@ -45,6 +45,7 @@ def _issued_remittance():
         cuit="20123456789",
         document="12345678",
         locality=locality,
+        address="Posadas",
     )
     product = Product.create(
         codigo="ALM",

@@ -204,6 +204,9 @@ class Carrier(BaseModel):
     codigo = CharField(null=True)
     tipo = CharField(null=True)
     locality = ForeignKeyField(DgrLocality, backref="carriers", null=True)
+    #: Domicilio del transportista. El F150 lo exige en el campo 13 de la
+    #: cabecera C y ``transporte.dbf`` lo trae en ``DOMICILIO``.
+    address = CharField(null=True)
     active = BooleanField(default=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
@@ -235,6 +238,10 @@ class Driver(BaseModel):
     document = CharField(null=True)
     phone = CharField(null=True)
     locality = ForeignKeyField(DgrLocality, backref="drivers", null=True)
+    #: Domicilio del chofer. El F150 lo exige en el campo 31 de la cabecera C y
+    #: ``chofer.dbf`` lo trae en ``DOMICILIO``. Los choferes cargados a mano
+    #: tambien lo necesitan.
+    address = CharField(null=True)
     active = BooleanField(default=True)
     available = BooleanField(default=True)
     source_system = CharField(null=True)

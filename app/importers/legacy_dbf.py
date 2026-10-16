@@ -20,6 +20,11 @@ from app.services.product_classification_service import analyze_legacy_product
 ENTITY_KEYS = ("clients", "carriers", "drivers", "trucks", "products")
 EXEMPT_VAT_NAME = "EXENTO"
 
+#: Ancho del campo ``DOMICILIO`` en ``transporte.dbf`` y ``chofer.dbf``. El F150
+#: escribe ese domicilio en los campos 13 (transportista) y 31 (chofer) de la
+#: cabecera C, y los archivos reales lo traen completo.
+ADDRESS_WIDTH = 30
+
 
 @dataclass(frozen=True)
 class ImportOutcome:
@@ -189,6 +194,7 @@ class LegacyDbfMasterImporter:
             "codigo": source_id,
             "tipo": self._value(row, "TIPO", "TIPOTRANSP") or None,
             "locality": self._find_locality(row),
+            "address": self._address(row),
         }
         return ImportOutcome(self._upsert(Carrier, {"name": name}, values, source_system, source_id, batch))
 
@@ -225,6 +231,7 @@ class LegacyDbfMasterImporter:
             "document": self._value(row, "DNI", "DOCUMENTO", "DOC"),
             "phone": self._value(row, "TELEFONO", "TEL", "PHONE"),
             "locality": self._find_locality(row),
+            "address": self._address(row),
         }
         action = self._upsert(Driver, {"name": name}, values, source_system, source_id, batch)
         related_actions = (("trucks", truck_action),) if truck_action is not None else ()
@@ -478,6 +485,17 @@ class LegacyDbfMasterImporter:
 
     def _clean_domain(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9]", "", value).upper()
+
+    def _address(self, row: Mapping[str, Any]) -> str | None:
+        """Domicilio del transportista o del chofer, que el F150 exige.
+
+        Viene de ``DOMICILIO`` en ``transporte.dbf`` y ``chofer.dbf``, un texto
+        libre de 30 caracteres que a veces trae espacios sobrantes. Se colapsan
+        para que el ancho sea estable en el archivo. Los choferes cargados a
+        mano no pasan por acá: su domicilio lo guarda el operador.
+        """
+        text = " ".join(self._value(row, "DOMICILIO", "DIRECCION", "DOMIC").split())
+        return text[:ADDRESS_WIDTH] or None
 
     def _clean_identity_name(self, value: str) -> str:
         return re.sub(r"[^A-Z0-9]", "", value.upper())

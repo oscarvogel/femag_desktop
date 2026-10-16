@@ -236,6 +236,7 @@ class F150BatchService:
                 cuit=self._format_cuit(remittance.carrier_cuit or carrier.cuit or ""),
                 name=remittance.carrier_name or carrier.name,
                 carrier_type=carrier.tipo or "",
+                address=carrier.address or "",
                 code=carrier.codigo or "",
                 location=self._dgr_location(carrier.locality),
             ),
@@ -255,6 +256,7 @@ class F150BatchService:
                     driver.cuit or "",
                     remittance.driver_document or driver.document or "",
                 ),
+                address=driver.address or "",
                 location=self._dgr_location(driver.locality),
             ),
             items=tuple(items),
@@ -300,6 +302,8 @@ class F150BatchService:
                 issues.append("transportista: falta tipo")
             if not (carrier.codigo or "").strip():
                 issues.append("transportista: falta código")
+            if not (carrier.address or "").strip():
+                issues.append("transportista: falta domicilio")
             issues.extend(
                 F150BatchService._locality_issues(carrier.locality, section="transportista")
             )
@@ -311,6 +315,8 @@ class F150BatchService:
                 issues.append("camión: falta tipo de acoplado")
         driver = remittance.driver
         if driver is not None:
+            if not (driver.address or "").strip():
+                issues.append("chofer: falta domicilio")
             issues.extend(
                 F150BatchService._locality_issues(driver.locality, section="chofer")
             )
