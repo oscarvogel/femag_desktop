@@ -40,11 +40,23 @@ class RuntimeSchemaPreparationRequired(RuntimeError):
 
 
 class ConnectionDialog(QDialog):
-    def __init__(self, *, current: RuntimeConnection | None = None, parent=None):
+    def __init__(
+        self,
+        *,
+        current: RuntimeConnection | None = None,
+        save_connection: bool = True,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(f"FEMAG Desktop {BUILD_VERSION} - Conexion MySQL")
         self.setMinimumWidth(470)
         self._current = current
+        # Con ``save_connection=False`` el dialogo prepara el esquema con la
+        # credencial que se ingresa pero NO la deja guardada como conexion
+        # operativa. Es el camino que usa el arranque (#717) para migrar: la
+        # credencial administrativa sirve para un ALTER y no debe quedar en
+        # disco como la de todos los dias (#DEPLOY).
+        self._save_connection = save_connection
 
         self.host = QLineEdit(current.host if current else DEFAULT_MYSQL_HOST)
         self.port = QSpinBox()
@@ -116,6 +128,10 @@ class ConnectionDialog(QDialog):
                 return
         except (ValueError, RuntimeError, SecureConfigurationError) as exc:
             QMessageBox.critical(self, "No se pudo guardar la conexion", str(exc))
+            return
+        if not self._save_connection:
+            # Solo preparando el esquema: la credencial no se persiste.
+            self.accept()
             return
         try:
             save_runtime_connection(connection)
