@@ -423,11 +423,8 @@ class LoadOrderPrintService:
 
     def _used_pallet_total(self, order: LoadOrder) -> int:
         return (
-            LoadOrderPallet.select(LoadOrderPallet.id)
-            .join(LoadOrderPalletAllocation)
-            .join(LoadOrderDestination)
-            .where(LoadOrderDestination.order == order)
-            .distinct()
+            LoadOrderPallet.select()
+            .where(LoadOrderPallet.order == order)
             .count()
         )
 

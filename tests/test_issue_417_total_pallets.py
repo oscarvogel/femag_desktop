@@ -191,8 +191,7 @@ def test_single_client_with_multiple_pallets_uses_physical_count_in_pdf(db, tmp_
     assert "9 pallets" not in pdf_text
 
 
-def test_total_counts_pallets_used_by_order_destinations_not_first_parent_group(db, tmp_path):
-    from app.models.load_orders import LoadOrder, LoadOrderPallet
+def test_total_counts_all_physical_pallets_even_without_allocations(db, tmp_path):
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
     from app.services.load_order_service import LoadOrderService
     from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
@@ -201,11 +200,15 @@ def test_total_counts_pallets_used_by_order_destinations_not_first_parent_group(
     driver = Driver.create(name="Chofer total destinos issue 417", carrier=carrier)
     truck = Truck.create(domain="ISS417DST", carrier=carrier)
     product = Product.create(name="Producto destinos issue 417", unit="UNIDAD", peso_unitario_kg=25)
-    distributions = [("Cliente 13", 13), ("Cliente 2", 2), ("Cliente 3", 3), ("Cliente 1", 1)]
+    distributions = [
+        ("Cliente 13", 13, set(range(1, 14))),
+        ("Cliente 2", 2, {1, 2}),
+        ("Cliente 3", 3, {1, 2, 3}),
+        ("Cliente 1", 1, {1}),
+    ]
     destinations = []
-    pallets = []
-    sequence = 1
-    for index, (name, pallet_count) in enumerate(distributions):
+    destination_allocations = []
+    for index, (name, pallet_count, pallet_sequences) in enumerate(distributions):
         client = Client.create(name=name, cuit=f"307000418{index:02d}", iva_condition="RI")
         address = ClientAddress.create(
             client=client,
@@ -221,21 +224,30 @@ def test_total_counts_pallets_used_by_order_destinations_not_first_parent_group(
                 "products": [{"product": product, "quantity": pallet_count * 60}],
             }
         )
-        for _ in range(pallet_count):
-            pallets.append(
-                {
-                    "sequence": sequence,
-                    "allocations": [
-                        {
-                            "client": client,
-                            "delivery_address": address,
-                            "product": product,
-                            "quantity": 60,
-                        }
-                    ],
-                }
-            )
-            sequence += 1
+        destination_allocations.append(
+            {
+                "client": client,
+                "delivery_address": address,
+                "pallet_sequences": pallet_sequences,
+            }
+        )
+
+    # The real order has 19 physical pallet records. Destination allocations
+    # refer to 13 of them, with the first three shared across destinations;
+    # six pallet records have no product allocation.
+    pallets = []
+    for sequence in range(1, 20):
+        allocations = [
+            {
+                "client": destination["client"],
+                "delivery_address": destination["delivery_address"],
+                "product": product,
+                "quantity": 60,
+            }
+            for destination in destination_allocations
+            if sequence in destination["pallet_sequences"]
+        ]
+        pallets.append({"sequence": sequence, "allocations": allocations})
 
     order = LoadOrderService(current_user="issue-417-test").create_order(
         carrier=carrier,
@@ -244,21 +256,9 @@ def test_total_counts_pallets_used_by_order_destinations_not_first_parent_group(
         destinations=destinations,
         pallets=pallets,
     )
-    other_order = LoadOrder.create(
-        order_number=9000,
-        carrier=carrier,
-        driver=driver,
-        truck=truck,
-        created_by="issue-417-test",
-    )
-    # Reproduce a split parent relation while all 19 allocations remain visible
-    # through the order's four destinations, matching the renderer's data source.
-    LoadOrderPallet.update(order=other_order).where(
-        (LoadOrderPallet.order == order) & (LoadOrderPallet.sequence > 13)
-    ).execute()
 
     pdf_path = ConsolidatedLoadOrderPrintService(current_user="issue-417-test").export_pdf(order, tmp_path)
     pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf_path)).pages)
 
-    assert "13 pallets" in pdf_text
     assert "19 pallets" in pdf_text
+    assert "13 pallets" in pdf_text
