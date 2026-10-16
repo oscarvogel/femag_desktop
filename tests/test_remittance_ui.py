@@ -130,13 +130,77 @@ def test_issue_action_offers_f150_after_emit(db, tmp_path, monkeypatch):
     )
     page.table.selectRow(0)
     monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
-    offered = []
-    monkeypatch.setattr(page, "_offer_f150", offered.append)
+    generated = []
+    monkeypatch.setattr(page, "_generate_f150_after_emit", generated.append)
 
     page._issue()
 
     assert Remittance.get_by_id(remittance.id).status == Remittance.STATUS_ISSUED
-    assert [row.id for row in offered] == [remittance.id]
+    assert [row.id for row in generated] == [remittance.id]
+
+
+def test_emitir_genera_el_f150_sin_preguntar(db, tmp_path, monkeypatch):
+    """Cargar el remito y que el F150 aparezca es el flujo normal."""
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.f150_batch_service import F150BatchService
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    remittance = RemittanceService("ui_f150_auto").issue(_f150_ready_draft("ui_f150_auto"))
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(
+        current_user="ui_f150_auto", output_dir=tmp_path, f150_output_dir=tmp_path
+    )
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a, **_k: asked.append(True))
+    monkeypatch.setattr(QMessageBox, "information", lambda *_a, **_k: None)
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2])
+    )
+
+    page._generate_f150_after_emit(remittance)
+
+    assert asked == [], "no debe preguntar al operador"
+    assert warnings == []
+    expected = tmp_path / "F150-0001-00001068.txt"
+    assert expected.exists()
+    assert F150BatchService.is_included(remittance) is True
+
+
+def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
+    """Si falta un dato del formato, el remito queda emitido y pendiente."""
+    from PyQt5.QtWidgets import QApplication, QMessageBox
+
+    from app.services.f150_batch_service import F150BatchService
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    # Sin domicilio del transportista el F150 no se puede generar.
+    draft = _f150_ready_draft("ui_f150_pending")
+    draft.carrier.address = None
+    draft.carrier.save()
+    remittance = RemittanceService("ui_f150_pending").issue(draft)
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(
+        current_user="ui_f150_pending", output_dir=tmp_path, f150_output_dir=tmp_path
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *_a, **_k: None)
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2])
+    )
+
+    page._generate_f150_after_emit(remittance)
+
+    assert len(warnings) == 1
+    assert "no se genero" in warnings[0]
+    assert "transportista: falta domicilio" in warnings[0]
+    assert list(tmp_path.glob("F150-*")) == []
+    # El remito sigue emitido y pendiente: se genera desde la pantalla de F150.
+    assert F150BatchService.is_included(remittance) is False
+    assert F150BatchService.validation_issues(remittance)
 
 
 def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatch):
@@ -151,14 +215,13 @@ def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatc
     page = RemittancesPage(
         current_user="ui_f150_save", output_dir=tmp_path, f150_output_dir=tmp_path
     )
-    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *_args, **_kwargs: None)
     warnings = []
     monkeypatch.setattr(
         QMessageBox, "warning", lambda *_args, **_kwargs: warnings.append(_args[2])
     )
 
-    page._offer_f150(remittance)
+    page._generate_f150_after_emit(remittance)
 
     assert warnings == []
     expected = tmp_path / "F150-0001-00001068.txt"
@@ -167,24 +230,6 @@ def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatc
     assert content.startswith("C1F15023082026@1@12@0001@")
     inclusion = F150BatchService.is_included(remittance)
     assert inclusion is True
-
-
-def test_offer_f150_skips_file_when_user_declines(db, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QMessageBox
-
-    from app.services.remittance_service import RemittanceService
-    from app.ui.remittances import RemittancesPage
-
-    remittance = RemittanceService("ui_f150_decline").issue(_f150_ready_draft("ui_f150_decline"))
-    app = QApplication.instance() or QApplication([])
-    page = RemittancesPage(
-        current_user="ui_f150_decline", output_dir=tmp_path, f150_output_dir=tmp_path
-    )
-    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.No)
-
-    page._offer_f150(remittance)
-
-    assert list(tmp_path.glob("F150-*")) == []
 
 
 

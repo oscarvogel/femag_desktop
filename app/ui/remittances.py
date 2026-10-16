@@ -848,27 +848,35 @@ class RemittancesPage(QWidget):
             "Remito emitido",
             f"{emitted.remittance_number} quedó emitido y ya no puede editarse.",
         )
-        self._offer_f150(emitted)
+        self._generate_f150_after_emit(emitted)
 
-    def _offer_f150(self, remittance: Remittance) -> None:
+    def _generate_f150_after_emit(self, remittance: Remittance) -> None:
+        """Genera el F150 del remito recien emitido, sin preguntar.
+
+        Cargar el remito con sus datos y que el F150 aparezca es el flujo normal.
+        Si falta un dato del formato no se cae la emision: el remito queda
+        pendiente y aparece en la pantalla de F150 con el motivo, para
+        generarlo mas tarde una vez completados los datos.
+        """
         if not remittance.physical_point_of_sale or not remittance.physical_number:
             return
         identity = f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
-        answer = QMessageBox.question(
-            self,
-            "Generar F150",
-            f"¿Desea generar el archivo F150 del remito {identity}?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if answer != QMessageBox.Yes:
-            return
         file_name = f"F150-{remittance.physical_point_of_sale}-{remittance.physical_number}.txt"
         output = self.f150_output_dir / file_name
         try:
             batch = F150BatchService(self.current_user).generate([remittance], output)
+        except FileExistsError:
+            # Ya se habia generado. No es un problema para el operador.
+            return
         except Exception as exc:
-            QMessageBox.warning(self, "Generar F150", str(exc))
+            QMessageBox.warning(
+                self,
+                "F150 pendiente",
+                f"El remito {identity} quedo emitido, pero su F150 no se genero:\n\n"
+                f"{exc}\n\n"
+                "El remito aparece en la pantalla de F150 para generarlo cuando "
+                "complete los datos que faltan.",
+            )
             return
         QMessageBox.information(
             self,
