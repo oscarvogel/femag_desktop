@@ -140,8 +140,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_content_table.setMaximumHeight(260)
         self.guided_content_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-        advanced_index = current_layout.indexOf(self.guided_advanced_button)
-        current_layout.insertWidget(max(advanced_index, 0), selector_frame)
+        current_layout.addWidget(selector_frame)
 
         for group in (self.guided_splitter.widget(0), self.guided_splitter.widget(1)):
             group.setMinimumWidth(0)
@@ -157,7 +156,6 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             self.guided_delete_pallet_button,
             self.guided_remove_button,
             self.guided_lock_button,
-            self.guided_advanced_button,
         ):
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -268,6 +266,27 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
                 widget.deleteLater()
         self._guided_pallet_buttons = {}
 
+        # La pantalla se construye antes de que la base este disponible (#668):
+        # sin capacidad configurada no se puede saber si un pallet esta completo.
+        try:
+            max_kg = PalletCapacityService.pallet_max_kg()
+        except Exception:
+            max_kg = None
+
+        style_empty = ""
+        style_partial = (
+            "QPushButton { background: #f6c453; color: #4a3200; font-weight: 900; "
+            "border: 2px solid #b7791f; border-radius: 6px; }"
+        )
+        style_complete = (
+            "QPushButton { background: #1f7a3d; color: white; font-weight: 900; "
+            "border: 2px solid #14532d; border-radius: 6px; }"
+        )
+        style_locked = (
+            "QPushButton { background: #d9e2ec; color: #334e68; font-weight: 900; "
+            "border: 2px dashed #627d98; border-radius: 6px; }"
+        )
+
         for index, pallet in enumerate(sorted(self._pallets, key=lambda item: int(item["sequence"]))):
             sequence = int(pallet["sequence"])
             button = QPushButton(str(sequence))
@@ -277,15 +296,24 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
             button.setChecked(selected)
             button.setMinimumWidth(36)
             button.setMaximumHeight(30)
+            has_content = bool(pallet.get("allocations"))
+            pallet_kg = self._pallet_kg(pallet)
+            locked = sequence in self._locked_sequences
             if selected:
                 button.setStyleSheet(
                     "QPushButton { background: #173a59; color: white; font-weight: 900; "
                     "border: 2px solid #0f2e49; border-radius: 6px; }"
                 )
+            elif has_content and max_kg is not None and pallet_kg >= max_kg:
+                button.setStyleSheet(style_complete)
+            elif has_content:
+                button.setStyleSheet(style_partial)
+            elif locked:
+                button.setStyleSheet(style_locked)
             else:
-                button.setStyleSheet("")
-            suffix = " · fijado" if sequence in self._locked_sequences else ""
-            button.setToolTip(f"Pallet {sequence}{suffix} · {_kg_text(self._pallet_kg(pallet))}")
+                button.setStyleSheet(style_empty)
+            suffix = " · fijado" if locked else ""
+            button.setToolTip(f"Pallet {sequence}{suffix} · {_kg_text(pallet_kg)}")
             button.clicked.connect(lambda _checked=False, seq=sequence: self._guided_select_pallet(seq))
             row = index // self.PALLET_SELECTOR_COLUMNS
             column = index % self.PALLET_SELECTOR_COLUMNS
