@@ -182,12 +182,6 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         pallet_actions.addWidget(self.guided_lock_button)
         current_layout.addLayout(pallet_actions)
 
-        self.guided_advanced_button = QPushButton("Edicion avanzada")
-        self.guided_advanced_button.setObjectName("guidedAdvancedPalletEditorButton")
-        self.guided_advanced_button.setProperty("secondary", True)
-        self.guided_advanced_button.clicked.connect(self._toggle_advanced_editor)
-        current_layout.addWidget(self.guided_advanced_button)
-
         self.guided_splitter.addWidget(pending_group)
         self.guided_splitter.addWidget(current_group)
         self.guided_splitter.setStretchFactor(0, 3)
@@ -468,13 +462,6 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self._selected_sequence = int(sequence)
         self._render_editor()
         self._refresh_guided_ui()
-
-    def _toggle_advanced_editor(self) -> None:
-        visible = not self.editor_panel.isVisible()
-        self.editor_panel.setVisible(visible)
-        self.guided_advanced_button.setText(
-            "Ocultar edicion avanzada" if visible else "Edicion avanzada"
-        )
 
     def toggle_selected_pallet_lock(self) -> None:
         super().toggle_selected_pallet_lock()

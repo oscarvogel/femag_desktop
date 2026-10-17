@@ -71,6 +71,32 @@ def test_guided_selector_shows_twenty_clickable_pallets_without_combo(db):
     assert "background: #173a59" in widget._guided_pallet_buttons[17].styleSheet()
 
 
+def test_guided_selector_paints_loaded_pallets_by_state(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.pallet_capacity_service import PalletCapacityService
+    from app.ui.pallet_composition import PalletCompositionWidget
+
+    app = QApplication.instance() or QApplication([])
+    PalletCapacityService.set_pallet_max_kg(Decimal("1500"))
+    widget = PalletCompositionWidget(
+        destinations=_destinations(db, quantity=3000, weight=Decimal("1.000"))
+    )
+    widget.guided_total_pallets_input.setValue(4)
+    widget._guided_create_to_total()
+
+    widget._selected_sequence = 1
+    widget._add_row_to_pallet(widget._pallets[0], widget._current_rows()[0], Decimal("1500"))
+    widget._add_row_to_pallet(widget._pallets[1], widget._current_rows()[0], Decimal("300"))
+    widget._selected_sequence = 4
+    widget._refresh()
+    app.processEvents()
+
+    assert "#1f7a3d" in widget._guided_pallet_buttons[1].styleSheet()
+    assert "#f6c453" in widget._guided_pallet_buttons[2].styleSheet()
+    assert widget._guided_pallet_buttons[3].styleSheet() == ""
+
+
 def test_guided_capacity_action_is_visible_when_workbench_is_shown(db):
     from PyQt5.QtWidgets import QApplication
 
