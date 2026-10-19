@@ -124,6 +124,10 @@ from app.ui.audit_history_dialog import LoadOrderHistoryDialog
 from app.ui.audit_query_page import AuditQueryPage
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
+from app.ui.load_order_ledger_repair_dialog import LoadOrderLedgerRepairDialog
+from app.services.load_order_ledger_repair_service import (
+    LoadOrderLedgerRepairService,
+)
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -2017,6 +2021,9 @@ class FemagDesktopWindow(QMainWindow):
             current_user=self.shell.username,
             prints_dir=LOAD_ORDER_PRINTS_DIR,
         )
+        repair_service = LoadOrderLedgerRepairService(
+            current_user=self.shell.username
+        )
         selected_order_id: dict[str, int | None] = {"value": None}
         refreshing_selection: dict[str, bool] = {"value": False}
 
@@ -2042,6 +2049,9 @@ class FemagDesktopWindow(QMainWindow):
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
+        repair_button = _action_button(
+            "repairLedgerLoadOrderButton", "Reparar cta. corriente", secondary=True
+        )
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
@@ -2052,6 +2062,10 @@ class FemagDesktopWindow(QMainWindow):
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         can_reprint = _can_reprint_load_orders(self.user)
         reprint_button.setVisible(can_reprint)
+        # Sólo el administrador repara una orden emitida a medias: es una
+        # excepción, no una operación de la operatoria.
+        can_repair_ledger = PermissionService.is_administrator(self.user)
+        repair_button.setVisible(can_repair_ledger)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
@@ -2068,8 +2082,12 @@ class FemagDesktopWindow(QMainWindow):
             reprint_button,
             budget_button,
             annul_button,
+            repair_button,
         ):
             actions.addWidget(button)
+        # Se oculta despues de agregarlo al layout: un boton sin padre al que
+        # se le hace visible se vuelve una ventana propia.
+        repair_button.setVisible(can_repair_ledger)
         actions.addStretch(1)
 
         search_row = QHBoxLayout()
@@ -2156,6 +2174,17 @@ class FemagDesktopWindow(QMainWindow):
                 f"Página {page_state['page']} de {page_state['pages']} · "
                 f"{page_state['total']} orden(es)"
             )
+            if can_repair_ledger:
+                # El número de órdenes sin cuenta corriente va EN el botón: es
+                # la señal de que hay plata que no está registrada, sin que
+                # nadie tenga que abrir el diálogo para enterarse.
+                try:
+                    rotas = repair_service.count_broken_orders()
+                except Exception:
+                    rotas = 0
+                repair_button.setText(
+                    f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
+                )
             previous_page_button.setEnabled(page_state["page"] > 1)
             next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
@@ -2533,6 +2562,22 @@ class FemagDesktopWindow(QMainWindow):
                 return
             refresh(page_number=page_state["page"] + 1)
 
+        def repair_ledger() -> None:
+            """Reparación de órdenes emitidas sin cuenta corriente (sólo admin)."""
+            if not PermissionService.is_administrator(self.user):
+                feedback.show_error(
+                    "Sólo un administrador puede reparar órdenes emitidas.",
+                    focus_widget=table,
+                )
+                return
+            dialog = LoadOrderLedgerRepairDialog(self.shell.username, self, user=self.user)
+            dialog.exec_()
+            if dialog.repaired:
+                refresh()
+                feedback.show_success(
+                    "Orden(es) reparada(s): " + ", ".join(dialog.repaired) + "."
+                )
+
         table.currentCellChanged.connect(lambda row, _column, _previous_row, _previous_column: load_selected(row))
         new_button.clicked.connect(open_new_order_dialog)
         edit_button.clicked.connect(open_edit_order_dialog)
@@ -2547,6 +2592,7 @@ class FemagDesktopWindow(QMainWindow):
         print_button.clicked.connect(print_order)
         reprint_button.clicked.connect(reprint_order)
         budget_button.clicked.connect(print_budget)
+        repair_button.clicked.connect(repair_ledger)
         refresh()
         return page
 
