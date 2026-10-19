@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+from app.config.database import database_proxy
 from app.models.audit import AuditLog
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
@@ -53,12 +54,19 @@ class LoadOrderOperationService:
         # abre transaccion, asi que fallar despues dejaria la orden emitida con
         # presupuesto y sin salida de stock.
         self.stock.plan_dispatch(order)
-        issued = self.load_orders.change_status(order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla")
-        self.account_ledger.generate_for_load_order(issued)
-        # La mercaderia sale de la planta cuando se emite la orden, no cuando se
-        # cierra la entrega: emitir es el hecho operativo que produce el
-        # presupuesto. Va aca y no en el cierre, que es un paso administrativo.
-        self.stock.register_dispatch(issued)
+        # Emitir es UNA operacion: estado, cuenta corriente y salida de stock.
+        # Van en la misma transaccion para que no quede una orden "Emitida" sin
+        # registrar en los libros: si el presupuesto o el movimiento fallan, la
+        # orden vuelve a "Pendiente" y se puede reintentar (#726).
+        with database_proxy.atomic():
+            issued = self.load_orders.change_status(
+                order, LoadOrder.STATUS_ISSUED, reason="Emitida desde pantalla"
+            )
+            self.account_ledger.generate_for_load_order(issued)
+            # La mercaderia sale de la planta cuando se emite la orden, no cuando se
+            # cierra la entrega: emitir es el hecho operativo que produce el
+            # presupuesto. Va aca y no en el cierre, que es un paso administrativo.
+            self.stock.register_dispatch(issued)
         return issued
 
     def print_order(self, order: LoadOrder) -> Path:

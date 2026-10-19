@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import date, timedelta
 
 from app.config.database import database_proxy
@@ -122,8 +123,10 @@ class BudgetService:
             if not order.is_unissued:
                 raise ValueError(
                     f"El presupuesto {existing.display_number} no coincide con la mercaderia "
-                    f"de la OC-{order.order_number:06d}. La orden ya esta emitida y no se puede "
-                    "corregir sola: anule la orden y genere una nueva."
+                    f"de la OC-{order.order_number:06d}. No se puede emitir con el presupuesto "
+                    "desactualizado: vuelva a imprimir el presupuesto para actualizarlo o "
+                    "corrija la mercaderia de la orden. Si la orden ya estaba emitida, anule la "
+                    "orden y genere una nueva."
                 )
             self._regenerate_from_order(existing, order, rows, timing)
             return existing
@@ -339,29 +342,31 @@ class BudgetService:
     ) -> bool:
         """Si el detalle del presupuesto sigue siendo el de la orden.
 
-        Se comparan cantidad e importe por renglon de origen. Si no coinciden, el
-        documento quedo viejo y sus importes no son los de la mercaderia.
+        Se comparan producto, cantidad e importe de cada renglon, no el id del
+        renglon de origen. Ese id es un detalle de implementacion que se pierde
+        en cada edicion de la orden: ``_replace_destinations`` borra y recrea
+        los renglones, y el vinculo del item queda en NULL por ``SET NULL``. Con
+        la mercaderia intacta, comparar por id daba "no coincide" y la emision
+        se caia (#726).
         """
-        expected = {}
+        expected = Counter()
         for row in rows:
             amounts = self._line_amounts_for_timing(row, timing)
             if amounts is not None:
-                expected[row.id] = (
-                    quantize_money(amounts.quantity),
-                    quantize_money(amounts.total),
-                )
-        actual = {
-            item.source_order_product_id: (
-                quantize_money(item.quantity),
-                quantize_money(item.total),
-            )
-            for item in budget.items
-            if item.source_order_product_id is not None
-        }
-        if not expected:
-            # La parte ya no tiene mercaderia: el documento sobra.
-            return not actual
+                expected[self._merchandise_key(row.product_id, amounts.quantity, amounts.total)] += 1
+        actual = Counter()
+        for item in budget.items:
+            actual[self._merchandise_key(item.product_id, item.quantity, item.total)] += 1
         return expected == actual
+
+    @staticmethod
+    def _merchandise_key(product_id, quantity, total) -> tuple:
+        """Clave de un renglon de mercaderia, independiente del renglon de origen."""
+        return (
+            product_id,
+            quantize_money(quantity),
+            quantize_money(total),
+        )
 
     def _regenerate_from_order(
         self,
