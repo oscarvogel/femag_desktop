@@ -5467,6 +5467,8 @@ QComboBox QAbstractItemView {
 #saveLoadOrderButton { min-width: 132px; }
 QTableWidget { background: #ffffff; alternate-background-color: #fbfdff; gridline-color: #edf2f7; border: 0; selection-background-color: #e8f1ff; selection-color: #0f172a; }
 QHeaderView::section { background: #ffffff; color: #334155; border: 0; border-bottom: 1px solid #d9e1ec; padding: 10px; font-weight: 700; }
+QProgressBar { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; min-height: 20px; color: #334155; font-weight: 700; text-align: center; }
+QProgressBar::chunk { background: #1473e6; border-radius: 5px; }
 """
 
 
