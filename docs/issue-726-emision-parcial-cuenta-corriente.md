@@ -170,6 +170,47 @@ mercadería.
 Con las dos correcciones, contra el dump de producción la detección da
 **exactamente dos órdenes**: la OC-000078 y la OC-000081.
 
+## Impacto económico (medido contra la base real)
+
+Los 6 documentos de las dos órdenes rotas sumaban **$82.690.200,00** de deuda que
+**no estaba registrada** en la cuenta corriente:
+
+| Orden | Documento | Cliente | A registrar | Saldo que ve la empresa hoy |
+|---|---|---|---|---|
+| OC-000078 | PRES-000168 | MOLINOS RIO DE LA PLATA S.A. | 26.130.000,00 | **0,00** |
+| OC-000078 | PRES-000169 | DISTRIBUIDORA DE MAT. PRIMAS S.A. | 4.800.000,00 | **0,00** |
+| OC-000078 | PRES-000170 | HUERTA MAMA CORA S.R.L. | 7.132.860,00 | **0,00** |
+| OC-000078 | PRES-000171 | GARCIA ABEL CARLOS | 2.280.000,00 | **0,00** |
+| OC-000081 | PRES-000173 | OTERO JUAN ANTONIO | 37.592.100,00 | 53.217.965,81 |
+| OC-000081 | PRES-000174 | COMERCIAL EXPRESS S.R.L. | 4.755.240,00 | **0,00** |
+
+**Cinco de los seis clientes aparecen con saldo $0.** Eso es la forma en que la
+plata se pierde: nadie reclama a un cliente que el sistema dice que no debe
+nada. La mercadería salió de la planta, se facturó y se entregó, y en la cuenta
+corriente no hay nada que reclamar.
+
+**Stock**: 56.000 kg de mercadería que salió de la planta y que el sistema sigue
+mostrando como disponible (28.500 kg de la OC-000078; 25.500 kg + 2.000 kg de la
+OC-000081).
+
+### Cómo me entero de esto en adelante
+
+1. **En la pantalla**: el botón "Reparar cta. corriente" de la pantalla de órdenes
+   lleva el número de órdenes afectadas: **"Reparar cta. corriente (2)"**. Es la
+   señal, sin abrir nada.
+2. **Con el diálogo**: lista las órdenes, el documento que falta, el cliente y el
+   importe, y repara con confirmación.
+3. **Como control periódico** (sin escribir nada):
+
+   ```bash
+   py -m scripts.repair_missing_ledger_movements --list
+   ```
+
+4. **Prevención**: desde #726 la emisión es atómica, así que una orden no puede
+   volver a quedar emitida sin registrar. La detección de los puntos 1 a 3 es la
+   red de seguridad para lo anterior al arreglo (y para lo que se haya hecho por
+   fuera de la aplicación).
+
 ## Decisiones tomadas
 
 | Tema | Decisión |
