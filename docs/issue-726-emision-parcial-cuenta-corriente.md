@@ -434,6 +434,46 @@ Y los saldos que ve la empresa **antes** de reparar (misma base):
 - La reparación escribe en la base de producción: se ejecuta con copia de base
   previa y con el `--apply` explícito.
 
+## Reparación aplicada sobre la base real (19/10/2026 18:20)
+
+La reparación se aplicó con el mismo servicio que usa el botón de administración
+(`LoadOrderLedgerRepairService`), sobre la base de producción del puesto
+(`127.0.0.1:3306/femag_desktop`, configuración segura DPAPI).
+
+**Respaldo previo** (para que la corrección sea reversible y no silenciosa):
+
+```
+C:\Users\Usuario\Downloads\femag_pre_repair_20261019.sql   (2.717.776 bytes)
+```
+
+**Resultado:**
+
+| Orden | Movimientos creados | Despachos | Suma de los movimientos |
+|---|---|---|---|
+| OC-000078 | 4 | 1 (28.500,000 kg) | 40.342.860,00 |
+| OC-000081 | 2 | 2 (25.500,000 + 2.000,000 kg) | 42.347.340,00 |
+
+**Control posterior (misma base):**
+
+- Órdenes rotas que quedan: **0**.
+- Los 6 documentos (168, 169, 170, 171, 173, 174) tienen su movimiento en la cuenta
+  corriente, con el importe exacto del presupuesto.
+- Saldos que ve la empresa **antes → después**:
+
+| Cliente | Antes | Después |
+|---|---|---|
+| MOLINOS RIO DE LA PLATA S.A. | 0,00 | **26.130.000,00** |
+| DISTRIBUIDORA DE MAT. PRIMAS S.A. | 0,00 | **4.800.000,00** |
+| HUERTA MAMA CORA S.R.L. | 0,00 | **7.132.860,00** |
+| GARCIA ABEL CARLOS | 0,00 | **2.280.000,00** |
+| OTERO JUAN ANTONIO | 53.217.965,81 | **90.810.065,81** |
+| COMERCIAL EXPRESS S.R.L. | 0,00 | **4.755.240,00** |
+
+- **Stock**: 56.000 kg descontados (28.500 + 27.500).
+- **Idempotencia**: repetir la reparación no duplica nada (4 movimientos por 40.342.860,00
+  y 2 por 42.347.340,00, igual que antes).
+- **Alarma**: 0 avisos de plata. La alarma se apaga sola cuando la orden queda reparada.
+
 ## Pendientes (operativos)
 
 1. **Merge** de este PR y publicación del **candidate** en `oscarvogel/vogel-releases`
