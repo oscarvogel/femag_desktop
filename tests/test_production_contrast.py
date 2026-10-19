@@ -105,6 +105,42 @@ def test_el_contraste_separa_lo_medido_de_lo_estimado(db):
     assert c.measured_kg == Decimal("1000.00")
 
 
+def test_una_ticket_importada_antes_de_722_se_clasifica_como_estimada(db):
+    """El caso real que aparecio en la prueba contra MySQL (#724).
+
+    Cuando se creo la columna ``yield_source``, el backfill generico del
+    esquema le puso 'measured' a todas las filas que ya existian. Un ticket
+    con PROMEDIO 0 nunca fue medido por la planta: el PROMEDIO manda, no la
+    columna, y si no el rendimiento ponderado del mes se hunde.
+    """
+    ticket = _receipt(DAY, "10000", "0", "0.00", comp="9")
+    # Asi queda una fila que se importo antes de que existiera la columna.
+    ticket.yield_source = "measured"
+    ticket.estimated_yield_pct = None
+    ticket.save()
+
+    c = ProductionContrastService.for_day(DAY)
+
+    assert c.measured_kg == Decimal("0.00")
+    assert c.estimated_tickets == 1
+    assert c.estimated_kg == Decimal("10000.00")
+    # La fecula teorica sale del parametro vigente, no del 0,00 guardado.
+    assert c.estimated_starch_kg == Decimal("2233.00")
+    assert c.theoretical_starch_kg == Decimal("2233.00")
+    assert c.theoretical_yield_pct == Decimal("0.00")
+
+
+def test_una_ticket_antes_de_722_se_muestra_como_estimada_en_el_detalle(db):
+    ticket = _receipt(DAY, "10000", "0", "0.00", comp="9")
+    ticket.yield_source = "measured"
+    ticket.save()
+
+    lineas = ProductionContrastService.receipt_lines(DAY, DAY)
+
+    assert lineas[0][4] == "Estimado"
+    assert lineas[0][3] == Decimal("22.33")
+
+
 def test_sin_rindes_medidos_no_hay_rinde_ponderado(db):
     """Si todo el material es estimado, el rendimiento ponderado no existe."""
     from app.models.production import YIELD_SOURCE_ESTIMATED
