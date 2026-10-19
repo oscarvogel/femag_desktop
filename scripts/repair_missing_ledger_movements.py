@@ -1,19 +1,14 @@
-"""Reparación de órdenes de carga emitidas SIN cuenta corriente ni salida de stock.
+"""Reparación por consola de órdenes de carga emitidas SIN cuenta corriente.
 
-Una emisión de orden de carga deja tres efectos: el estado "Emitida", el
-movimiento en la cuenta corriente del cliente y el descuento de stock. Con
-``#726`` esos tres efectos quedaron en una sola transacción, pero las órdenes
-que ya quedaron a medias (OC-000078 y OC-000081 en producción) necesitan una
-reparación **sin rehacer la operación física**: la mercadería ya salió de la
-planta.
+La vía normal es la aplicación: botón **"Reparar cta. corriente"** en la
+pantalla de órdenes, que abre el diálogo de administración
+(:class:`app.ui.load_order_ledger_repair_dialog.LoadOrderLedgerRepairDialog`).
+Esta herramienta es el complemento de consola, para el puesto donde se atiende
+el problema sin usuario gráfico o para dejar registro de la operación.
 
-Esta herramienta:
-
-1. **Detecta** las órdenes emitidas o cerradas cuyo presupuesto no tiene
-   movimiento en la cuenta corriente, o cuya mercadería no salió del stock.
-2. **Repara** con los mismos servicios que usa la emisión
-   (:class:`AccountLedgerService` y :class:`LoadOrderStockService`), que son
-   idempotentes: repetirlos no duplica nada.
+La lógica vive en :class:`app.services.load_order_ledger_repair_service.
+LoadOrderLedgerRepairService`: la herramienta y la pantalla usan exactamente la
+misma.
 
 Política
 --------
@@ -23,8 +18,8 @@ Política
    se aplica de a uno, igual que ``scripts/repair_monetary_integrity.py``.
 3. **Idempotente.** Una orden ya reparada no se toca, no genera un segundo
    movimiento y no duplica el ``AuditLog``.
-4. **Una sola transacción.** Estado, cuenta corriente, stock y auditoría se
-   escriben juntos: si algo falla, se revierte todo.
+4. **Una sola transacción.** Cuenta corriente, stock y auditoría se escriben
+   juntos: si algo falla, se revierte todo.
 5. **No toca** importes: los movimientos salen del presupuesto ya emitido, que
    es la fuente de verdad del sistema.
 
@@ -48,173 +43,37 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
 from typing import Sequence
+
+from app.services.load_order_ledger_repair_service import (
+    LoadOrderLedgerRepairService,
+    OrderLedgerGap,
+)
 
 EXIT_OK = 0
 EXIT_CONFIG_ERROR = 2
 EXIT_ABORTED = 3
-
-#: Estados de orden que pueden tener movimientos de cuenta corriente vivos.
-REPAIRABLE_STATUSES = ("Emitida", "Cerrada")
 
 
 class RepairAborted(Exception):
     """No se puede reparar: falta un identificador o falla una condición."""
 
 
-@dataclass(frozen=True)
-class BudgetGap:
-    """Un presupuesto de la orden al que le falta su movimiento."""
-
-    budget_id: int
-    budget_number: str
-    client_id: int
-    client_name: str
-    timing: str
-    total_amount: float
-
-
-@dataclass(frozen=True)
-class OrderFinding:
-    """Todo lo que falta registrar de una orden."""
-
-    order_id: int
-    order_number: int
-    status: str
-    date: str
-    budget_gaps: tuple[BudgetGap, ...]
-    missing_stock: bool
-    stock_units: int
-    stock_kg: float
-
-    @property
-    def is_repairable(self) -> bool:
-        return bool(self.budget_gaps) or self.missing_stock
-
-
-# ---------------------------------------------------------------------------
-# Detección
-# ---------------------------------------------------------------------------
-def _clients_of(order) -> list:
-    from app.models.masters import Client
-
-    clients, vistos = [], set()
-    for destino in order.destinations.order_by():
-        cliente_id = destino.client_id
-        if cliente_id in vistos:
-            continue
-        vistos.add(cliente_id)
-        clientes.append(Client.get_by_id(cliente_id))
-    return clientes
-
-
-def _budgets_of(order) -> list:
-    from app.models.budgets import Budget
-
-    return list(
-        Budget.select()
-        .where(
-            (Budget.load_order == order)
-            & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
-        )
-        .order_by(Budget.id)
-    )
-
-
-def _movement_of_budget(budget_id: int):
-    from app.models.accounting import ClientAccountMovement
-
-    return (
-        ClientAccountMovement.select()
-        .where(
-            (ClientAccountMovement.source_ref == f"Budget:{budget_id}")
-            & (ClientAccountMovement.is_reversal == False)  # noqa: E712
-        )
-        .order_by(ClientAccountMovement.id)
-        .first()
-    )
-
-
-def _dispatch_movements(order_id: int) -> list:
-    from app.models.stock import StockMovement
-    from app.services.load_order_stock_service import dispatch_source_prefix
-
-    return list(
-        StockMovement.select().where(
-            StockMovement.source_ref.startswith(f"{dispatch_source_prefix(order_id)}:")
-        )
-    )
-
-
-def find_missing_ledger(order, *, current_user: str = "auditoria") -> OrderFinding:
-    """Detecta qué le falta registrar a una orden. No escribe nada."""
-    from app.services.load_order_stock_service import LoadOrderStockService
-
-    gaps: list[BudgetGap] = []
-    for budget in _budgets_of(order):
-        if _movement_of_budget(budget.id) is not None:
-            continue
-        cliente = budget.client
-        gaps.append(
-            BudgetGap(
-                budget_id=budget.id,
-                budget_number=budget.display_number,
-                client_id=cliente.id,
-                client_name=cliente.name,
-                timing=budget.timing,
-                total_amount=float(budget.total_amount or 0),
-            )
-        )
-
-    plan = LoadOrderStockService(current_user=current_user).plan_dispatch(order)
-    despachos = _dispatch_movements(order.id)
-    unidades = int(sum(float(unidades) for _producto, unidades, _kilos in plan))
-    kilos = float(sum(float(kilos) for _producto, _unidades, kilos in plan))
-
-    return OrderFinding(
-        order_id=order.id,
-        order_number=int(order.order_number),
-        status=order.status,
-        date=str(order.date),
-        budget_gaps=tuple(gaps),
-        missing_stock=bool(plan) and not despachos,
-        stock_units=unidades,
-        stock_kg=kilos,
-    )
-
-
-def find_all(current_user: str = "auditoria") -> list[OrderFinding]:
-    """Todas las ordenes con faltantes. No escribe nada."""
-    from app.models.load_orders import LoadOrder
-
-    findings = []
-    for order in (
-        LoadOrder.select()
-        .where(LoadOrder.status.in_(REPAIRABLE_STATUSES))
-        .order_by(LoadOrder.order_number)
-    ):
-        finding = find_missing_ledger(order, current_user=current_user)
-        if finding.is_repairable:
-            findings.append(finding)
-    return findings
+def _money(value: float) -> str:
+    return f"{value:,.2f}"
 
 
 # ---------------------------------------------------------------------------
 # Informe
 # ---------------------------------------------------------------------------
-def _money(value: float) -> str:
-    return f"{value:,.2f}"
-
-
-def render_finding(finding: OrderFinding) -> str:
+def render_finding(finding: OrderLedgerGap) -> str:
     """Informe legible de una orden. No escribe nada."""
     lines = [
-        f"OC-{finding.order_number:06d} (id {finding.order_id})  estado={finding.status}  fecha={finding.date}",
+        f"{finding.order_reference} (id {finding.order_id})  estado={finding.status}  fecha={finding.date}",
     ]
-    if finding.budget_gaps:
+    if finding.ledger_gaps:
         lines.append("  Cuenta corriente: falta el movimiento de")
-        for gap in finding.budget_gaps:
+        for gap in finding.ledger_gaps:
             lines.append(
                 f"    - {gap.budget_number}  cliente={gap.client_name} (id {gap.client_id})  "
                 f"parte={gap.timing}  total={_money(gap.total_amount)}"
@@ -228,43 +87,6 @@ def render_finding(finding: OrderFinding) -> str:
     else:
         lines.append("  Stock: despacho registrado")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Reparación
-# ---------------------------------------------------------------------------
-def repair_order(order, *, user: str) -> dict:
-    """Repara UNA orden en una sola transacción.
-
-    Usa los mismos servicios que la emisión, que son idempotentes: si el
-    movimiento o el descuento ya estaban, no se duplican.
-    """
-    from app.config.database import database_proxy
-    from app.services.account_ledger_service import AccountLedgerService
-    from app.services.audit_service import AuditService
-    from app.services.load_order_stock_service import LoadOrderStockService
-
-    resultado = {"movimientos": [], "despachos": [], "presupuestos": 0}
-    with database_proxy.atomic():
-        presupuestos = _budgets_of(order)
-        resultado["presupuestos"] = len(presupuestos)
-        movimientos = AccountLedgerService(current_user=user).generate_for_load_order(order)
-        resultado["movimientos"] = [m.id for m in movimientos]
-        despachos = LoadOrderStockService(current_user=user).register_dispatch(order)
-        resultado["despachos"] = [m.id for m in despachos]
-        AuditService().record(
-            user=user,
-            module="Ordenes de carga",
-            action="reparar_cuenta_corriente",
-            record_ref=f"LoadOrder:{order.id}",
-            new_value={
-                "order_number": int(order.order_number),
-                "movement_ids": resultado["movimientos"],
-                "stock_movement_ids": resultado["despachos"],
-            },
-            observation="Reparacion de emision parcial (#726)",
-        )
-    return resultado
 
 
 # ---------------------------------------------------------------------------
@@ -315,11 +137,6 @@ def _resolve_order(reference: str):
         order = LoadOrder.get_or_none(LoadOrder.id == numero)
     if order is None:
         raise RepairAborted(f"No se encontro la orden {valor}.")
-    if order.status not in REPAIRABLE_STATUSES:
-        raise RepairAborted(
-            f"La OC-{order.order_number:06d} esta en estado {order.status}: "
-            f"solo se reparan ordenes {', '.join(REPAIRABLE_STATUSES)}."
-        )
     return order
 
 
@@ -353,25 +170,33 @@ def run(argv: Sequence[str] | None = None) -> int:
 
     for line in target.header_lines():
         print(line)
-    print("WRITE MODE: destructivo y explicito (una sola transaccion)" if args.apply else "READ MODE: no se modifica nada")
+    print(
+        "WRITE MODE: destructivo y explicito (una sola transaccion)"
+        if args.apply
+        else "READ MODE: no se modifica nada"
+    )
 
     from scripts.repair_monetary_integrity import open_writable_database
 
     database = open_writable_database(target)
     try:
+        service = LoadOrderLedgerRepairService(current_user=args.user)
+
         if args.list:
-            findings = find_all(current_user=args.user)
+            findings = service.find_broken_orders()
             if not findings:
                 print("No hay ordenes emitidas sin cuenta corriente ni sin salida de stock.")
                 return EXIT_OK
             for finding in findings:
                 print(render_finding(finding))
             print("")
-            print(f"{len(findings)} orden(es) con faltantes. Para reparar una: --order <numero> --apply")
+            print(
+                f"{len(findings)} orden(es) con faltantes. Para reparar una: --order <numero> --apply"
+            )
             return EXIT_OK
 
         order = _resolve_order(args.order)
-        finding = find_missing_ledger(order, current_user=args.user)
+        finding = service.find_gap(order)
         print(render_finding(finding))
         if not finding.is_repairable:
             print("")
@@ -384,15 +209,15 @@ def run(argv: Sequence[str] | None = None) -> int:
             print("Para aplicar exactamente este plan, vuelva a ejecutar con --apply.")
             return EXIT_OK
 
-        resultado = repair_order(order, user=args.user)
+        result = service.repair(order)
         print("")
         print("APPLIED")
         print(
-            f"  movimientos de cuenta corriente: {resultado['movimientos'] or 'ninguno (ya estaban)'}"
+            f"  movimientos de cuenta corriente: {len(result.movement_ids) or 'ninguno (ya estaban)'}"
         )
-        print(f"  despachos de stock: {resultado['despachos'] or 'ninguno (ya estaba)'}")
+        print(f"  despachos de stock: {len(result.stock_movement_ids) or 'ninguno (ya estaba)'}")
         print("")
-        print(render_finding(find_missing_ledger(order, current_user=args.user)))
+        print(render_finding(service.find_gap(order)))
         return EXIT_OK
     finally:
         try:

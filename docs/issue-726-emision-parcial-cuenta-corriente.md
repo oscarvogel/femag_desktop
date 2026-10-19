@@ -127,18 +127,48 @@ transacción**. Si algo falla, la orden vuelve a "Pendiente", no queda registrad
 ningún libro y el error se muestra como antes. La validación de stock sigue
 haciéndose **antes** de tocar el estado.
 
-### 3. Herramienta de reparación
+### 3. La reparación es una acción de administración, no un script
 
-`scripts/repair_missing_ledger_movements.py`: detecta y repara órdenes emitidas sin
-movimiento en la cuenta corriente o sin salida de stock, **sin rehacer la operación
-física**.
+La vía normal es la aplicación: en la pantalla **Órdenes de carga** aparece el botón
+**"Reparar cta. corriente"**, **sólo para el perfil Administrador**, que abre el
+diálogo `LoadOrderLedgerRepairDialog`:
 
-- `--list`: informa todas las órdenes con faltantes (no escribe).
-- `--order <n>`: plan de una orden concreta.
-- `--order <n> --apply`: repara, en una sola transacción, con los mismos servicios
-  que usa la emisión (idempotentes) y deja rastro en el `AuditLog`.
-- No repara en lote ni por defecto: una orden por ejecución, igual que
-  `scripts/repair_monetary_integrity.py`.
+![Diálogo de reparación de cuenta corriente](screenshots/issue_726/admin_reparar_cuenta_corriente.png)
+
+El diálogo:
+
+1. Lista las órdenes emitidas o cerradas que no tienen movimiento en la cuenta
+   corriente (o salida de stock), con el detalle de qué documento falta y por
+   qué importe.
+2. Al seleccionar una, muestra abajo exactamente lo que se va a registrar
+   (presupuesto, cliente, importe, kilos).
+3. Pide confirmación con ese detalle antes de escribir.
+4. Repara en **una sola transacción** y deja rastro en el `AuditLog`.
+5. Vuelve a listar: la orden reparada desaparece de la lista.
+
+`scripts/repair_missing_ledger_movements.py` queda como complemento de consola
+(DY-RUN por defecto, una orden por ejecución) y usa **exactamente el mismo
+servicio**: `LoadOrderLedgerRepairService`.
+
+### Detección: dos formatos de movimiento conviven en la base
+
+La detección tiene que reconocer los dos formatos de movimiento que hay en la base
+histórica, o marca como rotas órdenes que están bien:
+
+| Formato | `source_ref` | Vínculo al presupuesto | Desde |
+|---|---|---|---|
+| Actual | `Budget:<id>` | sí | emisión con presupuesto |
+| Legacy | `LoadOrder:<id>` | no | órdenes anteriores a #6xx |
+
+Sin reconocer el legacy, la OC-000031 (cerrada, con sus 7 movimientos en regla)
+aparecía como rota. Y el faltante de stock **sólo** se marca si la orden también
+perdió la cuenta corriente: las órdenes anteriores al cambio que descuenta la
+mercadería al emitir (y no al cerrar) no tienen movimientos de stock por orden, y
+marcarlas sería un falso positivo que, al reparar, descontaría dos veces la
+mercadería.
+
+Con las dos correcciones, contra el dump de producción la detección da
+**exactamente dos órdenes**: la OC-000078 y la OC-000081.
 
 ## Decisiones tomadas
 
@@ -151,7 +181,10 @@ física**.
 | Error de presupuesto desactualizado | El texto se ajustó: ya no dice "anule la orden" cuando la emisión se revierte sola |
 | Importes de la reparación | Salen del **presupuesto persistido**, igual que en la emisión; no se recalcula nada a mano |
 | Alcance de la reparación | Sólo órdenes "Emitida" y "Cerrada"; las anuladas no se tocan |
-| Herramienta | `scripts/repair_missing_ledger_movements.py`, DRY-RUN por defecto y una orden por ejecución |
+| Herramienta | `LoadOrderLedgerRepairService` (servicio), con pantalla de admin y script de consola encima |
+| Quién puede reparar | **Sólo el perfil Administrador**: botón y diálogo bloqueados por permiso |
+| Detección de movimientos | Reconoce el formato actual (`Budget:<id>`) y el legacy (`LoadOrder:<id>`) |
+| Faltante de stock | Se marca **sólo** si la orden también perdió la cuenta corriente |
 
 ## Validaciones ejecutadas
 
@@ -162,7 +195,11 @@ python -m app.main --smoke       # "FEMAG smoke OK"
 python -m pytest                 # 1744 passed, 3 skipped
 ```
 
-Tests nuevos: `tests/test_issue_726_partial_issue.py` (10 tests).
+Tests nuevos:
+
+- `tests/test_issue_726_partial_issue.py` (10 tests): el mecanismo, la regresión, la
+  atomicidad, la comparación y la reparación.
+- `tests/test_issue_726_admin_repair_ui.py` (3 tests): la pantalla de administración.
 
 | Test | Qué cubre |
 |---|---|
@@ -175,6 +212,9 @@ Tests nuevos: `tests/test_issue_726_partial_issue.py` (10 tests).
 | `test_la_reparacion_detecta_la_orden_sin_cuenta_corriente` | Detección |
 | `test_la_reparacion_genera_el_movimiento_y_es_idempotente` | Reparación e idempotencia |
 | `test_la_reparacion_no_toca_una_orden_sana` | Una orden sana no se toca |
+| `test_el_dialogo_de_admin_lista_las_ordenes_sin_cuenta_corriente` | El diálogo lista las órdenes rotas |
+| `test_un_usuario_que_no_es_admin_no_puede_reparar` | Sin perfil Administrador no se puede |
+| `test_el_boton_de_reparar_solo_lo_ve_el_administrador` | El botón sólo existe para el admin |
 
 **Los tres tests clave fallan sin el fix** (verificado con `git stash` sobre los dos
 archivos de servicio): `test_emitir_tras_editar_deja_el_movimiento_en_cuenta_corriente`,
@@ -231,13 +271,36 @@ despachos de stock: 1              (id=54, LoadOrder:87:Dispatch:1, 1.500,000 kg
 **5. Control global:** después de la reparación, **ninguna** orden emitida o cerrada
 queda sin movimiento.
 
+**6. La detección da exactamente dos órdenes** sobre el dump de producción (86
+órdenes, 197 presupuestos, 836 movimientos):
+
+```
+roto: OC-000078 | 4 documento(s) sin registrar · stock sin descontar (1140 un / 28.500 kg)
+roto: OC-000081 | 2 documento(s) sin registrar · stock sin descontar (1220 un / 27.500 kg)
+```
+
+Esto no fue gratis: la primera versión de la detección marcaba **61 órdenes** rotas.
+Eran falsos positivos por dos motivos que sólo aparecen contra la base real:
+
+1. Las órdenes legacy (1 a 62) tienen sus movimientos con `source_ref =
+   'LoadOrder:<id>'` y sin vínculo al presupuesto. La detección ahora reconoce
+   ese formato.
+2. Las órdenes anteriores al cambio que descuenta la mercadería al emitir no
+   tienen movimientos de stock por orden. Marcar el stock ahí era un falso
+   positivo que, al reparar, habría descontado dos veces la mercadería.
+
 ## Alcance incluido
 
 - Comparación de presupuesto/mercadería por contenido.
 - Emisión atómica (estado + cuenta corriente + stock).
 - Texto del error de presupuesto desactualizado, ajustado a la nueva realidad.
-- Herramienta de reparación de órdenes emitidas a medias.
-- Tests de regresión sobre el escenario exacto de producción.
+- **`LoadOrderLedgerRepairService`**: detección y reparación de órdenes emitidas a medias.
+- **Pantalla de administración**: botón "Reparar cta. corriente" (sólo Administrador) y
+  diálogo con el listado de órdenes rotas, el detalle de lo que se registra y la
+  confirmación previa.
+- Script de consola como complemento, sobre el mismo servicio.
+- Tests de regresión sobre el escenario exacto de producción y tests de la opción de
+  administrador.
 
 ## Fuera de alcance
 
@@ -263,19 +326,16 @@ queda sin movimiento.
 ## Pendientes (operativos)
 
 1. **Merge** de este PR.
-2. **Producción**: hacer copia de la base y correr la reparación:
-
-   ```bash
-   py -m scripts.repair_missing_ledger_movements --list
-   py -m scripts.repair_missing_ledger_movements --order 78 --apply
-   py -m scripts.repair_missing_ledger_movements --order 81 --apply
-   ```
-
+2. **Producción**: abrir la pantalla de órdenes con un usuario Administrador y usar
+   el botón **"Reparar cta. corriente"**. El diálogo lista las dos órdenes rotas y
+   deja registrarlas con confirmación. (Si se prefiere por consola:
+   `py -m scripts.repair_missing_ledger_movements --order 78 --apply` y
+   `--order 81 --apply`.)
 3. **Control posterior** en la pantalla de cuenta corriente: los clientes
-   MOLINOS RIO DE LA PLATA (26.130.000,00), DISTRIBUIDORA DE MAT. PRIMAS
-   (4.800.000,00), HUERTA MAMA CORA (7.132.860,00), GARCIA ABEL CARLOS
-   (2.280.000,00), OTERO JUAN ANTONIO (37.592.100,00) y COMERCIAL EXPRESS
-   (4.755.240,00) tienen que tener sus documentos en la cuenta corriente.
+   MOLINOS RIO DE LA PLATA (26.130.000), DISTRIBUIDORA DE MAT. PRIMAS
+   (4.800.000), HUERTA MAMA CORA (7.132.860), GARCIA ABEL CARLOS
+   (2.280.000), OTERO JUAN ANTONIO (37.592.100) y COMERCIAL EXPRESS
+   (4.755.240) tienen que tener sus documentos en la cuenta corriente.
 4. **Stock**: verificar que la mercadería de la OC-000078 (28.500 kg) y de la
    OC-000081 (27.500 kg) salió del stock.
 5. **Comunicación**: avisar a los cuatro clientes de la OC-000078 y a los dos de la

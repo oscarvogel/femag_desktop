@@ -323,52 +323,81 @@ def _orden_emitida_sin_cuenta_corriente(data):
 
 
 def test_la_reparacion_detecta_la_orden_sin_cuenta_corriente(db):
-    from scripts.repair_missing_ledger_movements import find_missing_ledger
-
-    data = _maestros()
-    order = _orden_emitida_sin_cuenta_corriente(data)
-
-    finding = find_missing_ledger(order)
-
-    assert finding.is_repairable
-    assert len(finding.budget_gaps) == 1
-    assert finding.budget_gaps[0].client_id == data["client"].id
-    assert finding.missing_stock is True
-
-
-def test_la_reparacion_genera_el_movimiento_y_es_idempotente(db):
-    from scripts.repair_missing_ledger_movements import (
-        find_missing_ledger,
-        repair_order,
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
     )
 
     data = _maestros()
     order = _orden_emitida_sin_cuenta_corriente(data)
 
-    resultado = repair_order(order, user="admin")
+    finding = LoadOrderLedgerRepairService(current_user="admin").find_gap(order)
 
-    assert len(resultado["movimientos"]) == 1
-    assert len(resultado["despachos"]) == 1
+    assert finding.is_repairable
+    assert len(finding.ledger_gaps) == 1
+    assert finding.ledger_gaps[0].client_id == data["client"].id
+    assert finding.missing_stock is True
+
+
+def test_la_reparacion_genera_el_movimiento_y_es_idempotente(db):
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
+    )
+
+    data = _maestros()
+    order = _orden_emitida_sin_cuenta_corriente(data)
+    service = LoadOrderLedgerRepairService(current_user="admin")
+
+    resultado = service.repair(order)
+
+    assert len(resultado.movement_ids) == 1
+    assert len(resultado.stock_movement_ids) == 1
     movements = _movimientos_de(order)
     assert len(movements) == 1
     assert movements[0].total_amount == approx(CANTIDAD * PRECIO * 1.21, abs=0.01)
 
     # Repetir la reparacion no duplica nada.
-    again = repair_order(order, user="admin")
+    service.repair(order)
     assert len(_movimientos_de(order)) == 1
     assert len(_despachos_de(order)) == 1
-    assert find_missing_ledger(order).is_repairable is False
+    assert service.find_gap(order).is_repairable is False
 
 
 def test_la_reparacion_no_toca_una_orden_sana(db):
-    from scripts.repair_missing_ledger_movements import find_missing_ledger
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
+    )
 
     data = _maestros()
     order = _asignar_pallets(_crear_orden(data), data)
     LoadOrderOperationService(current_user="admin").issue(order)
 
-    finding = find_missing_ledger(LoadOrder.get_by_id(order.id))
+    finding = LoadOrderLedgerRepairService(current_user="admin").find_gap(
+        LoadOrder.get_by_id(order.id)
+    )
 
     assert finding.is_repairable is False
-    assert finding.budget_gaps == ()
+    assert finding.ledger_gaps == ()
     assert finding.missing_stock is False
+
+
+def test_el_script_de_consola_lista_las_ordenes_rotas(db, capsys):
+    """El script de consola y la pantalla usan la misma lógica."""
+    from scripts.repair_missing_ledger_movements import run
+
+    data = _maestros()
+    order = _orden_emitida_sin_cuenta_corriente(data)
+
+    assert order.order_number > 0
+    # El script abre su propia conexión: en el test se valida el render del
+    # informe con el servicio, que es lo que el script imprime.
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
+    )
+    from scripts.repair_missing_ledger_movements import render_finding
+
+    finding = LoadOrderLedgerRepairService(current_user="admin").find_gap(order)
+    informe = render_finding(finding)
+
+    assert str(order.order_number) in informe
+    assert "falta el movimiento de" in informe
+    assert "Stock: falta el despacho" in informe
