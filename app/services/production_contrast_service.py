@@ -59,6 +59,7 @@ class ProductionContrast:
     border_kg: Decimal
     border_days: int
     # Desglose del material cuyo rinde fue estimado y no medido (#722).
+    measured_kg: Decimal
     estimated_tickets: int
     estimated_kg: Decimal
     estimated_starch_kg: Decimal
@@ -259,6 +260,7 @@ class ProductionContrastService:
             pending_parts=pending_parts,
             border_kg=border_kg.quantize(CENT),
             border_days=BORDER_DAYS,
+            measured_kg=measured_kg.quantize(CENT),
             estimated_tickets=estimated_tickets,
             estimated_kg=estimated_kg.quantize(CENT),
             estimated_starch_kg=estimated_starch_kg.quantize(CENT),

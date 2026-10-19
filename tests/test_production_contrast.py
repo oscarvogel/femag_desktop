@@ -102,6 +102,24 @@ def test_el_contraste_separa_lo_medido_de_lo_estimado(db):
     assert c.theoretical_starch_kg == Decimal("2109.70")
     assert c.theoretical_starch_kg_measured == Decimal("100.00")
     assert c.estimated_share_pct == Decimal("90.0")
+    assert c.measured_kg == Decimal("1000.00")
+
+
+def test_sin_rindes_medidos_no_hay_rinde_ponderado(db):
+    """Si todo el material es estimado, el rendimiento ponderado no existe."""
+    from app.models.production import YIELD_SOURCE_ESTIMATED
+
+    estimado = _receipt(DAY, "9000", "0", "2009.70", comp="2")
+    estimado.yield_source = YIELD_SOURCE_ESTIMATED
+    estimado.estimated_yield_pct = Decimal("22.33")
+    estimado.save()
+
+    c = ProductionContrastService.for_day(DAY)
+
+    assert c.received_kg == Decimal("9000")
+    assert c.measured_kg == Decimal("0.00")
+    assert c.estimated_tickets == 1
+    assert c.theoretical_yield_pct == Decimal("0.00")
 
 
 def test_sin_recepciones_no_hay_teoria_ni_rinde_real(db):

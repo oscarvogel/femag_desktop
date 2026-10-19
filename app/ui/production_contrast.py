@@ -186,7 +186,13 @@ class ProductionContrastPage(QWidget):
 
         valor, _ = self.kpis["teorica"]
         valor.setText(f"{contraste.theoretical_starch_kg:,.2f} kg")
-        if contraste.estimated_tickets:
+        if contraste.measured_kg <= 0 and contraste.received_kg > 0:
+            # Todo el material del periodo es de rinde estimado: no hay un
+            # rendimiento ponderado que mostrar.
+            self.kpis["teorica"][1].setText(
+                "rinde teórico ponderado s/d (ningún ticket con rinde medido)"
+            )
+        elif contraste.estimated_tickets:
             self.kpis["teorica"][1].setText(
                 f"rinde teórico ponderado {contraste.theoretical_yield_pct:.2f} % (solo rindes medidos)"
             )
