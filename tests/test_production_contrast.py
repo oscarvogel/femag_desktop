@@ -76,6 +76,34 @@ def test_el_rinde_teorico_se_pondera_por_kilos(db):
     assert c.theoretical_starch_kg == Decimal("2800.00")
 
 
+def test_el_contraste_separa_lo_medido_de_lo_estimado(db):
+    """Un ticket sin rinde no puede hundir el rendimiento del mes (#722).
+
+    El ponderado sale solo de los tickets con rinde medido: si entrara el
+    estimado, el PROMEDIO de origen (0 %) arrastraria el promedio del mes.
+    """
+    from app.models.production import YIELD_SOURCE_ESTIMATED
+
+    _receipt(DAY, "1000", "10.00", "100.00", comp="1")
+    estimado = _receipt(DAY, "9000", "0", "2009.70", comp="2")
+    estimado.yield_source = YIELD_SOURCE_ESTIMATED
+    estimado.estimated_yield_pct = Decimal("22.33")
+    estimado.save()
+
+    c = ProductionContrastService.for_day(DAY)
+
+    assert c.received_tickets == 2
+    assert c.received_kg == Decimal("10000")
+    # 10 %, no 1 %: el ticket sin rinde no pesa en el promedio.
+    assert c.theoretical_yield_pct == Decimal("10.00")
+    assert c.estimated_tickets == 1
+    assert c.estimated_kg == Decimal("9000.00")
+    assert c.estimated_starch_kg == Decimal("2009.70")
+    assert c.theoretical_starch_kg == Decimal("2109.70")
+    assert c.theoretical_starch_kg_measured == Decimal("100.00")
+    assert c.estimated_share_pct == Decimal("90.0")
+
+
 def test_sin_recepciones_no_hay_teoria_ni_rinde_real(db):
     product = _product()
     _confirmed_part(product, 10)

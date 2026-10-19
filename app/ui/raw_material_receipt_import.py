@@ -5,10 +5,13 @@ from decimal import Decimal
 
 from PyQt5.QtCore import QDate, QObject, QRunnable, QThreadPool, pyqtSignal
 from PyQt5.QtWidgets import (
-    QDateEdit, QHBoxLayout, QHeaderView, QLabel, QProgressBar, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QDateEdit, QDoubleSpinBox, QHBoxLayout, QHeaderView, QLabel, QProgressBar,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from app.services.estimated_yield_service import (
+    DEFAULT_ESTIMATED_YIELD_PCT, EstimatedYieldService,
+)
 from app.services.raw_material_receipt_import_service import (
     RawMaterialReceiptImportService, ReceiptPreview, ReceiptTotals,
 )
@@ -104,6 +107,7 @@ class RawMaterialReceiptImportPage(QWidget):
         "Producto",
         "Kg liquidables",
         "Rinde promedio",
+        "Origen del rinde",
         "Fécula teórica",
         "Fécula legacy",
         "Estado",
@@ -163,6 +167,34 @@ class RawMaterialReceiptImportPage(QWidget):
         controls.addStretch(1)
         layout.addLayout(controls)
 
+        # El rinde estimado es un parametro de la planta (#722): las cargas que
+        # llegan sin rinde medido se importan igual, con este valor, y quedan
+        # marcadas como estimadas.
+        estimados = QHBoxLayout()
+        etiqueta_rinde = QLabel("Rinde estimado para cargas sin rinde")
+        self.estimated_yield = QDoubleSpinBox()
+        self.estimated_yield.setObjectName("rawMaterialReceiptEstimatedYield")
+        self.estimated_yield.setRange(0.01, 100.0)
+        self.estimated_yield.setDecimals(2)
+        self.estimated_yield.setSingleStep(0.25)
+        self.estimated_yield.setSuffix(" %")
+        self.estimated_yield.setValue(float(self._stored_estimated_yield()))
+        self.estimated_yield.setToolTip(
+            "Se aplica a las cargas que llegan sin rinde medido. Queda registrado "
+            "en cada ticket, asi que el rendimiento del mes se puede mostrar "
+            "separando lo que la planta midio de lo que se estimo."
+        )
+        estimados.addWidget(etiqueta_rinde)
+        estimados.addWidget(self.estimated_yield)
+        ayuda_rinde = QLabel(
+            "Las cargas sin rinde se importan igual y quedan marcadas como estimadas."
+        )
+        ayuda_rinde.setObjectName("subheading")
+        ayuda_rinde.setWordWrap(True)
+        estimados.addWidget(ayuda_rinde)
+        estimados.addStretch(1)
+        layout.addLayout(estimados)
+
         self.progress = QProgressBar()
         self.progress.setObjectName("rawMaterialReceiptProgress")
         self.progress.setRange(0, 100)
@@ -199,6 +231,30 @@ class RawMaterialReceiptImportPage(QWidget):
         return QDate(today.year(), today.month(), 1)
 
     @staticmethod
+    def _stored_estimated_yield() -> Decimal:
+        """Rinde estimado guardado, o el valor por defecto si no se puede leer.
+
+        La pantalla tiene que abrir aunque el parametro no este disponible:
+        que falte la tabla de parametros no puede dejar al operador sin poder
+        consultar los tickets.
+        """
+        try:
+            return EstimatedYieldService.estimated_yield_pct()
+        except Exception:  # noqa: BLE001
+            return DEFAULT_ESTIMATED_YIELD_PCT
+
+    def _persist_estimated_yield(self) -> None:
+        """Guarda el rinde estimado antes de consultar.
+
+        Se persiste al consultar y no al cambiar el campo, para que el valor
+        que se aplica sea siempre el que el operador tiene a la vista.
+        """
+        try:
+            EstimatedYieldService.set_estimated_yield_pct(self.estimated_yield.value())
+        except ValueError as exc:
+            self.feedback.show_error(str(exc))
+
+    @staticmethod
     def _to_date(qd: QDate) -> date:
         return date(qd.year(), qd.month(), qd.day())
 
@@ -225,7 +281,8 @@ class RawMaterialReceiptImportPage(QWidget):
                 row.supplier_name or row.supplier_code,
                 row.product_name or row.product_code,
                 _kg(row.payable_kg),
-                f"{row.yield_average:,.2f} %",
+                f"{row.effective_yield_pct:,.2f} %",
+                "Estimado" if row.is_estimated_yield else "Medido",
                 _kg(row.theoretical_starch_kg),
                 _kg(row.legacy_starch_kg),
                 STATUS_LABELS.get(preview.status, preview.status),
@@ -234,12 +291,23 @@ class RawMaterialReceiptImportPage(QWidget):
                 self.table.setItem(index, column, QTableWidgetItem(str(value)))
 
     def _render_totals(self, totals: ReceiptTotals, pending: int) -> None:
-        self.summary_label.setText(
+        if totals.measured_tickets:
+            rinde = f"rinde ponderado {totals.weighted_yield:,.2f} %"
+        else:
+            rinde = "rinde ponderado s/d (ningún ticket con rinde medido)"
+        texto = (
             f"{totals.tickets} ticket(s) · {_kg(totals.payable_kg)} kg liquidables · "
-            f"rinde ponderado {totals.weighted_yield:,.2f} % · "
+            f"{rinde} · "
             f"{_kg(totals.theoretical_starch_kg)} kg de fécula teórica · "
             f"{pending} ticket(s) sin importar"
         )
+        if totals.estimated_tickets:
+            texto += (
+                f" · {totals.estimated_tickets} ticket(s) sin rinde medido "
+                f"({_kg(totals.estimated_payable_kg)} kg con rinde estimado "
+                f"de {totals.estimated_yield_pct:,.2f} %)"
+            )
+        self.summary_label.setText(texto)
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = busy
@@ -336,6 +404,7 @@ class RawMaterialReceiptImportPage(QWidget):
             return
         self._last_start = start
         self._last_end = end
+        self._persist_estimated_yield()
         self._clear_result(f"Consultando tickets {_range_text(start, end)}…")
         self._set_busy(True, "Consultando femagfab…")
         self.feedback.show_info(f"Consultando tickets {_range_text(start, end)}…")

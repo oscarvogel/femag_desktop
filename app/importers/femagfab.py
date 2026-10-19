@@ -36,10 +36,38 @@ class LegacyReceipt:
     yield_3: Decimal
     yield_average: Decimal
     legacy_starch_kg: Decimal
+    # Rinde que se aplica de verdad. None significa "el del origen": los
+    # tickets con PROMEDIO > 0 usan su propio rinde medido (#722).
+    applied_yield_pct: Decimal | None = None
+
+    @property
+    def is_estimated_yield(self) -> bool:
+        """True cuando el ticket llego sin rinde medido."""
+        return self.yield_average <= 0
+
+    @property
+    def effective_yield_pct(self) -> Decimal:
+        """El rinde que se usa para el calculo: el medido o el estimado."""
+        if self.applied_yield_pct is not None:
+            return self.applied_yield_pct
+        return self.yield_average
+
+    @property
+    def source_theoretical_starch_kg(self) -> Decimal:
+        """Fecula teorica segun el PROMEDIO de ORIGEN.
+
+        Es la que va en el hash: el hash tiene que cubrir el contenido del
+        legacy y nada mas. Si dependiera del rinde estimado, cambiar el
+        parametro despues invalidaria todas las importaciones ya hechas.
+        """
+        return (self.payable_kg * self.yield_average / Decimal("100")).quantize(
+            TWOPLACES, rounding=ROUND_HALF_UP
+        )
 
     @property
     def theoretical_starch_kg(self) -> Decimal:
-        return (self.payable_kg * self.yield_average / Decimal("100")).quantize(
+        """Fecula teorica con el rinde que se aplica (medido o estimado)."""
+        return (self.payable_kg * self.effective_yield_pct / Decimal("100")).quantize(
             TWOPLACES, rounding=ROUND_HALF_UP
         )
 
@@ -62,7 +90,7 @@ class LegacyReceipt:
             "yield_3": str(self.yield_3),
             "yield_average": str(self.yield_average),
             "legacy_starch_kg": str(self.legacy_starch_kg),
-            "theoretical_starch_kg": str(self.theoretical_starch_kg),
+            "theoretical_starch_kg": str(self.source_theoretical_starch_kg),
         }
 
     @property
@@ -112,6 +140,10 @@ class FemagFabSource:
             raise ValueError("La fecha desde no puede ser posterior a la fecha hasta.")
         start = datetime.combine(start_day, time.min)
         end = datetime.combine(end_day, time.min) + timedelta(days=1)
+        # Los tickets sin rinde medido tambien entran (#722): antes el filtro
+        # `PROMEDIO > 0` los dejaba afuera y se perdian en silencio, sin dejar
+        # rastro de cuantas cargas eran. El rinde que se les aplica despues es
+        # un parametro de la planta, y el ticket queda marcado como estimado.
         sql = """
             SELECT m.COMP comp, m.FECHA received_at, m.PROVEEDOR supplier_code,
                    COALESCE(pr.NOMBRE, '') supplier_name, m.PRODUCTO product_code,
@@ -124,7 +156,7 @@ class FemagFabSource:
               LEFT JOIN proveedo pr ON pr.CODIGO = m.PROVEEDOR
               LEFT JOIN productos p ON p.CODIGO = m.PRODUCTO
              WHERE m.FECHA >= %s AND m.FECHA < %s
-               AND m.TARA > 0 AND m.TOTALK > 0 AND m.PROMEDIO > 0
+               AND m.TARA > 0 AND m.TOTALK > 0
                AND COALESCE(m.PRODUCTO, '') <> ''
              ORDER BY m.FECHA, m.COMP
         """
