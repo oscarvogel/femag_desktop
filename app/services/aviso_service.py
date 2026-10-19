@@ -1,8 +1,18 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 from app.models.notifications import AvisoLectura
 from app.models.security import User
+
+logger = logging.getLogger(__name__)
+
+#: Avisos que no se apagan marcando "leído".
+#:
+#: Son los que avisan de plata que no está registrada: el problema sigue
+#: existiendo hasta que se repara, así que silenciarlo con el botón "Marcar
+#: todo leído" dejaría al sistema caído sin avisar otra vez (#726).
+PERSISTENT_TYPES = frozenset({"orden_sin_cuenta_corriente"})
 
 
 @dataclass(frozen=True)
@@ -21,6 +31,10 @@ class AvisoService:
         if user is None or not user.active:
             return []
         avisos: list[AvisoView] = []
+        if self._can_see(user, ["Administración", "Administrador"]):
+            # La alarma de plata va PRIMERA: es lo que no se puede dejar de
+            # ver, y el listado de avisos pendientes ya tiene ruido (#726).
+            avisos += self._orden_sin_cuenta_corriente()
         if self._can_see(user, ["Secretaría", "Administración", "Administrador"]):
             avisos += self._orden_sin_cierre()
             avisos += self._deuda_vencida()
@@ -55,6 +69,12 @@ class AvisoService:
     def _filter_leidos(self, user: User, avisos: list[AvisoView]) -> list[AvisoView]:
         filtered = []
         for aviso in avisos:
+            if aviso.tipo in PERSISTENT_TYPES:
+                # Estos avisos no se apagan marcando "leído": se apagan cuando
+                # la orden queda reparada. Si se apagaran, el sistema volvería
+                # a caer sin avisar nada (#726).
+                filtered.append(aviso)
+                continue
             rec = AvisoLectura.get_or_none(
                 (AvisoLectura.user == user)
                 & (AvisoLectura.tipo == aviso.tipo)
@@ -123,6 +143,46 @@ class AvisoService:
                         created_at=datetime.utcnow(),
                     )
                 )
+        return out
+
+    def _orden_sin_cuenta_corriente(self) -> list[AvisoView]:
+        """Órdenes emitidas sin movimiento en la cuenta corriente del cliente.
+
+        Es la alarma del incidente #726: una orden emitida a medias deja
+        mercadería afuera y **plata sin registrar**. El aviso se arma con el
+        monto que falta, porque eso es lo que la empresa está perdiendo.
+
+        Si la detección falla, no se inventa ninguna alarma: se registra el
+        error y se sigue, para no dejar al administrador con un aviso falso
+        que lo haga desconfiar del sistema.
+        """
+        from app.services.load_order_ledger_repair_service import (
+            LoadOrderLedgerRepairService,
+        )
+
+        out: list[AvisoView] = []
+        try:
+            service = LoadOrderLedgerRepairService(current_user="aviso_sistema")
+            findings = service.find_orders_missing_ledger()
+        except Exception:
+            logger.exception("No se pudo detectar órdenes sin cuenta corriente")
+            return []
+        for finding in findings:
+            documentos = len(finding.ledger_gaps)
+            out.append(
+                AvisoView(
+                    titulo=f"{finding.order_reference} sin cuenta corriente",
+                    descripcion=(
+                        f"{documentos} documento(s) · "
+                        f"${finding.total_amount:,.2f} sin registrar"
+                    ),
+                    tipo="orden_sin_cuenta_corriente",
+                    prioridad="alta",
+                    route_key="load_orders",
+                    referencia_id=finding.order_id,
+                    created_at=datetime.utcnow(),
+                )
+            )
         return out
 
     def _producto_revision(self) -> list[AvisoView]:

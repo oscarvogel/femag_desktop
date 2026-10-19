@@ -150,7 +150,37 @@ El diálogo:
 (DY-RUN por defecto, una orden por ejecución) y usa **exactamente el mismo
 servicio**: `LoadOrderLedgerRepairService`.
 
-### Detección: dos formatos de movimiento conviven en la base
+### 4. La alarma permanente: el sistema avisa, no espera que alguien pregunte
+
+El incidente no fue sólo que dos órdenes quedaran a medias: fue que **nadie se enteró**.
+Por eso el arreglo tiene una tercera capa, además de la comparación por contenido y la
+emisión atómica: **una alarma visible**.
+
+`app/services/aviso_service.py`: el tipo de aviso `orden_sin_cuenta_corriente`, de
+prioridad **alta**, visible para **Administración** y **Administrador**, y que va **primero**
+en el listado (el listado de avisos pendientes ya tiene ruido, y esto no puede quedar
+enterrado).
+
+El aviso se arma con el **dinero que falta**, que es lo que duele:
+
+```
+[alta] OC-000078 sin cuenta corriente: 4 documento(s) · $40,342,860.00 sin registrar
+[alta] OC-000081 sin cuenta corriente: 2 documento(s) · $42,347,340.00 sin registrar
+```
+
+Dos reglas que hacen que la alarma sea una alarma y no un aviso más:
+
+1. **No se puede silenciar.** El botón "Marcar todo leído" no la apaga mientras la orden
+   siga rota: se apaga cuando la orden queda reparada. Si se pudiera apagar, el sistema
+   volvería a caer sin avisar nada (#726).
+2. **No inventa.** Si la detección falla, no se muestra ninguna alarma: se registra el
+   error en el log. Una alarma falsa hace desconfiar del sistema, que es peor que no
+   tenerla.
+
+La detección que usa la alarma (`LoadOrderLedgerRepairService.find_orders_missing_ledger`)
+es la misma que usa el botón y el script de consola: una sola lógica.
+
+### 5. Detección: dos formatos de movimiento conviven en la base
 
 La detección tiene que reconocer los dos formatos de movimiento que hay en la base
 histórica, o marca como rotas órdenes que están bien:
@@ -195,6 +225,9 @@ OC-000081).
 
 ### Cómo me entero de esto en adelante
 
+0. **Sin hacer nada**: la barra superior muestra **"Avisos (2)"** y el aviso dice qué
+   orden y **cuánta plata no está registrada**. La alarma no se puede apagar con
+   "Marcar todo leído" mientras la orden siga rota.
 1. **En la pantalla**: el botón "Reparar cta. corriente" de la pantalla de órdenes
    lleva el número de órdenes afectadas: **"Reparar cta. corriente (2)"**. Es la
    señal, sin abrir nada.
@@ -207,7 +240,7 @@ OC-000081).
    ```
 
 4. **Prevención**: desde #726 la emisión es atómica, así que una orden no puede
-   volver a quedar emitida sin registrar. La detección de los puntos 1 a 3 es la
+   volver a quedar emitida sin registrar. La detección de los puntos 0 a 3 es la
    red de seguridad para lo anterior al arreglo (y para lo que se haya hecho por
    fuera de la aplicación).
 
@@ -226,6 +259,9 @@ OC-000081).
 | Quién puede reparar | **Sólo el perfil Administrador**: botón y diálogo bloqueados por permiso |
 | Detección de movimientos | Reconoce el formato actual (`Budget:<id>`) y el legacy (`LoadOrder:<id>`) |
 | Faltante de stock | Se marca **sólo** si la orden también perdió la cuenta corriente |
+| Alarma | Aviso de prioridad **alta** en la barra superior, **primero** en el listado, con el monto sin registrar |
+| Silenciar la alarma | **No se puede** con "Marcar todo leído": se apaga recién cuando la orden queda reparada |
+| Detección que falla | **No** se muestra alarma: se registra el error (una alarma falsa hace desconfiar) |
 
 ## Validaciones ejecutadas
 
@@ -240,7 +276,8 @@ Tests nuevos:
 
 - `tests/test_issue_726_partial_issue.py` (10 tests): el mecanismo, la regresión, la
   atomicidad, la comparación y la reparación.
-- `tests/test_issue_726_admin_repair_ui.py` (3 tests): la pantalla de administración.
+- `tests/test_issue_726_admin_repair_ui.py` (4 tests): la pantalla de administración.
+- `tests/test_issue_726_alarma_aviso.py` (6 tests): la alarma permanente.
 
 | Test | Qué cubre |
 |---|---|
@@ -256,6 +293,12 @@ Tests nuevos:
 | `test_el_dialogo_de_admin_lista_las_ordenes_sin_cuenta_corriente` | El diálogo lista las órdenes rotas |
 | `test_un_usuario_que_no_es_admin_no_puede_reparar` | Sin perfil Administrador no se puede |
 | `test_el_boton_de_reparar_solo_lo_ve_el_administrador` | El botón sólo existe para el admin |
+| `test_el_admin_ve_el_aviso_con_la_plata_que_falta` | La alarma dice el monto que no está registrado |
+| `test_la_secretaria_no_ve_la_alarma_de_plata` | Es una alarma de administración |
+| `test_la_alarma_no_se_apaga_marcandola_leida` | "Marcar todo leído" no silencia la alarma |
+| `test_la_alarma_desaparece_cuando_la_orden_queda_reparada` | Se apaga al reparar, no antes |
+| `test_el_badge_de_la_barra_superior_muestra_la_alarma` | La señal está en la barra superior |
+| `test_el_badge_no_muestra_alarma_si_no_hay_ordenes_rotas` | Sin roturas no hay alarma inventada |
 
 **Los tres tests clave fallan sin el fix** (verificado con `git stash` sobre los dos
 archivos de servicio): `test_emitir_tras_editar_deja_el_movimiento_en_cuenta_corriente`,
@@ -330,6 +373,30 @@ Eran falsos positivos por dos motivos que sólo aparecen contra la base real:
    tienen movimientos de stock por orden. Marcar el stock ahí era un falso
    positivo que, al reparar, habría descontado dos veces la mercadería.
 
+**7. La alarma contra la base real** (misma conexión, sólo lectura):
+
+```
+count_broken_orders: 2
+  OC-000078  2026-10-16  Emitida  docs=4  monto=40,342,860.00
+  OC-000081  2026-10-19  Emitida  docs=2  monto=42,347,340.00
+  TOTAL SIN REGISTRAR: 82,690,200.00
+
+--- AVISOS DE LA BARRA SUPERIOR ---
+  [alta] OC-000078 sin cuenta corriente: 4 documento(s) · $40,342,860.00 sin registrar
+  [alta] OC-000081 sin cuenta corriente: 2 documento(s) · $42,347,340.00 sin registrar
+```
+
+Y los saldos que ve la empresa **antes** de reparar (misma base):
+
+| Cliente | Saldo actual |
+|---|---|
+| MOLINOS RIO DE LA PLATA S.A. | 0,00 |
+| DISTRIBUIDORA DE MAT. PRIMAS S.A | 0,00 |
+| HUERTA MAMA CORA S.R.L | 0,00 |
+| GARCIA ABEL CARLOS | 0,00 |
+| OTERO JUAN ANTONIO | 53.217.965,81 |
+| COMERCIAL EXPRESS S.R.L. | 0,00 |
+
 ## Alcance incluido
 
 - Comparación de presupuesto/mercadería por contenido.
@@ -339,6 +406,9 @@ Eran falsos positivos por dos motivos que sólo aparecen contra la base real:
 - **Pantalla de administración**: botón "Reparar cta. corriente" (sólo Administrador) y
   diálogo con el listado de órdenes rotas, el detalle de lo que se registra y la
   confirmación previa.
+- **Alarma permanente**: aviso de prioridad alta en la barra superior y en el Centro de
+  Avisos, con el monto sin registrar, que no se puede silenciar mientras la orden siga
+  rota.
 - Script de consola como complemento, sobre el mismo servicio.
 - Tests de regresión sobre el escenario exacto de producción y tests de la opción de
   administrador.
@@ -366,18 +436,25 @@ Eran falsos positivos por dos motivos que sólo aparecen contra la base real:
 
 ## Pendientes (operativos)
 
-1. **Merge** de este PR.
-2. **Producción**: abrir la pantalla de órdenes con un usuario Administrador y usar
-   el botón **"Reparar cta. corriente"**. El diálogo lista las dos órdenes rotas y
-   deja registrarlas con confirmación. (Si se prefiere por consola:
-   `py -m scripts.repair_missing_ledger_movements --order 78 --apply` y
-   `--order 81 --apply`.)
-3. **Control posterior** en la pantalla de cuenta corriente: los clientes
+1. **Merge** de este PR y publicación del **candidate** en `oscarvogel/vogel-releases`
+   (`femag-candidate` + `apps/femag/candidate.json`), que es el canal por el que se
+   instala en la máquina del cliente.
+2. **En la máquina del cliente**: instalar el candidate nuevo. Al entrar como
+   Administrador tiene que aparecer **"Avisos (2)"** en la barra superior y el botón
+   **"Reparar cta. corriente (2)"** en la pantalla de órdenes.
+3. **Reparación**: abrir el botón **"Reparar cta. corriente"** y confirmar cada orden.
+   El diálogo lista las dos órdenes rotas y deja registrarlas con confirmación. (Si se
+   prefiere por consola: `py -m scripts.repair_missing_ledger_movements --order 78
+   --apply` y `--order 81 --apply`.)
+4. **Control posterior** en la pantalla de cuenta corriente: los clientes
    MOLINOS RIO DE LA PLATA (26.130.000), DISTRIBUIDORA DE MAT. PRIMAS
    (4.800.000), HUERTA MAMA CORA (7.132.860), GARCIA ABEL CARLOS
    (2.280.000), OTERO JUAN ANTONIO (37.592.100) y COMERCIAL EXPRESS
    (4.755.240) tienen que tener sus documentos en la cuenta corriente.
-4. **Stock**: verificar que la mercadería de la OC-000078 (28.500 kg) y de la
+5. **Stock**: verificar que la mercadería de la OC-000078 (28.500 kg) y de la
    OC-000081 (27.500 kg) salió del stock.
-5. **Comunicación**: avisar a los cuatro clientes de la OC-000078 y a los dos de la
+6. **Comunicación**: avisar a los cuatro clientes de la OC-000078 y a los dos de la
    OC-000081 que sus documentos ya están en la cuenta corriente.
+7. **En el cliente de producción** (máquina del cliente), verificar que la base tiene
+   las mismas dos órdenes rotas: la copia de trabajo tenía 86 órdenes y el cliente ya
+   tiene 88 (dos órdenes nuevas), pero el dump es del 19/10 16:11.

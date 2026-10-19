@@ -118,21 +118,21 @@ class LoadOrderLedgerRepairService:
         )
 
     # -- Detección ---------------------------------------------------------
-    def count_broken_orders(self) -> int:
-        """Cuántas órdenes emitidas o cerradas están sin cuenta corriente.
+    def ledger_gaps_by_order(self) -> dict[int, list[LedgerGap]]:
+        """Documentos sin movimiento, agrupados por orden.
 
-        Consulta barata (tres queries) para poder mostrar el número en la
-        pantalla sin abrir el diálogo. Cuenta **órdenes**, no documentos: es
-        la unidad que el administrador tiene que resolver.
+        Consulta barata (tres queries) para poder usarla en la barra de avisos
+        y en el botón de la pantalla sin abrir el diálogo.
         """
         from app.models.accounting import ClientAccountMovement
 
-        orders = list(
-            LoadOrder.select().where(LoadOrder.status.in_(REPAIRABLE_STATUSES))
-        )
+        orders = {
+            o.id: o
+            for o in LoadOrder.select().where(LoadOrder.status.in_(REPAIRABLE_STATUSES))
+        }
         if not orders:
-            return 0
-        order_ids = [o.id for o in orders]
+            return {}
+        order_ids = list(orders)
         budgets = list(
             Budget.select().where(
                 (Budget.load_order << order_ids)
@@ -140,7 +140,7 @@ class LoadOrderLedgerRepairService:
             )
         )
         if not budgets:
-            return 0
+            return {}
 
         budget_ids = [b.id for b in budgets]
         vinculados = {
@@ -158,7 +158,7 @@ class LoadOrderLedgerRepairService:
             )
         }
 
-        ordenes_rojas = set()
+        agrupado: dict[int, list[LedgerGap]] = {}
         for budget in budgets:
             if f"Budget:{budget.id}" in vinculados:
                 continue
@@ -169,8 +169,52 @@ class LoadOrderLedgerRepairService:
             )
             if (budget.load_order_id, budget.client_id, tipo) in legacy:
                 continue
-            ordenes_rojas.add(budget.load_order_id)
-        return len(ordenes_rojas)
+            cliente = budget.client
+            agrupado.setdefault(budget.load_order_id, []).append(
+                LedgerGap(
+                    budget_id=budget.id,
+                    budget_number=budget.display_number,
+                    client_id=cliente.id,
+                    client_name=cliente.name,
+                    timing=budget.timing,
+                    total_amount=float(budget.total_amount or 0),
+                )
+            )
+        return agrupado
+
+    def count_broken_orders(self) -> int:
+        """Cuántas órdenes emitidas o cerradas están sin cuenta corriente.
+
+        Cuenta **órdenes**, no documentos: es la unidad que el administrador
+        tiene que resolver.
+        """
+        return len(self.ledger_gaps_by_order())
+
+    def find_orders_missing_ledger(self) -> list[OrderLedgerGap]:
+        """Órdenes emitidas sin movimiento en la cuenta corriente.
+
+        No incluye el análisis de stock: es la lista para la alarma y para el
+        botón, donde alcanza con saber qué documento falta.
+        """
+        from app.models.load_orders import LoadOrder as _LoadOrder
+
+        agrupado = self.ledger_gaps_by_order()
+        out: list[OrderLedgerGap] = []
+        for order_id, gaps in agrupado.items():
+            order = _LoadOrder.get_by_id(order_id)
+            out.append(
+                OrderLedgerGap(
+                    order_id=order.id,
+                    order_number=int(order.order_number),
+                    status=order.status,
+                    date=str(order.date),
+                    ledger_gaps=tuple(gaps),
+                    missing_stock=False,
+                    stock_units=0,
+                    stock_kg=0.0,
+                )
+            )
+        return sorted(out, key=lambda f: f.order_number)
 
     def find_broken_orders(self) -> list[OrderLedgerGap]:
         """Todas las órdenes emitidas o cerradas con faltantes. No escribe nada."""
