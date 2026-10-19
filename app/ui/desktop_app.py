@@ -125,6 +125,9 @@ from app.ui.audit_query_page import AuditQueryPage
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.load_order_ledger_repair_dialog import LoadOrderLedgerRepairDialog
+from app.services.load_order_ledger_repair_service import (
+    LoadOrderLedgerRepairService,
+)
 from app.ui.dashboard import DashboardService, future_module_message
 from app.ui.load_orders import build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
@@ -2018,6 +2021,9 @@ class FemagDesktopWindow(QMainWindow):
             current_user=self.shell.username,
             prints_dir=LOAD_ORDER_PRINTS_DIR,
         )
+        repair_service = LoadOrderLedgerRepairService(
+            current_user=self.shell.username
+        )
         selected_order_id: dict[str, int | None] = {"value": None}
         refreshing_selection: dict[str, bool] = {"value": False}
 
@@ -2168,6 +2174,17 @@ class FemagDesktopWindow(QMainWindow):
                 f"Página {page_state['page']} de {page_state['pages']} · "
                 f"{page_state['total']} orden(es)"
             )
+            if can_repair_ledger:
+                # El número de órdenes sin cuenta corriente va EN el botón: es
+                # la señal de que hay plata que no está registrada, sin que
+                # nadie tenga que abrir el diálogo para enterarse.
+                try:
+                    rotas = repair_service.count_broken_orders()
+                except Exception:
+                    rotas = 0
+                repair_button.setText(
+                    f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
+                )
             previous_page_button.setEnabled(page_state["page"] > 1)
             next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None

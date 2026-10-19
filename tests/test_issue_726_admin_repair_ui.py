@@ -68,6 +68,27 @@ def test_un_usuario_que_no_es_admin_no_puede_reparar(db):
     assert app is not None
 
 
+def test_el_boton_muestra_cuantas_ordenes_estan_sin_cuenta_corriente(db):
+    """El número de órdenes rotas va EN el botón: la señal de plata perdida."""
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    admin, _consulta = _usuarios()
+    data = _maestros()
+    _orden_emitida_sin_cuenta_corriente(data)
+
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    page = ventana._load_order_page()
+    boton = page.findChild(QPushButton, "repairLedgerLoadOrderButton")
+
+    assert boton is not None
+    assert "(1)" in boton.text(), f"El botón tiene que mostrar el conteo: {boton.text()!r}"
+    ventana.close()
+    assert app is not None
+
+
 def test_el_boton_de_reparar_solo_lo_ve_el_administrador(db):
     from PyQt5.QtWidgets import QApplication, QPushButton
 

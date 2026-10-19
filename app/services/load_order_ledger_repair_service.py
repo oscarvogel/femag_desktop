@@ -118,6 +118,60 @@ class LoadOrderLedgerRepairService:
         )
 
     # -- Detección ---------------------------------------------------------
+    def count_broken_orders(self) -> int:
+        """Cuántas órdenes emitidas o cerradas están sin cuenta corriente.
+
+        Consulta barata (tres queries) para poder mostrar el número en la
+        pantalla sin abrir el diálogo. Cuenta **órdenes**, no documentos: es
+        la unidad que el administrador tiene que resolver.
+        """
+        from app.models.accounting import ClientAccountMovement
+
+        orders = list(
+            LoadOrder.select().where(LoadOrder.status.in_(REPAIRABLE_STATUSES))
+        )
+        if not orders:
+            return 0
+        order_ids = [o.id for o in orders]
+        budgets = list(
+            Budget.select().where(
+                (Budget.load_order << order_ids)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            )
+        )
+        if not budgets:
+            return 0
+
+        budget_ids = [b.id for b in budgets]
+        vinculados = {
+            m.source_ref
+            for m in ClientAccountMovement.select().where(
+                ClientAccountMovement.source_ref
+                << [f"Budget:{budget_id}" for budget_id in budget_ids]
+            )
+        }
+        legacy = {
+            (m.load_order_id, m.client_id, m.movement_type)
+            for m in ClientAccountMovement.select().where(
+                (ClientAccountMovement.load_order << order_ids)
+                & (ClientAccountMovement.is_reversal == False)  # noqa: E712
+            )
+        }
+
+        ordenes_rojas = set()
+        for budget in budgets:
+            if f"Budget:{budget.id}" in vinculados:
+                continue
+            tipo = (
+                ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE
+                if budget.timing == Budget.TIMING_IMMEDIATE
+                else ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED
+            )
+            if (budget.load_order_id, budget.client_id, tipo) in legacy:
+                continue
+            ordenes_rojas.add(budget.load_order_id)
+        return len(ordenes_rojas)
+
     def find_broken_orders(self) -> list[OrderLedgerGap]:
         """Todas las órdenes emitidas o cerradas con faltantes. No escribe nada."""
         findings = []
