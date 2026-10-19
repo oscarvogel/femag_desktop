@@ -58,10 +58,35 @@ class ProductionContrast:
     pending_parts: int
     border_kg: Decimal
     border_days: int
+    # Desglose del material cuyo rinde fue estimado y no medido (#722).
+    measured_kg: Decimal
+    estimated_tickets: int
+    estimated_kg: Decimal
+    estimated_starch_kg: Decimal
 
     @property
     def is_month(self) -> bool:
         return (self.end - self.start).days >= 27
+
+    @property
+    def estimated_share_pct(self) -> Decimal | None:
+        """Por parte del material recibido cuyo rinde se estimo.
+
+        Es lo que avisa si el rendimiento del mes se puede comparar con otro
+        mes: un mes con mucho material estimado no es un mes comparable.
+        """
+        if self.received_kg <= ZERO:
+            return None
+        return (self.estimated_kg / self.received_kg * ONE_HUNDRED).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
+
+    @property
+    def theoretical_starch_kg_measured(self) -> Decimal:
+        """Parte de la teoria que se apoya en rindes medidos por la planta."""
+        return (self.theoretical_starch_kg - self.estimated_starch_kg).quantize(
+            CENT, rounding=ROUND_HALF_UP
+        )
 
     @property
     def border_pct(self) -> Decimal | None:
@@ -171,7 +196,11 @@ class ProductionContrastService:
 
         received_kg = ZERO
         weighted_sum = ZERO
+        measured_kg = ZERO
         theoretical_starch_kg = ZERO
+        estimated_kg = ZERO
+        estimated_starch_kg = ZERO
+        estimated_tickets = 0
         border_kg = ZERO
         ultimo_dia = calendar.monthrange(start.year, start.month)[1]
         desde_borde = ultimo_dia - BORDER_DAYS + 1
@@ -180,10 +209,19 @@ class ProductionContrastService:
             payable = Decimal(str(receipt.payable_kg or 0))
             rendes = Decimal(str(receipt.yield_average or 0))
             received_kg += payable
-            # El rinde teorico se pondera por kilos liquidados, que es como se
-            # pesa una planta: no todos los tickets pesan lo mismo.
-            weighted_sum += payable * rendes
             theoretical_starch_kg += Decimal(str(receipt.theoretical_starch_kg or 0))
+            if receipt.is_estimated_yield:
+                # El rinde de este ticket se estimo (#722). No entra al
+                # promedio ponderado: su PROMEDIO de origen es 0 y hundiria el
+                # rendimiento del periodo.
+                estimated_tickets += 1
+                estimated_kg += payable
+                estimated_starch_kg += Decimal(str(receipt.theoretical_starch_kg or 0))
+            else:
+                # El rinde teorico se pondera por kilos liquidados, que es como
+                # se pesa una planta: no todos los tickets pesan lo mismo.
+                measured_kg += payable
+                weighted_sum += payable * rendes
             if es_mes and receipt.received_at.day >= desde_borde:
                 border_kg += payable
 
@@ -204,8 +242,8 @@ class ProductionContrastService:
                 real_bags += int(bag.bags or 0)
 
         theoretical_yield_pct = (
-            (weighted_sum / received_kg).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            if received_kg > ZERO
+            (weighted_sum / measured_kg).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if measured_kg > ZERO
             else ZERO
         )
 
@@ -222,6 +260,10 @@ class ProductionContrastService:
             pending_parts=pending_parts,
             border_kg=border_kg.quantize(CENT),
             border_days=BORDER_DAYS,
+            measured_kg=measured_kg.quantize(CENT),
+            estimated_tickets=estimated_tickets,
+            estimated_kg=estimated_kg.quantize(CENT),
+            estimated_starch_kg=estimated_starch_kg.quantize(CENT),
         )
 
     @classmethod
@@ -231,7 +273,8 @@ class ProductionContrastService:
                 (r.supplier_name or "").strip() or r.supplier_code,
                 (r.product_name or "").strip() or r.product_code,
                 Decimal(str(r.payable_kg or 0)),
-                Decimal(str(r.yield_average or 0)),
+                r.effective_yield_pct,
+                r.yield_source_label,
                 Decimal(str(r.theoretical_starch_kg or 0)),
             )
             for r in ProductionContrastService.receipts_between(start, end)

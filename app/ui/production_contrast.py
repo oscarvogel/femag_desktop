@@ -12,7 +12,9 @@ from PyQt5.QtWidgets import (
 from app.services.production_contrast_service import ProductionContrastService
 from app.ui.form_feedback import FormFeedback
 
-RECEIPT_HEADERS = ("Proveedor", "Mandioca", "Kg liquidados", "Rinde prom.", "Fecula teorica")
+RECEIPT_HEADERS = (
+    "Proveedor", "Mandioca", "Kg liquidados", "Rinde prom.", "Origen", "Fecula teorica",
+)
 PART_HEADERS = ("Fecha", "Turno", "Estado", "Producto", "Bolsas", "Kg embolsados")
 
 PERIODO_DIA = "Dia"
@@ -184,9 +186,20 @@ class ProductionContrastPage(QWidget):
 
         valor, _ = self.kpis["teorica"]
         valor.setText(f"{contraste.theoretical_starch_kg:,.2f} kg")
-        self.kpis["teorica"][1].setText(
-            f"rinde teórico ponderado {contraste.theoretical_yield_pct:.2f} %"
-        )
+        if contraste.measured_kg <= 0 and contraste.received_kg > 0:
+            # Todo el material del periodo es de rinde estimado: no hay un
+            # rendimiento ponderado que mostrar.
+            self.kpis["teorica"][1].setText(
+                "rinde teórico ponderado s/d (ningún ticket con rinde medido)"
+            )
+        elif contraste.estimated_tickets:
+            self.kpis["teorica"][1].setText(
+                f"rinde teórico ponderado {contraste.theoretical_yield_pct:.2f} % (solo rindes medidos)"
+            )
+        else:
+            self.kpis["teorica"][1].setText(
+                f"rinde teórico ponderado {contraste.theoretical_yield_pct:.2f} %"
+            )
 
         valor, _ = self.kpis["real"]
         valor.setText(f"{contraste.real_starch_kg:,.2f} kg")
@@ -249,6 +262,17 @@ class ProductionContrastPage(QWidget):
                 f"{contraste.pending_parts} parte(s) en borrador no cuentan como producción "
                 "real: se pueden seguir modificando."
             )
+        if contraste.estimated_tickets:
+            porcentaje = contraste.estimated_share_pct
+            avisos.append(
+                f"{contraste.estimated_tickets} ticket(s) de los "
+                f"{contraste.received_tickets} llegaron sin rinde medido: se les "
+                f"estimó uno y sus {contraste.estimated_kg:,.0f} kg "
+                f"({porcentaje} % de lo recibido) no son rindes de la planta. "
+                "El rendimiento ponderado de arriba sale solo de los tickets "
+                "medidos, así que el número no se infla, pero este mes no es "
+                "comparable con otro que no tenga material estimado."
+            )
         if not contraste.has_receipts:
             avisos.append("No hay tickets importados de femagfab para este periodo.")
         if not contraste.has_confirmed_production and contraste.has_receipts:
@@ -258,9 +282,9 @@ class ProductionContrastPage(QWidget):
     def _fill_receipts(self, inicio: date, fin: date) -> None:
         filas = ProductionContrastService.receipt_lines(inicio, fin)
         self.receipts_table.setRowCount(len(filas))
-        for indice, (proveedor, producto, kg, rinde, fecula) in enumerate(filas):
+        for indice, (proveedor, producto, kg, rinde, origen, fecula) in enumerate(filas):
             valores = (
-                proveedor, producto, f"{kg:,.0f}", f"{rinde:.2f} %", f"{fecula:,.2f}",
+                proveedor, producto, f"{kg:,.0f}", f"{rinde:.2f} %", origen, f"{fecula:,.2f}",
             )
             for columna, valor in enumerate(valores):
                 self.receipts_table.setItem(indice, columna, QTableWidgetItem(str(valor)))

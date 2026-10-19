@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from peewee import (
     CharField,
     DateField,
@@ -10,6 +12,17 @@ from peewee import (
 
 from app.models.base import BaseModel, utc_now
 from app.models.masters import Product
+
+
+# De donde salio el rinde de un ticket (#722). "measured" es el PROMEDIO que
+# midio la planta; "estimated" es el parametro que se aplico porque el ticket
+# llego sin rinde.
+YIELD_SOURCE_MEASURED = "measured"
+YIELD_SOURCE_ESTIMATED = "estimated"
+YIELD_SOURCE_LABELS = {
+    YIELD_SOURCE_MEASURED: "Medido",
+    YIELD_SOURCE_ESTIMATED: "Estimado",
+}
 
 
 class RawMaterialReceipt(BaseModel):
@@ -38,12 +51,38 @@ class RawMaterialReceipt(BaseModel):
     yield_average = DecimalField(max_digits=7, decimal_places=2)
     legacy_starch_kg = DecimalField(max_digits=12, decimal_places=2, default=0)
     theoretical_starch_kg = DecimalField(max_digits=12, decimal_places=2)
+    # De donde salio el rinde con el que se calculo ``theoretical_starch_kg``
+    # (#722). Sin esto, una carga sin rinde mezclada con las medidas haria que
+    # el rendimiento del mes pareciera peor de lo que es.
+    yield_source = CharField(max_length=16, null=True, default=YIELD_SOURCE_MEASURED)
+    # Rinde que se aplico, solo cuando fue estimado. Si esta vacio, el ticket
+    # uso su propio PROMEDIO medido.
+    estimated_yield_pct = DecimalField(max_digits=7, decimal_places=2, null=True)
     source_payload = TextField()
     imported_at = DateTimeField(default=utc_now)
 
     class Meta:
         table_name = "raw_material_receipt"
         indexes = ((("received_at",), False), (("source_comp",), False))
+
+    @property
+    def is_estimated_yield(self) -> bool:
+        """True cuando el rinde fue estimado y no medido por la planta."""
+        if self.yield_source:
+            return self.yield_source == YIELD_SOURCE_ESTIMATED
+        # Un ticket anterior a #722 no tiene el campo: se deduce del PROMEDIO.
+        return Decimal(str(self.yield_average or 0)) <= 0
+
+    @property
+    def yield_source_label(self) -> str:
+        return YIELD_SOURCE_LABELS.get(self.yield_source or "", "Medido")
+
+    @property
+    def effective_yield_pct(self) -> Decimal:
+        """El rinde con el que se calculo la fecula teorica de este ticket."""
+        if self.estimated_yield_pct is not None:
+            return Decimal(str(self.estimated_yield_pct))
+        return Decimal(str(self.yield_average or 0))
 
 
 class ProductionPart(BaseModel):
