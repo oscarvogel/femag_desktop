@@ -6,10 +6,39 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from app.models.production import ProductionBag, ProductionPart, RawMaterialReceipt
+from app.services.estimated_yield_service import EstimatedYieldService
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 ONE_HUNDRED = Decimal("100")
+
+
+def fecula_teorica_de(receipt, parametro_estimado: Decimal) -> Decimal:
+    """La fecula teorica que aplica hoy a una ticket.
+
+    Para una ticket **medida** es la que se importo: el rinde lo dio la planta
+    y no se toca. Para una ticket **estimada** se recalcula con el parametro
+    vigente, porque el estimado es un valor de la planta y no un dato
+    congelado: asi la previsualizacion de la importacion y este contraste
+    muestran lo mismo (#724).
+
+    Esto tambien arregla las tickets que se importaron antes de #722: su
+    fecula guardada es 0,00 (el PROMEDIO de origen era 0) y su columna
+    ``yield_source`` quedo en 'measured' por el backfill del esquema. Con el
+    parametro vigente se recalculan bien sin tocar los datos.
+    """
+    if receipt.is_estimated_yield:
+        return (
+            Decimal(str(receipt.payable_kg or 0)) * parametro_estimado / ONE_HUNDRED
+        ).quantize(CENT, rounding=ROUND_HALF_UP)
+    return Decimal(str(receipt.theoretical_starch_kg or 0))
+
+
+def rinde_efectivo_de(receipt, parametro_estimado: Decimal) -> Decimal:
+    """El rinde que hoy se le atribuye a una ticket."""
+    if receipt.is_estimated_yield:
+        return parametro_estimado
+    return Decimal(str(receipt.yield_average or 0))
 
 # Dias del final del mes que se consideran "de borde": el material que entra ahi
 # no llega a procesarse dentro del mes. Tres dias es el supuesto operativo, segun
@@ -201,6 +230,7 @@ class ProductionContrastService:
         estimated_kg = ZERO
         estimated_starch_kg = ZERO
         estimated_tickets = 0
+        parametro_estimado = EstimatedYieldService.estimated_yield_pct()
         border_kg = ZERO
         ultimo_dia = calendar.monthrange(start.year, start.month)[1]
         desde_borde = ultimo_dia - BORDER_DAYS + 1
@@ -208,15 +238,16 @@ class ProductionContrastService:
         for receipt in receipts:
             payable = Decimal(str(receipt.payable_kg or 0))
             rendes = Decimal(str(receipt.yield_average or 0))
+            fecula = fecula_teorica_de(receipt, parametro_estimado)
             received_kg += payable
-            theoretical_starch_kg += Decimal(str(receipt.theoretical_starch_kg or 0))
+            theoretical_starch_kg += fecula
             if receipt.is_estimated_yield:
                 # El rinde de este ticket se estimo (#722). No entra al
                 # promedio ponderado: su PROMEDIO de origen es 0 y hundiria el
                 # rendimiento del periodo.
                 estimated_tickets += 1
                 estimated_kg += payable
-                estimated_starch_kg += Decimal(str(receipt.theoretical_starch_kg or 0))
+                estimated_starch_kg += fecula
             else:
                 # El rinde teorico se pondera por kilos liquidados, que es como
                 # se pesa una planta: no todos los tickets pesan lo mismo.
@@ -268,14 +299,15 @@ class ProductionContrastService:
 
     @classmethod
     def receipt_lines(cls, start: date, end: date) -> list[tuple]:
+        parametro_estimado = EstimatedYieldService.estimated_yield_pct()
         return [
             (
                 (r.supplier_name or "").strip() or r.supplier_code,
                 (r.product_name or "").strip() or r.product_code,
                 Decimal(str(r.payable_kg or 0)),
-                r.effective_yield_pct,
+                rinde_efectivo_de(r, parametro_estimado),
                 r.yield_source_label,
-                Decimal(str(r.theoretical_starch_kg or 0)),
+                fecula_teorica_de(r, parametro_estimado),
             )
             for r in ProductionContrastService.receipts_between(start, end)
         ]

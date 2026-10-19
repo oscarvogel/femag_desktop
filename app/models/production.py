@@ -67,22 +67,29 @@ class RawMaterialReceipt(BaseModel):
 
     @property
     def is_estimated_yield(self) -> bool:
-        """True cuando el rinde fue estimado y no medido por la planta."""
-        if self.yield_source:
-            return self.yield_source == YIELD_SOURCE_ESTIMATED
-        # Un ticket anterior a #722 no tiene el campo: se deduce del PROMEDIO.
-        return Decimal(str(self.yield_average or 0)) <= 0
+        """True cuando el rinde fue estimado y no medido por la planta.
+
+        Manda el ``PROMEDIO`` de origen: un ticket con PROMEDIO 0 nunca fue
+        medido. La columna ``yield_source`` no puede decidir esto, porque el
+        backfill generico del esquema le pone su valor por defecto ('measured')
+        a las filas que ya existian cuando se creo la columna, y esas filas son
+        justamente las que no tienen rinde (#724).
+        """
+        if Decimal(str(self.yield_average or 0)) <= 0:
+            return True
+        return self.yield_source == YIELD_SOURCE_ESTIMATED
 
     @property
     def yield_source_label(self) -> str:
+        if self.is_estimated_yield:
+            return YIELD_SOURCE_LABELS[YIELD_SOURCE_ESTIMATED]
         return YIELD_SOURCE_LABELS.get(self.yield_source or "", "Medido")
 
-    @property
-    def effective_yield_pct(self) -> Decimal:
-        """El rinde con el que se calculo la fecula teorica de este ticket."""
-        if self.estimated_yield_pct is not None:
-            return Decimal(str(self.estimated_yield_pct))
-        return Decimal(str(self.yield_average or 0))
+    # Nota (#724): el rinde que se usa hoy para un ticket estimado NO se lee de
+    # aca, sino del parametro vigente de la planta, y lo calcula
+    # ``app.services.production_contrast_service.rinde_efectivo_de``. Esta
+    # columna ``estimated_yield_pct`` queda como registro historico de que se
+    # aplico un estimado al importar, no como el valor en uso.
 
 
 class ProductionPart(BaseModel):
