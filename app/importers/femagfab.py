@@ -104,8 +104,14 @@ class FemagFabSource:
         )
 
     def fetch_day(self, day: date) -> list[LegacyReceipt]:
-        start = datetime.combine(day, time.min)
-        end = start + timedelta(days=1)
+        return self.fetch_range(day, day)
+
+    def fetch_range(self, start_day: date, end_day: date) -> list[LegacyReceipt]:
+        """Trae los tickets del rango inclusivo ``start_day`` .. ``end_day``."""
+        if start_day > end_day:
+            raise ValueError("La fecha desde no puede ser posterior a la fecha hasta.")
+        start = datetime.combine(start_day, time.min)
+        end = datetime.combine(end_day, time.min) + timedelta(days=1)
         sql = """
             SELECT m.COMP comp, m.FECHA received_at, m.PROVEEDOR supplier_code,
                    COALESCE(pr.NOMBRE, '') supplier_name, m.PRODUCTO product_code,

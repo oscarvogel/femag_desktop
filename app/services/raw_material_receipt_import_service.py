@@ -3,9 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Callable
 
 from app.importers.femagfab import FemagFabSource, LegacyReceipt
 from app.models.production import RawMaterialReceipt
+
+
+ProgressCallback = Callable[[str, int, int], None]
 
 
 @dataclass(frozen=True)
@@ -32,19 +36,49 @@ class RawMaterialReceiptImportService:
         self.source = source or FemagFabSource()
 
     def preview(self, day: date) -> tuple[list[ReceiptPreview], ReceiptTotals]:
-        rows = self.source.fetch_day(day)
+        return self.preview_range(day, day)
+
+    def preview_range(
+        self,
+        start_day: date,
+        end_day: date,
+        progress: ProgressCallback | None = None,
+    ) -> tuple[list[ReceiptPreview], ReceiptTotals]:
+        """Previsualiza un rango inclusivo, informando avance de a un ticket."""
+        if progress:
+            progress("consulta", 0, 0)
+        rows = self.source.fetch_range(start_day, end_day)
+        keys = [self.source.source_key(row.comp) for row in rows]
+        existing = self._existing_hashes(keys)
+        total = len(rows)
+        if progress:
+            progress("revision", 0, total)
         previews = []
-        for row in rows:
-            key = self.source.source_key(row.comp)
-            existing = RawMaterialReceipt.get_or_none(RawMaterialReceipt.source_key == key)
-            if existing is None:
+        for index, (row, key) in enumerate(zip(rows, keys), start=1):
+            current_hash = existing.get(key)
+            if current_hash is None:
                 status = self.NEW
-            elif existing.source_hash == row.source_hash:
+            elif current_hash == row.source_hash:
                 status = self.UNCHANGED
             else:
                 status = self.MODIFIED
             previews.append(ReceiptPreview(row=row, source_key=key, status=status))
+            if progress:
+                progress("revision", index, total)
         return previews, self.totals(rows)
+
+    @staticmethod
+    def _existing_hashes(keys: list[str]) -> dict[str, str]:
+        """Resuelve todos los source_key del rango en pocas consultas."""
+        hashes: dict[str, str] = {}
+        for start in range(0, len(keys), 500):
+            chunk = keys[start:start + 500]
+            query = RawMaterialReceipt.select(
+                RawMaterialReceipt.source_key, RawMaterialReceipt.source_hash
+            ).where(RawMaterialReceipt.source_key.in_(chunk))
+            for record in query:
+                hashes[record.source_key] = record.source_hash
+        return hashes
 
     @staticmethod
     def totals(rows: list[LegacyReceipt]) -> ReceiptTotals:
@@ -56,11 +90,15 @@ class RawMaterialReceiptImportService:
         )
         return ReceiptTotals(len(rows), payable, starch, weighted)
 
-    def import_new(self, previews: list[ReceiptPreview]) -> int:
+    def import_new(
+        self,
+        previews: list[ReceiptPreview],
+        progress: ProgressCallback | None = None,
+    ) -> int:
+        pending = [preview for preview in previews if preview.status == self.NEW]
+        total = len(pending)
         created = 0
-        for preview in previews:
-            if preview.status != self.NEW:
-                continue
+        for index, preview in enumerate(pending, start=1):
             row = preview.row
             RawMaterialReceipt.create(
                 source_key=preview.source_key, source_instance=self.source.instance,
@@ -76,4 +114,6 @@ class RawMaterialReceiptImportService:
                 source_payload=__import__("json").dumps(row.payload(), ensure_ascii=False, sort_keys=True),
             )
             created += 1
+            if progress:
+                progress("importacion", index, total)
         return created

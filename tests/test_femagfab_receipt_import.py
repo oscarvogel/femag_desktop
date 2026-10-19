@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from app.importers.femagfab import LegacyReceipt
@@ -23,6 +23,39 @@ def receipt(payable="10000", yield_average="25.00", legacy="0", comp="123"):
     )
 
 
+def test_fetch_range_covers_the_whole_last_day(monkeypatch):
+    from app.importers.femagfab import FemagFabSource
+
+    source = FemagFabSource(host="host", database="femagfab", user="user", password="")
+    captured = {}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            captured["params"] = params
+
+        def fetchall(self):
+            return []
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(source, "_connect", lambda: _Connection())
+    rows = source.fetch_range(date(2026, 1, 1), date(2026, 1, 31))
+
+    assert rows == []
+    assert captured["params"] == (datetime(2026, 1, 1), datetime(2026, 2, 1))
+
+
 def test_theoretical_starch_does_not_trust_legacy_fecula():
     row = receipt(legacy="0")
     assert row.theoretical_starch_kg == Decimal("2500.00")
@@ -32,6 +65,53 @@ def test_hash_changes_when_productive_source_changes():
     before = receipt(yield_average="25.00")
     after = receipt(yield_average="24.50")
     assert before.source_hash != after.source_hash
+
+
+def test_preview_range_classifies_tickets_in_bulk(db):
+    from app.models.production import RawMaterialReceipt
+
+    rows = [receipt(comp="1"), receipt(comp="2"), receipt(comp="3")]
+    source = _SourceStub(rows)
+    service = RawMaterialReceiptImportService(source=source)
+
+    def stored(row, source_hash):
+        return RawMaterialReceipt.create(
+            source_key=source.source_key(row.comp), source_comp=row.comp,
+            source_hash=source_hash, received_at=row.received_at,
+            supplier_code=row.supplier_code, product_code=row.product_code,
+            gross_kg=row.gross_kg, tare_kg=row.tare_kg, net_kg=row.net_kg,
+            payable_kg=row.payable_kg, yield_average=row.yield_average,
+            theoretical_starch_kg=row.theoretical_starch_kg, source_payload="{}",
+        )
+
+    stored(rows[0], rows[0].source_hash)
+    stored(rows[1], "hash-viejo")
+
+    phases = []
+    previews, _ = service.preview_range(
+        date(2026, 9, 1), date(2026, 9, 28), progress=lambda *args: phases.append(args)
+    )
+
+    assert [preview.status for preview in previews] == [
+        RawMaterialReceiptImportService.UNCHANGED,
+        RawMaterialReceiptImportService.MODIFIED,
+        RawMaterialReceiptImportService.NEW,
+    ]
+    assert phases[0] == ("consulta", 0, 0)
+    assert phases[-1] == ("revision", 3, 3)
+
+
+class _SourceStub:
+    instance = "femagfab"
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def source_key(self, comp):
+        return f"femagfab:femagfab:movi:{comp}"
+
+    def fetch_range(self, start, end):
+        return self.rows
 
 
 def test_weighted_yield_uses_payable_kilos():
@@ -55,8 +135,16 @@ class _PreviewServiceStub:
         self.rows = rows
         self.status = status
         self.imported = []
+        self.ranges = []
+        self.phases = []
 
     def preview(self, day):
+        return self.preview_range(day, day)
+
+    def preview_range(self, start, end, progress=None):
+        self.ranges.append((start, end))
+        if progress:
+            progress("consulta", 0, 0)
         previews = [
             ReceiptPreview(
                 row=row,
@@ -65,12 +153,30 @@ class _PreviewServiceStub:
             )
             for row in self.rows
         ]
+        if progress:
+            for index, _ in enumerate(previews, start=1):
+                self.phases.append(("revision", index, len(previews)))
+                progress("revision", index, len(previews))
         return previews, self.totals(self.rows)
 
-    def import_new(self, previews):
+    def import_new(self, previews, progress=None):
         pending = [preview for preview in previews if preview.status == self.NEW]
+        for index, _ in enumerate(pending, start=1):
+            if progress:
+                self.phases.append(("importacion", index, len(pending)))
+                progress("importacion", index, len(pending))
         self.imported.extend(pending)
         return len(pending)
+
+
+def _wait_for(app, page, timeout=5.0):
+    import time
+
+    deadline = time.time() + timeout
+    while page._busy and time.time() < deadline:
+        app.processEvents()
+    app.processEvents()
+    assert page._busy is False, "la consulta/importacion no termino a tiempo"
 
 
 def _imported_day():
@@ -159,11 +265,12 @@ def test_already_imported_day_shows_sin_cambios_and_disables_import(db):
     app = QApplication.instance() or QApplication([])
     service = _PreviewServiceStub(_imported_day(), RawMaterialReceiptImportService.UNCHANGED)
     page = RawMaterialReceiptImportPage(service=service)
-    page.day.setDate(QDate(2026, 9, 28))
+    page.start_day.setDate(QDate(2026, 9, 28))
+    page.end_day.setDate(QDate(2026, 9, 28))
     app.processEvents()
 
     page.refresh()
-    app.processEvents()
+    _wait_for(app, page)
 
     assert page.table.rowCount() == 8
     assert page.table.item(0, 0).text() == "1000"
@@ -183,6 +290,7 @@ def test_already_imported_day_shows_sin_cambios_and_disables_import(db):
     assert "20,000.00 kg de fécula teórica" in summary
 
     page.import_new()
+    app.processEvents()
     assert service.imported == []
 
 
@@ -197,11 +305,56 @@ def test_pending_tickets_enable_import_action(db):
     app.processEvents()
 
     page.refresh()
-    app.processEvents()
+    _wait_for(app, page)
 
     assert page.table.item(0, 7).text() == "Nuevo"
     assert page.import_button.isEnabled() is True
     assert "8 ticket(s) sin importar" in page.summary_label.text()
 
     page.import_new()
+    _wait_for(app, page)
     assert len(service.imported) == 8
+    assert page.import_button.isEnabled() is False
+    assert service.phases[-1][0] == "importacion"
+
+
+def test_consulta_uses_inclusive_range_and_shows_progress(db):
+    from PyQt5.QtCore import QDate
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
+
+    app = QApplication.instance() or QApplication([])
+    service = _PreviewServiceStub(_imported_day(), RawMaterialReceiptImportService.UNCHANGED)
+    page = RawMaterialReceiptImportPage(service=service)
+    page.start_day.setDate(QDate(2026, 9, 1))
+    page.end_day.setDate(QDate(2026, 9, 28))
+    app.processEvents()
+
+    page.refresh()
+    _wait_for(app, page)
+
+    assert service.ranges == [(date(2026, 9, 1), date(2026, 9, 28))]
+    assert ("revision", 8, 8) in service.phases
+    assert "entre el 01/09/2026 y el 28/09/2026" in page.feedback.message
+    assert page.progress.isVisible() is False
+
+
+def test_invalid_range_is_rejected_without_querying(db):
+    from PyQt5.QtCore import QDate
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
+
+    app = QApplication.instance() or QApplication([])
+    service = _PreviewServiceStub(_imported_day(), RawMaterialReceiptImportService.NEW)
+    page = RawMaterialReceiptImportPage(service=service)
+    page.start_day.setDate(QDate(2026, 9, 28))
+    page.end_day.setDate(QDate(2026, 9, 1))
+    app.processEvents()
+
+    page.refresh()
+    app.processEvents()
+
+    assert service.ranges == []
+    assert "posterior" in page.feedback.message.lower()
