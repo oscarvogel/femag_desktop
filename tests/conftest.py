@@ -29,6 +29,11 @@ def _isolate_femag_env(monkeypatch, tmp_path):
         "FEMAG_DB_ENGINE",
         "FEMAG_SQLITE_PATH",
         "FEMAG_SECURE_CONFIG",
+        # ``FEMAG_DEMO`` tambien se filtra: un ``load_settings()`` hecho fuera
+        # de un test (por ejemplo al importar un modulo) carga el ``.env`` de la
+        # maquina y deja la variable en el proceso, y ahi ``load_settings``
+        # devuelve ``demo=True`` en vez de leer el ``.env`` del test.
+        "FEMAG_DEMO",
     ):
         monkeypatch.delenv(var, raising=False)
     yield

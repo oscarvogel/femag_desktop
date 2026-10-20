@@ -45,6 +45,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--encoding", default="cp1252", help="Encoding DBF legacy, por defecto cp1252")
     parser.add_argument("--source-system", default="legacy_dbf", help="Identificador del sistema origen")
+    parser.add_argument(
+        "--mode",
+        choices=("patch", "overwrite"),
+        default="patch",
+        help="Como se trata lo que ya esta en la base. 'patch' (por defecto) solo "
+        "completa los campos vacios y respeta lo que edito el operador; "
+        "'overwrite' hace que el legacy mande sobre todo.",
+    )
     parser.add_argument("--skip-dgr", action="store_true", help="No importar la referencia DGR")
     parser.add_argument("--skip-masters", action="store_true", help="No importar los maestros")
     parser.add_argument("--skip-origin", action="store_true", help="No configurar el origen DGR")
@@ -69,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             import_dgr=not args.skip_dgr,
             import_masters=not args.skip_masters,
             configure_origin=not args.skip_origin,
+            mode=args.mode,
         )
     finally:
         if not database.is_closed():
@@ -81,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
                 "masters": report.masters,
                 "origin": report.origin.__dict__ if report.origin else None,
                 "checks": list(report.checks),
+                "mode": report.mode,
                 "warnings": list(report.warnings),
                 "blockers": list(report.blockers),
                 "remittances_ready": report.remittances_ready,
@@ -101,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Maestros importados:")
             _print_resumen(report.masters)
         print()
-        print("Verificacion:")
+        print(f"Verificacion (modo {report.mode}):")
         for check in report.checks:
             print(f"   {check}")
         if report.blockers:
