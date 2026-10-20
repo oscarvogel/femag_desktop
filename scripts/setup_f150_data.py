@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
                 "origin": report.origin.__dict__ if report.origin else None,
                 "checks": list(report.checks),
                 "warnings": list(report.warnings),
+                "blockers": list(report.blockers),
                 "remittances_ready": report.remittances_ready,
                 "remittances_blocked": [
                     {"remittance": numero, "issues": list(problemas)}
@@ -103,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Verificacion:")
         for check in report.checks:
             print(f"   {check}")
+        if report.blockers:
+            print()
+            print("La base NO esta lista para emitir:")
+            for blocker in report.blockers:
+                print(f"   - {blocker}")
         if report.warnings:
             print()
             print("Avisos:")

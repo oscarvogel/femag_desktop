@@ -118,6 +118,7 @@ def test_el_setup_importa_todo_y_deja_el_origen_configurado(db, tmp_path):
     report = F150SetupService().run(dbf_dir=carpeta)
 
     assert report.warnings == ()
+    assert report.blockers == ()
     assert report.origin is not None
     assert report.origin.locality_name == "CAPIOVI"
     assert F150BatchService.origin_configured() is True
@@ -139,6 +140,7 @@ def test_el_setup_es_idempotente(db, tmp_path):
     segunda = F150SetupService().run(dbf_dir=carpeta)
 
     assert segunda.warnings == ()
+    assert segunda.blockers == ()
     assert DgrLocality.select().count() == 2
     assert Carrier.select().count() == 1
     assert ClientAddress.select().count() == 1
@@ -153,7 +155,8 @@ def test_sin_referencia_dgr_no_importa_los_maestros_y_avisa(db, tmp_path):
         dbf_dir=carpeta, import_dgr=False, configure_origin=False
     )
 
-    assert any("referencia DGR" in warning for warning in report.warnings)
+    assert any("referencia DGR" in blocker for blocker in report.blockers)
+    assert report.ok is False
     assert Carrier.select().count() == 0
     assert Driver.select().count() == 0
 
@@ -165,6 +168,7 @@ def test_avisa_cuando_no_hay_que_importar_por_faltar_dbf(db, tmp_path):
     report = F150SetupService().run(dbf_dir=carpeta)
 
     assert report.warnings
+    assert report.blockers
     assert report.origin is None
     assert report.ok is False
 
@@ -194,12 +198,18 @@ def test_avisa_si_la_localidad_de_origen_no_existe_en_la_referencia(db, tmp_path
     report = F150SetupService().run(dbf_dir=carpeta, locality_code="9999")
 
     assert report.origin is None
-    assert any("9999" in warning for warning in report.warnings)
+    assert any("9999" in blocker for blocker in report.blockers)
     assert report.ok is False
 
 
 def test_avisa_si_la_importacion_dejo_filas_sin_entrar(db, tmp_path):
-    """Una fila que no entra tiene que quedar a la vista, no en el resumen."""
+    """Una fila que no entra tiene que quedar a la vista, no en el resumen.
+
+    Pero no voltea el resultado: una fila del legacy que no se pudo importar no
+    deja al resto de la base sin poder emitir. El legacy real tiene una asi
+    (el chofer 0090, sin nombre ni CUIT) y con ella el setup tiene que salir
+    con exito igual.
+    """
     carpeta = escribir_dbf_de_la_fabrica(tmp_path / "fabrica")
     write_dbf(
         carpeta / "clientes.dbf",
@@ -213,8 +223,8 @@ def test_avisa_si_la_importacion_dejo_filas_sin_entrar(db, tmp_path):
     report = F150SetupService().run(dbf_dir=carpeta)
 
     assert any("sin entrar" in warning for warning in report.warnings)
-    assert report.ok is False
     assert report.masters["clients"]["errors"]
+    assert report.ok is True
 
 
 def test_el_setup_avisa_que_hay_remitos_bloqueados(db, tmp_path):

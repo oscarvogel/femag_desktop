@@ -68,15 +68,24 @@ class F150SetupReport:
     masters: dict[str, Any] = field(default_factory=dict)
     origin: F150Location | None = None
     checks: tuple[str, ...] = ()
+    #: Avisos para el operador: cosas que conviene mirar pero que no impiden
+    #: emitir (por ejemplo una fila del legacy que no se pudo importar).
     warnings: tuple[str, ...] = ()
+    #: Lo que de verdad impide emitir: sin esto la base NO esta lista.
+    blockers: tuple[str, ...] = ()
     remittances_ready: int = 0
     remittances_blocked: tuple[tuple[str, tuple[str, ...]], ...] = ()
     remittances_not_checked: int = 0
 
     @property
     def ok(self) -> bool:
-        """True cuando no quedan avisos de los que dependen los remitos."""
-        return not self.warnings and not self.remittances_blocked
+        """True cuando la base puede generar F150.
+
+        Lo que manda es la verificacion (referencia DGR, origen y remitos), no
+        los avisos: una fila del legacy que no se pudo importar no deja al resto
+        de la base sin poder emitir, asi que no puede voltear el resultado.
+        """
+        return not self.blockers and not self.remittances_blocked
 
 
 class F150SetupService:
@@ -148,6 +157,7 @@ class F150SetupService:
         configure_origin: bool = True,
     ) -> F150SetupReport:
         warnings: list[str] = []
+        blockers: list[str] = []
 
         dgr_summary: dict[str, Any] = {}
         masters_summary: dict[str, Any] = {}
@@ -165,7 +175,7 @@ class F150SetupService:
 
         localidades = DgrLocality.select().count()
         if localidades == 0:
-            warnings.append(
+            blockers.append(
                 "No hay ninguna localidad DGR cargada. Sin la referencia DGR los "
                 "maestros se importan sin localidad y sin avisar, y el F150 no "
                 "sale."
@@ -181,6 +191,13 @@ class F150SetupService:
                 )
             self._agregar_fallos(warnings, "maestros", masters_summary)
 
+        if self._sin_maestros():
+            blockers.append(
+                "No quedo ningun maestro en la base (clientes, transportistas, "
+                "choferes y productos). Sin maestros no hay a quien emitirle un "
+                "remito."
+            )
+
         origin: F150Location | None = None
         if configure_origin:
             codigo = locality_code
@@ -190,14 +207,14 @@ class F150SetupService:
                 param = Path(param_path) if param_path else Path(dbf_dir) / "param.dbf"
                 codigo = self.origin_code_from_param(param, encoding=encoding)
             if not codigo:
-                warnings.append(
+                blockers.append(
                     "No se pudo determinar el origen DGR: falta el param.dbf o el "
                     "argumento --locality-code. Sin origen, el F150 no sale."
                 )
             else:
                 locality = DgrLocality.get_or_none(DgrLocality.code == str(codigo).strip())
                 if locality is None:
-                    warnings.append(
+                    blockers.append(
                         f"La localidad de origen {codigo!r} no existe en la "
                         "referencia DGR importada."
                     )
@@ -205,7 +222,7 @@ class F150SetupService:
                     try:
                         origin = F150BatchService.set_origin(locality)
                     except ValueError as exc:
-                        warnings.append(f"No se pudo configurar el origen DGR: {exc}")
+                        blockers.append(f"No se pudo configurar el origen DGR: {exc}")
 
         checks, remittances_ready, blocked, not_checked = self.verify()
         return F150SetupReport(
@@ -214,6 +231,7 @@ class F150SetupService:
             origin=origin,
             checks=checks,
             warnings=tuple(warnings),
+            blockers=tuple(blockers),
             remittances_ready=remittances_ready,
             remittances_blocked=blocked,
             remittances_not_checked=not_checked,
@@ -277,6 +295,16 @@ class F150SetupService:
     def _con_campo(field) -> int:
         """Cuantas filas tienen el campo informado (el camion no tiene localidad)."""
         return field.model.select().where(field.is_null(False)).count()
+
+    @staticmethod
+    def _sin_maestros() -> bool:
+        """True cuando no quedo ningun maestro importado en la base."""
+        from app.models.masters import Client
+
+        return not any(
+            model.select().count()
+            for model in (Client, Carrier, Driver, Product)
+        )
 
     @staticmethod
     def _agregar_fallos(
