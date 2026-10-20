@@ -474,6 +474,28 @@ C:\Users\Usuario\Downloads\femag_pre_repair_20261019.sql   (2.717.776 bytes)
   y 2 por 42.347.340,00, igual que antes).
 - **Alarma**: 0 avisos de plata. La alarma se apaga sola cuando la orden queda reparada.
 
+## Por qué el administrador no encontraba la acción (y qué se corrigió)
+
+La primera publicación del candidate dejó al administrador en la máquina del cliente
+**sin ver el botón** y **sin ver el cambio**. Se investigated por qué y eran tres
+cosas distintas:
+
+| Problema | Qué pasaba | Corrección |
+|---|---|---|
+| **El instalador no cerraba la app abierta** | El `.iss` no tenía `CloseApplications`: con FEMAG abierto, el EXE **no se reemplaza** y el puesto sigue corriendo el build viejo. El log lo confirma: el último arranque fue a las 18:05 y la instalación fue a las 18:51 | `CloseApplications=yes` + `RestartApplications=yes`: Inno Setup cierra la app (también en instalación silenciosa) y avisa si no puede |
+| **El botón quedaba fuera de pantalla** | Iba al **final** de la fila de acciones de órdenes, que es más ancha que la ventana: en una pantalla angosta se caía por la derecha | Va **primero** en la fila |
+| **La alarma sólo navegaba** | El aviso de plata llevava a la pantalla de órdenes, donde había que buscar el botón | El aviso trae su propia **acción**: al clickearlo abre la pantalla de reparación |
+
+Además, la barra superior (que siempre se ve, a diferencia de la fila de acciones)
+sumó un botón **"Otros"** que despliega las opciones que no van siempre a la vista:
+**"Reparar cta. corriente (N)"** con el contador de órdenes rotas, "Centro de Avisos"
+y "Configurar conexión...".
+
+> Para verificar que el build nuevo quedó instalado, la versión se lee en la **barra
+> de estado, abajo a la izquierda**: tiene que decir la versión publicada acá abajo.
+> Si dice otra, el instalador no reemplazó el EXE (app abierta) y hay que cerrar
+> FEMAG y reinstalar.
+
 ## Publicación del candidate
 
 El candidate se construyó **localmente** desde `main` mergeado (`c20abc1`) y se publicó en

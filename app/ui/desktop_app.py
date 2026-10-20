@@ -798,7 +798,7 @@ class FemagDesktopWindow(QMainWindow):
             n = self.aviso_service.count_unread(self.user)
             self.notifications.setText(f"Avisos ({n})" if n else "Avisos")
 
-    def _abrir_opciones(self, button: QPushButton) -> None:
+    def _abrir_opciones(self, button: QPushButton) -> QMenu:
         """Menú "Otros": las acciones que no van siempre en la barra.
 
         El botón de reparar la cuenta corriente vive acá y no en la fila de
@@ -826,6 +826,7 @@ class FemagDesktopWindow(QMainWindow):
             conexion = menu.addAction("Configurar conexión...")
             conexion.triggered.connect(self._abrir_configuracion_conexion)
         menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+        return menu
 
     def _abrir_configuracion_conexion(self) -> None:
         """Reconfigura la conexión MySQL del puesto (sólo administrador)."""
