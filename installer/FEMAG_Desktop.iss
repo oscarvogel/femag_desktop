@@ -25,6 +25,12 @@ Uninstallable=yes
 ArchitecturesAllowed=x64compatible
 SetupIconFile=..\app\ui\assets\branding\femag.ico
 UninstallDisplayIcon={app}\FEMAG Desktop.exe
+; Con la app abierta, el EXE no se reemplaza y el usuario sigue viendo la
+; version vieja: hay que cerrar la aplicacion antes de instalar. Con esto,
+; Inno Setup la cierra sola (tambien en instalacion silenciosa) y, si no
+; puede, avisa en vez de dejar el puesto con un build viejo.
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"

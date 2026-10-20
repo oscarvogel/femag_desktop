@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 #: todo leído" dejaría al sistema caído sin avisar otra vez (#726).
 PERSISTENT_TYPES = frozenset({"orden_sin_cuenta_corriente"})
 
+#: Acción que dispara el aviso de plata: abrir la pantalla de reparación.
+ACCION_REPARAR_CUENTA_CORRIENTE = "reparar_cuenta_corriente"
+
 
 @dataclass(frozen=True)
 class AvisoView:
@@ -24,6 +27,11 @@ class AvisoView:
     route_key: str
     referencia_id: int | None
     created_at: datetime
+    #: Acción que se abre al clickear el aviso. Vacío = sólo navegar a la
+    #: pantalla. La alarma de plata lleva la acción de reparación: el
+    #: administrador tiene que llegar al botón sin tener que adivinar dónde
+    #: está (#726).
+    accion: str = ""
 
 
 class AvisoService:
@@ -181,6 +189,7 @@ class AvisoService:
                     route_key="load_orders",
                     referencia_id=finding.order_id,
                     created_at=datetime.utcnow(),
+                    accion=ACCION_REPARAR_CUENTA_CORRIENTE,
                 )
             )
         return out

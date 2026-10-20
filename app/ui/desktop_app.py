@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QPushButton,
     QHeaderView,
     QScrollArea,
@@ -601,7 +602,15 @@ class FemagDesktopWindow(QMainWindow):
         )
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
         self._add_page("audit_query", AuditQueryPage(parent=self))
-        self._add_page("avisos", AvisoCenterPage(user=self.user, on_navigate=self._navigate_to_route, parent=self))
+        self._add_page(
+            "avisos",
+            AvisoCenterPage(
+                user=self.user,
+                on_navigate=self._navigate_to_route,
+                on_action=self._abrir_reparacion_cuenta_corriente,
+                parent=self,
+            ),
+        )
         self._add_page("placeholder", self._placeholder_page())
         self.nav.currentRowChanged.connect(self._navigate)
         self.nav.setCurrentRow(0)
@@ -652,14 +661,24 @@ class FemagDesktopWindow(QMainWindow):
         search.returnPressed.connect(lambda: self._on_global_search(search))
 
         notifications = QPushButton("Avisos")
+        more_button = QPushButton("Otros")
         help_button = QPushButton("Ayuda")
         settings = QPushButton("Config")
         change_password = QPushButton("Cambiar clave")
         theme_button = QPushButton()
         logout = QPushButton("Cerrar sesión")
-        for button in (notifications, help_button, settings, change_password, theme_button, logout):
+        for button in (
+            notifications,
+            more_button,
+            help_button,
+            settings,
+            change_password,
+            theme_button,
+            logout,
+        ):
             button.setObjectName("topbarIconButton")
         notifications.setObjectName("avisoButton")
+        more_button.setObjectName("topbarMoreButton")
         help_button.setObjectName("helpButton")
         # Comparte el estilo del resto del topbar a proposito: asi el boton del
         # tema no necesita reglas propias y hereda las claras y las oscuras.
@@ -671,10 +690,12 @@ class FemagDesktopWindow(QMainWindow):
         self.aviso_dropdown = AvisoDropdown(
             user=self.user,
             on_navigate=self._navigate_to_route,
+            on_action=self._abrir_reparacion_cuenta_corriente,
             parent=self,
         )
         self.notifications = notifications
         notifications.clicked.connect(self._toggle_avisos)
+        more_button.clicked.connect(lambda: self._abrir_opciones(more_button))
         help_button.clicked.connect(
             lambda: QMessageBox.information(self, "Ayuda", future_module_message())
         )
@@ -696,6 +717,7 @@ class FemagDesktopWindow(QMainWindow):
         layout.addWidget(search, 1)
         layout.addStretch(1)
         layout.addWidget(notifications)
+        layout.addWidget(more_button)
         layout.addWidget(help_button)
         layout.addWidget(settings)
         layout.addWidget(change_password)
@@ -775,6 +797,60 @@ class FemagDesktopWindow(QMainWindow):
             self.aviso_dropdown.show()
             n = self.aviso_service.count_unread(self.user)
             self.notifications.setText(f"Avisos ({n})" if n else "Avisos")
+
+    def _abrir_opciones(self, button: QPushButton) -> None:
+        """Menú "Otros": las acciones que no van siempre en la barra.
+
+        El botón de reparar la cuenta corriente vive acá y no en la fila de
+        acciones de órdenes: esa fila es más ancha que la ventana y el botón
+        se caía por la derecha, justo cuando hay plata sin registrar
+        (#726). Acá siempre se ve, al lado de la alarma.
+        """
+        menu = QMenu(self)
+        es_admin = PermissionService.is_administrator(self.user)
+        if es_admin:
+            try:
+                rotas = LoadOrderLedgerRepairService(
+                    current_user=self.shell.username
+                ).count_broken_orders()
+            except Exception:
+                rotas = 0
+            accion = menu.addAction(
+                f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
+            )
+            accion.triggered.connect(self._abrir_reparacion_cuenta_corriente)
+            menu.addSeparator()
+        centro = menu.addAction("Centro de Avisos")
+        centro.triggered.connect(lambda: self._navigate_to_route("avisos"))
+        if es_admin:
+            conexion = menu.addAction("Configurar conexión...")
+            conexion.triggered.connect(self._abrir_configuracion_conexion)
+        menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _abrir_configuracion_conexion(self) -> None:
+        """Reconfigura la conexión MySQL del puesto (sólo administrador)."""
+        if not PermissionService.is_administrator(self.user):
+            return
+        try:
+            current = load_runtime_connection()
+        except SecureConfigurationError:
+            current = None
+        ConnectionDialog(current=current, parent=self).exec_()
+
+    def _abrir_reparacion_cuenta_corriente(self, _aviso=None) -> None:
+        """Abre la pantalla de reparación desde la alarma de la barra superior.
+
+        La alarma de plata (#726) tiene que llevar al administrator al lugar
+        donde se arregla, no sólo a la pantalla de órdenes: si hay que buscar
+        el botón, la alarma no served de nada.
+        """
+        if not PermissionService.is_administrator(self.user):
+            return
+        dialog = LoadOrderLedgerRepairDialog(self.shell.username, self, user=self.user)
+        dialog.exec_()
+        if dialog.repaired:
+            self._navigate_to_route("load_orders")
+            self._refresh_aviso_badge()
 
     def _open_change_password(self) -> None:
         dialog = ChangePasswordDialog(title="Cambiar mi contraseña", parent=self)
@@ -2073,6 +2149,12 @@ class FemagDesktopWindow(QMainWindow):
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
         _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
         for button in (
+            # El botón de administración va PRIMERO: al final de la fila
+            # quedaba fuera de pantalla en ventanas angostas (esa fila es más
+            # ancha que la ventana y el botón se caía por la derecha), y
+            # justo cuando hay plata sin registrar es cuando hay que llegar
+            # rápido.
+            repair_button,
             new_button,
             edit_button,
             history_button,
@@ -2082,13 +2164,12 @@ class FemagDesktopWindow(QMainWindow):
             reprint_button,
             budget_button,
             annul_button,
-            repair_button,
         ):
             actions.addWidget(button)
+        actions.addStretch(1)
         # Se oculta despues de agregarlo al layout: un boton sin padre al que
         # se le hace visible se vuelve una ventana propia.
         repair_button.setVisible(can_repair_ledger)
-        actions.addStretch(1)
 
         search_row = QHBoxLayout()
         search_row.setContentsMargins(10, 0, 10, 10)

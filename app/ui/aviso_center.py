@@ -5,10 +5,11 @@ from app.utils.datetime_utils import as_datetime
 
 
 class AvisoCenterPage(QWidget):
-    def __init__(self, *, user, on_navigate, parent=None):
+    def __init__(self, *, user, on_navigate, on_action=None, parent=None):
         super().__init__(parent)
         self.user = user
         self.on_navigate = on_navigate
+        self.on_action = on_action
         self.service = AvisoService()
         lay = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -61,4 +62,9 @@ class AvisoCenterPage(QWidget):
 
     def _navigate(self, aviso):
         self.service.mark_read(self.user, aviso.tipo, aviso.referencia_id)
+        accion = getattr(aviso, "accion", "")
+        if accion and self.on_action is not None:
+            # La alarma de plata abre la pantalla de reparación (#726).
+            self.on_action(aviso)
+            return
         self.on_navigate(aviso.route_key)

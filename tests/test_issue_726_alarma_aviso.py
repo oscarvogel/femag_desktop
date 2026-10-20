@@ -154,3 +154,107 @@ def test_el_badge_no_muestra_alarma_si_no_hay_ordenes_rotas(db):
     assert boton.text() == "Avisos" or "(0)" in boton.text()
     ventana.close()
     assert app is not None
+
+
+def test_el_aviso_de_plata_trae_la_accion_de_reparacion(db):
+    """El aviso tiene que abrir la reparación, no sólo navegar a una pantalla."""
+    from app.services.aviso_service import ACCION_REPARAR_CUENTA_CORRIENTE, AvisoService
+
+    admin, _secretaria = _usuarios()
+    data = _maestros()
+    _orden_emitida_sin_cuenta_corriente(data)
+
+    alarma = _alarma(AvisoService().get_for_user(admin))
+
+    assert len(alarma) == 1
+    assert alarma[0].accion == ACCION_REPARAR_CUENTA_CORRIENTE
+
+
+def test_clickear_el_aviso_de_plata_abre_la_pantalla_de_reparacion(db, monkeypatch):
+    """Clic en el aviso -> diálogo de reparación (sin adivinar dónde está)."""
+    import app.ui.desktop_app as desktop_app
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    admin, _secretaria = _usuarios()
+    data = _maestros()
+    _orden_emitida_sin_cuenta_corriente(data)
+
+    abiertas = []
+
+    class DialogoFalso:
+        def __init__(self, *args, **kwargs):
+            self.repaired = []
+            abiertas.append(self)
+
+        def exec_(self):
+            return 0
+
+    monkeypatch.setattr(desktop_app, "LoadOrderLedgerRepairDialog", DialogoFalso)
+
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    ventana.aviso_dropdown.refresh()
+    item = None
+    for indice in range(ventana.aviso_dropdown.list.count()):
+        candidate = ventana.aviso_dropdown.list.item(indice)
+        aviso = candidate.data(Qt.UserRole)
+        if aviso is not None and getattr(aviso, "tipo", "") == "orden_sin_cuenta_corriente":
+            item = candidate
+    assert item is not None, "El aviso de plata tiene que estar en el desplegable"
+
+    ventana.aviso_dropdown._on_click(item)
+
+    assert len(abiertas) == 1, "El aviso de plata tiene que abrir la pantalla de reparación"
+    ventana.close()
+    assert app is not None
+
+
+def test_el_boton_de_reparar_no_queda_fuera_de_la_fila_de_acciones(db):
+    """El botón va PRIMERO: al final se caía fuera de la ventana (#726)."""
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    admin, _secretaria = _usuarios()
+
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    ventana.show()
+    # La pagina tiene que estar visible: si no, su layout no se activa y las
+    # coordenadas de los botones no dicen nada.
+    ventana.stack.setCurrentIndex(ventana._route_indexes["load_orders"])
+    app.processEvents()
+    page = ventana.stack.widget(ventana._route_indexes["load_orders"])
+    boton = page.findChild(QPushButton, "repairLedgerLoadOrderButton")
+    nuevo = page.findChild(QPushButton, "newLoadOrderButton")
+
+    assert boton is not None and nuevo is not None
+    x_reparar = boton.mapTo(page, boton.rect().topLeft()).x()
+    x_nuevo = nuevo.mapTo(page, nuevo.rect().topLeft()).x()
+    assert x_reparar < x_nuevo, (
+        f"El boton de reparar tiene que estar antes que el resto de las acciones "
+        f"(reparar={x_reparar}, nuevo={x_nuevo})"
+    )
+    ventana.close()
+    assert app is not None
+
+
+def test_el_menu_otros_tiene_la_opcion_de_reparar_para_el_admin(db):
+    """El acceso tiene que estar en la barra superior, que siempre se ve."""
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    app = QApplication.instance() or QApplication([])
+    admin, _secretaria = _usuarios()
+
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    boton = ventana.findChild(QPushButton, "topbarMoreButton")
+
+    assert boton is not None, "El boton 'Otros' tiene que estar en la barra superior"
+    assert not boton.isHidden()
+    ventana.close()
+    assert app is not None

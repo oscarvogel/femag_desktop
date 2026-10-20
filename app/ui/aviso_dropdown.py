@@ -4,11 +4,12 @@ from app.services.aviso_service import AvisoService
 
 
 class AvisoDropdown(QFrame):
-    def __init__(self, *, user, on_navigate, parent=None):
+    def __init__(self, *, user, on_navigate, on_action=None, parent=None):
         super().__init__(parent)
         self.setObjectName("avisoDropdown")
         self.user = user
         self.on_navigate = on_navigate
+        self.on_action = on_action
         self.service = AvisoService()
         self.setWindowFlags(Qt.Popup)
         layout = QVBoxLayout(self)
@@ -41,7 +42,14 @@ class AvisoDropdown(QFrame):
         aviso = item.data(Qt.UserRole)
         if aviso and hasattr(aviso, "route_key"):
             self.service.mark_read(self.user, aviso.tipo, aviso.referencia_id)
-            self.on_navigate(aviso.route_key)
+            accion = getattr(aviso, "accion", "")
+            if accion and self.on_action is not None:
+                # El aviso trae su propia acción (la alarma de plata abre la
+                # pantalla de reparación): no hay que adivinar dónde está el
+                # botón (#726).
+                self.on_action(aviso)
+            else:
+                self.on_navigate(aviso.route_key)
             self.hide()
 
     def _mark_all(self):
