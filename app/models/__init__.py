@@ -37,6 +37,7 @@ from app.models.security import MenuItem, Permission, User, UserProfile
 from app.models.whatsapp import WhatsAppEnvio
 from app.models.production import (
     ProductionBag,
+    ProductionConsumption,
     ProductionPart,
     RawMaterialIntake,
     RawMaterialIntakeLine,
@@ -100,6 +101,7 @@ ALL_MODELS = [
     RawMaterialIntakeLine,
     ProductionPart,
     ProductionBag,
+    ProductionConsumption,
     StockMovement,
     StockCount,
     StockCountLine,

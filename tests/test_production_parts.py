@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from itertools import count
 
 import pytest
 
@@ -10,9 +11,13 @@ from app.models.masters import (
     Product,
 )
 from app.models.production import ProductionBag, ProductionPart
+from app.models.stock import StockMovement
 from app.services.production_part_service import ProductionPartService
+from app.services.stock_service import StockService
 
 DAY = date(2026, 9, 29)
+
+_MATERIAS = count(1)
 
 
 def _bagged_product(name="Almidón de mandioca", weight="25.000"):
@@ -21,10 +26,43 @@ def _bagged_product(name="Almidón de mandioca", weight="25.000"):
     )
 
 
+def _materia_prima(name=None, weight="1000.000", stock_kg="5000.000"):
+    """Materia prima comprada, con su stock real en el libro.
+
+    Desde #730 el parte declara la materia prima que consumio, y la
+    confirmacion se bloquea si el material no alcanza. Por eso el test tiene
+    que arrancar con una compra: si no, estaria probando un flujo que en
+    planta no puede pasar.
+    """
+    producto = Product.create(
+        name=name or f"Almidón a granel {next(_MATERIAS)}",
+        unit="kg",
+        peso_unitario_kg=Decimal(weight),
+        product_kind="producto",
+        stock_role="materia_prima",
+        active=True,
+    )
+    StockService.register(
+        product=producto,
+        movement_type=StockMovement.TYPE_PURCHASE,
+        quantity_kg=Decimal(stock_kg),
+        source_ref=f"raw_material_intake:{producto.id}",
+        description="Compra de big bag",
+        movement_date=DAY,
+        created_by="operador1",
+    )
+    return producto
+
+
+def _consumos(materia, kg="5000.000"):
+    return [(materia, Decimal(kg))]
+
+
 def test_production_calculates_kg_from_bags_and_unit_weight(db):
     product = _bagged_product()
     part = ProductionPartService.create(
-        production_date=DAY, shift="Mañana", lines=[(product, 280)]
+        production_date=DAY, shift="Mañana", lines=[(product, 280)],
+        consumptions=_consumos(_materia_prima()),
     )
     lines = ProductionPartService.lines_of(part)
     assert len(lines) == 1
@@ -37,13 +75,15 @@ def test_production_accepts_several_products_in_one_shift(db):
     almidon = _bagged_product("Almidón de mandioca", "25.000")
     premezcla = _bagged_product("Premezcla industrial", "20.000")
     part = ProductionPartService.create(
-        production_date=DAY, shift="Tarde", lines=[(almidon, 100), (premezcla, 50)]
+        production_date=DAY, shift="Tarde", lines=[(almidon, 100), (premezcla, 50)],
+        consumptions=_consumos(_materia_prima()),
     )
     totals = ProductionPartService.totals([part])
     assert totals.parts == 1
     assert totals.lines == 2
     assert totals.bags == 150
     assert totals.kg == Decimal("3500.00")
+    assert totals.consumed_kg == Decimal("5000.00")
 
 
 def test_production_rejects_product_without_unit_weight(db):
@@ -86,7 +126,8 @@ def test_production_requires_shift(db):
 def test_kg_snapshot_survives_master_weight_change(db):
     product = _bagged_product(weight="25.000")
     part = ProductionPartService.create(
-        production_date=DAY, shift="Mañana", lines=[(product, 100)]
+        production_date=DAY, shift="Mañana", lines=[(product, 100)],
+        consumptions=_consumos(_materia_prima()),
     )
     product.peso_unitario_kg = Decimal("30.000")
     product.save()
@@ -98,13 +139,16 @@ def test_kg_snapshot_survives_master_weight_change(db):
 def test_production_can_be_corrected_replacing_lines(db):
     almidon = _bagged_product("Almidón de mandioca", "25.000")
     premezcla = _bagged_product("Premezcla industrial", "20.000")
+    materia = _materia_prima()
     part = ProductionPartService.create(
         production_date=DAY, shift="Mañana", lines=[(almidon, 280)],
+        consumptions=_consumos(materia),
         observations="Carga inicial",
     )
     part = ProductionPartService.update(
         part, production_date=DAY, shift="Mañana",
-        lines=[(almidon, 200), (premezcla, 10)], observations="Corrección de embolsado",
+        lines=[(almidon, 200), (premezcla, 10)], consumptions=_consumos(materia),
+        observations="Corrección de embolsado",
     )
     totals = ProductionPartService.totals([part])
     assert totals.lines == 2
@@ -116,7 +160,8 @@ def test_production_can_be_corrected_replacing_lines(db):
 def test_annul_removes_part_and_its_bags(db):
     product = _bagged_product()
     part = ProductionPartService.create(
-        production_date=DAY, shift="Mañana", lines=[(product, 40)]
+        production_date=DAY, shift="Mañana", lines=[(product, 40)],
+        consumptions=_consumos(_materia_prima()),
     )
     ProductionPartService.annul(part)
     assert ProductionPart.select().count() == 0
@@ -125,10 +170,15 @@ def test_annul_removes_part_and_its_bags(db):
 
 def test_for_day_keeps_dates_independent(db):
     product = _bagged_product()
+    materia = _materia_prima()
     ProductionPartService.create(
-        production_date=date(2026, 9, 28), shift="Mañana", lines=[(product, 100)]
+        production_date=date(2026, 9, 28), shift="Mañana", lines=[(product, 100)],
+        consumptions=_consumos(materia),
     )
-    ProductionPartService.create(production_date=DAY, shift="Mañana", lines=[(product, 200)])
+    ProductionPartService.create(
+        production_date=DAY, shift="Mañana", lines=[(product, 200)],
+        consumptions=_consumos(materia),
+    )
     rows = ProductionPartService.for_day(date(2026, 9, 28))
     assert len(rows) == 1
     assert rows[0].production_date == date(2026, 9, 28)
@@ -137,12 +187,20 @@ def test_for_day_keeps_dates_independent(db):
 
 def test_day_totals_add_up_across_shifts(db):
     product = _bagged_product()
-    ProductionPartService.create(production_date=DAY, shift="Mañana", lines=[(product, 100)])
-    ProductionPartService.create(production_date=DAY, shift="Tarde", lines=[(product, 150)])
+    materia = _materia_prima()
+    ProductionPartService.create(
+        production_date=DAY, shift="Mañana", lines=[(product, 100)],
+        consumptions=_consumos(materia, "3000.000"),
+    )
+    ProductionPartService.create(
+        production_date=DAY, shift="Tarde", lines=[(product, 150)],
+        consumptions=_consumos(materia, "4000.000"),
+    )
     totals = ProductionPartService.totals(ProductionPartService.for_day(DAY))
     assert totals.parts == 2
     assert totals.bags == 250
     assert totals.kg == Decimal("6250.00")
+    assert totals.consumed_kg == Decimal("7000.00")
 
 
 def test_migration_drops_legacy_kilos_columns_and_orphan_parts(db):
@@ -185,7 +243,10 @@ def test_migration_keeps_parts_that_already_have_bags(db):
     from app.config.schema import _drop_legacy_production_kilos
 
     product = _bagged_product()
-    ProductionPartService.create(production_date=DAY, shift="Mañana", lines=[(product, 30)])
+    ProductionPartService.create(
+        production_date=DAY, shift="Mañana", lines=[(product, 30)],
+        consumptions=_consumos(_materia_prima()),
+    )
 
     db.execute_sql("ALTER TABLE production_part ADD COLUMN cassava_processed_kg DECIMAL(12,2) NULL")
     _drop_legacy_production_kilos(db)

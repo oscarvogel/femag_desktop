@@ -6,15 +6,20 @@ rendiran Y kilos de fecula, y cuanto se embolso de verdad.
 
 from datetime import date, datetime
 from decimal import Decimal
+from itertools import count
 
 import pytest
 
 from app.models.masters import Product
 from app.models.production import ProductionPart, RawMaterialReceipt
+from app.models.stock import StockMovement
 from app.services.production_contrast_service import ProductionContrastService
 from app.services.production_part_service import ProductionPartService
+from app.services.stock_service import StockService
 
 DAY = date(2026, 10, 2)
+
+_MATERIAS = count(1)
 
 
 def _receipt(day, payable, rinde_pct, teorica, comp="000000046238", proveedor="KLEM JORGE"):
@@ -36,9 +41,37 @@ def _product(name="BOLSAS DE FECULA NATIVA", weight="25.000"):
     )
 
 
+def _materia_prima(name=None, weight="1000.000", stock_kg="50000.000"):
+    """Materia prima comprada, con su stock real en el libro.
+
+    Desde #730 el parte declara la materia prima que consumio, y la
+    confirmacion se bloquea si el material no alcanza: el test tiene que
+    arrancar con una compra.
+    """
+    producto = Product.create(
+        name=name or f"ALMIDON A GRANEL {next(_MATERIAS)}",
+        unit="kg",
+        peso_unitario_kg=Decimal(weight),
+        product_kind="producto",
+        stock_role="materia_prima",
+        active=True,
+    )
+    StockService.register(
+        product=producto,
+        movement_type=StockMovement.TYPE_PURCHASE,
+        quantity_kg=Decimal(stock_kg),
+        source_ref=f"raw_material_intake:{producto.id}",
+        description="Compra de big bag",
+        movement_date=DAY,
+        created_by="operador1",
+    )
+    return producto
+
+
 def _confirmed_part(product, bags, shift="MaÃ±ana"):
     part = ProductionPartService.create(
-        production_date=DAY, shift=shift, lines=[(product, bags)]
+        production_date=DAY, shift=shift, lines=[(product, bags)],
+        consumptions=[(_materia_prima(), Decimal("1000.000"))],
     )
     return ProductionPartService.confirm(part, current_user="operador1")
 
@@ -189,7 +222,8 @@ def test_un_parte_en_borrador_no_cuenta_como_real(db):
     _receipt(DAY, "41043", "22.54", "9249.00")
     product = _product()
     borrador = ProductionPartService.create(
-        production_date=DAY, shift="MaÃ±ana", lines=[(product, 60)]
+        production_date=DAY, shift="MaÃ±ana", lines=[(product, 60)],
+        consumptions=[(_materia_prima(), Decimal("1000.000"))],
     )
 
     c = ProductionContrastService.for_day(DAY)
@@ -267,7 +301,8 @@ def test_el_mes_agrega_todo_y_el_dia_no(db):
     _receipt(date(2026, 11, 3), "50000", "25.00", "12500.00", comp="3")
     product = _product()
     parte = ProductionPartService.create(
-        production_date=date(2026, 10, 20), shift="Mañana", lines=[(product, 200)]
+        production_date=date(2026, 10, 20), shift="Mañana", lines=[(product, 200)],
+        consumptions=[(_materia_prima(), Decimal("5000.000"))],
     )
     ProductionPartService.confirm(parte, current_user="operador1")
 
@@ -394,7 +429,8 @@ def test_la_pantalla_avisa_los_borradores_que_no_cuentan(db):
     _receipt(DAY, "41043", "22.54", "9249.00")
     product = _product()
     ProductionPartService.create(
-        production_date=DAY, shift="Mañana", lines=[(product, 60)]
+        production_date=DAY, shift="Mañana", lines=[(product, 60)],
+        consumptions=[(_materia_prima(), Decimal("1000.000"))],
     )
 
     page = _page(db)
