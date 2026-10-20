@@ -544,16 +544,20 @@ en la máquina del cliente.
 
 | Dato | Valor |
 |---|---|
-| Versión | **2026.10.20.07.10.00** |
-| SHA256 | `6be937b925256e53bfe390dc9b76549f7503ff7f44b9cf0620e34dd4e085448d` |
-| Tamaño | 42.698.133 bytes |
-| `source_sha` | `04dc8fb2516683f9696b222383c88c9783403763` |
+| Versión | **2026.10.20.09.09.43** |
+| SHA256 | `d5950ca7702381a4808258fd6df6f6c6d4ce7db6b1ccc80a116732576888ba21` |
+| Tamaño | 42.724.468 bytes |
+| `source_sha` | `795a5501bede6681d362a58df13c7aac01613787` |
 | Descarga | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
 
-> Versión anterior publicada: `2026.10.19.18.50.09` (SHA256 `9d6fb4d9…27e12`). **Si en
-> la máquina del cliente la barra de estado dice esa versión, el instalador no
-> reemplazó el EXE**: es la versión anterior, que no tiene el botón ni la alarma.
-> La buena es la **2026.10.20.07.10.00**.
+> Versiones anteriores publicadas: `2026.10.20.07.10.00` (SHA256 `6be937b9…5448d`) y
+> `2026.10.19.18.50.09` (SHA256 `9d6fb4d9…27e12`). **Si en la máquina del cliente la
+> barra de estado dice una de esas, el instalador no reemplazó el EXE**: son versiones
+> anteriores. La buena es la **2026.10.20.09.09.43**.
+>
+> La `2026.10.20.07.10.00` **sí** tiene el botón "Otros" en la barra superior con la
+> acción "Reparar cta. corriente": con esa versión la reparación también se puede
+> hacer sin instalar nada nuevo.
 
 Validaciones del artefacto: `--smoke` OK, `--production-health-check` OK, sin secretos ni
 configuración en el artefacto, y el SHA256 del asset publicado coincide con el del
