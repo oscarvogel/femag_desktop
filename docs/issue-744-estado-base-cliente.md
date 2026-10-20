@@ -103,21 +103,27 @@ legacy, sin nombre ni CUIT, que no entra nunca).
 
 ## Que hay que hacer en la maquina del cliente
 
-**No hace falta un release nuevo.** La app instalada ya tiene la pantalla
-**Importacion -> Importacion DBF** y el boton **"Configurar origen DGR"**.
+**La app tiene que estar actualizada.** Con la version anterior a #746, la
+importacion **pisa** lo que el operador edito a mano (nombre, telefono,
+domicilio, rubros) y con la version nueva no: la importacion solo completa lo
+que esta vacio.
 
-1. **Actualizar la app** a la ultima version publicada (la del 20/10, que ya
-   esta promovida a produccion). Esto importa: el backfill de las direcciones
-   de cliente (#688) es lo que completa la localidad del destino. Con una
-   version anterior, reimportar los maestros completa transportistas, choferes,
-   productos y camiones, pero **las direcciones de cliente quedan sin
-   localidad** y el remito sigue bloqueado por "destino: falta localidad DGR".
-2. Abrir **Importacion -> Importacion DBF**.
-3. Poner los cuatro DBF de maestros de la carpeta del legacy de la maquina del
+El release con #746 todavia no se publico, asi que hay dos caminos:
+
+- **Con la app actualizada** (recomendado): la pantalla *Importacion ->
+  Importacion DBF* hace el trabajo, con el orden ya corregido y sin pisar lo
+  editado.
+- **Sin app actualizada**: se puede correr el comando a mano, pero con el
+  importador viejo, que **si** pisa lo editado. Ojo con esto.
+
+Los pasos con la app actualizada:
+
+1. Abrir **Importacion -> Importacion DBF**.
+2. Poner los cuatro DBF de maestros de la carpeta del legacy de la maquina del
    cliente: `clientes.dbf`, `transporte.dbf`, `chofer.dbf`, `productos.dbf`.
-4. **Importar DBF**. La referencia DGR ya esta, asi que no hace falta
+3. **Importar DBF**. La referencia DGR ya esta, asi que no hace falta
    importarla de nuevo (si se importa, es idempotente).
-5. Abrir el remito y generar el F150: deberian dar 0 problemas.
+4. Abrir el remito y generar el F150: deberian dar 0 problemas.
 
 Si en la maquina del cliente hay Python y el repo, el comando hace los tres
 pasos y ademas verifica:
@@ -125,6 +131,42 @@ pasos y ademas verifica:
 ```powershell
 python scripts/setup_f150_data.py --dbf-dir "C:\ruta\del\legacy\data"
 ```
+
+Por defecto hace las cosas en modo `patch`: **solo completa lo vacio** y
+respeta lo que el operador edito. Con `--mode overwrite` el legacy manda en
+todo, que es lo que hay que usar para una recarga deliberada, no para una
+base viva.
+
+## La importacion no pisa lo que el operador edito (#746)
+
+La base del cliente es una base **viva**. Antes de #746, la importacion
+escribia todos los valores del legacy encima de la fila existente, asi que una
+reimportacion deshacia los cambios del operador.
+
+Ahora hay dos modos:
+
+- **`patch` (por defecto)**: solo completa los campos **vacios**. Lo que el
+  operador corrigio a mano se respeta.
+- **`overwrite`**: el legacy manda en todos los campos, como antes. A
+  proposito, para una carga limpia o una recarga deliberada.
+
+De algunos campos la importacion es **duena** y los corrige siempre, porque el
+operador no los edita en el ABM y son los que el F150 exige: la localidad DGR
+del transportista, del chofer y de la direccion del cliente, el tipo de chasis
+y de acoplado del camion, y los rubros y la unidad DGR de los productos.
+
+Comprobado contra esta misma base (restaurada del dump, con ediciones
+simuladas del operador):
+
+| edicion del operador | despues del setup |
+|---|---|
+| telefono del cliente `343-500-0000` | `343-500-0000` (respetado) |
+| razon social del cliente | respetada |
+| domicilio del transportista | respetado |
+| domicilio del cliente | respetado |
+| rubro DGR del producto (campo de la importacion) | corregido al del legacy |
+| localidad de la direccion (vacia) | completada (COLON) |
+| remito `REM-00000001` | **14 problemas -> 0** |
 
 ## Pendientes
 
