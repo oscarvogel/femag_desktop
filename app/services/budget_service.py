@@ -12,6 +12,7 @@ from app.models.load_orders import (
 from app.models.masters import Client, Product
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
+from app.services.budget_stock_service import BudgetStockService, BudgetStockShortfallError
 from app.services.client_service import ClientService
 from app.services.money import (
     BudgetTotals,
@@ -32,6 +33,7 @@ class BudgetService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
+        self.stock = BudgetStockService(current_user, audit_service=self.audit_service)
 
     def _next_budget_number(self) -> int:
         sequence, _ = NumberSequence.get_or_create(
@@ -187,7 +189,25 @@ class BudgetService:
         items: list[dict],
         issue_date: date | None = None,
         observations: str | None = None,
+        stock_override_reason: str = "",
     ) -> Budget:
+        """Crea un presupuesto manual y descuenta el stock de la mercaderia (#734).
+
+        El presupuesto manual es la segunda puerta por la que la mercaderia sale
+        de la planta, despues del despacho de la orden de carga. Por eso
+        descuenta stock: si no, la mercaderia se va sin dejar rastro en el libro
+        y el aviso de faltante de #732 no la ve.
+
+        Si la mercaderia no alcanza, no se crea el presupuesto en silencio: se
+        levanta :class:`BudgetStockShortfallError` con el detalle del faltante.
+        La pantalla lo muestra y pide un motivo; con ese motivo se vuelve a llamar
+        con ``stock_override_reason``, y la decision queda asentada en la
+        auditoria y en los movimientos del libro.
+
+        El descuento va en la misma transaccion que el documento y la deuda: si
+        el movimiento fallara, no puede quedar un presupuesto emitido con mercaderia
+        que no salio.
+        """
         client = Client.get_by_id(client.id)
         ClientService.ensure_active(client)
         from app.models.accounting import ClientAccountMovement
@@ -199,6 +219,19 @@ class BudgetService:
         totals = self._totals_from_normalized_items(normalized_items)
         movement_date = issue_date or date.today()
         due_date = movement_date + timedelta(days=max(int(client.dias_plazo_pago or 0), 0))
+
+        # El faltante se calcula antes de crear nada: sin motivo, el presupuesto
+        # no se crea, y con motivo el descuento va en la misma transaccion que el
+        # documento.
+        plan = self.stock.plan(normalized_items)
+        faltantes = self.stock.shortfall(plan)
+        motivo = (stock_override_reason or "").strip()
+        if faltantes and not motivo:
+            detalle = "; ".join(faltante.describe() for faltante in faltantes)
+            raise BudgetStockShortfallError(
+                f"No hay stock suficiente para crear el presupuesto: {detalle}",
+                faltantes=faltantes,
+            )
 
         with database_proxy.atomic():
             budget = Budget.create(
@@ -237,6 +270,7 @@ class BudgetService:
                 is_reversal=False,
                 created_by=self.current_user,
             )
+            self.stock.register(budget, plan, override_reason=motivo)
             self._record("crear_manual", budget, movement=movement)
         self.assert_monetary_integrity(budget)
         return budget
@@ -286,6 +320,13 @@ class BudgetService:
             )
             budget.status = Budget.STATUS_ANNULLED
             budget.save(only=[Budget.status])
+            # Anular un presupuesto manual devuelve la mercaderia: si no vuelve
+            # al deposito, el libro descuenta una salida que no existio. No borra
+            # nada: deja el movimiento de salida y su contrario, con el motivo.
+            self.stock.reverse(
+                budget,
+                reason=f"Anulación del presupuesto {budget.display_number}: {reason}",
+            )
             self._record("anular_manual", budget, reason=reason)
         return budget
 

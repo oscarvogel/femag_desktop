@@ -18,6 +18,10 @@ from PyQt5.QtWidgets import (
 from app.models.budgets import Budget
 from app.models.masters import Client, Product
 from app.services.budget_service import BudgetService
+from app.services.budget_stock_service import (
+    BudgetStockShortfallError,
+    descuenta_stock,
+)
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
 
@@ -125,6 +129,12 @@ class ManualBudgetDialog(QDialog):
         self.total_label.setObjectName("manualBudgetTotalLabel")
         self.total_label.setAlignment(Qt.AlignRight)
         layout.addWidget(self.total_label)
+
+        self.stock_note = QLabel()
+        self.stock_note.setObjectName("manualBudgetStockNote")
+        self.stock_note.setWordWrap(True)
+        self.stock_note.setProperty("uiRole", "muted")
+        layout.addWidget(self.stock_note)
 
         self.observations_input = QTextEdit()
         self.observations_input.setObjectName("manualBudgetObservationsInput")
@@ -241,18 +251,84 @@ class ManualBudgetDialog(QDialog):
                     cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.items_table.setItem(row, column, cell)
         self.total_label.setText(f"Total: $ {total:,.2f}")
+        self._refresh_stock_note()
+
+    def _refresh_stock_note(self) -> None:
+        """Dice que renglones descuentan stock y cuales no.
+
+        El presupuesto manual descuenta el stock de la mercaderia (#734), pero no
+        todo lo que se carga es mercaderia: un flete o un gasto administrativo no
+        sale del deposito, y un producto sin peso de bolsa cargado no se puede
+        convertir a kilos. Decirlo aca evita que el operador crea que la bolsa
+        no se descontó por un error.
+        """
+        sin_stock = sorted(
+            {
+                item["product"].name
+                for item in self._items
+                if not descuenta_stock(item["product"])
+            }
+        )
+        if sin_stock:
+            self.stock_note.setText(
+                "No descuentan stock (no son mercadería o no tienen peso de bolsa "
+                f"cargado): {', '.join(sin_stock)}"
+            )
+        elif self._items:
+            self.stock_note.setText(
+                "La mercadería de este presupuesto descuenta el stock del depósito."
+            )
+        else:
+            self.stock_note.setText("")
+
+    def _crear(self, *, stock_override_reason: str = "") -> Budget:
+        return BudgetService(self.current_user).create_manual(
+            client=self.client,
+            items=self.budget_items(),
+            observations=self.observations(),
+            stock_override_reason=stock_override_reason,
+        )
 
     def _confirm(self) -> None:
         if not self._items:
             self._show_warning("Agregue al menos un producto al presupuesto.")
             return
         try:
-            self._budget = BudgetService(self.current_user).create_manual(
-                client=self.client,
-                items=self.budget_items(),
-                observations=self.observations(),
+            self._budget = self._crear()
+        except BudgetStockShortfallError as exc:
+            # Mismo aviso que el despacho (#732): el faltante por producto y el
+            # motivo obligatorio. Sin motivo el presupuesto no se crea, y con el
+            # motivo la decision queda asentada en el libro.
+            from app.ui.load_order_stock_shortfall_dialog import (
+                LoadOrderStockShortfallDialog,
             )
-        except Exception as exc:
+
+            aviso = LoadOrderStockShortfallDialog(
+                None,
+                exc.faltantes,
+                parent=self,
+                titulo="Stock insuficiente - Nuevo presupuesto",
+                subtitulo="El presupuesto pide más mercadería de la que hay en stock",
+                texto_ayuda=(
+                    "Podés crearlo igual, pero el motivo queda registrado en la "
+                    "auditoría y en los movimientos de stock: es la traza de por "
+                    "qué se despachó sin stock."
+                ),
+                headers=(
+                    "Producto",
+                    "Stock en el libro (kg)",
+                    "Pide el presupuesto (kg)",
+                    "Falta (kg)",
+                ),
+            )
+            if aviso.exec_() != QDialog.Accepted:
+                return
+            try:
+                self._budget = self._crear(stock_override_reason=aviso.reason())
+            except Exception as exc:  # noqa: BLE001
+                self._show_warning(f"No se pudo crear el presupuesto: {exc}")
+                return
+        except Exception as exc:  # noqa: BLE001
             self._show_warning(f"No se pudo crear el presupuesto: {exc}")
             return
         self.accept()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from decimal import Decimal
 
 from app.models.load_orders import LoadOrder
@@ -9,36 +8,13 @@ from app.models.masters import Product
 from app.models.stock import StockMovement
 from app.services.audit_service import AuditService
 from app.services.stock_service import StockService
+from app.services.stock_shortfall import StockShortfall, stock_shortfall_of
 
 ZERO = Decimal("0.000")
 
 
 class LoadOrderStockError(ValueError):
     pass
-
-
-@dataclass(frozen=True)
-class StockShortfall:
-    """Faltante de un producto para despachar una orden (#732).
-
-    ``available_kg`` es el saldo del libro: ya descuenta lo que salio antes, asi
-    que el faltante es real, no una estimacion. ``requested_kg`` es lo que la
-    orden se lleva.
-    """
-
-    product: Product
-    available_kg: Decimal
-    requested_kg: Decimal
-
-    @property
-    def missing_kg(self) -> Decimal:
-        return max(self.requested_kg - self.available_kg, ZERO)
-
-    def describe(self) -> str:
-        return (
-            f"{self.product.name}: hay {self.available_kg:,.3f} kg, "
-            f"la orden pide {self.requested_kg:,.3f} kg, faltan {self.missing_kg:,.3f} kg"
-        )
 
 
 def dispatch_source_prefix(order_id: int) -> str:
@@ -151,35 +127,17 @@ class LoadOrderStockService:
         """Productos de la orden que no tienen stock suficiente (#732).
 
         No bloquea nada: la operacion decide que hacer con el faltante. El
-        saldo sale del libro de movimientos, asi que ya descuenta lo que salio
-        antes y el faltante es real.
-
-        Solo se avisa de los productos **con stock conocido**, es decir, los que
-        alguna vez entraron al libro (inventario inicial, compra, produccion).
-        De un producto que nunca se conto no se puede afirmar que falte: se
-        esta avisando de que el inventario todavia no esta cargado, que es otra
-        cosa. Sin esta distincion el aviso aparece en cada despacho hasta que
-        se carga el inventario inicial, y a la larga el operador lo deja de
-        leer.
+        calculo vive en :func:`app.services.stock_shortfall.stock_shortfall_of`
+        porque el presupuesto manual (#734) necesita exactamente el mismo.
 
         Se usa el mismo plan que el descuento, para que lo que se avisa y lo
         que se descuenta no puedan divergir.
         """
-        faltantes: list[StockShortfall] = []
-        for producto_id, _unidades, kilos in self.plan_dispatch(order):
-            producto = Product.get_by_id(producto_id)
-            if not StockService.has_inbound_movements(producto):
-                continue
-            disponible = StockService.balance_for(producto).balance_kg
-            if kilos > disponible:
-                faltantes.append(
-                    StockShortfall(
-                        product=producto,
-                        available_kg=disponible,
-                        requested_kg=kilos,
-                    )
-                )
-        return faltantes
+        plan = [
+            (Product.get_by_id(producto_id), unidades, kilos)
+            for producto_id, unidades, kilos in self.plan_dispatch(order)
+        ]
+        return stock_shortfall_of(plan)
 
     def _weight_of_dispatch(self, order, producto_id: int) -> Decimal:
         """Peso de bolsa que se uso cuando salio ese producto de esta orden.

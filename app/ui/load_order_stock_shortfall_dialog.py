@@ -17,49 +17,76 @@ from app.services.load_order_stock_service import StockShortfall
 
 
 class LoadOrderStockShortfallDialog(QDialog):
-    """Modal para avisar que la orden pide mas mercaderia de la que hay (#732).
+    """Modal para avisar que la operacion pide mas mercaderia de la que hay.
+
+    Lo usan dos operaciones: el despacho de la orden de carga (#732) y el
+    presupuesto manual (#734). El aviso es el mismo en las dos, porque el
+    problema es el mismo: la mercaderia sale de la planta y el libro dice que
+    no hay.
 
     Muestra el faltante por producto y exige un motivo para emitir igual. El
     motivo es lo que queda asentado en la auditoria y en los movimientos del
     libro: sin el, la decision de despachar sin stock no existe.
+
+    ``order`` es opcional porque el presupuesto manual no tiene orden: en ese
+    caso el titulo y el texto los define la operacion que lo abre.
     """
 
     HEADERS = ("Producto", "Stock en el libro (kg)", "Pide la orden (kg)", "Falta (kg)")
 
     def __init__(
         self,
-        order: LoadOrder,
+        order: LoadOrder | None,
         faltantes: list[StockShortfall],
         parent=None,
+        *,
+        titulo: str | None = None,
+        subtitulo: str | None = None,
+        texto_ayuda: str | None = None,
+        headers: tuple[str, ...] | None = None,
     ):
         super().__init__(parent)
-        self.order = LoadOrder.get_by_id(order.id)
+        self.order = LoadOrder.get_by_id(order.id) if order is not None else None
         self.faltantes = list(faltantes)
         self.setObjectName("loadOrderStockShortfallDialog")
-        self.setWindowTitle(f"Stock insuficiente - OC-{self.order.order_number:06d}")
+        if titulo is None:
+            titulo = (
+                f"Stock insuficiente - OC-{self.order.order_number:06d}"
+                if self.order is not None
+                else "Stock insuficiente"
+            )
+        self.setWindowTitle(titulo)
         self.setModal(True)
         self.resize(720, 460)
         self.setMinimumWidth(640)
 
         layout = QVBoxLayout(self)
 
-        title = QLabel(f"Stock insuficiente para la orden OC-{self.order.order_number:06d}")
+        if subtitulo is None:
+            subtitulo = (
+                f"Stock insuficiente para la orden OC-{self.order.order_number:06d}"
+                if self.order is not None
+                else "Stock insuficiente"
+            )
+        title = QLabel(subtitulo)
         title.setObjectName("loadOrderStockShortfallTitle")
         title.setProperty("uiRole", "sectionTitle")
         layout.addWidget(title)
 
-        help_text = QLabel(
-            "La orden pide más mercadería de la que hay en stock. Podés emitirla "
-            "igual, pero el motivo queda registrado en la auditoría y en los "
-            "movimientos de stock: es la traza de por qué se despachó sin stock."
-        )
+        if texto_ayuda is None:
+            texto_ayuda = (
+                "La orden pide más mercadería de la que hay en stock. Podés emitirla "
+                "igual, pero el motivo queda registrado en la auditoría y en los "
+                "movimientos de stock: es la traza de por qué se despachó sin stock."
+            )
+        help_text = QLabel(texto_ayuda)
         help_text.setWordWrap(True)
         help_text.setProperty("uiRole", "muted")
         layout.addWidget(help_text)
 
         self.table = QTableWidget(len(self.faltantes), len(self.HEADERS))
         self.table.setObjectName("loadOrderStockShortfallTable")
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
+        self.table.setHorizontalHeaderLabels(list(headers or self.HEADERS))
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
