@@ -476,6 +476,40 @@ C:\Users\Usuario\Downloads\femag_pre_repair_20261019.sql   (2.717.776 bytes)
 
 ## Por qué el administrador no encontraba la acción (y qué se corrigió)
 
+### La causa de fondo: la pantalla que se ve la arma una extensión
+
+`app/main.py` instala extensiones de interfaz al arrancar. Una de ellas,
+`load_order_workspace_restore_extension`, **reemplaza por completo** la pantalla de
+órdenes del código base: la que el usuario ve tiene "Ver detalle", "Pallets" y la fila de
+"Búsqueda rápida", y **no** es la que construye `desktop_app._load_order_page`.
+
+El botón de reparación había quedado en la página del código base, que **en runtime no
+existe**. Por eso no aparecía ni con el build instalado, ni como admin, ni con la
+ventana ancha. Los tests tampoco lo detectaban porque **no instalaban la extensión**:
+probaban una pantalla que la aplicación real nunca muestra.
+
+Corregido con una fuente única (`desktop_app._ledger_repair_button`) que se usa en las
+dos pantallas, más un test que construye la pantalla de la extensión.
+
+### Y un efecto colateral que rompía la suite
+
+Las extensiones se instalaban a nivel de módulo, así que **importar** `app.main`
+parcheaba la ventana de órdenes para todo el proceso: un solo test que importara el
+módulo rompía los tests de órdenes que corrían después. Ahora las extensiones se
+instalan en `install_extensions()`, que se llama al abrir la interfaz: importar un
+módulo no reconfigura la app.
+
+### Salida de emergencia que no depende de la pantalla
+
+El EXE congelado tiene una CLI para resolverlo sin abrir la aplicación:
+
+```
+"FEMAG Desktop.exe" --repair-ledger                      # lista (dry-run)
+"FEMAG Desktop.exe" --repair-ledger --order 78 --apply   # repara la OC-000078
+```
+
+Es el mismo servicio que el botón de administrador.
+
 La primera publicación del candidate dejó al administrador en la máquina del cliente
 **sin ver el botón** y **sin ver el cambio**. Se investigated por qué y eran tres
 cosas distintas:

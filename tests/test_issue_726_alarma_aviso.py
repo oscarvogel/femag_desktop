@@ -260,41 +260,41 @@ def test_el_menu_otros_tiene_la_opcion_de_reparar_para_el_admin(db):
     assert app is not None
 
 
-def test_el_boton_de_reparar_esta_en_la_pantalla_real_de_ordenes(db, monkeypatch):
+def test_el_boton_de_reparar_esta_en_la_pantalla_real_de_ordenes(db):
     """La pantalla que se ve en runtime la arma una EXTENSIÓN que reemplaza a la
     del código base.
 
     El botón estaba en la página del código base, que en runtime no se ve: por
     eso el administrador no lo encontraba aunque tuviera el build instalado
-    (#726). Este test instala la extensión, igual que el arranque real, para
-    que no vuelva a pasar.
+    (#726). Este test construye la pantalla de la extensión (igual que el
+    arranque real) para que no vuelva a pasar.
     """
     from PyQt5.QtWidgets import QApplication, QPushButton
 
     from app.ui.desktop_app import FemagDesktopWindow
     from app.ui.load_order_workspace_restore_extension import (
-        install_load_order_workspace_restore_extension,
+        _restored_load_order_page,
     )
-
-    original = FemagDesktopWindow._load_order_page
-    monkeypatch.setattr(FemagDesktopWindow, "_load_order_page", original)
-    install_load_order_workspace_restore_extension()
 
     app = QApplication.instance() or QApplication([])
     admin, _secretaria = _usuarios()
 
     ventana = FemagDesktopWindow(user=admin, demo_mode=True)
     ventana.show()
-    ventana.stack.setCurrentIndex(ventana._route_indexes["load_orders"])
     app.processEvents()
-    page = ventana.stack.widget(ventana._route_indexes["load_orders"])
-    boton = page.findChild(QPushButton, "repairLedgerLoadOrderButton")
+    page = _restored_load_order_page(ventana)
+    app.processEvents()
 
+    boton = page.findChild(QPushButton, "repairLedgerLoadOrderButton")
     assert boton is not None, (
         "El boton de reparar tiene que estar en la pantalla REAL de ordenes "
         "(la de la extension), no solo en la del codigo base."
     )
-    assert boton.isVisible()
+    # ``isHidden`` dice si el botón está oculto a propósito; ``isVisible`` exige
+    # que la página esté mostrada en una ventana, y acá la página se construye
+    # suelta para no tocar la ventana del test.
+    assert not boton.isHidden(), "El boton de reparar no puede quedar oculto"
+    page.deleteLater()
     ventana.close()
     assert app is not None
 

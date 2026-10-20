@@ -137,11 +137,6 @@ def _restored_load_order_page(self):
     budget_button = desktop._action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
     annul_button = desktop._action_button("annulLoadOrderButton", "Anular", secondary=True)
     annul_button.setProperty("uiRole", "danger")
-    # Esta extension REEMPLAZA la pantalla de ordenes del codigo base, asi que
-    # el boton de reparacion tiene que estar aqui tambien: antes solo estaba
-    # en la pagina base, que en runtime no se ve, y el administrador no lo
-    # encontraba aunque el build estuviera instalado (#726).
-    repair_button, refresh_repair_count = desktop._ledger_repair_button(self)
 
     desktop._set_button_icon(new_button, QStyle.SP_FileIcon)
     desktop._set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
@@ -157,11 +152,14 @@ def _restored_load_order_page(self):
 
     can_reprint = desktop._can_reprint_load_orders(self.user)
     reprint_button.setVisible(can_reprint)
+    # Esta extension REEMPLAZA la pantalla de ordenes del codigo base, asi que
+    # el boton de reparacion tiene que estar aqui tambien: antes solo estaba
+    # en la pagina base, que en runtime no se ve, y el administrador no lo
+    # encontraba aunque el build estuviera instalado (#726).
+    # El helper lo agrega PRIMERO a la fila y lo muestra recien despues de
+    # estar en el layout (si no, se vuelve una ventana propia).
+    repair_button, refresh_repair_count = desktop._ledger_repair_button(self, actions)
     for button in (
-        # El boton de administracion va PRIMERO: al final de la fila quedaba
-        # fuera de pantalla en ventanas angostas, y justo cuando hay plata sin
-        # registrar es cuando hay que llegar rapido (#726).
-        repair_button,
         new_button,
         edit_button,
         detail_button,

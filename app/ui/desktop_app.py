@@ -2126,7 +2126,6 @@ class FemagDesktopWindow(QMainWindow):
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
-        repair_button, refresh_repair_count = _ledger_repair_button(self)
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
@@ -2143,13 +2142,12 @@ class FemagDesktopWindow(QMainWindow):
         search_input.setMinimumWidth(220)
         search_button = _action_button("searchLoadOrderButton", "Buscar", secondary=True)
         _set_button_icon(search_button, QStyle.SP_FileDialogContentsView)
+        # El botón de administración va PRIMERO: al final de la fila quedaba
+        # fuera de pantalla en ventanas angostas (esa fila es más ancha que la
+        # ventana y el botón se caía por la derecha), y justo cuando hay plata
+        # sin registrar es cuando hay que llegar rápido.
+        repair_button, refresh_repair_count = _ledger_repair_button(self, actions)
         for button in (
-            # El botón de administración va PRIMERO: al final de la fila
-            # quedaba fuera de pantalla en ventanas angostas (esa fila es más
-            # ancha que la ventana y el botón se caía por la derecha), y
-            # justo cuando hay plata sin registrar es cuando hay que llegar
-            # rápido.
-            repair_button,
             new_button,
             edit_button,
             history_button,
@@ -2952,7 +2950,7 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
     return button
 
 
-def _ledger_repair_button(window) -> tuple[QPushButton, object]:
+def _ledger_repair_button(window, actions_layout) -> tuple[QPushButton, object]:
     """Botón de reparación de órdenes sin cuenta corriente (sólo administrador).
 
     Fuente única para las DOS pantallas de órdenes: la del código base y la
@@ -2962,6 +2960,11 @@ def _ledger_repair_button(window) -> tuple[QPushButton, object]:
     no se usa: el administrador nunca lo vio aunque el build estuviera
     instalado (#726).
 
+    El botón se agrega **primero** a la fila de acciones y se muestra recién
+    después de estar en el layout: un botón sin padre al que se le hace
+    visible se vuelve una ventana propia, y al final de la fila se caía fuera
+    de pantalla en ventanas angostas.
+
     Devuelve el botón y la función que actualiza su contador.
     """
     from app.services.load_order_ledger_repair_service import LoadOrderLedgerRepairService
@@ -2970,6 +2973,7 @@ def _ledger_repair_button(window) -> tuple[QPushButton, object]:
         "repairLedgerLoadOrderButton", "Reparar cta. corriente", secondary=True
     )
     can_repair = PermissionService.is_administrator(window.user)
+    actions_layout.addWidget(button)
     button.setVisible(can_repair)
 
     def refresh_count() -> None:

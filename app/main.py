@@ -25,13 +25,22 @@ from app.ui.update_extension import install_update_extension
 from app.ui.application_lifecycle_extension import install_application_lifecycle_extension
 
 
-install_desktop_product_code_extension()
-install_load_order_instructions_extension()
-install_update_extension()
-install_application_lifecycle_extension()
-install_multi_station_refresh_extension()
-install_load_order_workspace_restore_extension()
-install_load_order_quick_search_extension()
+def install_extensions() -> None:
+    """Instala las extensiones de la interfaz.
+
+    Vive en una función y no a nivel de módulo a propósito: importar
+    ``app.main`` no debe reconfigurar la aplicación. Con los parches a nivel de
+    módulo, cualquier test que importara el módulo dejaba la ventana de
+    órdenes con la pantalla de la extensión y rompía los tests que corren
+    después (#726).
+    """
+    install_desktop_product_code_extension()
+    install_load_order_instructions_extension()
+    install_update_extension()
+    install_application_lifecycle_extension()
+    install_multi_station_refresh_extension()
+    install_load_order_workspace_restore_extension()
+    install_load_order_quick_search_extension()
 
 
 def smoke_check() -> str:
@@ -66,6 +75,11 @@ def production_health_check() -> int:
 
 def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
     from app.config.settings import resolve_effective_connection_settings
+
+    # Las extensiones se instalan acá y no al importar el módulo: la ventana
+    # de órdenes que se ve en runtime es la de la extensión, y el botón de
+    # reparación vive ahí (#726).
+    install_extensions()
 
     # El preámbulo de conexión vive en ``settings`` y no acá: el auditor
     # monetario usa la misma función para conectarse a la misma base que la app.
