@@ -110,6 +110,14 @@ class StockInitialInventoryPage(QWidget):
         self.observations.setPlaceholderText("Observación del conteo (opcional)")
         layout.addWidget(self.observations)
 
+        # Las bolsas que el operador viene escribiendo (#736). El refresco
+        # automatico recarga la tabla cada 10 segundos para que se vean los
+        # cambios de las otras estaciones: si al recargar se tomara siempre lo
+        # que esta guardado en la base, el operador perderia el conteo a mitad
+        # de camino. Lo escrito se conserva; lo que viene de la base, se actualiza.
+        self._escritas: dict[int, int] = {}
+        self._escritas_fecha: date | None = None
+
         acciones = QHBoxLayout()
         self.load_button = QPushButton("Cargar inventario inicial")
         self.load_button.setObjectName("stockInitialInventoryLoadButton")
@@ -129,6 +137,11 @@ class StockInitialInventoryPage(QWidget):
 
     def refresh(self) -> None:
         dia = self.selected_date()
+        # Lo que el operador escribio es de una fecha de corte. Si la fecha
+        # cambia, lo escrito no aplica a la nueva y se descarta (#736).
+        if dia != self._escritas_fecha:
+            self._escritas = {}
+            self._escritas_fecha = dia
         try:
             ya_cargado = self.service.has_initial(dia)
             anulado = self.service.is_voided(dia)
@@ -205,7 +218,7 @@ class StockInitialInventoryPage(QWidget):
             entrada.setRange(0, 9_999_999)
             entrada.setSingleStep(1)
             entrada.setSuffix(" bolsas")
-            entrada.setValue(int(conteos[producto.id]) if producto.id in conteos else 0)
+            entrada.setValue(self._bolsas_a_mostrar(producto.id, conteos, bloqueado))
             entrada.setReadOnly(bloqueado)
             entrada.valueChanged.connect(self._actualizar_equivalencia)
             self.entradas.setCellWidget(indice, 1, entrada)
@@ -220,6 +233,21 @@ class StockInitialInventoryPage(QWidget):
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.entradas.setItem(indice, 3, item)
         self._actualizar_equivalencia()
+
+    def _bolsas_a_mostrar(self, producto_id: int, conteos: dict, bloqueado: bool) -> int:
+        """Las bolsas que tiene que mostrar el campo.
+
+        Si el conteo ya esta cargado, manda lo que dice la base: el campo esta
+        bloqueado y lo que se muestra es la historia.
+
+        Si no esta cargado, manda **lo que escribio el operador** (#736). El
+        refresco automatico recarga la tabla cada 10 segundos para que se vean
+        los cambios de las otras estaciones; tomar siempre el valor guardado
+        haria perder el conteo a mitad de camino.
+        """
+        if not bloqueado and producto_id in self._escritas:
+            return self._escritas[producto_id]
+        return int(conteos[producto_id]) if producto_id in conteos else 0
 
     def _kilos_de(self, producto_id: int) -> Decimal:
         """Kilos que representan las bolsas escritas para un producto."""
@@ -239,6 +267,10 @@ class StockInitialInventoryPage(QWidget):
         """
         for producto_id, indice in self.filas.items():
             entrada = self.inputs[producto_id]
+            if not entrada.isReadOnly():
+                # Lo que el operador escribio se guarda aparte: el refresco
+                # automatico recarga la tabla y no puede llevarselo (#736).
+                self._escritas[producto_id] = entrada.value()
             kilos = self._kilos_de(producto_id)
             celda = self.entradas.item(indice, 2)
             if celda is None:
@@ -315,6 +347,7 @@ class StockInitialInventoryPage(QWidget):
         except Exception as exc:  # noqa: BLE001
             self.feedback.show_error(f"No se pudo anular el inventario: {exc}")
             return
+        self._escritas = {}
         self.refresh()
         self.feedback.show_success(
             f"Inventario anulado: {len(reversas)} movimiento(s) contrario(s) generados."
