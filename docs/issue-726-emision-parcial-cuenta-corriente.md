@@ -542,6 +542,25 @@ El candidate se construyó **localmente** desde `main` mergeado (`c20abc1`) y se
 `oscarvogel/vogel-releases` (tag `femag-candidate`), que es el canal por el que se instala
 en la máquina del cliente.
 
+## Promoción a producción (20/10/2026 09:29)
+
+Después de que el administrador validara el piloto (reparó la cuenta corriente en la
+máquina del cliente), el candidate se promovió con el flujo oficial
+`.\release.ps1 production`, que **no recompila**: toma el artefacto publicado en el canal
+candidate, verifica su SHA256 contra `candidate.json` y lo publica tal cual en el canal
+`latest`.
+
+| Dato | Valor |
+|---|---|
+| Versión promovida | **2026.10.20.09.09.43** |
+| SHA256 (idéntico al candidate) | `d5950ca7702381a4808258fd6df6f6c6d4ce7db6b1ccc80a116732576888ba21` |
+| `latest.json` | `channel=latest`, `approved_by=oscarvogel`, `approval_run_id=39422571688` |
+| Versión archivada para rollback | `2026.10.17.12.48.28` (`femag-previous` + `previous.json`) |
+| Historial | `apps/femag/history.jsonl` con la entrada de la promoción |
+
+Desde este momento, cualquier puesto que abra FEMAG en el canal de producción recibe este
+build, que lleva la emisión atómica, la alarma permanente y el botón de reparación.
+
 | Dato | Valor |
 |---|---|
 | Versión | **2026.10.20.09.09.43** |
