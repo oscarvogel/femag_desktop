@@ -45,8 +45,8 @@ CLIENT_CON_CUIT = {"CODIGO": "0200", "NOMBRE": "CLIENTE CON CUIT", "CUIT": "30-1
 CLIENT_CON_CUIT_CAREL = {"CODIGO": "0694", "NOMBRE": "CAREL HUE", "CUIT": "30-71111111-8"}
 
 
-def _import_clients(rows, source_system="legacy_dbf"):
-    return LegacyDbfMasterImporter().import_rows(
+def _import_clients(rows, source_system="legacy_dbf", mode="patch"):
+    return LegacyDbfMasterImporter(mode=mode).import_rows(
         {"clients": rows}, source_system=source_system
     )
 
@@ -121,6 +121,18 @@ def test_cuit_real_repetido_se_avisa_y_no_rompe_la_importacion(db):
     assert [w["code"] for w in warnings] == ["client_cuit_shared_by_two_rows"]
     assert Client.select().count() == 1
     assert Client.get().cuit == "30693299930"
+    # En modo patch el nombre es del operador: queda el de la primera fila.
+    assert Client.get().name == "TRANSPORTE SUR"
+
+
+def test_cuit_real_repetido_en_modo_overwrite_queda_la_ultima_fila(db):
+    summary = _import_clients(
+        [CLIENT_CUIT_REPETIDO_A, CLIENT_CUIT_REPETIDO_B], mode="overwrite"
+    )
+
+    assert summary["clients"]["errors"] == []
+    assert Client.select().count() == 1
+    assert Client.get().cuit == "30693299930"
     # Queda la última fila leída, que es lo que el comportamiento previo hacía
     assert Client.get().name == "TRANSPORTES DEL LITORAL"
 
@@ -156,18 +168,41 @@ def test_reimportar_el_mismo_lote_no_avisa_nada(db):
 
 
 def test_actualizar_por_source_id_cambia_el_ormino_mismo_cliente(db):
-    """La identidad es el CODIGO del legacy, no el CUIT."""
+    """La identidad es el CODIGO del legacy, no el CUIT.
+
+    El nombre lo edita el operador, asi que en modo patch no se pisa (#746).
+    """
     _import_clients([{"CODIGO": "0697", "NOMBRE": "PINTO CLAUDIO", "CUIT": "00-00000000-0"}])
     _import_clients([{"CODIGO": "0697", "NOMBRE": "PINTO CLAUDIO ACTUALIZADO",
                       "CUIT": "00-00000000-0"}])
 
     assert Client.select().count() == 1
+    assert Client.get(Client.source_id == "0697").name == "PINTO CLAUDIO"
+
+
+def test_en_modo_overwrite_el_nombre_y_el_cuit_siguen_al_legacy(db):
+    _import_clients([{"CODIGO": "0697", "NOMBRE": "PINTO CLAUDIO", "CUIT": "00-00000000-0"}],
+                     mode="overwrite")
+    _import_clients([{"CODIGO": "0697", "NOMBRE": "PINTO CLAUDIO ACTUALIZADO",
+                      "CUIT": "00-00000000-0"}], mode="overwrite")
+
     assert Client.get(Client.source_id == "0697").name == "PINTO CLAUDIO ACTUALIZADO"
 
 
 def test_el_cliente_actualiza_su_propio_cuit(db):
+    """El CUIT lo edita el operador: en modo patch no se pisa (#746)."""
     _import_clients([{"CODIGO": "0200", "NOMBRE": "CLIENTE CON CUIT", "CUIT": "30-12345678-4"}])
     _import_clients([{"CODIGO": "0200", "NOMBRE": "CLIENTE CON CUIT", "CUIT": "30-87654321-9"}])
+
+    assert Client.select().count() == 1
+    assert Client.get(Client.source_id == "0200").cuit == "30123456784"
+
+
+def test_en_modo_overwrite_el_cliente_actualiza_su_propio_cuit(db):
+    _import_clients([{"CODIGO": "0200", "NOMBRE": "CLIENTE CON CUIT", "CUIT": "30-12345678-4"}],
+                     mode="overwrite")
+    _import_clients([{"CODIGO": "0200", "NOMBRE": "CLIENTE CON CUIT", "CUIT": "30-87654321-9"}],
+                     mode="overwrite")
 
     assert Client.select().count() == 1
     assert Client.get(Client.source_id == "0200").cuit == "30876543219"
