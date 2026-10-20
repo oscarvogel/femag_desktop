@@ -474,6 +474,33 @@ C:\Users\Usuario\Downloads\femag_pre_repair_20261019.sql   (2.717.776 bytes)
   y 2 por 42.347.340,00, igual que antes).
 - **Alarma**: 0 avisos de plata. La alarma se apaga sola cuando la orden queda reparada.
 
+## Publicación del candidate
+
+El candidate se construyó **localmente** desde `main` mergeado (`c20abc1`) y se publicó en
+`oscarvogel/vogel-releases` (tag `femag-candidate`), que es el canal por el que se instala
+en la máquina del cliente.
+
+| Dato | Valor |
+|---|---|
+| Versión | **2026.10.19.18.50.09** |
+| SHA256 | `9d6fb4d9cccf4136a1fe7f6e18ac29e9708f7983e0c3db60e9e33256bf427e12` |
+| Tamaño | 42.686.202 bytes |
+| `source_sha` | `c20abc1aa87d83b0ef15ddf7021cca04499d6a15` |
+| Descarga | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+
+Validaciones del artefacto: `--smoke` OK, `--production-health-check` OK, sin secretos ni
+configuración en el artefacto, y el SHA256 del asset publicado coincide con el del
+manifiesto `apps/femag/candidate.json`.
+
+Instalado en este puesto: **2026.10.19.18.50.09** (el instalador preserva el área de
+runtime y configuración: `connection.json` sigue apuntando a `127.0.0.1:3306/femag_desktop`).
+
+> Nota de entorno: en este puesto, `pytest` sin `--basetemp` termina con
+> `PermissionError` al limpiar el symlink `pytest-current` del TEMP, **aunque los tests
+> pasen todos**. Es un problema de permisos de Windows sobre un reparse point viejo, no
+> del código. Workaround: `python -m pytest --basetemp=<carpeta del repo>`. En CI el
+> runner no tiene el problema.
+
 ## Pendientes (operativos)
 
 1. **Merge** de este PR y publicación del **candidate** en `oscarvogel/vogel-releases`
