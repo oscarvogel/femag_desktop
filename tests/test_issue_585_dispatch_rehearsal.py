@@ -166,7 +166,13 @@ def test_ensayo_de_despacho_con_reparto(db, tmp_path):
     # ------------------------------------------------------------ anular
     _traza("6. Anular una segunda orden: las dos deudas se reversan")
     otra = _crear_orden(db, data, numero=2)
-    service.issue(otra)
+    # La segunda orden pide mas de lo que quedo en stock: el ensayo no carga
+    # inventario, asi que despacha con el motivo que desde #732 exige el
+    # aviso de stock insuficiente (#732).
+    service.issue(
+        otra,
+        stock_override_reason="Ensayo de despacho: no se carga inventario inicial",
+    )
     otra = LoadOrder.get_by_id(otra.id)
     antes = ClientAccountMovement.select().where(
         (ClientAccountMovement.load_order == otra)

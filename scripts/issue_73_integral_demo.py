@@ -34,7 +34,14 @@ def run_integral_demo(
     masters = _ensure_demo_masters()
     order = _create_load_order(username, masters)
     operations = LoadOrderOperationService(current_user=username, prints_dir=evidence_dir)
-    issued = operations.issue(order)
+    # El demo recorre el flujo documental entero, no el stock: no carga
+    # inventario inicial. Desde #732, emitir sin stock suficiente pide un
+    # motivo, asi que el demo lo pasa explicitamente y queda asentado. Asi el
+    # propio demo deja el rastro de por que se emitio igual.
+    issued = operations.issue(
+        order,
+        stock_override_reason="Demo integral #73: el demo no carga inventario inicial",
+    )
 
     output_dir = Path(evidence_dir)
     order_pdf = operations.print_order(issued)

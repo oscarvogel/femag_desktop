@@ -292,6 +292,32 @@ class StockService:
         )
 
     @classmethod
+    def has_inbound_movements(cls, product) -> bool:
+        """True si el producto alguna vez **entró** al libro.
+
+        Sirve para distinguir dos cosas que desde afuera se ven igual: "no hay
+        stock de esto" y "el stock de esto todavía no se cargó". Un producto que
+        nunca tuvo una entrada (nunca se counted el inventario, nunca se
+        compro, nunca se produjo) no tiene opinion sobre sus existencias, asi
+        que no se puede afirmar que falte.
+
+        Es lo que permite que el aviso de stock insuficiente (#732) sea
+        util: avisa de un faltante real, no del inventario que todavia no se
+        cargo.
+        """
+        if product is None:
+            return False
+        return (
+            StockMovement.select()
+            .where(
+                (StockMovement.product == product)
+                & (StockMovement.movement_type << list(StockMovement.INBOUND_TYPES))
+            )
+            .count()
+            > 0
+        )
+
+    @classmethod
     def balances(cls, *, until: date | None = None) -> list[StockBalance]:
         """Saldos de todos los productos con movimientos."""
         totales = cls._totals_por_tipo(None, until)

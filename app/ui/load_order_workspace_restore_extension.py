@@ -28,6 +28,7 @@ from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
+from app.ui.load_order_stock_shortfall_dialog import emit_order_with_stock_check
 import app.ui.desktop_app as desktop
 
 
@@ -487,14 +488,21 @@ def _restored_load_order_page(self):
             feedback.show_warning("Seleccione una orden para emitir.", focus_widget=table)
             return
         try:
-            issued = operation_service.issue(order)
-            selected_order_id["value"] = issued.id
-            refresh()
-            feedback.show_success(
-                f"Orden {desktop._format_order_number(issued.order_number)} emitida."
+            issued = emit_order_with_stock_check(
+                operation_service, order, parent=page
             )
         except Exception as exc:
             feedback.show_error(str(exc), focus_widget=table)
+            return
+        if issued is None:
+            # El operador cancelo el aviso de stock insuficiente: la orden
+            # queda como estaba, sin tocar ningun libro.
+            return
+        selected_order_id["value"] = issued.id
+        refresh()
+        feedback.show_success(
+            f"Orden {desktop._format_order_number(issued.order_number)} emitida."
+        )
 
     def annul() -> None:
         order = selected_order()

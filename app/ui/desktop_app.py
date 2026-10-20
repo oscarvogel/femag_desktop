@@ -126,6 +126,7 @@ from app.ui.audit_query_page import AuditQueryPage
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.load_order_ledger_repair_dialog import LoadOrderLedgerRepairDialog
+from app.ui.load_order_stock_shortfall_dialog import emit_order_with_stock_check
 from app.services.load_order_ledger_repair_service import (
     LoadOrderLedgerRepairService,
 )
@@ -2452,14 +2453,21 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para emitir.", focus_widget=table)
                 return
             try:
-                issued = operation_service.issue(order)
-                feedback.show_success(
-                    f"Orden {_format_order_number(issued.order_number)} emitida."
+                issued = emit_order_with_stock_check(
+                    operation_service, order, parent=page
                 )
-                selected_order_id["value"] = issued.id
-                refresh()
             except Exception as exc:
                 feedback.show_error(str(exc), focus_widget=table)
+                return
+            if issued is None:
+                # El operador cancelo el aviso de stock insuficiente: la orden
+                # queda como estaba, sin tocar ningun libro.
+                return
+            feedback.show_success(
+                f"Orden {_format_order_number(issued.order_number)} emitida."
+            )
+            selected_order_id["value"] = issued.id
+            refresh()
 
         def annul() -> None:
             order = selected_order()
