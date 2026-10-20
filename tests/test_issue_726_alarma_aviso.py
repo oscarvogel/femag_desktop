@@ -258,3 +258,78 @@ def test_el_menu_otros_tiene_la_opcion_de_reparar_para_el_admin(db):
     assert not boton.isHidden()
     ventana.close()
     assert app is not None
+
+
+def test_el_boton_de_reparar_esta_en_la_pantalla_real_de_ordenes(db, monkeypatch):
+    """La pantalla que se ve en runtime la arma una EXTENSIÓN que reemplaza a la
+    del código base.
+
+    El botón estaba en la página del código base, que en runtime no se ve: por
+    eso el administrador no lo encontraba aunque tuviera el build instalado
+    (#726). Este test instala la extensión, igual que el arranque real, para
+    que no vuelva a pasar.
+    """
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.load_order_workspace_restore_extension import (
+        install_load_order_workspace_restore_extension,
+    )
+
+    original = FemagDesktopWindow._load_order_page
+    monkeypatch.setattr(FemagDesktopWindow, "_load_order_page", original)
+    install_load_order_workspace_restore_extension()
+
+    app = QApplication.instance() or QApplication([])
+    admin, _secretaria = _usuarios()
+
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    ventana.show()
+    ventana.stack.setCurrentIndex(ventana._route_indexes["load_orders"])
+    app.processEvents()
+    page = ventana.stack.widget(ventana._route_indexes["load_orders"])
+    boton = page.findChild(QPushButton, "repairLedgerLoadOrderButton")
+
+    assert boton is not None, (
+        "El boton de reparar tiene que estar en la pantalla REAL de ordenes "
+        "(la de la extension), no solo en la del codigo base."
+    )
+    assert boton.isVisible()
+    ventana.close()
+    assert app is not None
+
+
+def test_la_cli_de_reparacion_lista_sin_escribir(db, monkeypatch, capsys):
+    """La CLI del EXE permite resolverlo sin depender de la pantalla."""
+    import app.services.load_order_ledger_repair_service as servicio
+    from app.main import main
+    from app.models.accounting import ClientAccountMovement
+
+    monkeypatch.setattr(servicio, "open_repair_database", lambda *a, **k: db)
+    data = _maestros()
+    _orden_emitida_sin_cuenta_corriente(data)
+
+    codigo = main(["--repair-ledger"])
+    salida = capsys.readouterr().out
+
+    assert codigo == 0
+    assert "OC-" in salida, f"La CLI tiene que listar las ordenes rotas: {salida!r}"
+    assert "DRY-RUN" in salida
+    assert ClientAccountMovement.select().count() == 0, "El dry-run no escribe nada"
+
+
+def test_la_cli_de_reparacion_escribe_con_apply(db, monkeypatch, capsys):
+    import app.services.load_order_ledger_repair_service as servicio
+    from app.main import main
+    from app.models.accounting import ClientAccountMovement
+
+    monkeypatch.setattr(servicio, "open_repair_database", lambda *a, **k: db)
+    data = _maestros()
+    order = _orden_emitida_sin_cuenta_corriente(data)
+
+    codigo = main(["--repair-ledger", "--order", str(order.order_number), "--apply"])
+    salida = capsys.readouterr().out
+
+    assert codigo == 0
+    assert "APPLIED" in salida
+    assert ClientAccountMovement.select().count() == 1

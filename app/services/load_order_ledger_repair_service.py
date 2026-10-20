@@ -37,6 +37,39 @@ REPAIRABLE_STATUSES = (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED)
 ACTION_REPAIR = "reparar_cuenta_corriente"
 
 
+def open_repair_database(database_name: str | None = None):
+    """Abre la base que resuelve la configuracion del puesto, con escritura.
+
+    Vive en ``app/`` y no en ``scripts/`` a proposito: el instalador solo
+    empaqueta ``app/``, asi que el EXE congelado la puede usar. Es la misma
+    conexion que usa la aplicacion (configuracion segura DPAPI cuando el
+    puesto la tiene), no una connection suelta.
+    """
+    from app.config.database import (
+        FemagMySQLDatabase,
+        bind_database,
+        resolve_mysql_host_ipv4,
+    )
+    from app.services.monetary_audit_readonly import resolve_audit_database
+    from peewee import SqliteDatabase
+
+    target = resolve_audit_database(database_name=database_name)
+    if target.engine == "mysql":
+        database = FemagMySQLDatabase(
+            target.database,
+            host=resolve_mysql_host_ipv4(target.host),
+            port=target.port,
+            user=target.user,
+            password=target.password,
+            charset="utf8mb4",
+        )
+    else:
+        database = SqliteDatabase(str(target.sqlite_path), pragmas={"foreign_keys": 1})
+    bind_database(database)
+    database.connect(reuse_if_open=True)
+    return database
+
+
 @dataclass(frozen=True)
 class LedgerGap:
     """Un presupuesto de la orden al que le falta su movimiento."""

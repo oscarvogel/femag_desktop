@@ -2126,9 +2126,7 @@ class FemagDesktopWindow(QMainWindow):
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
-        repair_button = _action_button(
-            "repairLedgerLoadOrderButton", "Reparar cta. corriente", secondary=True
-        )
+        repair_button, refresh_repair_count = _ledger_repair_button(self)
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
@@ -2139,10 +2137,6 @@ class FemagDesktopWindow(QMainWindow):
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         can_reprint = _can_reprint_load_orders(self.user)
         reprint_button.setVisible(can_reprint)
-        # Sólo el administrador repara una orden emitida a medias: es una
-        # excepción, no una operación de la operatoria.
-        can_repair_ledger = PermissionService.is_administrator(self.user)
-        repair_button.setVisible(can_repair_ledger)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
@@ -2168,9 +2162,6 @@ class FemagDesktopWindow(QMainWindow):
         ):
             actions.addWidget(button)
         actions.addStretch(1)
-        # Se oculta despues de agregarlo al layout: un boton sin padre al que
-        # se le hace visible se vuelve una ventana propia.
-        repair_button.setVisible(can_repair_ledger)
 
         search_row = QHBoxLayout()
         search_row.setContentsMargins(10, 0, 10, 10)
@@ -2256,17 +2247,10 @@ class FemagDesktopWindow(QMainWindow):
                 f"Página {page_state['page']} de {page_state['pages']} · "
                 f"{page_state['total']} orden(es)"
             )
-            if can_repair_ledger:
-                # El número de órdenes sin cuenta corriente va EN el botón: es
-                # la señal de que hay plata que no está registrada, sin que
-                # nadie tenga que abrir el diálogo para enterarse.
-                try:
-                    rotas = repair_service.count_broken_orders()
-                except Exception:
-                    rotas = 0
-                repair_button.setText(
-                    f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
-                )
+            # El número de órdenes sin cuenta corriente va EN el botón: es la
+            # señal de que hay plata que no está registrada, sin que nadie
+            # tenga que abrir el diálogo para enterarse.
+            refresh_repair_count()
             previous_page_button.setEnabled(page_state["page"] > 1)
             next_page_button.setEnabled(page_state["page"] < page_state["pages"])
             selected_id = selected_order_id["value"] if selected_order_id["value"] is not None else None
@@ -2966,6 +2950,52 @@ def _action_button(object_name: str, text: str, *, secondary: bool = False) -> Q
     if secondary:
         button.setProperty("secondary", True)
     return button
+
+
+def _ledger_repair_button(window) -> tuple[QPushButton, object]:
+    """Botón de reparación de órdenes sin cuenta corriente (sólo administrador).
+
+    Fuente única para las DOS pantallas de órdenes: la del código base y la
+    que arma la extensión ``load_order_workspace_restore_extension`` (que es
+    la que se ve en runtime, porque reemplaza a la otra). Antes cada una
+    tenía su propia fila de botones y el botón de reparación quedó en la que
+    no se usa: el administrador nunca lo vio aunque el build estuviera
+    instalado (#726).
+
+    Devuelve el botón y la función que actualiza su contador.
+    """
+    from app.services.load_order_ledger_repair_service import LoadOrderLedgerRepairService
+
+    button = _action_button(
+        "repairLedgerLoadOrderButton", "Reparar cta. corriente", secondary=True
+    )
+    can_repair = PermissionService.is_administrator(window.user)
+    button.setVisible(can_repair)
+
+    def refresh_count() -> None:
+        if not can_repair:
+            return
+        try:
+            rotas = LoadOrderLedgerRepairService(
+                current_user=window.shell.username
+            ).count_broken_orders()
+        except Exception:
+            rotas = 0
+        button.setText(
+            f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
+        )
+
+    def open_repair() -> None:
+        if not PermissionService.is_administrator(window.user):
+            return
+        dialog = LoadOrderLedgerRepairDialog(
+            window.shell.username, window, user=window.user
+        )
+        dialog.exec_()
+        refresh_count()
+
+    button.clicked.connect(open_repair)
+    return button, refresh_count
 
 
 class _FieldFocusNavigation(QObject):

@@ -107,6 +107,88 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         ) from exc
 
 
+def run_repair_ledger(*, order: str | None = None, apply: bool = False) -> int:
+    """Reparacion de ordenes sin cuenta corriente desde la linea de comando.
+
+    Es el mismo servicio que usa el boton de administrador de la app
+    (``LoadOrderLedgerRepairService``), para el puesto donde la pantalla no
+    esta disponible o donde hay que resolverlo sin abrir la aplicacion.
+    DRY-RUN por defecto: sin ``--apply`` no se modifica nada (#726).
+    """
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
+        open_repair_database,
+    )
+
+    try:
+        database = open_repair_database()
+    except Exception as exc:
+        print(
+            f"ERROR: no se pudo resolver la conexion de FEMAG: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        service = LoadOrderLedgerRepairService(current_user="reparacion-cuenta-corriente")
+        if not order:
+            findings = service.find_broken_orders()
+            if not findings:
+                print("No hay ordenes emitidas sin cuenta corriente.")
+                return 0
+            for finding in findings:
+                print(
+                    f"OC-{finding.order_number:06d}  estado={finding.status}  "
+                    f"documentos={len(finding.ledger_gaps)}  "
+                    f"importe={finding.total_amount:,.2f}  {finding.summary()}"
+                )
+            print("")
+            print("DRY-RUN: no se modifico nada.")
+            print("Para reparar una: --repair-ledger --order <numero> --apply")
+            return 0
+
+        from app.models.load_orders import LoadOrder
+
+        valor = str(order).strip()
+        if not valor.isdigit():
+            print(f"ERROR: '{order}' no es un numero de orden valido.", file=sys.stderr)
+            return 2
+        target_order = LoadOrder.get_or_none(LoadOrder.order_number == int(valor))
+        if target_order is None:
+            target_order = LoadOrder.get_or_none(LoadOrder.id == int(valor))
+        if target_order is None:
+            print(f"ERROR: no se encontro la orden {valor}.", file=sys.stderr)
+            return 2
+
+        finding = service.find_gap(target_order)
+        print(
+            f"OC-{finding.order_number:06d}  estado={finding.status}  "
+            f"documentos={len(finding.ledger_gaps)}  importe={finding.total_amount:,.2f}"
+        )
+        for gap in finding.ledger_gaps:
+            print(f"  - {gap.budget_number}  {gap.client_name}  {gap.total_amount:,.2f}")
+        if not finding.is_repairable:
+            print("")
+            print("La orden ya esta consistente: no se modifico nada.")
+            return 0
+        if not apply:
+            print("")
+            print("DRY-RUN: no se modifico nada. Use --apply para escribir.")
+            return 0
+
+        result = service.repair(target_order)
+        print("")
+        print("APPLIED")
+        print(f"  movimientos de cuenta corriente: {len(result.movement_ids)}")
+        print(f"  despachos de stock: {len(result.stock_movement_ids)}")
+        return 0
+    except Exception as exc:
+        print(
+            f"ERROR: no se pudo completar la reparacion: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="femag-desktop")
     parser.add_argument("--smoke", action="store_true", help="Validate imports/config without opening UI")
@@ -122,12 +204,32 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Configure and securely save the MySQL connection for this Windows user",
     )
+    parser.add_argument(
+        "--repair-ledger",
+        action="store_true",
+        help=(
+            "Repara ordenes de carga emitidas sin cuenta corriente. Por defecto "
+            "solo lista (dry-run); con --order <numero> --apply escribe."
+        ),
+    )
+    parser.add_argument(
+        "--order",
+        type=str,
+        help="Numero de orden a reparar con --repair-ledger (78 = OC-000078).",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Con --repair-ledger: escribir la reparacion. Sin este flag no se modifica nada.",
+    )
     args = parser.parse_args(argv)
     if args.smoke:
         print(smoke_check())
         return 0
     if args.production_health_check:
         return production_health_check()
+    if args.repair_ledger:
+        return run_repair_ledger(order=args.order, apply=args.apply)
     if args.ui or args.demo_ui or args.configure:
         try:
             options = {"configure": True} if args.configure else {}

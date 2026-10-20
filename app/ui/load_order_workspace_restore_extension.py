@@ -137,6 +137,11 @@ def _restored_load_order_page(self):
     budget_button = desktop._action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
     annul_button = desktop._action_button("annulLoadOrderButton", "Anular", secondary=True)
     annul_button.setProperty("uiRole", "danger")
+    # Esta extension REEMPLAZA la pantalla de ordenes del codigo base, asi que
+    # el boton de reparacion tiene que estar aqui tambien: antes solo estaba
+    # en la pagina base, que en runtime no se ve, y el administrador no lo
+    # encontraba aunque el build estuviera instalado (#726).
+    repair_button, refresh_repair_count = desktop._ledger_repair_button(self)
 
     desktop._set_button_icon(new_button, QStyle.SP_FileIcon)
     desktop._set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
@@ -153,6 +158,10 @@ def _restored_load_order_page(self):
     can_reprint = desktop._can_reprint_load_orders(self.user)
     reprint_button.setVisible(can_reprint)
     for button in (
+        # El boton de administracion va PRIMERO: al final de la fila quedaba
+        # fuera de pantalla en ventanas angostas, y justo cuando hay plata sin
+        # registrar es cuando hay que llegar rapido (#726).
+        repair_button,
         new_button,
         edit_button,
         detail_button,
@@ -365,6 +374,9 @@ def _restored_load_order_page(self):
         )
         previous_page_button.setEnabled(page_state["page"] > 1)
         next_page_button.setEnabled(page_state["page"] < page_state["pages"])
+        # Contador de ordenes sin cuenta corriente EN el boton: la senal de
+        # que hay plata que no esta registrada (#726).
+        refresh_repair_count()
 
     def selected_order() -> LoadOrder | None:
         if selected_order_id["value"] is None:

@@ -670,28 +670,13 @@ def open_writable_database(target: AuditDatabaseTarget):
     (``FemagMySQLDatabase``) porque la operación ES una escritura. Su
     ``connect()`` ejecuta la preparación idempotente del esquema, que es el
     comportamiento normal de la aplicación.
-    """
-    from app.config.database import (
-        FemagMySQLDatabase,
-        bind_database,
-        resolve_mysql_host_ipv4,
-    )
-    from peewee import SqliteDatabase
 
-    if target.engine == "mysql":
-        database = FemagMySQLDatabase(
-            target.database,
-            host=resolve_mysql_host_ipv4(target.host),
-            port=target.port,
-            user=target.user,
-            password=target.password,
-            charset="utf8mb4",
-        )
-    else:
-        database = SqliteDatabase(str(target.sqlite_path), pragmas={"foreign_keys": 1})
-    bind_database(database)
-    database.connect(reuse_if_open=True)
-    return database
+    La apertura vive en ``app.services.load_order_ledger_repair_service`` para
+    que el EXE congelado (que sólo empaqueta ``app/``) pueda usarla también.
+    """
+    from app.services.load_order_ledger_repair_service import open_repair_database
+
+    return open_repair_database(database_name=target.database)
 
 
 def _print_connection(target: AuditDatabaseTarget) -> None:
