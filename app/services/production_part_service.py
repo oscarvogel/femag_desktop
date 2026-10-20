@@ -5,7 +5,8 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from app.models.base import utc_now
-from app.models.production import ProductionBag, ProductionPart
+from app.models.masters import STOCK_ROLE_RAW
+from app.models.production import ProductionBag, ProductionConsumption, ProductionPart
 from app.models.stock import StockMovement
 from app.services.stock_service import StockService
 
@@ -21,6 +22,7 @@ class ProductionTotals:
     lines: int
     bags: int
     kg: Decimal
+    consumed_kg: Decimal = Decimal("0")
 
 
 class ProductionPartService:
@@ -79,6 +81,49 @@ class ProductionPartService:
             prepared.append((product, int(bags), weight, kg))
         return prepared
 
+    @classmethod
+    def _consumptions(cls, consumptions) -> list[tuple]:
+        """Materia prima que consume el turno, en kilos.
+
+        A diferencia del ingreso (#656), que se cuenta en big bags, el consumo
+        se mide en kilos: un big bag abierto se puede terminar en otro turno,
+        asi que el big bag no es la unidad real de consumo (decision del
+        operador, 2026-10-20).
+        """
+        consumptions = list(consumptions or [])
+        if not consumptions:
+            raise ValueError(
+                "Cargá la materia prima que consumió el turno: sin eso las bolsas "
+                "entran al stock y el almidón nunca sale."
+            )
+        prepared = []
+        seen: set[int] = set()
+        for product, raw_kg in consumptions:
+            if product is None:
+                raise ValueError("Cada línea de consumo necesita un producto.")
+            if product.id in seen:
+                raise ValueError(
+                    f"La materia prima '{product.name}' está cargada dos veces en el mismo turno."
+                )
+            seen.add(product.id)
+            if product.stock_role != STOCK_ROLE_RAW:
+                raise ValueError(
+                    f"'{product.name}' no es materia prima. Solo se consume material con "
+                    "Rol en el stock = Materia prima."
+                )
+            try:
+                kg = Decimal(str(raw_kg))
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValueError(
+                    f"Los kilos consumidos de '{product.name}' deben ser un número."
+                ) from None
+            if kg <= 0:
+                raise ValueError(
+                    f"Los kilos consumidos de '{product.name}' deben ser mayores a cero."
+                )
+            prepared.append((product, kg.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)))
+        return prepared
+
     @staticmethod
     def _values(*, shift: str, observations: str = ""):
         shift = (shift or "").strip()
@@ -88,21 +133,23 @@ class ProductionPartService:
 
     @classmethod
     def create(
-        cls, *, production_date: date, shift: str, lines, observations: str = ""
+        cls, *, production_date: date, shift: str, lines, consumptions=(), observations: str = ""
     ) -> ProductionPart:
         shift, observations = cls._values(shift=shift, observations=observations)
         prepared = cls._lines(lines)
+        prepared_consumptions = cls._consumptions(consumptions)
         with ProductionPart._meta.database.atomic():
             part = ProductionPart.create(
                 production_date=production_date, shift=shift, observations=observations
             )
             cls._write_lines(part, prepared)
+            cls._write_consumptions(part, prepared_consumptions)
         return part
 
     @classmethod
     def update(
         cls, part: ProductionPart, *, production_date: date, shift: str, lines,
-        observations: str = "",
+        consumptions=(), observations: str = "",
     ) -> ProductionPart:
         # El orden importa: un parte anulado tambien esta confirmado, y decirle
         # "esta confirmado" manda al operador al motivo equivocado.
@@ -115,6 +162,7 @@ class ProductionPartService:
             )
         shift, observations = cls._values(shift=shift, observations=observations)
         prepared = cls._lines(lines)
+        prepared_consumptions = cls._consumptions(consumptions)
         with ProductionPart._meta.database.atomic():
             part.production_date = production_date
             part.shift = shift
@@ -122,6 +170,7 @@ class ProductionPartService:
             part.save()
             cls._delete_lines(part)
             cls._write_lines(part, prepared)
+            cls._write_consumptions(part, prepared_consumptions)
         return part
 
     @staticmethod
@@ -136,10 +185,15 @@ class ProductionPartService:
 
     @classmethod
     def confirm(cls, part: ProductionPart, *, current_user: str | None = None) -> ProductionPart:
-        """El operador confirma el turno: la produccion entra al stock.
+        """El operador confirma el turno: la produccion entra al stock y la
+        materia prima consumida sale.
 
         Idempotente. Si el parte ya esta confirmado devuelve el mismo parte sin
         volver a escribir movimientos, gracias al indice unico del libro.
+
+        Antes de escribir nada se verifica que haya materia prima suficiente
+        (#730): no se puede producir material que no se compro. Si no alcanza,
+        la confirmacion se bloquea y el stock no se toca.
         """
         if part.is_voided:
             raise ValueError("El parte está anulado y no se puede confirmar.")
@@ -150,7 +204,18 @@ class ProductionPartService:
         if not lineas:
             raise ValueError("El parte no tiene bolsas cargadas, no hay nada que confirmar.")
 
+        consumos = cls.consumptions_of(part)
+        if not consumos:
+            raise ValueError(
+                "El parte no tiene materia prima consumida, no se puede confirmar: "
+                "las bolsas entrarían al stock y el almidón no saldría."
+            )
+
         with ProductionPart._meta.database.atomic():
+            # El control va adentro de la transaccion y antes de escribir
+            # cualquier movimiento: si el material no alcanza, no se toca el
+            # libro y el parte queda como borrador.
+            cls._verificar_stock_disponible(consumos)
             part.confirmed_at = utc_now()
             part.confirmed_by = (current_user or "").strip() or None
             part.save()
@@ -167,7 +232,40 @@ class ProductionPartService:
                     movement_date=part.production_date,
                     created_by=part.confirmed_by,
                 )
+            for consumo in consumos:
+                StockService.register(
+                    product=consumo.product,
+                    movement_type=StockMovement.TYPE_PRODUCTION_CONSUMPTION,
+                    quantity_kg=consumo.kg,
+                    source_ref=cls.source_ref_of(part),
+                    description=(
+                        f"Consumo de {consumo.product.name} del "
+                        f"{part.production_date.isoformat()} turno {part.shift}"
+                    ),
+                    movement_date=part.production_date,
+                    created_by=part.confirmed_by,
+                )
         return part
+
+    @staticmethod
+    def _verificar_stock_disponible(consumos) -> None:
+        """Bloquea la confirmacion si la materia prima no alcanza (#730).
+
+        El disponible sale del libro de movimientos, asi que ya descuenta lo que
+        consumieron los partes confirmados anteriores. La comprobacion es por
+        producto: cada linea se compara contra el saldo de su propia materia
+        prima.
+        """
+        for consumo in consumos:
+            disponible = StockService.balance_for(consumo.product).balance_kg
+            if disponible < consumo.kg:
+                raise ValueError(
+                    f"No hay materia prima suficiente para confirmar: de "
+                    f"«{consumo.product.name}» hay {disponible:,.3f} kg en stock y el "
+                    f"parte consume {consumo.kg:,.3f} kg. Registrá la compra del big "
+                    "bag (Producción > Ingreso de materia prima) o el inventario "
+                    "inicial antes de confirmar."
+                )
 
     @staticmethod
     def _write_lines(part: ProductionPart, prepared: list[tuple]) -> None:
@@ -175,6 +273,11 @@ class ProductionPartService:
             ProductionBag.create(
                 part=part, product=product, bags=bags, unit_weight_kg=weight, kg=kg
             )
+
+    @staticmethod
+    def _write_consumptions(part: ProductionPart, prepared: list[tuple]) -> None:
+        for product, kg in prepared:
+            ProductionConsumption.create(part=part, product=product, kg=kg)
 
     @classmethod
     def annul(
@@ -201,9 +304,18 @@ class ProductionPartService:
             raise ValueError("Explicá por qué se anula un parte ya confirmado.")
 
         with ProductionPart._meta.database.atomic():
+            # Se revierten los dos movimientos del parte: las bolsas que
+            # entraron y la materia prima que salio. Anular solo uno dejaria el
+            # stock desbalanceado (#730).
             movements = StockMovement.select().where(
                 (StockMovement.source_ref == cls.source_ref_of(part))
-                & (StockMovement.movement_type == StockMovement.TYPE_PRODUCTION)
+                & (
+                    (StockMovement.movement_type == StockMovement.TYPE_PRODUCTION)
+                    | (
+                        StockMovement.movement_type
+                        == StockMovement.TYPE_PRODUCTION_CONSUMPTION
+                    )
+                )
                 & (StockMovement.is_reversal == False)  # noqa: E712
             )
             for movement in list(movements):
@@ -219,7 +331,7 @@ class ProductionPartService:
             ProductionPart.select()
             .where(ProductionPart.production_date == day)
             .order_by(ProductionPart.id)
-            .prefetch(ProductionBag)
+            .prefetch(ProductionBag, ProductionConsumption)
         )
 
     @staticmethod
@@ -231,8 +343,20 @@ class ProductionPartService:
         return list(bags.order_by(ProductionBag.id))
 
     @staticmethod
+    def consumptions_of(part: ProductionPart):
+        """Materia prima consumida por el parte, tolerando prefetch."""
+        consumptions = part.consumptions
+        if isinstance(consumptions, (list, tuple)):
+            return sorted(consumptions, key=lambda consumo: consumo.id)
+        return list(consumptions.order_by(ProductionConsumption.id))
+
+    @staticmethod
     def _delete_lines(part: ProductionPart) -> None:
         ProductionBag.delete().where(ProductionBag.part == part).execute()
+        # El borrado explicito importa: en SQLite las claves foraneas no estan
+        # activas por defecto, asi que la cascada de la base no siempre corre y
+        # las lineas de consumo podrian quedar colgando de un parte borrado.
+        ProductionConsumption.delete().where(ProductionConsumption.part == part).execute()
 
     @staticmethod
     def totals(rows) -> ProductionTotals:
@@ -246,6 +370,7 @@ class ProductionPartService:
         lines = 0
         bags = 0
         kg = Decimal("0")
+        consumed_kg = Decimal("0")
         for row in rows:
             if row.is_voided:
                 continue
@@ -253,4 +378,6 @@ class ProductionPartService:
                 lines += 1
                 bags += int(bag.bags or 0)
                 kg += Decimal(str(bag.kg or 0))
-        return ProductionTotals(len(rows), lines, bags, kg)
+            for consumo in ProductionPartService.consumptions_of(row):
+                consumed_kg += Decimal(str(consumo.kg or 0))
+        return ProductionTotals(len(rows), lines, bags, kg, consumed_kg)

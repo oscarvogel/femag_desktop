@@ -35,6 +35,12 @@ class StockMovement(BaseModel):
 
     TYPE_INITIAL_INVENTORY = "initial_inventory"
     TYPE_PRODUCTION = "production"
+    #: Salida de materia prima consumida por un parte de produccion (#730).
+    #: Es la contraparte de ``TYPE_PRODUCTION``: el mismo parte entra las
+    #: bolsas terminadas y sale el almidon que se fracciono. Sin este tipo, el
+    #: stock de materia prima solo crecia y el mismo kilo quedaba en los dos
+    #: stocks.
+    TYPE_PRODUCTION_CONSUMPTION = "production_consumption"
     TYPE_PURCHASE = "purchase"
     TYPE_IMPORT = "import"
     TYPE_DISPATCH = "dispatch"
@@ -50,7 +56,9 @@ class StockMovement(BaseModel):
             TYPE_ADJUSTMENT_POSITIVE,
         }
     )
-    OUTBOUND_TYPES = frozenset({TYPE_DISPATCH, TYPE_ADJUSTMENT_NEGATIVE})
+    OUTBOUND_TYPES = frozenset(
+        {TYPE_DISPATCH, TYPE_ADJUSTMENT_NEGATIVE, TYPE_PRODUCTION_CONSUMPTION}
+    )
     ALL_TYPES = INBOUND_TYPES | OUTBOUND_TYPES
 
     product = ForeignKeyField(Product, backref="stock_movements")

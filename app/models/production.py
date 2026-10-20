@@ -163,6 +163,37 @@ class ProductionBag(BaseModel):
         pass
 
 
+class ProductionConsumption(BaseModel):
+    """Materia prima consumida por un parte de produccion (#730).
+
+    Es la mitad que faltaba del circuito del fraccionado. :class:`ProductionBag`
+    describe lo que **sale** del turno (las bolsas embolsadas); esta clase
+    describe lo que **entra** a la fraccionadora (los kilos de almidon que el
+    turno consumio). Al confirmar un parte, los dos movimientos se escriben
+    juntos: las bolsas entran al stock y la materia prima sale.
+
+    A diferencia de :class:`RawMaterialIntakeLine`, que se mide en big bags,
+    el consumo se mide en **kilos** (decision del operador, 2026-10-20). Un big
+    bag abierto se puede terminar en otro turno, asi que el big bag no es la
+    unidad real de consumo: el operador carga los kilos que consumio.
+
+    Que la merma no se registre es otra decision del operador: la diferencia
+    entre los kilos consumidos y los kilos embolsados se ve sola al comparar
+    los dos movimientos, asi que no hace falta un movimiento de merma.
+    """
+
+    part = ForeignKeyField(ProductionPart, backref="consumptions", on_delete="CASCADE")
+    product = ForeignKeyField(Product, backref="production_consumptions", on_delete="RESTRICT")
+    kg = DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        table_name = "production_consumption"
+        # Sin indices declarados a proposito, por la misma razon que en
+        # ``ProductionBag``: las dos claves foraneas ya generan su indice y
+        # duplicar el nombre hace fallar create_tables() contra MySQL.
+        pass
+
+
 class RawMaterialIntake(BaseModel):
     """Ingreso de materia prima comprada en big bags (#656).
 
