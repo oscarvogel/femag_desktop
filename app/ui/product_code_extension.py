@@ -4,7 +4,14 @@ from decimal import Decimal
 
 from PyQt5.QtWidgets import QComboBox, QDoubleSpinBox, QGridLayout, QLabel, QLineEdit
 
-from app.models.masters import PRODUCT_KIND_LABELS, Product, TipoIVA, product_display_label
+from app.models.masters import (
+    PRODUCT_KIND_LABELS,
+    STOCK_ROLE_FINISHED,
+    STOCK_ROLE_LABELS,
+    Product,
+    TipoIVA,
+    product_display_label,
+)
 from app.services.master_service import MasterService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 
@@ -38,6 +45,20 @@ def install_product_code_extension() -> None:
             enable_combo_autocomplete(self.kind_input, placeholder="Buscar tipo...")
             for value, label in PRODUCT_KIND_LABELS.items():
                 self.kind_input.addItem(label, value)
+            # El campo "Rol en el stock" lo agrega el ABM base (#656) para
+            # distinguir lo que se compra en big bags de lo que se vende
+            # embolsado. Esta extension reconstruye el formulario entero, asi
+            # que si no lo declara aca el campo queda inalcanzable: no se puede
+            # marcar ninguna materia prima y la pantalla de ingreso de big bags
+            # no tiene nada que mostrar.
+            self.stock_role_input = QComboBox()
+            self.stock_role_input.setObjectName("productStockRoleInput")
+            for value, label in STOCK_ROLE_LABELS.items():
+                self.stock_role_input.addItem(label, value)
+            self.stock_role_hint = QLabel()
+            self.stock_role_hint.setObjectName("subheading")
+            self.stock_role_hint.setWordWrap(True)
+            self.stock_role_input.currentIndexChanged.connect(self._sync_stock_role_hint)
             self.iva_input = QComboBox()
             self.iva_input.setObjectName("productIvaTypeInput")
             enable_combo_autocomplete(self.iva_input, placeholder="Buscar IVA...")
@@ -62,20 +83,23 @@ def install_product_code_extension() -> None:
             form.addWidget(self.name_input, 1, 1)
             form.addWidget(QLabel("Clasificación"), 2, 0)
             form.addWidget(self.kind_input, 2, 1)
-            form.addWidget(QLabel("Unidad"), 3, 0)
-            form.addWidget(self.unit_input, 3, 1)
-            form.addWidget(QLabel("Peso unitario"), 4, 0)
-            form.addWidget(self.weight_input, 4, 1)
-            form.addWidget(QLabel("Tipo de IVA"), 5, 0)
-            form.addWidget(self.iva_input, 5, 1)
-            form.addWidget(QLabel("Lista 1"), 6, 0)
-            form.addWidget(self.price_list_1_input, 6, 1)
-            form.addWidget(QLabel("Lista 2"), 7, 0)
-            form.addWidget(self.price_list_2_input, 7, 1)
-            form.addWidget(QLabel("Lista 3"), 8, 0)
-            form.addWidget(self.price_list_3_input, 8, 1)
-            form.addWidget(QLabel("Lista 4"), 9, 0)
-            form.addWidget(self.price_list_4_input, 9, 1)
+            form.addWidget(QLabel("Rol en el stock"), 3, 0)
+            form.addWidget(self.stock_role_input, 3, 1)
+            form.addWidget(self.stock_role_hint, 4, 0, 1, 2)
+            form.addWidget(QLabel("Unidad"), 5, 0)
+            form.addWidget(self.unit_input, 5, 1)
+            form.addWidget(QLabel("Peso unitario"), 6, 0)
+            form.addWidget(self.weight_input, 6, 1)
+            form.addWidget(QLabel("Tipo de IVA"), 7, 0)
+            form.addWidget(self.iva_input, 7, 1)
+            form.addWidget(QLabel("Lista 1"), 8, 0)
+            form.addWidget(self.price_list_1_input, 8, 1)
+            form.addWidget(QLabel("Lista 2"), 9, 0)
+            form.addWidget(self.price_list_2_input, 9, 1)
+            form.addWidget(QLabel("Lista 3"), 10, 0)
+            form.addWidget(self.price_list_3_input, 10, 1)
+            form.addWidget(QLabel("Lista 4"), 11, 0)
+            form.addWidget(self.price_list_4_input, 11, 1)
             layout.addLayout(form)
             self.feedback = master_abm._entry_feedback(layout)
             master_abm._entry_footer(layout, self, "saveProductButton", self._save)
@@ -83,6 +107,7 @@ def install_product_code_extension() -> None:
         def _load_record(self) -> None:
             if self.record_id is None:
                 self.unit_input.setText("kg")
+                self._sync_stock_role_hint()
                 return
             product = Product.get_by_id(self.record_id)
             if product.tipo_iva_id is not None and self.iva_input.findData(product.tipo_iva_id) < 0:
@@ -96,6 +121,13 @@ def install_product_code_extension() -> None:
             self.unit_input.setText(product.unit)
             self.weight_input.setValue(float(product.peso_unitario_kg))
             self.kind_input.setCurrentIndex(max(self.kind_input.findData(product.product_kind or "revisar"), 0))
+            # Cargar el rol real del producto: sin esto, editar un producto ya
+            # guardado lo devolveria a "Producto terminado" y una materia prima
+            # volveria a desaparecer del circuito de stock.
+            self.stock_role_input.setCurrentIndex(
+                max(self.stock_role_input.findData(product.stock_role or STOCK_ROLE_FINISHED), 0)
+            )
+            self._sync_stock_role_hint()
             if product.tipo_iva_id is not None:
                 self.iva_input.setCurrentIndex(self.iva_input.findData(product.tipo_iva_id))
             self.price_list_1_input.setText(master_abm._money_text(product.precio_lista_1 or product.precio_neto_base))
@@ -128,6 +160,7 @@ def install_product_code_extension() -> None:
                         codigo=codigo,
                         peso_unitario_kg=Decimal(str(self.weight_input.value())),
                         product_kind=self.kind_input.currentData(),
+                        stock_role=self.stock_role_input.currentData(),
                         tipo_iva=tipo_iva,
                         **prices,
                     )
@@ -139,6 +172,7 @@ def install_product_code_extension() -> None:
                         codigo=codigo,
                         peso_unitario_kg=Decimal(str(self.weight_input.value())),
                         product_kind=self.kind_input.currentData(),
+                        stock_role=self.stock_role_input.currentData(),
                         tipo_iva=tipo_iva,
                         **prices,
                     )
@@ -156,6 +190,7 @@ def install_product_code_extension() -> None:
                     product.unit,
                     f"{product.peso_unitario_kg:.3f} kg" if product.peso_unitario_kg > 0 else "Peso pendiente",
                     master_abm.product_kind_label(product.product_kind),
+                    master_abm.stock_role_label(product.stock_role),
                     "Sí" if master_abm.product_is_loadable(product) else "No",
                     "Pendiente" if product.review_required else "Confirmado",
                     master_abm._money_text(product.precio_lista_1 or product.precio_neto_base),
@@ -175,7 +210,7 @@ def install_product_code_extension() -> None:
         configs = base_configs()
         configs["products"] = master_abm.MasterAbmConfig(
             "Productos",
-            ["Código", "Producto", "Unidad", "Peso", "Clasificación", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
+            ["Código", "Producto", "Unidad", "Peso", "Clasificación", "Rol en el stock", "Órdenes", "Revisión", "Lista 1", "Lista 2", "Lista 3", "Lista 4", "Estado"],
             product_rows,
             ProductCodeEntryDialog,
             "newProductButton",
