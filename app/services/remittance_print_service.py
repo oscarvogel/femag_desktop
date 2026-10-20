@@ -40,20 +40,20 @@ class RemittancePrintTemplate:
     client_x: float = 45
     client_y: float = 234
     address_x: float = 45
-    address_y: float = 223
+    address_y: float = 228
     city_x: float = 120
-    city_y: float = 223
+    city_y: float = 228
     province_x: float = 173
-    province_y: float = 223
+    province_y: float = 228
     cuit_x: float = 45
-    cuit_y: float = 212
+    cuit_y: float = 222
     iva_x: float = 45
-    iva_y: float = 202
+    iva_y: float = 212
     document_x: float = 128
     document_y: float = 207
     quantity_x: float = 24
     detail_x: float = 44
-    first_detail_y: float = 186
+    first_detail_y: float = 196
     detail_step: float = 7.2
     max_detail_rows: int = 16
     carrier_x: float = 57
@@ -126,12 +126,12 @@ class RemittancePrintService:
         )
 
         pdf.setLineWidth(0.4)
-        pdf.rect(15 * MM, 188 * MM, 180 * MM, 78 * MM)
-        pdf.rect(15 * MM, 62 * MM, 180 * MM, 123 * MM)
+        pdf.rect(15 * MM, 203 * MM, 180 * MM, 63 * MM)
+        pdf.rect(15 * MM, 72 * MM, 180 * MM, 129 * MM)
         pdf.rect(15 * MM, 30 * MM, 180 * MM, 30 * MM)
         pdf.setFont("Helvetica", 6)
         pdf.drawString(17 * MM, 263 * MM, "CLIENTE / DESTINO")
-        pdf.drawString(17 * MM, 179 * MM, "DETALLE")
+        pdf.drawString(17 * MM, 189 * MM, "DETALLE")
         pdf.drawString(17 * MM, 52 * MM, "TRANSPORTE")
 
         pdf.setFont("Helvetica", 9)
