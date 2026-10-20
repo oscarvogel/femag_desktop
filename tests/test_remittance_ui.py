@@ -568,13 +568,15 @@ def test_remittance_print_template_matches_requested_layout(db):
     assert template.date_font_size == 12
     # 2) bloque cliente 5mm arriba y 25mm a la derecha.
     assert (template.client_x, template.client_y) == (45, 234)
-    assert (template.address_x, template.address_y) == (45, 223)
-    assert (template.city_x, template.city_y) == (120, 223)
-    assert (template.province_x, template.province_y) == (173, 223)
-    assert (template.cuit_x, template.cuit_y) == (45, 212)
-    assert (template.iva_x, template.iva_y) == (45, 202)
-    # 4) detalle 8mm mas arriba.
-    assert template.first_detail_y == 186
+    # 3) domicilio 5mm mas arriba (direccion, ciudad y provincia comparten linea).
+    assert (template.address_x, template.address_y) == (45, 228)
+    assert (template.city_x, template.city_y) == (120, 228)
+    assert (template.province_x, template.province_y) == (173, 228)
+    # CUIT e IVA 10mm mas arriba.
+    assert (template.cuit_x, template.cuit_y) == (45, 222)
+    assert (template.iva_x, template.iva_y) == (45, 212)
+    # 4) detalle 10mm mas arriba (el inicio; el resto de los renglones mantiene el paso).
+    assert template.first_detail_y == 196
     # Transportista 5mm arriba y 10mm a la derecha.
     assert (template.carrier_x, template.carrier_y) == (57, 58)
     assert (template.carrier_cuit_x, template.carrier_cuit_y) == (128, 58)
@@ -583,6 +585,43 @@ def test_remittance_print_template_matches_requested_layout(db):
     # 5) chofer 5mm arriba y 10mm a la izquierda.
     assert (template.driver_x, template.driver_y) == (37, 47)
     assert (template.driver_document_x, template.driver_document_y) == (155, 47)
+
+
+def test_remittance_print_layout_applies_the_shifts_requested_by_the_operator(db):
+    """Guarda el desplazamiento pedido: domicilio 5mm, CUIT 10mm, IVA 10mm y detalle 10mm.
+
+    Las posiciones de referencia son las publicadas antes de este pedido, para que
+    un movimiento futuro de las coordenadas se note como una regresion.
+    """
+    from app.services.remittance_print_service import RemittancePrintTemplate
+
+    template = RemittancePrintTemplate()
+
+    previous = {
+        "address": 223,
+        "cuit": 212,
+        "iva": 202,
+        "first_detail": 186,
+    }
+
+    assert template.address_y - previous["address"] == 5
+    assert template.cuit_y - previous["cuit"] == 10
+    assert template.iva_y - previous["iva"] == 10
+    assert template.first_detail_y - previous["first_detail"] == 10
+
+    # El resto del formulario no se movio.
+    assert template.date_y == 264
+    assert template.client_y == 234
+    assert template.document_y == 207
+    assert template.carrier_y == 58
+    assert template.driver_y == 47
+
+    # La linea del domicilio sube completa: direccion, ciudad y provincia.
+    assert template.address_y == template.city_y == template.province_y
+
+    # El bloque de detalle no se pisa con el bloque de cliente ni con el transporte.
+    assert template.first_detail_y < template.iva_y
+    assert template.first_detail_y - (template.max_detail_rows - 1) * template.detail_step > 60
 
 
 def test_print_draws_date_bigger_than_body(db):
