@@ -7,11 +7,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from peewee import fn
+from peewee import IntegrityError, fn
 
 from app.models.base import utc_now
 from app.models.dgr import DgrLocality
-from app.models.masters import Carrier, Client, Driver, Product, TipoIVA, Truck
+from app.models.masters import (
+    CLIENT_ADDRESS_TYPE_DELIVERY,
+    CLIENT_ADDRESS_TYPE_FISCAL,
+    CLIENT_ADDRESS_TYPE_SHARED,
+    Carrier,
+    Client,
+    ClientAddress,
+    Driver,
+    Product,
+    TipoIVA,
+    Truck,
+)
 from app.models.system import ImportBatch
 from app.services.client_service import ClientService
 from app.services.product_classification_service import analyze_legacy_product
@@ -25,12 +36,23 @@ EXEMPT_VAT_NAME = "EXENTO"
 #: cabecera C, y los archivos reales lo traen completo.
 ADDRESS_WIDTH = 30
 
+#: Tipos de dirección que el importador considera "la dirección del cliente".
+#: Los tres valen: una dirección fiscal sola, una de entrega sola, o una
+#: compartida (fiscal y entrega) que es lo que crea la importación.
+CLIENT_ADDRESS_TYPES = (
+    CLIENT_ADDRESS_TYPE_FISCAL,
+    CLIENT_ADDRESS_TYPE_DELIVERY,
+    CLIENT_ADDRESS_TYPE_SHARED,
+)
+
 
 @dataclass(frozen=True)
 class ImportOutcome:
     action: str
     warnings: tuple[dict[str, str], ...] = ()
     related_actions: tuple[tuple[str, str], ...] = ()
+    #: Contadores que se suman al resumen de la entidad (``nombre -> cantidad``).
+    counters: tuple[tuple[str, int], ...] = ()
 
 
 class LegacyDbfMasterImporter:
@@ -68,9 +90,25 @@ class LegacyDbfMasterImporter:
                     summary[entity]["warnings"].extend(outcome.warnings)
                     for related_entity, related_action in outcome.related_actions:
                         summary[related_entity][related_action] += 1
+                    for counter_name, counter_value in outcome.counters:
+                        summary[entity][counter_name] = (
+                            summary[entity].get(counter_name, 0) + counter_value
+                        )
                 except ValueError as exc:
                     summary[entity]["errors"].append(
                         {"source_id": self._value(row, "CODIGO", "ID", "IDLEGACY"), "message": str(exc)}
+                    )
+                except IntegrityError as exc:
+                    # Una fila que choca con un indice unico (por ejemplo dos
+                    # filas del legacy con el mismo nombre de chofer) no puede
+                    # frenar la importacion entera: si frena, los camiones, los
+                    # productos y las direcciones se quedan sin importar y el
+                    # F150 sigue sin poder emitir. Se anota la fila y se sigue.
+                    summary[entity]["errors"].append(
+                        {
+                            "source_id": self._value(row, "CODIGO", "ID", "IDLEGACY"),
+                            "message": f"choque con un indice unico: {exc}",
+                        }
                     )
 
         batch.status = "success" if not any(summary[entity]["errors"] for entity in ENTITY_KEYS) else "partial"
@@ -94,8 +132,15 @@ class LegacyDbfMasterImporter:
             "contact": self._value(row, "CONTACTO"),
         }
         action, client, warnings = self._upsert_client(values, source_system, source_id, batch)
-        self._ensure_client_addresses(client, row)
-        return ImportOutcome(action, tuple(warnings))
+        backfilled, updated = self._ensure_client_addresses(client, row)
+        return ImportOutcome(
+            action,
+            tuple(warnings),
+            counters=(
+                ("localidad_backfill", backfilled),
+                ("localidad_actualizada", updated),
+            ),
+        )
 
     def _upsert_client(
         self,
@@ -155,6 +200,9 @@ class LegacyDbfMasterImporter:
             client.imported_at = now
         else:
             action = "updated"
+            values = self._cuit_that_does_not_belong_to_another(
+                client, values, source_id, warnings
+            )
             for field, value in values.items():
                 setattr(client, field, value)
             if client.imported_at is None:
@@ -167,22 +215,120 @@ class LegacyDbfMasterImporter:
         client.save()
         return action, client, warnings
 
-    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> None:
+    def _cuit_that_does_not_belong_to_another(
+        self,
+        client: Client,
+        values: dict[str, Any],
+        source_id: str,
+        warnings: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        """No le saca el CUIT a otro cliente para ponérselo a este (#741).
+
+        ``client.cuit`` es único. El legacy a veces tiene **dos filas con el
+        mismo CUIT** (el mismo cliente con dos codigos, uno abreviado y otro
+        completo) y a veces corrige el CUIT de una fila con el de otra. Cuando
+        eso pasa, la fila que ya existe en la base por su ``source_id`` recibe
+        el CUIT de la otra, y el guardado revienta con
+        ``Duplicate entry ... for key 'client.client_cuit'``: la importacion
+        entera se caia y con ella los camiones, los choferes y los productos
+        que ya venian bien.
+
+        El CUIT identifica al cliente, asi que no se lo sacamos a quien lo
+        tiene: se deja el que ya estaba y se avisa, que es una decision del
+        operador y no del importador.
+        """
+        cuit = values.get("cuit")
+        if not cuit:
+            return values
+        if client.cuit == cuit:
+            return values
+        owner = Client.select().where((Client.cuit == cuit) & (Client.id != client.id)).first()
+        if owner is None:
+            return values
+        warnings.append(
+            {
+                "code": "client_cuit_taken_by_another_row",
+                "source_id": source_id,
+                "message": (
+                    f"el CUIT {cuit} ya lo tiene el cliente "
+                    f"{owner.source_system or 'manual'}:{owner.source_id or owner.id}; "
+                    f"este cliente conserva su CUIT {client.cuit or '(sin CUIT)'}"
+                ),
+            }
+        )
+        return {**values, "cuit": client.cuit}
+
+    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> tuple[int, int]:
+        """Deja la dirección del cliente con su localidad DGR (#688).
+
+        ``ClientService.ensure_imported_shared_address`` **reutiliza** la
+        dirección que ya existe cuando el cliente ya tenía una, y al reutilizarla
+        no toca ``locality``. Las direcciones que se importaron el 26 de agosto,
+        cuando ``dgrlocality`` estaba vacía, quedaron así con ``locality_id =
+        NULL`` y el F150 no puede emitir: sin localidad no sale la provincia ni
+        el país del destino (#688).
+
+        Por eso el backfill vive **acá** y no en el servicio: el servicio lo
+        comparte con el ABM de clientes (#264) y ahí una reimportación no tiene
+        por qué tocar lo que el operador dejó a mano. Acá el backfill es
+        explícito, cuenta lo que hizo y el legacy manda cuando el dato cambió.
+
+        Devuelve ``(direcciones sin localidad que se completaron, direcciones
+        cuya localidad cambió)``.
+        """
         address = self._value(row, "DOMICILIO", "DIRECCION", "ADDRESS")
         if not address:
-            return
+            return 0, 0
 
         city = self._value(row, "IMPOSITIVO", "CIUDAD", "CITY", default="Sin especificar")
         postal_code = self._value(row, "CODPOS", "CODIGOPOSTAL", "CP")
         observations = f"Código postal: {postal_code}" if postal_code else None
+        locality = self._find_locality(row)
         ClientService.ensure_imported_shared_address(
             client,
             province="Sin especificar",
             city=city,
             address=address,
             observations=observations,
-            locality=self._find_locality(row),
+            locality=locality,
         )
+        return self._backfill_address_locality(client, locality)
+
+    def _backfill_address_locality(self, client: Client, locality: DgrLocality | None) -> tuple[int, int]:
+        """Le pone la localidad DGR a la dirección del cliente aunque ya exista.
+
+        Tres reglas, que son las de #688:
+
+        - si el legacy no trae localidad, **no** se toca la que ya tenía: el
+          importador no tiene nada que decir sobre ese dato;
+        - si la dirección no tenía localidad, se le pone la del legacy
+          (``backfilled``);
+        - si la dirección tenía **otra** localidad, se actualiza a la del legacy
+          (``updated``): el legacy es la fuente de verdad del dato importado.
+
+        La escritura es idempotente: cuando la localidad ya es la del legacy no
+        se escribe nada, asi que correr la importación dos veces no cambia el
+        resultado.
+        """
+        if locality is None:
+            return 0, 0
+
+        backfilled = 0
+        updated = 0
+        addresses = ClientAddress.select().where(
+            (ClientAddress.client == client)
+            & (ClientAddress.address_type.in_(CLIENT_ADDRESS_TYPES))
+        )
+        for address in addresses:
+            if address.locality_id == locality.id:
+                continue
+            if address.locality_id is None:
+                backfilled += 1
+            else:
+                updated += 1
+            address.locality = locality
+            address.save(only=[ClientAddress.locality])
+        return backfilled, updated
 
     def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "carriers", "CODIGO", "ID", "IDLEGACY")
@@ -501,10 +647,15 @@ class LegacyDbfMasterImporter:
         return re.sub(r"[^A-Z0-9]", "", value.upper())
 
     def _empty_summary(self) -> dict[str, dict[str, Any]]:
-        return {
+        summary = {
             entity: {"created": 0, "updated": 0, "skipped": 0, "errors": [], "warnings": []}
             for entity in ENTITY_KEYS
         }
+        # Cuántas direcciones de cliente quedaron con la localidad DGR puesta y
+        # cuántas cambiaron de localidad por culpa del legacy (#688).
+        summary["clients"]["localidad_backfill"] = 0
+        summary["clients"]["localidad_actualizada"] = 0
+        return summary
 
     def _read_dbf(self, path: str | Path, *, encoding: str) -> list[dict[str, Any]]:
         try:
