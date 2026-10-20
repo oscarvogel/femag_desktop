@@ -491,6 +491,12 @@ sumó un botón **"Otros"** que despliega las opciones que no van siempre a la v
 **"Reparar cta. corriente (N)"** con el contador de órdenes rotas, "Centro de Avisos"
 y "Configurar conexión...".
 
+![La alarma y el botón de reparación](screenshots/issue_726/alarma_y_boton_otros.png)
+
+> La captura se sacó contra una **copia** de la base (`femag_demo_726`, ya eliminada)
+> con una orden rota a propósito, para que se vea el contador real: "Reparar cta.
+> corriente (1)" y "Avisos (46)".
+
 > Para verificar que el build nuevo quedó instalado, la versión se lee en la **barra
 > de estado, abajo a la izquierda**: tiene que decir la versión publicada acá abajo.
 > Si dice otra, el instalador no reemplazó el EXE (app abierta) y hay que cerrar
@@ -504,11 +510,16 @@ en la máquina del cliente.
 
 | Dato | Valor |
 |---|---|
-| Versión | **2026.10.19.18.50.09** |
-| SHA256 | `9d6fb4d9cccf4136a1fe7f6e18ac29e9708f7983e0c3db60e9e33256bf427e12` |
-| Tamaño | 42.686.202 bytes |
-| `source_sha` | `c20abc1aa87d83b0ef15ddf7021cca04499d6a15` |
+| Versión | **2026.10.20.07.10.00** |
+| SHA256 | `6be937b925256e53bfe390dc9b76549f7503ff7f44b9cf0620e34dd4e085448d` |
+| Tamaño | 42.698.133 bytes |
+| `source_sha` | `04dc8fb2516683f9696b222383c88c9783403763` |
 | Descarga | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+
+> Versión anterior publicada: `2026.10.19.18.50.09` (SHA256 `9d6fb4d9…27e12`). **Si en
+> la máquina del cliente la barra de estado dice esa versión, el instalador no
+> reemplazó el EXE**: es la versión anterior, que no tiene el botón ni la alarma.
+> La buena es la **2026.10.20.07.10.00**.
 
 Validaciones del artefacto: `--smoke` OK, `--production-health-check` OK, sin secretos ni
 configuración en el artefacto, y el SHA256 del asset publicado coincide con el del
