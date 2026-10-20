@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal
 
 from app.models.load_orders import LoadOrder
@@ -14,6 +15,30 @@ ZERO = Decimal("0.000")
 
 class LoadOrderStockError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class StockShortfall:
+    """Faltante de un producto para despachar una orden (#732).
+
+    ``available_kg`` es el saldo del libro: ya descuenta lo que salio antes, asi
+    que el faltante es real, no una estimacion. ``requested_kg`` es lo que la
+    orden se lleva.
+    """
+
+    product: Product
+    available_kg: Decimal
+    requested_kg: Decimal
+
+    @property
+    def missing_kg(self) -> Decimal:
+        return max(self.requested_kg - self.available_kg, ZERO)
+
+    def describe(self) -> str:
+        return (
+            f"{self.product.name}: hay {self.available_kg:,.3f} kg, "
+            f"la orden pide {self.requested_kg:,.3f} kg, faltan {self.missing_kg:,.3f} kg"
+        )
 
 
 def dispatch_source_prefix(order_id: int) -> str:
@@ -122,6 +147,40 @@ class LoadOrderStockService:
             plan.append((producto_id, unidades, kilos))
         return plan
 
+    def stock_shortfall(self, order) -> list[StockShortfall]:
+        """Productos de la orden que no tienen stock suficiente (#732).
+
+        No bloquea nada: la operacion decide que hacer con el faltante. El
+        saldo sale del libro de movimientos, asi que ya descuenta lo que salio
+        antes y el faltante es real.
+
+        Solo se avisa de los productos **con stock conocido**, es decir, los que
+        alguna vez entraron al libro (inventario inicial, compra, produccion).
+        De un producto que nunca se conto no se puede afirmar que falte: se
+        esta avisando de que el inventario todavia no esta cargado, que es otra
+        cosa. Sin esta distincion el aviso aparece en cada despacho hasta que
+        se carga el inventario inicial, y a la larga el operador lo deja de
+        leer.
+
+        Se usa el mismo plan que el descuento, para que lo que se avisa y lo
+        que se descuenta no puedan divergir.
+        """
+        faltantes: list[StockShortfall] = []
+        for producto_id, _unidades, kilos in self.plan_dispatch(order):
+            producto = Product.get_by_id(producto_id)
+            if not StockService.has_inbound_movements(producto):
+                continue
+            disponible = StockService.balance_for(producto).balance_kg
+            if kilos > disponible:
+                faltantes.append(
+                    StockShortfall(
+                        product=producto,
+                        available_kg=disponible,
+                        requested_kg=kilos,
+                    )
+                )
+        return faltantes
+
     def _weight_of_dispatch(self, order, producto_id: int) -> Decimal:
         """Peso de bolsa que se uso cuando salio ese producto de esta orden.
 
@@ -189,10 +248,22 @@ class LoadOrderStockService:
             )
         return movimientos
 
-    def register_dispatch(self, order) -> list[StockMovement]:
-        """Descuenta del stock lo que sale al emitir la orden."""
+    def register_dispatch(
+        self, order, *, override_reason: str = ""
+    ) -> list[StockMovement]:
+        """Descuenta del stock lo que sale al emitir la orden.
+
+        ``override_reason`` es el motivo con el que el operador confirmo emitir
+        igual sin stock suficiente (#732). Va en las observaciones del
+        movimiento y en la auditoria: cuando despues se ve un saldo en
+        negativo, el libro dice por que se emitio.
+        """
         order = self._require_order(order)
         prefix = dispatch_source_prefix(order.id)
+        motivo = (override_reason or "").strip()
+        observaciones = (
+            f"Despacho con stock insuficiente. Motivo: {motivo}" if motivo else None
+        )
 
         movimientos: list[StockMovement] = []
         for producto_id, unidades, kilos in self.plan_dispatch(order):
@@ -208,6 +279,7 @@ class LoadOrderStockService:
                         f"{_miles(unidades)} unidad(es)"
                     ),
                     movement_date=order.date,
+                    observations=observaciones,
                     created_by=self.current_user,
                 )
             )
@@ -222,6 +294,7 @@ class LoadOrderStockService:
                     "order_number": order.order_number,
                     "movement_ids": [m.id for m in movimientos],
                     "kg": str(sum(m.quantity_kg for m in movimientos)),
+                    "stock_override_reason": motivo or None,
                 },
             )
         return movimientos

@@ -9,9 +9,25 @@ from app.services.audit_service import AuditService
 from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
 from app.services.load_order_pallet_excel_export_service import LoadOrderPalletExcelExportService
-from app.services.load_order_stock_service import LoadOrderStockService
+from app.services.load_order_stock_service import (
+    LoadOrderStockService,
+    StockShortfall,
+)
 from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
 from app.services.load_order_service import LoadOrderService
+
+
+class LoadOrderStockShortfallError(ValueError):
+    """La orden pide mas mercaderia de la que hay en stock (#732).
+
+    Lleva el detalle del faltante para que la pantalla pueda mostrarlo y pedir
+    el motivo con el que el operador decide emitir igual. Sin ese motivo la
+    orden no se emite.
+    """
+
+    def __init__(self, message: str, *, faltantes: list[StockShortfall]):
+        super().__init__(message)
+        self.faltantes = list(faltantes)
 
 
 class LoadOrderOperationService:
@@ -37,7 +53,15 @@ class LoadOrderOperationService:
             current_user=current_user, audit_service=self.audit_service
         )
 
-    def issue(self, order: LoadOrder) -> LoadOrder:
+    def issue(self, order: LoadOrder, *, stock_override_reason: str = "") -> LoadOrder:
+        """Emite la orden: cambia el estado, genera el presupuesto y descuenta stock.
+
+        Si la orden pide mas mercaderia de la que hay en stock, no se emite en
+        silencio: se levanta :class:`LoadOrderStockShortfallError` con el
+        detalle del faltante. La pantalla lo muestra y pide un motivo; con ese
+        motivo se vuelve a llamar con ``stock_override_reason``, y la decision
+        queda asentada en la auditoria y en los movimientos del libro (#732).
+        """
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_ANNULLED:
             raise ValueError("No se puede emitir una orden anulada.")
@@ -54,6 +78,16 @@ class LoadOrderOperationService:
         # abre transaccion, asi que fallar despues dejaria la orden emitida con
         # presupuesto y sin salida de stock.
         self.stock.plan_dispatch(order)
+        # Y se avisa el faltante antes de emitir: el operador tiene que ver
+        # cuanto falta y decidir, no descubrirlo despues en el saldo.
+        faltantes = self.stock.stock_shortfall(order)
+        motivo = (stock_override_reason or "").strip()
+        if faltantes and not motivo:
+            detalle = "; ".join(faltante.describe() for faltante in faltantes)
+            raise LoadOrderStockShortfallError(
+                f"No hay stock suficiente para emitir la orden: {detalle}",
+                faltantes=faltantes,
+            )
         # Emitir es UNA operacion: estado, cuenta corriente y salida de stock.
         # Van en la misma transaccion para que no quede una orden "Emitida" sin
         # registrar en los libros: si el presupuesto o el movimiento fallan, la
@@ -66,7 +100,7 @@ class LoadOrderOperationService:
             # La mercaderia sale de la planta cuando se emite la orden, no cuando se
             # cierra la entrega: emitir es el hecho operativo que produce el
             # presupuesto. Va aca y no en el cierre, que es un paso administrativo.
-            self.stock.register_dispatch(issued)
+            self.stock.register_dispatch(issued, override_reason=motivo)
         return issued
 
     def print_order(self, order: LoadOrder) -> Path:
