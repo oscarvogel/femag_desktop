@@ -128,7 +128,8 @@ def test_legacy_product_import_assigns_exempt_vat_to_updated_products(db):
     assert exempt_vat.porcentaje == 0.0
 
 
-def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
+def test_legacy_dbf_master_import_is_idempotent_and_does_not_overwrite(db):
+    """Reimportar no deshace lo que el operador ya corrigio (#746)."""
     from app.importers.legacy_dbf import LegacyDbfMasterImporter
     from app.models.masters import Client
     from app.models.system import ImportBatch
@@ -162,11 +163,47 @@ def test_legacy_dbf_master_import_is_idempotent_and_source_wins(db):
     assert result["clients"]["updated"] == 1
     assert Client.select().count() == 1
     client = Client.get()
-    assert client.name == "Cliente Norte Actualizado"
-    assert client.phone == "222"
+    # Lo que ya estaba sigue como estaba: la base es viva.
+    assert client.name == "Cliente Norte"
+    assert client.phone == "111"
     assert client.imported_at is not None
     assert client.updated_from_source_at is not None
     assert ImportBatch.select().count() == 2
+
+
+def test_legacy_dbf_master_import_in_overwrite_mode_the_source_wins(db):
+    """El modo overwrite conserva el comportamiento anterior, a proposito."""
+    from app.importers.legacy_dbf import LegacyDbfMasterImporter
+    from app.models.masters import Client
+
+    importer = LegacyDbfMasterImporter(mode="overwrite")
+    importer.import_rows(
+        {
+            "clients": [
+                {"CODIGO": "C001", "RAZON": "Cliente Norte", "CUIT": "30711111118", "IVA": "RI", "TELEFONO": "111"}
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    importer.import_rows(
+        {
+            "clients": [
+                {
+                    "CODIGO": "C001",
+                    "RAZON": "Cliente Norte Actualizado",
+                    "CUIT": "30711111118",
+                    "IVA": "RI",
+                    "TELEFONO": "222",
+                }
+            ]
+        },
+        source_system="legacy_dbf",
+    )
+
+    client = Client.get()
+    assert client.name == "Cliente Norte Actualizado"
+    assert client.phone == "222"
 
 
 def test_legacy_client_import_creates_one_shared_address_without_overwriting_it(db):
@@ -617,7 +654,8 @@ def test_legacy_dbf_master_import_adopts_existing_natural_key_with_trace(db):
     client = Client.get()
     assert result["clients"]["updated"] == 1
     assert Client.select().count() == 1
-    assert client.name == "Cliente desde DBF"
+    # La fila existed y el operador la creo a mano: conserva su nombre (#746).
+    assert client.name == "Cliente preexistente"
     assert client.source_id == "C001"
     assert client.imported_at is not None
 

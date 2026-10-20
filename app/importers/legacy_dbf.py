@@ -31,6 +31,33 @@ from app.services.product_classification_service import analyze_legacy_product
 ENTITY_KEYS = ("clients", "carriers", "drivers", "trucks", "products")
 EXEMPT_VAT_NAME = "EXENTO"
 
+#: Campos de los que la importacion es **dueña**: el operador no los edita en el
+#: ABM (la localidad DGR, el tipo de chasis, los rubros DGR), asi que puede
+#: corregirlos siempre. Son ademas los que el F150 exige.
+#:
+#: Todo lo demas es del operador: en modo ``patch`` la importacion solo lo
+#: completa cuando esta vacio, para que una reimportacion en una base viva no
+#: deshaga lo que el operador corrigio a mano.
+IMPORT_OWNED_FIELDS: dict[str, tuple[str, ...]] = {
+    "Client": (),
+    "Carrier": ("codigo", "tipo", "locality"),
+    "Driver": ("locality",),
+    "Truck": ("chassis_type", "trailer_type"),
+    "Product": (
+        "rh1",
+        "rh2",
+        "rh3",
+        "rh4",
+        "unidad_dgr",
+        "tipo_iva",
+        "peso_unitario_kg",
+        "product_kind",
+        "classification_source",
+        "weight_source",
+        "review_required",
+    ),
+}
+
 #: Ancho del campo ``DOMICILIO`` en ``transporte.dbf`` y ``chofer.dbf``. El F150
 #: escribe ese domicilio en los campos 13 (transportista) y 31 (chofer) de la
 #: cabecera C, y los archivos reales lo traen completo.
@@ -56,13 +83,37 @@ class ImportOutcome:
 
 
 class LegacyDbfMasterImporter:
+    """Importa los maestros del legacy.
+
+    Hay dos modos y el default es el que no destruye trabajo:
+
+    - ``patch`` (default): **solo completa lo que esta vacio**. Si el campo ya
+      tiene un valor, no se toca. Es el modo para una base viva, donde el
+      operador ya corrigio nombres, telefonos, domicilios o rubros, y una
+      reimportacion no puede deshacer eso.
+    - ``overwrite``: el legacy manda, como antes. Sirve para una carga limpia
+      de una base vacia o para una recarga deliberada.
+    """
+
+    MODE_PATCH = "patch"
+    MODE_OVERWRITE = "overwrite"
+    MODES = (MODE_PATCH, MODE_OVERWRITE)
+
+    def __init__(self, *, mode: str = MODE_PATCH):
+        if mode not in self.MODES:
+            raise ValueError(f"Modo de importacion desconocido: {mode!r}.")
+        self.mode = mode
+
     def import_dbf_files(
         self,
         paths_by_entity: Mapping[str, str | Path],
         *,
         source_system: str = "legacy_dbf",
         encoding: str = "cp1252",
+        mode: str | None = None,
     ) -> dict[str, dict[str, Any]]:
+        if mode is not None:
+            self.mode = mode
         rows_by_entity = {
             entity: self._read_dbf(path, encoding=encoding)
             for entity, path in paths_by_entity.items()
@@ -131,14 +182,19 @@ class LegacyDbfMasterImporter:
             "email": self._value(row, "EMAIL", "MAIL"),
             "contact": self._value(row, "CONTACTO"),
         }
-        action, client, warnings = self._upsert_client(values, source_system, source_id, batch)
-        backfilled, updated = self._ensure_client_addresses(client, row)
+        action, client, warnings, completados, pisados = self._upsert_client(
+            values, source_system, source_id, batch
+        )
+        backfilled, updated, ignored = self._ensure_client_addresses(client, row)
         return ImportOutcome(
             action,
             tuple(warnings),
             counters=(
                 ("localidad_backfill", backfilled),
                 ("localidad_actualizada", updated),
+                ("localidad_respetada", ignored),
+                ("campos_completados", completados),
+                ("campos_pisados", pisados),
             ),
         )
 
@@ -196,6 +252,7 @@ class LegacyDbfMasterImporter:
 
         if client is None:
             action = "created"
+            completados, pisados = 0, 0
             client = Client(**values)
             client.imported_at = now
         else:
@@ -203,8 +260,7 @@ class LegacyDbfMasterImporter:
             values = self._cuit_that_does_not_belong_to_another(
                 client, values, source_id, warnings
             )
-            for field, value in values.items():
-                setattr(client, field, value)
+            completados, pisados = self._aplicar_valores(client, values)
             if client.imported_at is None:
                 client.imported_at = now
 
@@ -213,7 +269,7 @@ class LegacyDbfMasterImporter:
         client.updated_from_source_at = now
         client.last_import_batch = batch
         client.save()
-        return action, client, warnings
+        return action, client, warnings, completados, pisados
 
     def _cuit_that_does_not_belong_to_another(
         self,
@@ -258,7 +314,7 @@ class LegacyDbfMasterImporter:
         )
         return {**values, "cuit": client.cuit}
 
-    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> tuple[int, int]:
+    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> tuple[int, int, int]:
         """Deja la dirección del cliente con su localidad DGR (#688).
 
         ``ClientService.ensure_imported_shared_address`` **reutiliza** la
@@ -274,11 +330,11 @@ class LegacyDbfMasterImporter:
         explícito, cuenta lo que hizo y el legacy manda cuando el dato cambió.
 
         Devuelve ``(direcciones sin localidad que se completaron, direcciones
-        cuya localidad cambió)``.
+        cuya localidad cambió, direcciones con otra localidad que se respetaron)``.
         """
         address = self._value(row, "DOMICILIO", "DIRECCION", "ADDRESS")
         if not address:
-            return 0, 0
+            return 0, 0, 0
 
         city = self._value(row, "IMPOSITIVO", "CIUDAD", "CITY", default="Sin especificar")
         postal_code = self._value(row, "CODPOS", "CODIGOPOSTAL", "CP")
@@ -306,15 +362,20 @@ class LegacyDbfMasterImporter:
         - si la dirección tenía **otra** localidad, se actualiza a la del legacy
           (``updated``): el legacy es la fuente de verdad del dato importado.
 
+        En modo ``patch`` la tercera regla **no** aplica: si la dirección ya
+        tiene una localidad, se respeta (puede ser que el operador la haya
+        corregido a mano) y se cuenta como ``ignored``.
+
         La escritura es idempotente: cuando la localidad ya es la del legacy no
         se escribe nada, asi que correr la importación dos veces no cambia el
         resultado.
         """
         if locality is None:
-            return 0, 0
+            return 0, 0, 0
 
         backfilled = 0
         updated = 0
+        ignored = 0
         addresses = ClientAddress.select().where(
             (ClientAddress.client == client)
             & (ClientAddress.address_type.in_(CLIENT_ADDRESS_TYPES))
@@ -324,11 +385,16 @@ class LegacyDbfMasterImporter:
                 continue
             if address.locality_id is None:
                 backfilled += 1
+            elif self.mode == self.MODE_PATCH:
+                # La direccion ya tiene una localidad: puede ser que el
+                # operador la haya corregido a mano. No se toca.
+                ignored += 1
+                continue
             else:
                 updated += 1
             address.locality = locality
             address.save(only=[ClientAddress.locality])
-        return backfilled, updated
+        return backfilled, updated, ignored
 
     def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "carriers", "CODIGO", "ID", "IDLEGACY")
@@ -342,7 +408,13 @@ class LegacyDbfMasterImporter:
             "locality": self._find_locality(row),
             "address": self._address(row),
         }
-        return ImportOutcome(self._upsert(Carrier, {"name": name}, values, source_system, source_id, batch))
+        action, completados, pisados = self._upsert(
+            Carrier, {"name": name}, values, source_system, source_id, batch
+        )
+        return ImportOutcome(
+            action,
+            counters=(("campos_completados", completados), ("campos_pisados", pisados)),
+        )
 
     def _import_drivers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "drivers", "CODIGO", "ID", "IDLEGACY")
@@ -379,9 +451,16 @@ class LegacyDbfMasterImporter:
             "locality": self._find_locality(row),
             "address": self._address(row),
         }
-        action = self._upsert(Driver, {"name": name}, values, source_system, source_id, batch)
+        action, completados, pisados = self._upsert(
+            Driver, {"name": name}, values, source_system, source_id, batch
+        )
         related_actions = (("trucks", truck_action),) if truck_action is not None else ()
-        return ImportOutcome(action, warnings + truck_warnings, related_actions)
+        return ImportOutcome(
+            action,
+            warnings + truck_warnings,
+            related_actions,
+            counters=(("campos_completados", completados), ("campos_pisados", pisados)),
+        )
 
     def _import_trucks(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "trucks", "CODIGO", "ID", "IDLEGACY")
@@ -389,7 +468,13 @@ class LegacyDbfMasterImporter:
         carrier_source_id = self._required(row, "trucks", "TRANSP", "TRANSPORTISTA", "CARRIER")
         carrier = self._get_carrier(source_system, carrier_source_id)
         values = {"domain": domain, "carrier": carrier}
-        return ImportOutcome(self._upsert(Truck, {"domain": domain}, values, source_system, source_id, batch))
+        action, completados, pisados = self._upsert(
+            Truck, {"domain": domain}, values, source_system, source_id, batch
+        )
+        return ImportOutcome(
+            action,
+            counters=(("campos_completados", completados), ("campos_pisados", pisados)),
+        )
 
     def _import_products(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "products", "CODIGO", "ID", "IDLEGACY")
@@ -426,7 +511,13 @@ class LegacyDbfMasterImporter:
         effective_kind = values.get("product_kind", existing.product_kind if existing else inference.product_kind)
         effective_weight = values.get("peso_unitario_kg", existing.peso_unitario_kg if existing else inference.peso_unitario_kg)
         values["review_required"] = effective_kind == "revisar" or (effective_kind == "producto" and effective_weight <= 0)
-        return ImportOutcome(self._upsert(Product, {"name": name}, values, source_system, source_id, batch))
+        action, completados, pisados = self._upsert(
+            Product, {"name": name}, values, source_system, source_id, batch
+        )
+        return ImportOutcome(
+            action,
+            counters=(("campos_completados", completados), ("campos_pisados", pisados)),
+        )
 
     def _ensure_exempt_vat(self) -> TipoIVA:
         exempt_vat = (
@@ -547,6 +638,49 @@ class LegacyDbfMasterImporter:
             return carrier_cuit == driver_cuit
         return self._clean_identity_name(carrier.name) == driver_name
 
+    def _aplicar_valores(self, row, values: dict[str, Any]) -> tuple[int, int]:
+        """Escribe los valores del legacy sobre una fila que ya existe.
+
+        En modo ``patch`` la importacion es dueña de algunos campos (los que el
+        operador no edita en el ABM: la localidad DGR, los rubros, el tipo de
+        chasis) y de los demas **solo completa los que estan vacios**. Asi una
+        reimportacion en una base viva no deshace lo que el operador corrigio a
+        mano.
+
+        En modo ``overwrite`` el legacy manda en todos los campos, como antes.
+
+        Un valor vacio del legacy nunca borra lo que ya hay: si el legacy no
+        trae el dato, no tiene por que decir nada.
+
+        Devuelve ``(campos completados, campos pisados)``.
+        """
+        propios = IMPORT_OWNED_FIELDS.get(type(row).__name__, ())
+        completados = 0
+        pisados = 0
+        for field, value in values.items():
+            if self.mode == self.MODE_PATCH:
+                if self._vacio(value):
+                    continue
+                actual = getattr(row, field, None)
+                if field not in propios and not self._vacio(actual):
+                    continue
+            actual = getattr(row, field, None)
+            if self._vacio(actual):
+                completados += 1
+            else:
+                pisados += 1
+            setattr(row, field, value)
+        return completados, pisados
+
+    @staticmethod
+    def _vacio(value: Any) -> bool:
+        """True cuando el campo esta sin dato (``NULL`` o texto en blanco)."""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return not value.strip()
+        return False
+
     def _upsert(
         self,
         model,
@@ -566,12 +700,13 @@ class LegacyDbfMasterImporter:
             row = model.select().filter(**natural_lookup).first()
 
         action = "updated" if row is not None else "created"
+        completados = 0
+        pisados = 0
         if row is None:
             row = model(**values)
             row.imported_at = now
         else:
-            for field, value in values.items():
-                setattr(row, field, value)
+            completados, pisados = self._aplicar_valores(row, values)
             if row.imported_at is None:
                 row.imported_at = now
 
@@ -580,7 +715,7 @@ class LegacyDbfMasterImporter:
         row.updated_from_source_at = now
         row.last_import_batch = batch
         row.save()
-        return action
+        return action, completados, pisados
 
     def _get_carrier(self, source_system: str, source_id: str) -> Carrier:
         carrier = (

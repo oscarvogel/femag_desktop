@@ -68,6 +68,9 @@ class F150SetupReport:
     masters: dict[str, Any] = field(default_factory=dict)
     origin: F150Location | None = None
     checks: tuple[str, ...] = ()
+    #: Modo con el que se importaron los maestros: ``patch`` (solo completa lo
+    #: vacio) o ``overwrite`` (el legacy manda).
+    mode: str = "patch"
     #: Avisos para el operador: cosas que conviene mirar pero que no impiden
     #: emitir (por ejemplo una fila del legacy que no se pudo importar).
     warnings: tuple[str, ...] = ()
@@ -155,6 +158,7 @@ class F150SetupService:
         import_dgr: bool = True,
         import_masters: bool = True,
         configure_origin: bool = True,
+        mode: str = LegacyDbfMasterImporter.MODE_PATCH,
     ) -> F150SetupReport:
         warnings: list[str] = []
         blockers: list[str] = []
@@ -186,7 +190,7 @@ class F150SetupService:
             if faltan:
                 warnings.append("No se encontraron estos DBF de maestros: " + ", ".join(faltan))
             if paths:
-                masters_summary = LegacyDbfMasterImporter().import_dbf_files(
+                masters_summary = LegacyDbfMasterImporter(mode=mode).import_dbf_files(
                     paths, source_system=source_system, encoding=encoding
                 )
             self._agregar_fallos(warnings, "maestros", masters_summary)
@@ -230,6 +234,7 @@ class F150SetupService:
             masters=masters_summary,
             origin=origin,
             checks=checks,
+            mode=mode,
             warnings=tuple(warnings),
             blockers=tuple(blockers),
             remittances_ready=remittances_ready,

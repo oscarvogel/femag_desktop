@@ -39,8 +39,8 @@ CLIENT_ROW = {
 }
 
 
-def _import_clients(rows):
-    return LegacyDbfMasterImporter().import_rows({"clients": rows})
+def _import_clients(rows, *, mode: str = "patch"):
+    return LegacyDbfMasterImporter(mode=mode).import_rows({"clients": rows})
 
 
 def test_reimport_backfillea_la_localidad_de_la_direccion_existente(db):
@@ -86,13 +86,31 @@ def test_correrlo_dos_veces_no_cambia_el_resultado(db):
     assert ClientAddress.get().locality.name == "CAPITAL FEDERAL"
 
 
-def test_una_direccion_que_cambia_de_localidad_se_actualiza(db):
-    """Criterio 3: si el legacy cambia la localidad, la direccion la sigue."""
+def test_en_modo_patch_una_direccion_con_otra_localidad_se_respeta(db):
+    """#746: en una base viva la direccion conserva la localidad que tiene.
+
+    Puede ser que el operador la haya corregido a mano, asi que la
+    importacion no la pisa: solo la cuenta.
+    """
     DgrReferenceImporter().import_rows(DGR_ROWS)
     _import_clients([CLIENT_ROW])
     assert ClientAddress.get().locality.name == "CAPITAL FEDERAL"
 
     summary = _import_clients([dict(CLIENT_ROW, LOCALIDAD="2430")])
+
+    assert ClientAddress.get().locality.name == "CAPITAL FEDERAL"
+    assert summary["clients"]["localidad_respetada"] == 1
+    assert summary["clients"]["localidad_actualizada"] == 0
+    assert summary["clients"]["localidad_backfill"] == 0
+
+
+def test_en_modo_overwrite_la_direccion_sigue_la_localidad_del_legacy(db):
+    """Criterio 3 de #688, disponible a proposito con el modo overwrite."""
+    DgrReferenceImporter().import_rows(DGR_ROWS)
+    _import_clients([CLIENT_ROW], mode="overwrite")
+    assert ClientAddress.get().locality.name == "CAPITAL FEDERAL"
+
+    summary = _import_clients([dict(CLIENT_ROW, LOCALIDAD="2430")], mode="overwrite")
 
     assert ClientAddress.get().locality.name == "PUERTO RICO"
     assert summary["clients"]["localidad_actualizada"] == 1
