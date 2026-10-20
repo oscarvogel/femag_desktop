@@ -95,6 +95,14 @@ class StockCountPage(QWidget):
         self.motivo.setPlaceholderText("Motivo de la diferencia (opcional, queda asentado)")
         layout.addWidget(self.motivo)
 
+        # Las bolsas que el operador viene escribiendo (#736). El refresco
+        # automatico recarga la tabla cada 10 segundos para que se vean los
+        # cambios de las otras estaciones: si al recargar se tomara siempre lo
+        # que esta guardado en la base, el operador perderia el conteo a mitad
+        # de camino. Lo escrito se conserva; lo que viene de la base, se actualiza.
+        self._escritas: dict[int, int] = {}
+        self._escritas_fecha: date | None = None
+
         acciones = QHBoxLayout()
         self.save_button = QPushButton("Guardar conteo")
         self.save_button.setObjectName("stockCountSaveButton")
@@ -114,6 +122,11 @@ class StockCountPage(QWidget):
 
     def refresh(self) -> None:
         dia = self.selected_date()
+        # Lo que el operador escribio es de una fecha de conteo. Si la fecha
+        # cambia, lo escrito no aplica a la nueva y se descarta (#736).
+        if dia != self._escritas_fecha:
+            self._escritas = {}
+            self._escritas_fecha = dia
         try:
             conteo = StockCount.get_or_none(
                 (StockCount.count_date == dia) & (StockCount.status == StockCount.STATUS_OPEN)
@@ -123,6 +136,32 @@ class StockCountPage(QWidget):
             self._fill(dia, conteo, productos, lineas)
         except Exception as exc:  # noqa: BLE001
             self.feedback.show_error(f"No se pudo abrir el conteo: {exc}")
+
+    def _bolsas_a_mostrar(self, producto_id: int, linea, cerrado: bool) -> int:
+        """Las bolsas que tiene que mostrar el campo.
+
+        Si la linea ya esta guardada, o el conteo esta cerrado, manda lo que
+        dice la base: el campo esta bloqueado y lo que se muestra es la
+        historia.
+
+        Si no, manda **lo que escribio el operador** (#736). El refresco
+        automatico recarga la tabla cada 10 segundos para que se vean los
+        cambios de las otras estaciones; tomar siempre el valor guardado haria
+        perder el conteo a mitad de camino.
+        """
+        if linea is None and not cerrado and producto_id in self._escritas:
+            return self._escritas[producto_id]
+        return int(linea.counted_units) if linea else 0
+
+    def _registrar_bolsas_escritas(self) -> None:
+        """Guarda lo que el operador escribe, para que el refresco no se lo lleve.
+
+        Solo se guarda lo de los campos editables: una linea ya cargada no la
+        toco el operador, y mostrarla como "escrito" seria mentir.
+        """
+        for producto_id, entrada in self.inputs.items():
+            if not entrada.isReadOnly():
+                self._escritas[producto_id] = entrada.value()
 
     def _fill(self, dia, conteo, productos, lineas) -> None:
         cerrado = conteo is not None and not conteo.is_open
@@ -186,8 +225,9 @@ class StockCountPage(QWidget):
             entrada.setRange(0, 9_999_999)
             entrada.setSingleStep(1)
             entrada.setSuffix(" bolsas")
-            entrada.setValue(int(linea.counted_units) if linea else 0)
+            entrada.setValue(self._bolsas_a_mostrar(producto.id, linea, cerrado))
             entrada.setReadOnly(linea is not None or cerrado)
+            entrada.valueChanged.connect(self._registrar_bolsas_escritas)
             self.table.setCellWidget(indice, 2, entrada)
             self.inputs[producto.id] = entrada
             if linea is not None:
