@@ -111,6 +111,13 @@ class ProductionPart(BaseModel):
     shift = CharField(max_length=40)
     observations = TextField(null=True)
 
+    # Quien cargo el parte (#754). En la planta embolsan varias personas, asi que
+    # cada una carga su propio parte: el modelo admite varios partes por
+    # (fecha, turno) y este campo deja claro quien registro cada uno. Es otra
+    # cosa que ``confirmed_by``, que es quien confirmo y por lo tanto quien
+    # escribio los movimientos en el libro de stock.
+    recorded_by = CharField(max_length=80, null=True)
+
     confirmed_at = DateTimeField(null=True)
     confirmed_by = CharField(max_length=80, null=True)
 

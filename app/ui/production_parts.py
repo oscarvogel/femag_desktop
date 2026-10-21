@@ -227,12 +227,24 @@ class ProductionPartPage(QWidget):
         # Solo productos de venta: lo que se embolsa es lo que se despacha, no un
         # servicio, un interno o un articulo todavia en revision. El mismo criterio
         # que usa el maestro para marcar un producto como cargable.
+        #
+        # La materia prima queda fuera (#754): si el mismo producto se pudiera
+        # embolsar y ademas consumirse, el mismo kilo entraria y saldría del
+        # stock en el mismo parte y el saldo quedaria falseado.
+        #
+        # El filtro es NULL-safe: en SQL, ``stock_role != 'materia_prima'`` es
+        # NULL (y excluye la fila) cuando ``stock_role`` es NULL. Un producto
+        # sin rol cargado tiene que seguir apareciendo como embolsable.
         products = list(
             Product.select()
             .where(
                 (Product.active == True)  # noqa: E712
                 & (Product.peso_unitario_kg > 0)
                 & (Product.product_kind == PRODUCT_KIND_PRODUCT)
+                & (
+                    (Product.stock_role != STOCK_ROLE_RAW)
+                    | (Product.stock_role.is_null())
+                )
             )
             .order_by(Product.name)
         )
@@ -492,6 +504,7 @@ class ProductionPartPage(QWidget):
                     production_date=self.selected_date(), shift=self.shift.currentText(),
                     lines=self.pending, consumptions=self.pending_consumptions,
                     observations=self.observations.text(),
+                    recorded_by=self.current_username,
                 )
                 message = "Parte guardado."
             else:
@@ -500,6 +513,7 @@ class ProductionPartPage(QWidget):
                     shift=self.shift.currentText(), lines=self.pending,
                     consumptions=self.pending_consumptions,
                     observations=self.observations.text(),
+                    recorded_by=self.current_username,
                 )
                 message = "Parte modificado."
         except Exception as exc:

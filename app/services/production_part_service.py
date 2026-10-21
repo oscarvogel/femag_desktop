@@ -125,22 +125,29 @@ class ProductionPartService:
         return prepared
 
     @staticmethod
-    def _values(*, shift: str, observations: str = ""):
+    def _values(*, shift: str, observations: str = "", recorded_by: str | None = None):
         shift = (shift or "").strip()
         if not shift:
             raise ValueError("El turno es obligatorio.")
-        return shift, (observations or "").strip() or None
+        recorded_by = (recorded_by or "").strip() or None
+        return shift, (observations or "").strip() or None, recorded_by
 
     @classmethod
     def create(
-        cls, *, production_date: date, shift: str, lines, consumptions=(), observations: str = ""
+        cls, *, production_date: date, shift: str, lines, consumptions=(), observations: str = "",
+        recorded_by: str | None = None,
     ) -> ProductionPart:
-        shift, observations = cls._values(shift=shift, observations=observations)
+        shift, observations, recorded_by = cls._values(
+            shift=shift, observations=observations, recorded_by=recorded_by
+        )
         prepared = cls._lines(lines)
         prepared_consumptions = cls._consumptions(consumptions)
         with ProductionPart._meta.database.atomic():
             part = ProductionPart.create(
-                production_date=production_date, shift=shift, observations=observations
+                production_date=production_date,
+                shift=shift,
+                observations=observations,
+                recorded_by=recorded_by,
             )
             cls._write_lines(part, prepared)
             cls._write_consumptions(part, prepared_consumptions)
@@ -149,7 +156,7 @@ class ProductionPartService:
     @classmethod
     def update(
         cls, part: ProductionPart, *, production_date: date, shift: str, lines,
-        consumptions=(), observations: str = "",
+        consumptions=(), observations: str = "", recorded_by: str | None = None,
     ) -> ProductionPart:
         # El orden importa: un parte anulado tambien esta confirmado, y decirle
         # "esta confirmado" manda al operador al motivo equivocado.
@@ -160,13 +167,16 @@ class ProductionPartService:
                 "El parte está confirmado: ya entró al stock y no se puede editar. "
                 "Anulalo para generar el movimiento contrario."
             )
-        shift, observations = cls._values(shift=shift, observations=observations)
+        shift, observations, recorded_by = cls._values(
+            shift=shift, observations=observations, recorded_by=recorded_by
+        )
         prepared = cls._lines(lines)
         prepared_consumptions = cls._consumptions(consumptions)
         with ProductionPart._meta.database.atomic():
             part.production_date = production_date
             part.shift = shift
             part.observations = observations
+            part.recorded_by = recorded_by
             part.save()
             cls._delete_lines(part)
             cls._write_lines(part, prepared)

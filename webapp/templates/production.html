@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Producción · FEMAG{% endblock %}
+{% block content %}
+{% macro combo(campo, indice, valor_id, valor_texto, grupo, placeholder) %}
+<div class="combo" data-grupo="{{ grupo }}">
+  <input type="hidden" name="{{ campo }}_{{ indice }}" value="{{ valor_id }}">
+  <input type="text" class="combo-buscar" placeholder="{{ placeholder }}" autocomplete="off"
+         autocapitalize="none" spellcheck="false" role="combobox" aria-expanded="false"
+         aria-autocomplete="list" value="{{ valor_texto }}">
+  <ul class="combo-lista" role="listbox" hidden></ul>
+  <span class="combo-aviso" hidden>Elegí un producto de la lista.</span>
+</div>
+{% endmacro %}
+
+<div class="card">
+  <h1>Parte de producción</h1>
+  <p class="muted">Cargá las bolsas que embolsaste en el turno. Queda registrado a nombre de <strong>{{ current_username() }}</strong>.</p>
+
+  <form method="post" id="formParte">
+    <div class="grid-2">
+      <div>
+        <label for="fecha">Fecha</label>
+        <input id="fecha" name="fecha" type="date" value="{{ day.isoformat() }}" required>
+      </div>
+      <div>
+        <label for="turno">Turno</label>
+        <select id="turno" name="turno">
+          {% for s in shifts %}
+          <option value="{{ s }}" {% if s == shift %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <h2>Productos embolsados</h2>
+    {% if not productos_opciones %}
+      <p class="muted">No hay productos con peso de bolsa cargado. Cargalos en Maestros &gt; Productos antes de registrar bolsas.</p>
+    {% else %}
+      {% for i in range(bag_rows) %}
+      {% set pid = submitted.product[i] %}
+      <div class="line-row">
+        {{ combo('product', i, pid, etiquetas_producto.get(pid, ''), 'productos', 'Buscar producto...') }}
+        <input type="number" inputmode="numeric" min="1" step="1" name="bags_{{ i }}" placeholder="Bolsas" aria-label="Cantidad de bolsas {{ i + 1 }}" value="{{ submitted.bags[i] }}">
+      </div>
+      {% endfor %}
+    {% endif %}
+
+    <h2>Materia prima consumida</h2>
+    {% if not materias_opciones %}
+      <p class="muted">No hay materia prima cargada con rol «Materia prima». Sin materia prima el parte no se puede confirmar: las bolsas entrarían al stock y el almidón nunca saldría.</p>
+    {% else %}
+      {% for i in range(consumption_rows) %}
+      {% set mid = submitted.materia[i] %}
+      <div class="line-row">
+        {{ combo('materia', i, mid, etiquetas_materia.get(mid, ''), 'materias', 'Buscar materia prima...') }}
+        <input type="number" inputmode="decimal" min="0" step="0.01" name="kg_{{ i }}" placeholder="kg" aria-label="Kilos consumidos {{ i + 1 }}" value="{{ submitted.kg[i] }}">
+      </div>
+      {% endfor %}
+    {% endif %}
+
+    <label for="observaciones">Observación</label>
+    <textarea id="observaciones" name="observaciones" placeholder="Opcional">{{ submitted.observaciones }}</textarea>
+
+    <div style="height:16px"></div>
+    <button type="submit">Guardar parte</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Partes del {{ day.strftime('%d/%m/%Y') }}</h2>
+  <div class="summary">
+    <div><span>Partes</span>{{ totals.parts }}</div>
+    <div><span>Bolsas</span>{{ totals.bags }}</div>
+    <div><span>Kg embolsados</span>{{ totals.kg|kg }}</div>
+    <div><span>Kg consumidos</span>{{ totals.consumed_kg|kg }}</div>
+  </div>
+
+  {% for row in part_rows %}
+  <div class="line">
+    <div class="summary">
+      <div><span>Turno</span>{{ row.part.shift }}</div>
+      <div><span>Cargó</span>{{ row.part.recorded_by or 'sin dato' }}</div>
+      <div><span>Estado</span>{{ row.part.status_label }}</div>
+      <div><span>Bolsas</span>{{ row.bags_count }} · {{ row.kg_total|kg }} kg</div>
+    </div>
+    <ul class="detalle">
+      {% for bag in row.bags %}
+      <li>{{ bag.product.name }}: {{ bag.bags }} bolsas ({{ bag.kg|kg }} kg)</li>
+      {% endfor %}
+      {% for consumo in row.consumptions %}
+      <li>Consumió {{ consumo.product.name }}: {{ consumo.kg|kg }} kg</li>
+      {% endfor %}
+    </ul>
+    {% if not row.part.is_voided %}
+      {% if not row.part.is_confirmed %}
+      <form method="post" action="{{ url_for('production_confirm', part_id=row.part.id) }}">
+        <button type="submit">Confirmar este parte</button>
+      </form>
+      {% endif %}
+      <form method="post" action="{{ url_for('production_annul', part_id=row.part.id) }}">
+        <label for="motivo_{{ row.part.id }}">Motivo de la anulación</label>
+        <input id="motivo_{{ row.part.id }}" name="motivo" required placeholder="Por qué se anula">
+        <button type="submit" class="danger">Anular parte</button>
+      </form>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Todavía no hay partes cargados para este día.</p>
+  {% endfor %}
+</div>
+
+{% if is_administrator() %}
+<a class="button secondary" href="{{ url_for('production_turnos_pdf') }}">Imprimir hoja de QR por turno</a>
+{% endif %}
+
+<script type="application/json" id="opciones-productos">{{ productos_opciones|tojson }}</script>
+<script type="application/json" id="opciones-materias">{{ materias_opciones|tojson }}</script>
+
+<style>
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .line-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 8px; margin-bottom: 10px; align-items: start; }
+  .line-row input, .line-row select { min-width: 0; }
+  .detalle { margin: 10px 0 0; padding-left: 20px; color: #3d4b59; font-size: .92rem; }
+  .detalle li { margin: 3px 0; }
+  form + form { margin-top: 10px; }
+
+  .combo { position: relative; min-width: 0; }
+  .combo-buscar { width: 100%; }
+  .combo-lista { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 2px); margin: 0; padding: 0; list-style: none; background: white; border: 1px solid #b8c1ca; border-radius: 9px; box-shadow: 0 6px 18px rgba(0,0,0,.2); max-height: 250px; overflow-y: auto; }
+  .combo-lista[hidden] { display: none; }
+  .combo-lista li { padding: 11px 12px; font-size: .95rem; line-height: 1.3; cursor: pointer; border-bottom: 1px solid #eef1f4; }
+  .combo-lista li:last-child { border-bottom: 0; }
+  .combo-lista li:hover, .combo-lista li.activo { background: #eaf1f8; }
+  .combo-aviso { display: block; color: #9b3030; font-size: .82rem; margin-top: 4px; }
+  .combo-aviso[hidden] { display: none; }
+
+  @media (max-width: 430px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .line-row { grid-template-columns: minmax(0, 1fr) 84px; }
+  }
+</style>
+
+<script>
+(() => {
+  // Los combos son de busqueda: el operador escribe y elige de la lista, sin
+  // poder guardar un valor inventado. Es el mismo criterio que usa el
+  // escritorio con `enable_combo_autocomplete`.
+  const datos = {
+    productos: JSON.parse(document.getElementById('opciones-productos').textContent),
+    materias: JSON.parse(document.getElementById('opciones-materias').textContent),
+  };
+
+  const normalizar = (texto) => (texto || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  document.querySelectorAll('.combo').forEach((contenedor) => {
+    const opciones = datos[contenedor.dataset.grupo] || [];
+    const oculto = contenedor.querySelector('input[type="hidden"]');
+    const buscar = contenedor.querySelector('.combo-buscar');
+    const lista = contenedor.querySelector('.combo-lista');
+    const aviso = contenedor.querySelector('.combo-aviso');
+    let resultados = [];
+    let activo = -1;
+
+    const cerrar = () => {
+      lista.hidden = true;
+      buscar.setAttribute('aria-expanded', 'false');
+      activo = -1;
+    };
+
+    // El id solo se guarda cuando el texto es exactamente una opcion de la
+    // lista: si el operador escribe otra cosa, la fila no se guarda.
+    // El aviso se muestra cuando el campo ya no esta en foco, para no
+    // tapar la lista mientras se escribe.
+    const sincronizar = () => {
+      const valor = buscar.value.trim();
+      const encontrada = opciones.find((opcion) => opcion.etiqueta === valor);
+      oculto.value = encontrada ? encontrada.id : '';
+      const invalido = Boolean(valor) && !encontrada;
+      aviso.hidden = !invalido || document.activeElement === buscar;
+      return invalido;
+    };
+
+    const marcarActivo = () => {
+      const items = Array.from(lista.querySelectorAll('li'));
+      items.forEach((item, indice) => item.classList.toggle('activo', indice === activo));
+      if (items[activo]) items[activo].scrollIntoView({ block: 'nearest' });
+    };
+
+    const pintar = () => {
+      const texto = normalizar(buscar.value);
+      resultados = opciones
+        .filter((opcion) => normalizar(opcion.etiqueta).includes(texto))
+        .slice(0, 12);
+      lista.textContent = '';
+      resultados.forEach((opcion) => {
+        const item = document.createElement('li');
+        item.setAttribute('role', 'option');
+        item.textContent = opcion.etiqueta;
+        item.addEventListener('mousedown', (evento) => {
+          evento.preventDefault();
+          buscar.value = opcion.etiqueta;
+          sincronizar();
+          cerrar();
+        });
+        lista.appendChild(item);
+      });
+      activo = -1;
+      lista.hidden = resultados.length === 0;
+      buscar.setAttribute('aria-expanded', resultados.length ? 'true' : 'false');
+    };
+
+    buscar.addEventListener('input', () => { sincronizar(); pintar(); });
+    buscar.addEventListener('click', () => { if (lista.hidden) pintar(); else cerrar(); });
+    buscar.addEventListener('blur', () => setTimeout(() => { cerrar(); sincronizar(); }, 150));
+    buscar.addEventListener('keydown', (evento) => {
+      if (evento.key === 'ArrowDown' || evento.key === 'ArrowUp') {
+        if (lista.hidden) { pintar(); return; }
+        evento.preventDefault();
+        activo += evento.key === 'ArrowDown' ? 1 : -1;
+        if (activo < 0) activo = resultados.length - 1;
+        if (activo >= resultados.length) activo = 0;
+        marcarActivo();
+      } else if (evento.key === 'Enter') {
+        if (!lista.hidden && activo >= 0 && resultados[activo] !== undefined) {
+          evento.preventDefault();
+          buscar.value = resultados[activo].etiqueta;
+          sincronizar();
+          cerrar();
+        }
+      } else if (evento.key === 'Escape') {
+        cerrar();
+      }
+    });
+
+    sincronizar();
+  });
+
+  // Si el operador escribio un producto que no esta en la lista, esa linea no
+  // se guarda: avisar antes de dejarle mandar el parte, y no en silencio.
+  const formulario = document.getElementById('formParte');
+  if (formulario) {
+    formulario.addEventListener('submit', (evento) => {
+      let invalido = false;
+      document.querySelectorAll('.combo').forEach((contenedor) => {
+        const oculto = contenedor.querySelector('input[type="hidden"]');
+        const buscar = contenedor.querySelector('.combo-buscar');
+        const aviso = contenedor.querySelector('.combo-aviso');
+        if (buscar.value.trim() && !oculto.value) {
+          aviso.hidden = false;
+          invalido = true;
+        }
+      });
+      if (invalido) {
+        evento.preventDefault();
+        window.scrollTo(0, 0);
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}
