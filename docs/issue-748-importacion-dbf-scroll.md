@@ -82,3 +82,18 @@ porque en `offscreen` Qt dibuja los widgets sin texto (issue #652).
   "página larga sin scroll" aparece además en **Ingreso de materia prima**
   (necesita 703 px) y en **Partes de producción** (necesita 1013 px). Se
   siguen en el issue **#749** para no mezclar alcances en este PR.
+
+## Release
+
+| dato | valor |
+|---|---|
+| version | `2026.10.21.08.47.41` |
+| source_sha | `6b78ee98d1ef3689e63423b59fd2c540a5eb5ce0` |
+| SHA256 | `9b5718ca0015d9cb89e8c7db30ec91e91ebc34344c9237f6154ba6a3fc989932` |
+| tag candidate | `femag-candidate`, publicado el 2026-10-21 11:49Z |
+| tag produccion | `latest`, promovido el 2026-10-21 11:51Z (run `39595021785`) |
+
+En ese build la pantalla ya sale con el area desplazable: instalado en la PC
+piloto del canal candidate, con health-check en verde
+(`FEMAG production health OK`).
+

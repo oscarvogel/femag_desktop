@@ -108,11 +108,18 @@ importacion **pisa** lo que el operador edito a mano (nombre, telefono,
 domicilio, rubros) y con la version nueva no: la importacion solo completa lo
 que esta vacio.
 
-El release con #746 ya se publico y **ya esta en produccion**
-(version `2026.10.20.18.55.30`, SHA256
-`a04abad5e011ffa46ae5c806d79e0a39754f1b3ab08baa43c0b757d4a8b43dad`):
+El release con #746 y #748 ya se publico y **ya esta en produccion**
+(version `2026.10.21.08.47.41`, SHA256
+`9b5718ca0015d9cb89e8c7db30ec91e91ebc34344c9237f6154ba6a3fc989932`):
 
 <https://github.com/oscarvogel/vogel-releases/releases/download/latest/FEMAG_Desktop_Produccion_Setup.exe>
+
+Esa version trae las dos cosas que hacen falta para este paso:
+
+- **#746**: la importacion no pisa lo que el operador edito a mano.
+- **#748**: la pantalla *Importacion -> Importacion DBF* ya no se aplasta en
+  pantallas bajas (la del cliente mide 1638x969). Antes las filas del formulario
+  quedaban superpuestas y no se podia elegir ningun archivo.
 
 asi que hay dos caminos:
 
