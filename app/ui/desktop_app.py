@@ -91,6 +91,7 @@ from app.services.client_manual_debit_service import ClientManualDebitService
 from app.services.client_manual_credit_service import ClientManualCreditService
 from app.services.client_email_service import ClientEmailService
 from app.services.budget_print_service import BudgetPrintService
+from app.services.envelope_print_service import EnvelopePrintService
 from app.services.payment_receipt_print_service import PaymentReceiptPrintService
 from app.ui.form_feedback import FormFeedback
 from app.services import account_statement_mail_service
@@ -1240,6 +1241,7 @@ class FemagDesktopWindow(QMainWindow):
             whatsapp_statement_callback=self._share_account_statement_whatsapp,
             whatsapp_budget_callback=self._share_budget_whatsapp,
             print_budget_callback=self._print_budget_for_movement,
+            print_envelope_callback=self._print_envelope_for_movement,
             email_statement_callback=self._email_account_statement,
             portfolio_print_callback=self._print_salesperson_portfolio,
             portfolio_whatsapp_callback=self._share_salesperson_portfolio_whatsapp,
@@ -1636,6 +1638,30 @@ class FemagDesktopWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Presupuesto", f"No se pudo generar el presupuesto: {exc}"
             )
+            return
+        _open_print_output(pdf_path)
+
+    def _print_envelope_for_movement(self, movement) -> None:
+        """Genera el PDF del sobre del presupuesto guardado del movimiento (#740).
+
+        No altera el presupuesto, ni el stock, ni la cuenta corriente: solo
+        escribe el archivo del sobre y lo abre.
+        """
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+
+        try:
+            budget = self._budget_for_movement(movement)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sobre", str(exc))
+            return
+
+        try:
+            pdf_path = EnvelopePrintService(
+                current_user=self.shell.username
+            ).export_envelope(budget, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, "Sobre", f"No se pudo generar el sobre: {exc}")
             return
         _open_print_output(pdf_path)
 
@@ -2604,19 +2630,47 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para presupuestar.", focus_widget=table)
                 return
             try:
+                # Los presupuestos y los sobres salen en la misma operacion
+                # (#740). La llamada de presupuestos queda tal cual estaba.
                 paths = operation_service.export_budgets(order)
+                envelopes = operation_service.export_envelopes(order)
                 if not paths:
                     feedback.show_warning(
                         "La orden no tiene presupuestos para generar.", focus_widget=table
                     )
                     return
                 resolved_paths = [Path(path).resolve() for path in paths]
-                feedback.show_success(
-                    f"Se generaron {len(resolved_paths)} presupuesto(s) separados, uno por cliente."
+                mensaje = (
+                    f"Se generaron {len(resolved_paths)} presupuesto(s) separados, "
+                    "uno por presupuesto."
                 )
+                if envelopes.paths:
+                    mensaje += (
+                        f" Se generaron {len(envelopes.paths)} sobre(s), "
+                        "uno por presupuesto."
+                    )
+                if envelopes.failures:
+                    feedback.show_warning(
+                        mensaje
+                        + " Sobres que no se pudieron generar: "
+                        + "; ".join(
+                            f"{fallo.client_name} ({fallo.reason})"
+                            for fallo in envelopes.failures
+                        ),
+                        focus_widget=table,
+                    )
+                else:
+                    feedback.show_success(mensaje)
                 for resolved in resolved_paths:
                     try:
                         _open_print_output(resolved)
+                    except Exception:
+                        pass
+                # Los sobres se abren tambien: son los papelitos que hay que
+                # rotular y imprimir en la Epson.
+                for envelope in envelopes.paths:
+                    try:
+                        _open_print_output(Path(envelope).resolve())
                     except Exception:
                         pass
             except Exception as exc:

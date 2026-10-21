@@ -3,11 +3,16 @@ from pathlib import Path
 
 from app.config.database import database_proxy
 from app.models.audit import AuditLog
+from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
 from app.services.account_ledger_service import AccountLedgerService
 from app.services.audit_service import AuditService
 from app.services.budget_print_service import BudgetPrintService
 from app.services.client_credit_service import ClientCreditService
+from app.services.envelope_print_service import (
+    EnvelopeExportResult,
+    EnvelopePrintService,
+)
 from app.services.load_order_pallet_excel_export_service import LoadOrderPalletExcelExportService
 from app.services.load_order_stock_service import (
     LoadOrderStockService,
@@ -44,6 +49,9 @@ class LoadOrderOperationService:
         self.load_orders = LoadOrderService(current_user=current_user, audit_service=self.audit_service)
         self.prints = ConsolidatedLoadOrderPrintService(current_user=current_user, audit_service=self.audit_service)
         self.budget_prints = BudgetPrintService(current_user=current_user, audit_service=self.audit_service)
+        self.envelopes = EnvelopePrintService(
+            current_user=current_user, audit_service=self.audit_service
+        )
         self.pallet_excel = LoadOrderPalletExcelExportService(
             current_user=current_user,
             audit_service=self.audit_service,
@@ -185,6 +193,29 @@ class LoadOrderOperationService:
         return self.budget_prints.export_for_load_order(
             order, self.prints_dir, timing=timing
         )
+
+    def export_envelopes(
+        self, order: LoadOrder, timing: str | None = None
+    ) -> EnvelopeExportResult:
+        """Genera solo los sobres de los presupuestos de la orden (#740).
+
+        Es la parte de sobres de la exportacion: no toca los presupuestos ni
+        sus estados, solo escribe los PDF de sobre. Se puede usar sola (para
+        reimprimir) o junto a ``export_budgets`` en la misma operacion.
+
+        Solo usa los presupuestos que ya existen: pedir un sobre no crea
+        presupuestos nuevos.
+        """
+        order = LoadOrder.get_by_id(order.id)
+        budgets = list(
+            Budget.select()
+            .where(Budget.load_order == order)
+            .where(Budget.status == Budget.STATUS_ACTIVE)
+            .order_by(Budget.budget_number)
+        )
+        if timing is not None:
+            budgets = [budget for budget in budgets if budget.timing == timing]
+        return self.envelopes.export_envelopes(budgets, self.prints_dir)
 
     def export_combined_budget(self, order: LoadOrder) -> Path:
         """UI-compatible printable bundle: one numbered budget per client/page."""

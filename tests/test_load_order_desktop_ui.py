@@ -1194,20 +1194,37 @@ def test_load_order_page_opens_split_budget_pdf_for_each_client(db, tmp_path, mo
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    assert len(opened_outputs) == 2
+    assert len(opened_outputs) == 4
     assert all(path.exists() for path in opened_outputs)
     feedback = window.findChild(QLabel, "loadOrderFeedback").text()
     assert "2 presupuesto" in feedback
+    assert "2 sobre" in feedback
 
-    texts = []
-    for path in opened_outputs:
-        reader = PdfReader(str(path))
-        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+    # Los PDF de presupuesto y los de sobre se abren por separado: son
+    # archivos distintos para el mismo cliente (#740).
+    budget_paths = [path for path in opened_outputs if path.name.startswith("presupuesto_")]
+    envelope_paths = [path for path in opened_outputs if path.name.startswith("sobre_")]
+    assert len(budget_paths) == 2
+    assert len(envelope_paths) == 2
 
+    def _read(paths):
+        texts = []
+        for path in paths:
+            reader = PdfReader(str(path))
+            texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+        return texts
+
+    texts = _read(budget_paths)
     assert sum("Cliente Budget A" in text for text in texts) == 1
     assert sum("Cliente Budget B" in text for text in texts) == 1
     assert sum("Observaciones: Condición comercial Cliente Budget A." in text for text in texts) == 1
     assert sum("Observaciones: Condición comercial Cliente Budget B." in text for text in texts) == 1
+
+    envelope_texts = _read(envelope_paths)
+    assert sum("Cliente Budget A" in text for text in envelope_texts) == 1
+    assert sum("Cliente Budget B" in text for text in envelope_texts) == 1
+    assert sum("Ruta Budget A" in text for text in envelope_texts) == 1
+    assert sum("Ruta Budget B" in text for text in envelope_texts) == 1
 
 def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_path, monkeypatch):
     from pypdf import PdfReader
@@ -1283,17 +1300,31 @@ def test_load_order_page_refreshes_detail_selection_before_budgeting(db, tmp_pat
     window.findChild(QPushButton, "budgetLoadOrderButton").click()
     app.processEvents()
 
-    assert len(opened_outputs) == 2
-    texts = []
-    for path in opened_outputs:
-        reader = PdfReader(str(path))
-        texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+    assert len(opened_outputs) == 4
+    budget_paths = [path for path in opened_outputs if path.name.startswith("presupuesto_")]
+    envelope_paths = [path for path in opened_outputs if path.name.startswith("sobre_")]
+    assert len(budget_paths) == 2
+    assert len(envelope_paths) == 2
 
+    def _read(paths):
+        texts = []
+        for path in paths:
+            reader = PdfReader(str(path))
+            texts.append("\n".join(page.extract_text() or "" for page in reader.pages))
+        return texts
+
+    texts = _read(budget_paths)
     assert sum("Cliente Selection B" in text for text in texts) == 1
     assert sum("Cliente Selection C" in text for text in texts) == 1
     assert all("Cliente Selection A" not in text for text in texts)
     assert sum("Observaciones: Presupuesto exclusivo Selection B." in text for text in texts) == 1
     assert sum("Observaciones: Presupuesto exclusivo Selection C." in text for text in texts) == 1
+
+    # Los sobres son de la orden seleccionada: los clientes B y C, no el A.
+    envelope_texts = _read(envelope_paths)
+    assert sum("Cliente Selection B" in text for text in envelope_texts) == 1
+    assert sum("Cliente Selection C" in text for text in envelope_texts) == 1
+    assert all("Cliente Selection A" not in text for text in envelope_texts)
 
 def test_load_order_print_feedback_survives_pdf_viewer_failure(db, tmp_path, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidget
