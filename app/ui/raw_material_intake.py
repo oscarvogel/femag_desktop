@@ -52,6 +52,9 @@ class RawMaterialIntakePage(QWidget):
             "se puede fraccionar en bolsas."
         )
         subheading.setObjectName("subheading")
+        # El texto es largo: sin word wrap el QLabel impone un ancho minimo que
+        # no entra en una pantalla chica (#749).
+        subheading.setWordWrap(True)
         layout.addWidget(subheading)
 
         form = QFormLayout()
