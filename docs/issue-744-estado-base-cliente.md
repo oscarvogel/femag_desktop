@@ -108,11 +108,17 @@ importacion **pisa** lo que el operador edito a mano (nombre, telefono,
 domicilio, rubros) y con la version nueva no: la importacion solo completa lo
 que esta vacio.
 
-El release con #746 todavia no se publico, asi que hay dos caminos:
+El release con #746 ya se publico y **ya esta en produccion**
+(version `2026.10.20.18.55.30`, SHA256
+`a04abad5e011ffa46ae5c806d79e0a39754f1b3ab08baa43c0b757d4a8b43dad`):
 
-- **Con la app actualizada** (recomendado): la pantalla *Importacion ->
-  Importacion DBF* hace el trabajo, con el orden ya corregido y sin pisar lo
-  editado.
+<https://github.com/oscarvogel/vogel-releases/releases/download/latest/FEMAG_Desktop_Produccion_Setup.exe>
+
+asi que hay dos caminos:
+
+- **Con la app actualizada** (recomendado): se instala el instalador de arriba y
+  la pantalla *Importacion -> Importacion DBF* hace el trabajo, con el orden ya
+  corregido y sin pisar lo editado.
 - **Sin app actualizada**: se puede correr el comando a mano, pero con el
   importador viejo, que **si** pisa lo editado. Ojo con esto.
 
