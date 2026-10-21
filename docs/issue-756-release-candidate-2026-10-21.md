@@ -81,3 +81,12 @@ release y se restaura al final.
    `.\release.ps1 production` (workflow `promote-production.yml`, ~2 min), que
    sube los mismos bytes al tag `latest` y deja la version anterior en
    `previous.json` para rollback.
+
+## Decision del 21/10/2026
+
+- **No se promueve a produccion todavia.** Queda pendiente la prueba manual del
+  operador en la PC piloto; la promocion se hace recien con el OK de esa prueba.
+- **La PC piloto se actualiza por el updater de la app**, no con una
+  instalacion manual del instalador: la maquina esta en canal `candidate`, asi
+  que la app instalada (hoy `2026.10.21.09.36.40`) ofrece la actualizacion al
+  abrirse. La instalacion manual queda como recurso si el updater no aparece.
