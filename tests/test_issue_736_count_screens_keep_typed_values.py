@@ -39,6 +39,17 @@ def _app():
     return _QAPP
 
 
+def _otra_fecha() -> QDate:
+    """Una fecha que seguro es distinta de la de hoy.
+
+    El ``QDateEdit`` de la pantalla arranca en la fecha de hoy. Si la prueba
+    usara la fecha de hoy, ``setDate`` no cambiaria nada, no se emitiria
+    ``dateChanged`` y lo escrito no se descartaria: la prueba pasaria solo en
+    los dias que no coinciden con la fecha fija (issue #751).
+    """
+    return QDate.currentDate().addDays(1)
+
+
 def _producto(nombre="FECULA CON PESO"):
     return Product.create(
         name=nombre,
@@ -108,7 +119,7 @@ def test_cambiar_la_fecha_descarta_las_bolsas_escritas(db):
     pagina = StockInitialInventoryPage(current_username="admin")
     pagina.inputs[producto.id].setValue(40)
 
-    pagina.day.setDate(QDate(2026, 10, 21))
+    pagina.day.setDate(_otra_fecha())
 
     assert pagina.inputs[producto.id].value() == 0
 
@@ -168,7 +179,7 @@ def test_el_conteo_fisico_descarta_las_bolsas_al_cambiar_la_fecha(db):
     pagina = StockCountPage(current_username="admin")
     pagina.inputs[producto.id].setValue(12)
 
-    pagina.day.setDate(QDate(2026, 10, 21))
+    pagina.day.setDate(_otra_fecha())
 
     assert pagina.inputs[producto.id].value() == 0
 
