@@ -84,3 +84,16 @@ las que lo estaban son ahora áreas desplazables y el resto entra.
 - No se cambió el comportamiento de las pantallas: ni la carga de materia
   prima, ni el registro de partes, ni los cálculos.
 - No se tocó ninguna otra pantalla.
+
+## Release
+
+| dato | valor |
+|---|---|
+| version | `2026.10.21.09.36.40` |
+| source_sha | `0b2d2f4337814965747f1958fdbf6edba4427a3b` |
+| SHA256 | `59fbbb0fd9fb5118f0f88ecd47229e24ec2c79292f5464aab7c6cea832b624df` |
+| tag candidate | `femag-candidate`, publicado el 2026-10-21 12:39Z |
+| tag produccion | `latest`, promovido el 2026-10-21 12:41Z (run `39601543874`) |
+
+Instalado en la PC piloto del canal candidate, con health-check en verde
+(`FEMAG production health OK`).
