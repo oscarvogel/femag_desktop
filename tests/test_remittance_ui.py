@@ -401,6 +401,237 @@ def test_manual_dialog_transport_labels_expose_searchable_data(db):
     assert any("30777777770" in text for text in carrier_texts)
 
 
+def _transport_cascade_data():
+    """Maestros de transporte para probar la cascada desde el chofer (#756)."""
+    from app.models.masters import Carrier, Driver, Truck
+
+    carrier = Carrier.create(name="Transporte Cascada", cuit="30777777771")
+    truck = Truck.create(domain="CD234EF", trailer_domain="GH567IJ", carrier=carrier)
+    driver = Driver.create(
+        name="Chofer Cascada",
+        carrier=carrier,
+        usual_truck=truck,
+        document="12345678",
+    )
+    return {"carrier": carrier, "truck": truck, "driver": driver}
+
+
+def _remittance_dialog_parts(dialog):
+    from PyQt5.QtWidgets import QComboBox, QLineEdit
+
+    return {
+        "carrier": dialog.findChild(QComboBox, "remittanceCarrierInput"),
+        "truck": dialog.findChild(QComboBox, "remittanceTruckInput"),
+        "driver": dialog.findChild(QComboBox, "remittanceDriverInput"),
+        "trailer": dialog.findChild(QLineEdit, "remittanceTrailerInput"),
+    }
+
+
+def test_manual_dialog_fills_transport_from_driver(db):
+    """Elegir el chofer completa transportista, camion y acoplado (#756)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _transport_cascade_data()
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    parts["driver"].setCurrentIndex(parts["driver"].findData(data["driver"].id))
+    app.processEvents()
+
+    assert parts["carrier"].currentData() == data["carrier"].id
+    assert parts["truck"].currentData() == data["truck"].id
+    assert parts["trailer"].text() == "GH567IJ"
+
+
+def test_manual_dialog_uses_the_only_truck_of_the_driver_carrier(db):
+    """Sin camion habitual, se toma el unico camion del transportista (#756)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Carrier, Driver, Truck
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    carrier = Carrier.create(name="Transporte Unico", cuit="30777777772")
+    truck = Truck.create(domain="UN123AB", trailer_domain="UN456CD", carrier=carrier)
+    driver = Driver.create(name="Chofer Sin Habitual", carrier=carrier, document="12345679")
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    parts["driver"].setCurrentIndex(parts["driver"].findData(driver.id))
+    app.processEvents()
+
+    assert parts["carrier"].currentData() == carrier.id
+    assert parts["truck"].currentData() == truck.id
+    assert parts["trailer"].text() == "UN456CD"
+
+
+def test_manual_dialog_explains_when_the_driver_has_no_carrier(db):
+    """Un chofer sin transportista no completa nada y la ayuda lo dice (#756)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Driver
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    driver = Driver.create(name="Chofer Sin Transporte", carrier=None, document="12345680")
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    parts["driver"].setCurrentIndex(parts["driver"].findData(driver.id))
+    app.processEvents()
+
+    assert parts["carrier"].currentData() is None
+    assert parts["truck"].currentData() is None
+    assert parts["trailer"].text() == ""
+    assert "no tiene transportista" in parts["driver"].lineEdit().toolTip()
+
+
+def test_manual_dialog_keeps_the_trailer_written_by_hand(db):
+    """La patente escrita a mano manda sobre el autocompletado (#756)."""
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Truck
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _transport_cascade_data()
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    parts["driver"].setCurrentIndex(parts["driver"].findData(data["driver"].id))
+    app.processEvents()
+    assert parts["trailer"].text() == "GH567IJ"
+
+    parts["trailer"].clear()
+    QTest.keyClicks(parts["trailer"], "ZZ999XX")
+    app.processEvents()
+
+    # El camion cambia: el acoplado no se pisa porque el operador lo escribio.
+    other_truck = Truck.create(domain="OT111AA", trailer_domain="OT222BB", carrier=data["carrier"])
+    parts["truck"].setCurrentIndex(parts["truck"].findData(other_truck.id))
+    app.processEvents()
+
+    assert parts["trailer"].text() == "ZZ999XX"
+
+
+def test_manual_dialog_keeps_the_transport_when_the_driver_is_unassigned(db):
+    """"Sin asignar" en el chofer no borra el transporte cargado a mano (#756)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _transport_cascade_data()
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    parts["carrier"].setCurrentIndex(parts["carrier"].findData(data["carrier"].id))
+    parts["truck"].setCurrentIndex(parts["truck"].findData(data["truck"].id))
+    parts["driver"].setCurrentIndex(0)
+    app.processEvents()
+
+    assert parts["carrier"].currentData() == data["carrier"].id
+    assert parts["truck"].currentData() == data["truck"].id
+
+
+def test_manual_dialog_editing_a_draft_keeps_the_saved_transport(db):
+    """Editar un remito en borrador no cambia el transporte ya guardado (#756)."""
+    from datetime import date
+    from decimal import Decimal
+
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Client, ClientAddress, Product, Truck
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittanceDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _transport_cascade_data()
+    other_truck = Truck.create(
+        domain="OT333CC",
+        trailer_domain="OT444DD",
+        carrier=data["carrier"],
+    )
+    client = Client.create(name="Cliente Cascada", cuit="30712345678", iva_condition="RI")
+    address = ClientAddress.create(
+        client=client,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 12",
+        is_primary=True,
+    )
+    product = Product.create(name="Producto Cascada", unit="kg")
+    remittance = RemittanceService("ui_remittance_cascade").create_manual(
+        client=client,
+        delivery_address=address,
+        carrier=data["carrier"],
+        truck=other_truck,
+        trailer_domain="OT444DD",
+        driver=data["driver"],
+        physical_point_of_sale="0001",
+        physical_number="1234",
+        remittance_date=date(2026, 10, 21),
+        items=[{"product": product, "quantity": Decimal("10")}],
+    )
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade", remittance=remittance)
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    # El chofer tiene otro camion habitual: el guardado manda.
+    assert parts["carrier"].currentData() == data["carrier"].id
+    assert parts["truck"].currentData() == other_truck.id
+    assert parts["trailer"].text() == "OT444DD"
+
+
+def test_manual_dialog_saves_the_transport_filled_from_the_driver(db):
+    """Lo autocompletado desde el chofer se guarda con el remito (#756)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.remittances import Remittance
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    app = QApplication.instance() or QApplication([])
+    base = _master_data()
+    data = _transport_cascade_data()
+
+    dialog = RemittanceDialog(current_user="ui_remittance_cascade")
+    app.processEvents()
+    parts = _remittance_dialog_parts(dialog)
+
+    dialog.client_combo.setCurrentIndex(dialog.client_combo.findData(base["client"].id))
+    dialog.address_combo.setCurrentIndex(dialog.address_combo.findData(base["address"].id))
+    parts["driver"].setCurrentIndex(parts["driver"].findData(data["driver"].id))
+    dialog.items.cellWidget(0, 0).setCurrentIndex(
+        dialog.items.cellWidget(0, 0).findData(base["product"].id)
+    )
+    dialog.items.cellWidget(0, 1).setText("25")
+    dialog._save()
+    app.processEvents()
+
+    remittance = Remittance.get()
+    assert remittance.driver_id == data["driver"].id
+    assert remittance.carrier_id == data["carrier"].id
+    assert remittance.truck_id == data["truck"].id
+    assert remittance.trailer_domain == "GH567IJ"
+
+
 def test_manual_dialog_address_has_autocomplete(db):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication

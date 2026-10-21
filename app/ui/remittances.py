@@ -47,6 +47,11 @@ from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 REMITTANCE_PRINTS_DIR = Path("outputs") / "remittances"
 F150_OUTPUT_DIR = Path("outputs") / "f150"
 
+DRIVER_HINT = (
+    "Elegi el chofer: el transportista, el camion y el acoplado se completan solos. "
+    "Si escribis la patente del acoplado a mano, esa manda."
+)
+
 
 class RemittanceDialog(QDialog):
     def __init__(self, *, current_user: str, remittance: Remittance | None = None, parent=None):
@@ -80,6 +85,9 @@ class RemittanceDialog(QDialog):
             (self.driver_combo, "Buscar chofer..."),
         ):
             enable_combo_autocomplete(combo, placeholder=placeholder)
+        # El transporte sale del chofer: al elegirlo se completan el transportista,
+        # el camion y el acoplado (#756).
+        self.driver_combo.lineEdit().setToolTip(DRIVER_HINT)
         # Numero de remito manual: no se usa talonario correlativo. Se acepta
         # cualquier numero libre y se valida que no este usado (solo al emitir
         # es obligatorio).
@@ -161,8 +169,13 @@ class RemittanceDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+        # El transporte del remito se deduce del chofer (#756).
+        self._syncing_transport = False
+        self._trailer_edited = False
         self.client_combo.currentIndexChanged.connect(self._refresh_addresses)
         self.truck_combo.currentIndexChanged.connect(self._suggest_trailer)
+        self.driver_combo.currentIndexChanged.connect(self._refresh_from_driver)
+        self.trailer_input.textEdited.connect(self._mark_trailer_edited)
         self.point_input.editingFinished.connect(self._refresh_number_availability)
         self.number_input.editingFinished.connect(self._refresh_number_availability)
         self._load_clients()
@@ -210,43 +223,116 @@ class RemittanceDialog(QDialog):
             completer.setModel(combo.model())
 
     def _load_transport(self) -> None:
-        for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
-            combo.clear()
-            combo.addItem("Sin asignar", None)
-        for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name):  # noqa: E712
-            label = carrier.name
-            if carrier.cuit:
-                label += f" · {carrier.cuit}"
-            self.carrier_combo.addItem(label, carrier.id)
-        for truck in Truck.select().where(Truck.active == True).order_by(Truck.domain):  # noqa: E712
-            label = truck.domain
-            if truck.trailer_domain:
-                label += f" / {truck.trailer_domain}"
-            if truck.carrier:
-                label += f" · {truck.carrier.name}"
-            self.truck_combo.addItem(label, truck.id)
-        for driver in Driver.select().where(Driver.active == True).order_by(Driver.name):  # noqa: E712
-            label = driver.name
-            document = driver.cuit or driver.document
-            if document:
-                label += f" · {document}"
-            self.driver_combo.addItem(label, driver.id)
+        self._syncing_transport = True
+        try:
+            for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
+                combo.clear()
+                combo.addItem("Sin asignar", None)
+            for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name):  # noqa: E712
+                label = carrier.name
+                if carrier.cuit:
+                    label += f" · {carrier.cuit}"
+                self.carrier_combo.addItem(label, carrier.id)
+            for truck in Truck.select().where(Truck.active == True).order_by(Truck.domain):  # noqa: E712
+                label = truck.domain
+                if truck.trailer_domain:
+                    label += f" / {truck.trailer_domain}"
+                if truck.carrier:
+                    label += f" · {truck.carrier.name}"
+                self.truck_combo.addItem(label, truck.id)
+            for driver in Driver.select().where(Driver.active == True).order_by(Driver.name):  # noqa: E712
+                label = driver.name
+                document = driver.cuit or driver.document
+                if document:
+                    label += f" · {document}"
+                self.driver_combo.addItem(label, driver.id)
+        finally:
+            self._syncing_transport = False
         for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
             self._resync_completer(combo)
 
+    def _refresh_from_driver(self) -> None:
+        """Completa el transporte a partir del chofer (#756).
+
+        Igual que en las ordenes de carga: el chofer define el transportista y
+        el camion habitual, y de ahi sale la patente del acoplado. El operador
+        puede corregir el camion a mano; el acoplado vuelve a seguir al camion.
+        """
+        if self._syncing_transport:
+            return
+        driver_id = combo_current_data(self.driver_combo)
+        if not driver_id:
+            # "Sin asignar" no borra el transporte que el operador cargo a mano.
+            self._set_driver_hint(DRIVER_HINT)
+            return
+        driver = Driver.get_or_none(driver_id)
+        if driver is None:
+            return
+        carrier = Carrier.get_or_none(driver.carrier_id) if driver.carrier_id is not None else None
+        if carrier is None:
+            # El chofer no tiene transportista: no hay nada que deducir.
+            self._set_driver_hint(
+                "Este chofer no tiene transportista asociado: cargalo a mano."
+            )
+            return
+        if not carrier.active:
+            # El transportista esta dado de baja: no se completa nada.
+            self._set_driver_hint(
+                "El transportista de este chofer esta inactivo: cargalo a mano."
+            )
+            return
+        self._set_driver_hint(DRIVER_HINT)
+        index = self.carrier_combo.findData(carrier.id)
+        if index >= 0:
+            self.carrier_combo.setCurrentIndex(index)
+        truck = self._truck_for_driver(driver, carrier)
+        if truck is not None:
+            index = self.truck_combo.findData(truck.id)
+            if index >= 0:
+                self.truck_combo.setCurrentIndex(index)
+        self._suggest_trailer()
+
+    def _set_driver_hint(self, hint: str) -> None:
+        """La ayuda del combo Chofer explica que se completa y que no."""
+        line_edit = self.driver_combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setToolTip(hint)
+
+    @staticmethod
+    def _truck_for_driver(driver: Driver, carrier: Carrier) -> Truck | None:
+        """El camion que corresponde al chofer: el habitual o el unico del transportista."""
+        truck = (
+            Truck.get_or_none(driver.usual_truck_id)
+            if driver.usual_truck_id is not None
+            else None
+        )
+        if truck is not None and truck.active:
+            return truck
+        trucks = list(
+            Truck.select().where((Truck.active == True) & (Truck.carrier == carrier.id))  # noqa: E712
+        )
+        if len(trucks) == 1:
+            return trucks[0]
+        return None
+
+    def _mark_trailer_edited(self, text: str) -> None:
+        """La patente escrita a mano manda sobre el autocompletado.
+
+        Si el operador borra el campo, el autocompletado vuelve a mandear.
+        """
+        self._trailer_edited = bool(text.strip())
+
     def _suggest_trailer(self) -> None:
-        """Prefill del acoplado con el del camion, editable por el usuario."""
-        if self.trailer_input.text().strip():
+        """El acoplado sigue al camion mientras el operador no lo escriba a mano."""
+        if self._syncing_transport or self._trailer_edited:
             return
         truck_id = combo_current_data(self.truck_combo)
-        if not truck_id:
-            return
-        try:
-            truck = Truck.get_by_id(truck_id)
-        except Truck.DoesNotExist:
-            return
-        if truck.trailer_domain:
-            self.trailer_input.setText(truck.trailer_domain)
+        trailer = None
+        if truck_id:
+            truck = Truck.get_or_none(truck_id)
+            if truck is not None:
+                trailer = truck.trailer_domain
+        self.trailer_input.setText(trailer or "")
 
     @staticmethod
     def _selected_model(combo: QComboBox, model):
@@ -350,17 +436,23 @@ class RemittanceDialog(QDialog):
         self.date_input.setDate(QDate(r.date.year, r.date.month, r.date.day))
         self.point_input.setText(r.physical_point_of_sale or "")
         self.number_input.setText(r.physical_number or "")
-        self.trailer_input.setText(r.trailer_domain or "")
         self.reference_input.setText(r.document_reference or "")
         self.observations_input.setText(r.observations or "")
-        for combo, record_id in (
-            (self.carrier_combo, r.carrier_id),
-            (self.truck_combo, r.truck_id),
-            (self.driver_combo, r.driver_id),
-        ):
-            index = combo.findData(record_id)
-            if index >= 0:
-                combo.setCurrentIndex(index)
+        # Los datos guardados mandan: la cascada del chofer no puede pisar el
+        # transporte de un remito que ya existe.
+        self._syncing_transport = True
+        try:
+            for combo, record_id in (
+                (self.carrier_combo, r.carrier_id),
+                (self.truck_combo, r.truck_id),
+                (self.driver_combo, r.driver_id),
+            ):
+                index = combo.findData(record_id)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        finally:
+            self._syncing_transport = False
+        self.trailer_input.setText(r.trailer_domain or "")
         self.items.setRowCount(0)
         for item in r.items:
             self._add_item_row(
