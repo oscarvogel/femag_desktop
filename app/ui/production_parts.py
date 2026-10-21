@@ -65,6 +65,9 @@ class ProductionPartPage(QWidget):
             "almidón sale."
         )
         subheading.setObjectName("subheading")
+        # El texto es largo: sin word wrap el QLabel impone un ancho minimo de
+        # 1571 px y la pagina no entra en una pantalla chica (#749).
+        subheading.setWordWrap(True)
         layout.addWidget(subheading)
 
         form = QFormLayout()
@@ -106,6 +109,7 @@ class ProductionPartPage(QWidget):
 
         self.weight_hint = QLabel()
         self.weight_hint.setObjectName("subheading")
+        self.weight_hint.setWordWrap(True)
         layout.addWidget(self.weight_hint)
 
         self.lines_table = QTableWidget(0, len(self.LINE_HEADERS))
@@ -153,6 +157,7 @@ class ProductionPartPage(QWidget):
 
         self.consumption_hint = QLabel()
         self.consumption_hint.setObjectName("subheading")
+        self.consumption_hint.setWordWrap(True)
         layout.addWidget(self.consumption_hint)
 
         self.consumptions_table = QTableWidget(0, len(self.CONSUMPTION_HEADERS))

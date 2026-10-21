@@ -583,11 +583,22 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
         self._add_page("raw_material_receipts", RawMaterialReceiptImportPage(parent=self))
+        # Issue #749: estas dos paginas son mas altas que una pantalla baja y
+        # sin area desplazable Qt las comprime y sus widgets se superponen.
         self._add_page(
             "raw_material_intake",
-            RawMaterialIntakePage(current_username=self.shell.username, parent=self),
+            _scrollable_page(
+                RawMaterialIntakePage(current_username=self.shell.username, parent=self),
+                "rawMaterialIntakeScrollArea",
+            ),
         )
-        self._add_page("production_parts", ProductionPartPage(current_username=self.shell.username, parent=self))
+        self._add_page(
+            "production_parts",
+            _scrollable_page(
+                ProductionPartPage(current_username=self.shell.username, parent=self),
+                "productionPartsScrollArea",
+            ),
+        )
         self._add_page("production_contrast", ProductionContrastPage(parent=self))
         self._add_page(
             "stock_initial_inventory",
@@ -2868,7 +2879,7 @@ def _page(title: str, subtitle: str | None = None) -> QWidget:
     return page
 
 
-def _scrollable_page(page: QWidget) -> QScrollArea:
+def _scrollable_page(page: QWidget, object_name: str = "pageScrollArea") -> QScrollArea:
     """Envuelve una pagina en un area desplazable.
 
     Las paginas se agregan al ``QStackedWidget`` de la ventana. Si la ventana
@@ -2877,9 +2888,13 @@ def _scrollable_page(page: QWidget) -> QScrollArea:
     formulario quedaban pisadas y no se podia elegir ningun archivo (issue
     #748). Con el area desplazable el contenido conserva su alto y el operador
     lo recorre con la barra vertical.
+
+    Cada area lleva su propio nombre de objeto: con el mismo nombre, un
+    ``findChild`` devuelve la primera y las pruebas miden la pantalla
+    equivocada.
     """
     scroll = QScrollArea()
-    scroll.setObjectName("pageScrollArea")
+    scroll.setObjectName(object_name)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
