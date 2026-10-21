@@ -2730,6 +2730,9 @@ class FemagDesktopWindow(QMainWindow):
             ["Entidad", "Creados", "Actualizados", "Omitidos", "Advertencias", "Errores"]
         )
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Alto minimo util: dentro del area desplazable la tabla se lleva el
+        # espacio sobrante, pero nunca debe quedar como una franja de 26 px.
+        table.setMinimumHeight(150)
         layout.addWidget(table, 1)
 
         dgr_group = QGroupBox("Referencia DGR (archivo F150)")
@@ -2769,6 +2772,7 @@ class FemagDesktopWindow(QMainWindow):
             ["Entidad", "Creados", "Actualizados", "Omitidos", "Advertencias", "Errores"]
         )
         dgr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        dgr_table.setMinimumHeight(150)
         layout.addWidget(dgr_table, 1)
 
         def run_dgr_import() -> None:
@@ -2844,7 +2848,9 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_success(message)
 
         run_button.clicked.connect(run_import)
-        return page
+        # Issue #748: la pagina es mas alta que una pantalla baja. Sin scroll
+        # Qt la comprime y las filas del formulario quedan superpuestas.
+        return _scrollable_page(page)
 
 
 def _page(title: str, subtitle: str | None = None) -> QWidget:
@@ -2860,6 +2866,25 @@ def _page(title: str, subtitle: str | None = None) -> QWidget:
         subheading.setObjectName("subheading")
         layout.addWidget(subheading)
     return page
+
+
+def _scrollable_page(page: QWidget) -> QScrollArea:
+    """Envuelve una pagina en un area desplazable.
+
+    Las paginas se agregan al ``QStackedWidget`` de la ventana. Si la ventana
+    es mas baja que el minimo de la pagina, Qt comprime los layouts hijos y
+    los widgets se superponen: en la pantalla de Importacion DBF las filas del
+    formulario quedaban pisadas y no se podia elegir ningun archivo (issue
+    #748). Con el area desplazable el contenido conserva su alto y el operador
+    lo recorre con la barra vertical.
+    """
+    scroll = QScrollArea()
+    scroll.setObjectName("pageScrollArea")
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setWidget(page)
+    return scroll
 
 
 def _card(title: str, value: str) -> QFrame:
