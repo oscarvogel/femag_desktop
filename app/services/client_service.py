@@ -11,6 +11,10 @@ from app.models.masters import (
     client_address_has_fiscal_function,
 )
 from app.services.audit_service import AuditService
+from app.services.whatsapp_phone_classifier import (
+    ESTADO_INVALIDO,
+    clasificar_telefono,
+)
 
 
 class ClientService:
@@ -120,6 +124,37 @@ class ClientService:
             record_ref=f"Client:{client.id}",
             old_value={"active": previous},
             new_value={"active": active},
+        )
+        return client
+
+    def set_phone(self, client: Client, phone: str | None) -> Client:
+        """Guarda el teléfono del cliente y deja registro de quién lo cambió.
+
+        Acepta cualquier teléfono que sirva para llamar: una línea fija también
+        sirve, y a veces el cliente no tiene celular. Lo que no se acepta es basura
+        (letras o dos números en el mismo campo), porque eso ya no es un teléfono.
+
+        Devuelve el cliente actualizado. Si el teléfono no cambió, no toca la base
+        ni genera auditoría.
+        """
+        texto = (phone or "").strip() or None
+        if texto is not None:
+            clasificacion = clasificar_telefono(texto)
+            if clasificacion.estado == ESTADO_INVALIDO:
+                raise ValueError(f"El teléfono no es válido: {clasificacion.motivo}.")
+        anterior = (client.phone or "").strip()
+        nuevo = texto or ""
+        if anterior == nuevo:
+            return client
+        client.phone = nuevo or None
+        client.save(only=[Client.phone, Client.updated_at])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Clientes",
+            action="actualizar teléfono",
+            record_ref=f"Client:{client.id}",
+            old_value={"phone": anterior or None},
+            new_value={"phone": nuevo or None},
         )
         return client
 

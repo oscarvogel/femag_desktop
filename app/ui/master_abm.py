@@ -1929,6 +1929,11 @@ def build_client_abm_page(
     client_actions = QHBoxLayout()
     new_client_btn = _action_button("newClientButton", "Nuevo")
     edit_client_btn = _action_button("editClientButton", "Editar", secondary=True)
+    phone_client_btn = _action_button("editClientPhoneButton", "Teléfono", secondary=True)
+    phone_client_btn.setToolTip(
+        "Corrige el teléfono del cliente y te dice si es un celular (se puede "
+        "mandar WhatsApp), una línea fija o un número dudoso."
+    )
     emails_btn = _action_button("clientEmailsButton", "Emails", secondary=True)
     view_ledger_btn = _action_button(
         "viewClientLedgerButton", "Ver cuenta corriente", secondary=True
@@ -1942,16 +1947,25 @@ def build_client_abm_page(
     export_clients_btn.setToolTip(
         "Exporta a Excel los clientes visibles con su lista de precios."
     )
+    import_price_list_btn = _action_button(
+        "importPriceListExcelButton", "Importar lista", secondary=True
+    )
+    import_price_list_btn.setToolTip(
+        "Importa desde un Excel la lista de precios de cada cliente y completa el "
+        "teléfono de los que no lo tienen. Muestra una vista previa antes de aplicar."
+    )
     new_client_btn.setEnabled(can_create)
     edit_client_btn.setEnabled(can_modify)
     emails_btn.setEnabled(False)
     opening_balance_btn.setEnabled(False)
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
+    client_actions.addWidget(phone_client_btn)
     client_actions.addWidget(emails_btn)
     client_actions.addWidget(view_ledger_btn)
     client_actions.addWidget(opening_balance_btn)
     client_actions.addWidget(export_clients_btn)
+    client_actions.addWidget(import_price_list_btn)
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
@@ -2080,6 +2094,28 @@ def build_client_abm_page(
             refresh_clients()
             client_feedback.show_success("Cliente actualizado.")
 
+    def edit_client_phone() -> None:
+        """Cambia solo el teléfono del cliente seleccionado (#705)."""
+        from app.ui.client_phone_edit_dialog import ClientPhoneEditDialog
+
+        if not can_modify:
+            client_feedback.show_warning("El perfil actual no permite modificar este maestro.")
+            return
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.show_warning(
+                "Seleccione un cliente para cambiarle el teléfono.", focus_widget=client_table
+            )
+            return
+        dialog = ClientPhoneEditDialog(
+            client=Client.get_by_id(cid),
+            current_user=current_user,
+            parent=parent,
+        )
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.show_success("Teléfono actualizado.")
+
     def open_client_emails() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2163,6 +2199,15 @@ def build_client_abm_page(
             + (" Se abrió automáticamente." if opened else ""),
         )
 
+    def import_price_list_from_excel() -> None:
+        """Importa lista de precios (y completa teléfonos) desde un Excel (#705)."""
+        from app.ui.client_price_list_import_dialog import ClientPriceListImportDialog
+
+        dialog = ClientPriceListImportDialog(current_user=current_user, parent=parent)
+        if dialog.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.show_success("Importación aplicada.")
+
     def open_new_place() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2204,10 +2249,12 @@ def build_client_abm_page(
 
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)
+    phone_client_btn.clicked.connect(edit_client_phone)
     emails_btn.clicked.connect(open_client_emails)
     view_ledger_btn.clicked.connect(open_client_ledger)
     opening_balance_btn.clicked.connect(open_opening_balance)
     export_clients_btn.clicked.connect(export_clients_to_excel)
+    import_price_list_btn.clicked.connect(import_price_list_from_excel)
     add_place_btn.clicked.connect(open_new_place)
     edit_place_btn.clicked.connect(open_edit_place)
     toggle_place_btn.clicked.connect(toggle_place_active)
