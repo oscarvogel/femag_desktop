@@ -33,9 +33,8 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from app.models.whatsapp import WhatsAppEnvio
 from app.services.price_list_campaign_service import Destinatario
@@ -55,7 +54,13 @@ INTERVALO_MINIMO = 60.0
 INTERVALO_MAXIMO = 600.0
 
 #: Zona horaria del puesto: el tope diario se cuenta de medianoche local.
-ZONA = ZoneInfo("America/Argentina/Buenos_Aires")
+#:
+#: Argentina es UTC-3 fijo (no aplica horario de verano desde 2009), así que se usa un
+#: desplazamiento constante en lugar de ``zoneinfo``: en Windows la base de zonas horarias del
+#: sistema no está y ``zoneinfo`` necesita el paquete ``tzdata``, que no está en los requisitos
+#: (y en el venv limpio del release la app no arrancaba). Con el desplazamiento fijo no hace
+#: falta ninguna dependencia extra y el resultado es el mismo para el puesto.
+ZONA = timezone(timedelta(hours=-3))
 
 #: Estados que cortan la idempotencia: si el envío ya está en uno de estos, no se repite.
 #: ``queued`` y ``accepted`` también cuentan: el gateway ya tomó el mensaje, mandarlo de vuelta
