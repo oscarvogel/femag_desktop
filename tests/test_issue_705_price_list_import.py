@@ -175,6 +175,69 @@ def test_duplicado_mismo_cliente_en_la_base_se_unifica(db, tmp_path):
     assert vista.conflictos[0].tipo == "duplicado_unificado"
 
 
+def test_duplicado_mismo_cliente_con_listas_distintas_no_bloquea_el_cambio(db, tmp_path):
+    """#761: el mismo cliente con el CUIT en dos formatos y listas distintas.
+
+    En la base real el CUIT se guardó en dos formatos (el legacy sin guiones y
+    la carga manual con guiones) y el UNIQUE es sobre el texto, asi que
+    conviven dos filas del mismo cliente con listas distintas. La lista del
+    archivo tiene que llegar a la fila que quedo en la lista vieja.
+    """
+    legacy = _cliente(nombre="Gimenez 761", cuit="30705000016", lista=1)
+    manual = _cliente(nombre="Gimenez 761", cuit="30-7050000-16", lista=2)
+    archivo = _xlsx(tmp_path, [_fila("Gimenez 761", "30705000016", 2)])
+
+    vista = _importador().construir_vista_previa(archivo)
+
+    assert len(vista.cambios_lista) == 1
+    assert vista.cambios_lista[0].client_id == legacy.id
+    assert vista.cambios_lista[0].lista_anterior == 1
+    assert vista.cambios_lista[0].lista_nueva == 2
+    # La fila que ya estaba en la lista 2 no cambia, pero tampoco bloquea.
+    assert manual.id not in [cambio.client_id for cambio in vista.cambios_lista]
+    # Queda avisado de que hay que unificar las filas, pero no es un bloqueo.
+    assert vista.hay_conflictos
+    assert vista.conflictos[0].tipo == "duplicado_unificado"
+
+
+def test_duplicado_mismo_cliente_con_listas_distintas_se_aplica_a_todas_las_filas(db, tmp_path):
+    from app.models.masters import Client
+
+    legacy = _cliente(nombre="Unificado 761", cuit="30705000017", lista=1, phone=None)
+    manual = _cliente(nombre="Unificado 761", cuit="30-7050000-17", lista=2)
+    archivo = _xlsx(
+        tmp_path, [_fila("Unificado 761", "30705000017", 2, telefono="011 3116 7114")]
+    )
+
+    resultado = _importador().aplicar(_importador().construir_vista_previa(archivo))
+
+    assert resultado.cambios_lista == 1
+    assert Client.get_by_id(legacy.id).lista_precios == 2
+    assert Client.get_by_id(manual.id).lista_precios == 2
+    # El telefono falta en la fila legacy: se completa solo en esa.
+    assert Client.get_by_id(legacy.id).phone == "011 3116 7114"
+    # No se borra ninguna fila: unificar las filas del legacy es otro trabajo.
+    assert Client.select().where(Client.name == "Unificado 761").count() == 2
+
+
+def test_dos_clientes_distintos_con_el_mismo_cuit_no_se_aplica_aunque_difieran_las_listas(db, tmp_path):
+    """Nombres distintos: son clientes distintos, no se aplica nada.
+
+    Antes este caso se reportaba como "varias filas del cliente con listas
+    distintas", que hacia creer que era el mismo cliente.
+    """
+    _cliente(nombre="Empresa Uno 761", cuit="30705000018", lista=1)
+    _cliente(nombre="Empresa Dos 761", cuit="30-7050000-18", lista=3)
+    archivo = _xlsx(tmp_path, [_fila("Empresa Uno 761", "30705000018", 2)])
+
+    vista = _importador().construir_vista_previa(archivo)
+
+    assert not vista.cambios
+    assert vista.hay_conflictos
+    assert vista.conflictos[0].tipo == "cuit_ambiguo_base"
+    assert "más de un cliente" in vista.conflictos[0].detalle
+
+
 def test_lista_invalida_no_se_aplica(db, tmp_path):
     _cliente(nombre="Lista Rara", cuit="30705000008", lista=1)
     archivo = _xlsx(tmp_path, [_fila("Lista Rara", "30705000008", 7)])

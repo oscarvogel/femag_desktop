@@ -15,6 +15,12 @@ Las reglas son las mismas del modo ``patch`` del importador del legacy (#746/#74
   viene con separadores (``20- 29646152-1``) y el índice único es sobre el texto. Si
   el CUIT no sirve, se matchea por **nombre normalizado** y solo si da un único
   cliente.
+- Si el CUIT matchea **varias filas del mismo cliente** (mismo nombre normalizado,
+  CUIT guardado en dos formatos), la lista del archivo se aplica a **todas** sus
+  filas: el mismo cliente no puede tener dos listas de precios. Se avisa que
+  conviene unificarlas, pero no se borra ninguna (#761).
+- Si el CUIT matchea filas de **nombres distintos**, no se aplica nada: son
+  clientes distintos y es un error de datos que hay que corregir a mano.
 - Siempre hay una **vista previa que no escribe nada**: nada se toca hasta que el
   operador la mira y la confirma.
 """
@@ -423,11 +429,15 @@ class ClientPriceListImporter:
 
         if len(candidatos) > 1:
             nombres = {normalizar_nombre(candidato.name) for candidato in candidatos}
-            listas_base = {candidato.lista_precios for candidato in candidatos}
-            if len(nombres) == 1 and len(listas_base) == 1:
-                # Es el mismo cliente duplicado en la base: se actualizan todas sus
-                # filas y se avisa, porque un duplicado con precios distintos es un
-                # problema de datos que hay que corregir a mano.
+            if len(nombres) == 1:
+                # Es el mismo cliente en varias filas de la base: el CUIT se
+                # guardó en formatos distintos (el legacy sin guiones, la carga
+                # manual con guiones) y el UNIQUE de la base es sobre el texto,
+                # así que conviven. La lista del archivo se le aplica a TODAS
+                # sus filas: el mismo cliente no puede tener dos listas de
+                # precios. Se avisa que conviene unificarlas, pero no se borra
+                # ninguna: las filas del legacy tienen historia (presupuestos,
+                # remitos, cuenta corriente) y unificarlas es un trabajo aparte.
                 for candidato in candidatos:
                     self._evaluar(candidato, principal, "cuit duplicado unificado", vista)
                 vista.conflictos.append(
@@ -435,7 +445,8 @@ class ClientPriceListImporter:
                         tipo="duplicado_unificado",
                         detalle=(
                             "El CUIT corresponde a varias filas del mismo cliente en la base "
-                            f"({candidato.name}). Se actualizaron todas; conviene unificarlas."
+                            f"({candidatos[0].name}). Se actualizaron todas con la lista del "
+                            "archivo; conviene unificarlas."
                         ),
                         cuit=cuit,
                         filas=(principal.numero,),
@@ -444,22 +455,15 @@ class ClientPriceListImporter:
                 )
                 return
 
-            if len(listas_base) > 1:
-                detalle = (
-                    "El CUIT corresponde a varias filas del cliente con listas distintas en la "
-                    "base. Hay que unificar las filas antes de importar."
-                )
-                tipo = "duplicado_listas_distintas"
-            else:
-                detalle = (
-                    "El CUIT corresponde a más de un cliente en la base. "
-                    "No se aplica nada: revisá a mano."
-                )
-                tipo = "cuit_ambiguo_base"
+            # Nombres distintos: son clientes distintos que comparten el CUIT.
+            # No se aplica nada: es un error de datos que hay que corregir a mano.
             vista.conflictos.append(
                 Conflicto(
-                    tipo=tipo,
-                    detalle=detalle,
+                    tipo="cuit_ambiguo_base",
+                    detalle=(
+                        "El CUIT corresponde a más de un cliente en la base. "
+                        "No se aplica nada: revisá a mano."
+                    ),
                     cuit=cuit,
                     filas=tuple(fila.numero for fila in grupo),
                     nombres=tuple(sorted({candidato.name for candidato in candidatos})),
