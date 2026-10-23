@@ -636,7 +636,11 @@ def _restored_load_order_page(self):
                     return
                 elegidas = dialog.selected_timings()
                 timing = elegidas[0] if len(elegidas) == 1 else None
+            # Los presupuestos y los sobres salen en la misma operacion (#740).
+            # La llamada de presupuestos queda tal cual estaba: el PDF de
+            # presupuesto no se toca.
             paths = operation_service.export_budgets(order, timing=timing)
+            envelopes = operation_service.export_envelopes(order, timing=timing)
             if not paths:
                 feedback.show_warning(
                     "La orden no tiene presupuestos para generar.", focus_widget=table
@@ -644,14 +648,37 @@ def _restored_load_order_page(self):
                 return
             resolved_paths = [Path(path).resolve() for path in paths]
             partes = {path.stem for path in resolved_paths}
-            feedback.show_success(
+            mensaje = (
                 f"Se generaron {len(resolved_paths)} presupuesto(s): "
                 + ", ".join(sorted(partes))
                 + "."
             )
+            if envelopes.paths:
+                mensaje += (
+                    f" Se generaron {len(envelopes.paths)} sobre(s), uno por presupuesto."
+                )
+            if envelopes.failures:
+                feedback.show_warning(
+                    mensaje
+                    + " Sobres que no se pudieron generar: "
+                    + "; ".join(
+                        f"{fallo.client_name} ({fallo.reason})"
+                        for fallo in envelopes.failures
+                    ),
+                    focus_widget=table,
+                )
+            else:
+                feedback.show_success(mensaje)
             for resolved in resolved_paths:
                 try:
                     desktop._open_print_output(resolved)
+                except Exception:
+                    pass
+            # Los sobres se abren tambien: son los papelitos que hay que
+            # rotular y imprimir en la Epson.
+            for envelope in envelopes.paths:
+                try:
+                    desktop._open_print_output(Path(envelope).resolve())
                 except Exception:
                     pass
         except Exception as exc:
