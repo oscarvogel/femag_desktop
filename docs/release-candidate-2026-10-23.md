@@ -1,6 +1,6 @@
 # Candidates del 23/10/2026 — FEMAG Desktop
 
-Dos candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
+Tres candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
 **Ninguno está promovido a producción**: falta la prueba del operador en la PC
 piloto (y la prueba física del sobre con la Epson L3250 del issue #740).
 
@@ -148,6 +148,130 @@ FEMAG; si no, la app sigue buscando `latest.json` y no ve este candidate.
    `rotation_deg` y los desplazamientos definitivos en `envelope.json`.
 3. **Promoción a producción** con `.\release.ps1 production` desde `main`,
    una vez approved los dos puntos anteriores.
+
+---
+
+## Candidate vigente: 2026.10.23.14.26.30 (Fase B del envío de lista de precios)
+
+Este es el **candidate vigente**: el anterior (`2026.10.23.10.28.13`) queda superado.
+Sigue **sin promover a producción**.
+
+| dato | valor |
+|---|---|
+| version | `2026.10.23.14.26.30` |
+| source_sha | `7940e662e81e984479d4cc09c48ea231ba323ef8` (main) |
+| sha256 | `503c7f8561b2f7c4480dcdbd46fa3e88fdb053dbf3e3c864528a8adbe1754103` |
+| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.553.847 bytes) |
+| release | tag `femag-candidate` en `oscarvogel/vogel-releases` |
+| download_url | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+| publicado | 2026-10-23 17:28:54 UTC |
+
+### Los tres puntos verificados
+
+1. **SHA256 del instalador local** (`installer/output/FEMAG_Desktop_Produccion_Setup.exe`):
+   `503c7f85...54103` (43.553.847 bytes).
+2. **Digest del asset publicado** en el tag `femag-candidate`:
+   `sha256:503c7f85...54103` (43.553.847 bytes).
+3. **sha256 de `candidate.json`** (`apps/femag/candidate.json`):
+   `503c7f85...54103`.
+
+Los tres coinciden, y el tamaño del asset coincide con el del instalador local.
+
+### Qué entra en este build
+
+| PR | Issue | Qué trae |
+|---|---|---|
+| #764 | #763 | Configuración por lista (PDF + mensaje) y cálculo de la audiencia con el clasificador de teléfonos |
+| #765 | #763 | Motor de la campaña: cola secuencial, intervalo con jitter, tope diario, pausa/cancelar, reintentos, circuit breaker, idempotencia y auditoría |
+| #766 | #763 | Pantalla "Envío de lista de precios" en Maestros, con los 4 pasos del spec §4.2 |
+| #768 | #763 | Fix: la zona horaria del tope diario no depende de `zoneinfo` (ver abajo) |
+
+La bitácora completa de la Fase B está en `docs/fase-b-envio-lista-precios.md`.
+
+### Validaciones ejecutadas (dentro de `release.ps1`)
+
+```
+tests                               1966 passed, 3 skipped (527,49 s)
+compileall                          exit 0
+smoke de la app                     FEMAG smoke OK
+build del instalador de producción  OK (Inno Setup 6)
+smoke del EXE congelado             OK
+chequeo de recursos congelados      OK
+chequeo de secretos del artefacto   OK
+CANDIDATE_STATUS                    OK
+```
+
+Además, fuera del release: la suite completa con el **venv** del release
+(`.venv\Scripts\python.exe`, que es el que arma el instalador de Windows) con
+**1966 passed, 3 skipped** (421 s), `python -m compileall app` exit 0,
+`git diff --check` limpio y `python -m app.main --smoke` con `FEMAG smoke OK`.
+
+### El fix de la zona horaria (PR #768): por qué hacía falta
+
+El primer release con la Fase B **abortó en los tests (19 fallos) y no publicó nada**. La
+causa no era la lógica de la campaña: `zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")`
+exige el paquete **`tzdata`**, que no está en `requirements.txt`. En el venv limpio del
+release (y en la PC del cliente) **la app no arrancaba**: `ZoneInfoNotFoundError` al
+instalar la extensión.
+
+El CI en Linux no lo ve (ahí `tzdata` está en el sistema) y el Python del sistema de esta
+máquina también lo tiene, pero el `.venv` que arma el instalador no.
+
+La corrección (`ecb220e`) usa el desplazamiento fijo de Argentina, que es UTC-3 sin horario
+de verano desde 2009:
+
+```python
+ZONA = timezone(timedelta(hours=-3))
+```
+
+Así que no hace falta ninguna dependencia nueva y **no se tocó `requirements.txt`**.
+Evidencia antes/después con el venv: `ZoneInfoNotFoundError` → `extension OK`.
+
+### Verificación del contenido del instalador
+
+El instalador es Inno Setup con compresión lzma2, así que no se puede abrir con 7-Zip ni
+buscar cadenas dentro. Lo que sí se puede verificar es el **build congelado de
+PyInstaller** que va dentro (`dist/FEMAG Desktop/FEMAG Desktop.exe`): se lee el PYZ
+embebido (1259 módulos) y se mira el bytecode de `app.services.price_list_send_service`.
+
+```
+app.services.price_list_send_service: usa zoneinfo (código VIEJO, bug): False
+app.services.price_list_send_service: usa timedelta (fix):              True
+app.ui.price_list_send_extension:      zoneinfo=False
+app.services.whatsapp_envio_service:    zoneinfo=False
+```
+
+O sea: **el instalador publicado lleva el fix**, no el código que reventaba en Windows.
+
+### La audiencia real (base del cliente, dump del 20/10 con el import unificado aplicado)
+
+Medida con el código de la app (`PriceListCampaignService.calcular_audiencia`) contra la
+base aislada `femag_cliente_761` (**no se tocó ninguna base de producción**):
+
+| lista | clientes | celulares | posibles | inválidos | sin teléfono | inactivos | marcados por defecto |
+|---|---|---|---|---|---|---|---|
+| 1 | 874 | 25 | 145 | 35 | 669 | 1 | **25** |
+| 2 | 8 | 2 | 5 | 0 | 1 | 1 | **2** |
+
+**"Enviar la lista 1" son 25 mensajes seguros, no 875.** El cuello de botella real es el
+dato de contacto del maestro, no el motor de envío: 669 clientes de la lista 1 no tienen
+teléfono.
+
+Los "posibles" (un local de 10 u 11 dígitos puede ser una línea fija o un móvil escrito sin
+el "15") **no se mandan solos**: aparecen en la vista previa con el número exacto y los
+tilda el operador.
+
+### Lo que falta para darlo por verificado
+
+1. **La prueba real contra el gateway**: el código nunca habló con la API de WhatsApp.
+   Son 3-5 mensajes de prueba, intervalo de 10 s, **instancia de prueba**, con la
+   autorización expresa del operador (el riesgo real es que el proveedor bloquee la línea).
+2. **La prueba física del sobre con la Epson L3250** (issue #740).
+3. **La promoción a producción** (`.elease.ps1 production`) una vez probados los dos.
+
+Mientras tanto, `latest.json` sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`).
+
+---
 
 ## Nota operativa: el release se frenó en el primer intento
 
