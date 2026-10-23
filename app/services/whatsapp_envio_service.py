@@ -50,6 +50,14 @@ class WhatsAppEnvioService:
             "Configúrela desde Sistema > WhatsApp."
         )
 
+    def resolve_instance_for_user(self, usuario) -> str:
+        """Instancia de WhatsApp del usuario (API pública).
+
+        La usa la campaña de lista de precios (#763), que escribe la fila de auditoría con su
+        propia clave de campaña en vez de la que genera ``create_attempt``.
+        """
+        return self._resolve_instance_for_user(usuario)
+
     def create_attempt(
         self,
         *,
