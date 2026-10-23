@@ -8,7 +8,9 @@ La webapp vive en `webapp/` y comparte los modelos Peewee y la configuración de
 - escanear el QR desde la cámara del celular;
 - mostrar sus productos desde un celular;
 - cargar o corregir `lote` y `fecha_elaboracion` por línea;
-- persistir esos datos en la misma base utilizada por Desktop.
+- persistir esos datos en la misma base utilizada por Desktop;
+- registrar los partes de embolsado de la planta desde el celular, con el
+  operador identificado (ver "Registro de producción" más abajo).
 
 ## Arquitectura
 
@@ -75,6 +77,14 @@ FEMAG_WEB_HOST=0.0.0.0
 FEMAG_WEB_PORT=8000
 ```
 
+Variables de la sesión y de los QR de turno:
+
+| Variable | Para qué sirve |
+|---|---|
+| `FEMAG_WEB_SECRET_KEY` | Secreto con el que se firman las cookies de sesión. Si no está, la webapp genera uno aleatorio y lo guarda en el directorio de configuración del puesto. **El valor fijo que tenía antes el código se quitó**: con una clave conocida cualquiera podía firmar una cookie inventada y entrar como otro usuario. |
+| `FEMAG_WEB_PUBLIC_URL` | URL pública del servidor (por ejemplo `https://femag.local`). Es la que se imprime en los QR de turno. Sin ella se usa la URL que ve el propio servidor, que detrás de un proxy es la interna y no sirve desde el celular. |
+| `FEMAG_WEB_SECRET_FILE` | Ruta donde se guarda el secreto de sesión generado. Por defecto, `%LOCALAPPDATA%\FEMAG Desktop\webapp_secret.key` (o `~/.config/FEMAG Desktop/` en Linux). |
+
 En un despliegue definitivo se recomienda que Waitress/Webapp escuche solo en la interfaz local y que Caddy sea el único punto publicado a la LAN.
 
 ## Flujo con el QR actual
@@ -100,6 +110,57 @@ https://femag.local/orden/<token>
 ```
 
 No será necesario modificar el modelo ni regenerar los tokens existentes.
+
+## Registro de producción desde el celular
+
+En la planta embolsan varias personas y el dueño pidió que quedara registrado
+diariamente qué embolsó cada uno (#754). La captura vive en `/produccion`.
+
+### Qué hace
+
+- Exige iniciar sesión con un usuario de FEMAG: son los mismos usuarios del
+  escritorio, validados por `AuthService`. La sesión dura 12 horas.
+- El parte guarda **quién lo cargó** (`ProductionPart.recorded_by`) además de
+  quién lo confirmó. En un turno puede haber varias personas embolsando y cada
+  una carga su propio parte: el modelo admite varios partes por (fecha, turno),
+  así que la atribución queda por parte.
+- El circuito de stock es **el mismo** del escritorio: `ProductionPartService`
+  escribe las bolsas que entran y el material que sale en la misma transacción,
+  no duplica saldos y bloquea la confirmación si no hay materia prima
+  suficiente.
+- Un parte confirmado no se edita más: se anula con motivo, y la anulación
+  genera los movimientos contrarios.
+
+### QR por turno
+
+Un administrador puede imprimir la hoja de QR por turno en
+`/produccion/turnos.pdf`. Cada QR abre `/produccion` con el turno ya puesto:
+el operario escanea y carga, sin elegir turno ni escribir la dirección.
+
+Para que el QR sea alcanzable desde el celular hay que definir
+`FEMAG_WEB_PUBLIC_URL` con la URL pública del servidor.
+
+### Qué hay que preparar en la base
+
+La columna `production_part.recorded_by` es nueva. `validate_runtime_schema`
+corta el arranque del Desktop si a la base le falta, así que hay que preparar
+el esquema antes de que abran los puestos actualizados:
+
+- **Crear o actualizar ahora las tablas de FEMAG**, en el asistente de conexión; o
+- `python scripts/init_db.py`.
+
+La webapp no prepara el esquema por su cuenta: es el camino de siempre.
+
+### Lo que falta del lado de los datos
+
+La pantalla no inventa datos. Para registrar bolsas hacen falta
+
+- productos con **peso de bolsa** cargado en el maestro, y
+- al menos un producto con rol de stock **Materia prima**, para el consumo.
+
+Si no hay ninguno, el parte se puede guardar pero **no se puede confirmar**: el
+servicio lo bloquea a propósito, porque sin salida de materia prima las bolsas
+entrarían al stock y el mismo kilo quedaría en los dos stocks.
 
 ## Cámara y HTTPS
 
@@ -211,6 +272,17 @@ FEMAG Desktop no necesita trasladarse junto con la webapp.
 Esta primera etapa está pensada para LAN interna. Antes de publicarla hacia Internet se debe agregar autenticación/autorización, HTTPS con una estrategia de certificados adecuada, política de exposición de MySQL, auditoría de cambios y endurecimiento del servidor.
 
 MySQL nunca debe exponerse directamente a los celulares ni incluir credenciales de base en JavaScript. Los celulares hablan solamente con la webapp; la webapp es quien accede a MySQL.
+
+Estado de la autenticación:
+
+- `/produccion` **exige iniciar sesión** con un usuario de FEMAG (#754). Es lo que
+  permite saber quién cargó cada parte.
+- `/orden/<token>` **sigue sin login**: se abre por el QR de la orden y cualquiera
+  que conozca el token puede cargar lote y fecha. Ponerle login es un cambio
+  aparte (#364), no se mezcló con la captura de producción.
+- El secreto con el que se firman las cookies de sesión no puede ser un valor
+  fijo del repositorio: se resuelve por `FEMAG_WEB_SECRET_KEY` o por un archivo
+  aleatorio del directorio de configuración del puesto.
 
 ## Healthcheck
 

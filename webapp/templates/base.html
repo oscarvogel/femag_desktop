@@ -18,6 +18,8 @@
     body { margin: 0; }
     header { background: #17324d; color: white; padding: 16px 20px; }
     header strong { font-size: 1.15rem; }
+    header nav { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    header nav a { color: #cfe0f2; text-decoration: none; font-size: .9rem; font-weight: 600; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.1); }
     main { max-width: 760px; margin: 0 auto; padding: 18px 14px 40px; }
     .card { background: white; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
     h1 { font-size: 1.35rem; margin: 0 0 12px; }
@@ -25,8 +27,11 @@
     p { margin: 6px 0; }
     .muted { color: #687481; font-size: .92rem; }
     label { display: block; font-weight: 650; margin: 12px 0 5px; }
-    input { width: 100%; min-height: 46px; border: 1px solid #b8c1ca; border-radius: 9px; padding: 10px 12px; font-size: 1rem; }
+    input, select, textarea { width: 100%; min-height: 46px; border: 1px solid #b8c1ca; border-radius: 9px; padding: 10px 12px; font-size: 1rem; background: white; color: inherit; }
+    textarea { min-height: 72px; resize: vertical; }
     button, .button { display: inline-block; width: 100%; min-height: 48px; border: 0; border-radius: 9px; padding: 12px 16px; font-size: 1rem; font-weight: 700; cursor: pointer; text-align: center; text-decoration: none; background: #17324d; color: white; }
+    button.secondary, .button.secondary { background: #6b7a88; }
+    button.danger, .button.danger { background: #9b3030; }
     .message { border-radius: 9px; padding: 11px 12px; margin-bottom: 14px; }
     .message.success { background: #e7f6ed; color: #215b38; }
     .message.error { background: #fdecec; color: #852d2d; }
@@ -38,7 +43,18 @@
   </style>
 </head>
 <body>
-<header><strong>FEMAG · Despachos</strong></header>
+<header>
+  <strong>FEMAG · Despachos</strong>
+  <nav>
+    <a href="{{ url_for('home') }}">Órdenes</a>
+    <a href="{{ url_for('production') }}">Producción</a>
+    {% if current_username() %}
+      <a href="{{ url_for('logout') }}">Salir ({{ current_username() }})</a>
+    {% else %}
+      <a href="{{ url_for('login') }}">Iniciar sesión</a>
+    {% endif %}
+  </nav>
+</header>
 <main>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}<div class="message {{ category }}">{{ message }}</div>{% endfor %}
