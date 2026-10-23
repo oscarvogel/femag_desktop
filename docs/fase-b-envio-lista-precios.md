@@ -2,7 +2,9 @@
 
 Bitácora de la implementación del módulo de envío, en las tres etapas en que se hizo.
 
-**Estado:** código completo y validado (1966 tests). **Falta la prueba real contra el gateway**:
+**Estado:** código completo y validado (1966 tests), publicado como candidate
+`2026.10.23.14.26.30` (canal `candidate`, **sin promover a producción**).
+**Falta la prueba real contra el gateway**:
 hasta que no se manden 3-5 mensajes de prueba sobre la instancia de prueba, el módulo no se
 considera verificado en producción.
 
@@ -71,10 +73,74 @@ normalizador viejo, se mandaría a números que no son de nadie.
   hacen que reanudar no vuelva a mandar a quien ya recibió la lista.
 - El envío **real** requiere autorización expresa (riesgo de bloqueo de línea).
 
+## Hallazgo: la zona horaria del tope diario no podía depender de `zoneinfo`
+
+El primer release con la Fase B **abortó en los tests (19 fallos) y no publicó nada**. La
+causa no era la lógica de la campaña: el tope diario se cuenta desde la medianoche local y
+el código usaba
+
+```python
+ZONA = ZoneInfo("America/Argentina/Buenos_Aires")
+```
+
+`zoneinfo` exige el paquete **`tzdata`**, que no está en `requirements.txt`. En el venv
+limpio del release (y en la PC del cliente) **la app no arrancaba**: `ZoneInfoNotFoundError`
+al instalar la extensión.
+
+El CI en Linux no lo ve (`tzdata` está en el sistema) y el Python del sistema de la máquina
+de desarrollo también lo tiene, pero el `.venv` que arma el instalador de Windows no. Por eso
+la corrección (PR #768, commit `ecb220e`) **no tocó `requirements.txt`** y usó el
+desplazamiento fijo de Argentina, que es UTC-3 sin horario de verano desde 2009:
+
+```python
+ZONA = timezone(timedelta(hours=-3))
+```
+
+Evidencia antes/después con el venv: `ZoneInfoNotFoundError` → `extension OK`.
+
+Además se verificó el **contenido** del instalador publicado (Inno Setup comprime con
+lzma2, así que no se puede abrir con 7-Zip): se leyó el PYZ embebido del build congelado de
+PyInstaller (1259 módulos) y se confirmó que `app.services.price_list_send_service` usa
+`timedelta` y **no** `zoneinfo`. O sea, el instalador que se publicó lleva el fix.
+
+## La lista 2, en detalle (para la prueba real)
+
+Contra la base aislada del cliente (`femag_cliente_761`, dump del 20/10 con el import
+unificado aplicado), con el código real de la app:
+
+| id | cliente | teléfono en la base | estado | marcado | número a enviar |
+|---|---|---|---|---|---|
+| 88 | MENDEZ MARIA FERNANDA | 011-4484-7498 | posible | no | 5491144847498 |
+| 850 | GIMENEZ ROMINA JAQUELINE | +5491164426278 | celular | **sí** | 5491164426278 |
+| 852 | BUENOS ALIMENTOS | 011 2155 4404 | posible | no | 5491121554404 |
+| 853 | MUSLI WOLKEN S.A | 358 - 602 5698 | posible | no | 5493586025698 |
+| 854 | BAREIRO JAVIER | 011 3116 7114 | posible | no | 5491131167114 |
+| 855 | GUIZZETTI MARIA DE LOS ANGELES | 011 5958 9894 | posible | no | 5491159589894 |
+| 870 | CODIGO ANIMALS.R.L. | +5491157489959 | celular | **sí** | 5491157489959 |
+| 873 | DA SILVA MARCELO RUBEN | (sin teléfono) | vacío | no | (no se manda) |
+
+Además hay un GIMENEZ ROMINA JAQUELINE **inactivo** (id 865): la pantalla lo omite y avisa
+en el contador `inactivos_omitidos`.
+
+**Con la lista 2 solo salen marcados 2 destinatarios** (GIMENEZ y CODIGO ANIMALS). Para
+llegar a 3-5 hay que tildar a mano alguno de los "posibles", y eso es una decisión del
+operador: un local de 10 dígitos puede ser una línea fija, y mandarle a un fijo no es un
+error de datos, es lo que más rápido hace que el proveedor bloquee la línea.
+
+**Requisito previo**: el usuario que opera tiene que tener una **instancia de WhatsApp
+asignada** (`Sistema > WhatsApp`, tabla de usuarios). Sin instancia, la pantalla avisa
+*"El usuario no tiene una instancia de WhatsApp asociada"* y no deja empezar. En la base del
+cliente hay dos: `femag_cliente_761` (admin y cristina) y `femag_gabriela` (gabriela).
+
+**El PDF no viaja en el repositorio**: se elige en la PC del cliente con "Seleccionar PDF" y
+se guarda con "Guardar configuración" (queda la ruta en `AppParameter`). El archivo tiene
+que existir en el disco de esa máquina.
+
 ## Qué falta
 
 1. **La prueba real**: 3-5 destinatarios, intervalo de 10 s, **instancia de prueba**. Es el único
-   punto sin verificar: el código nunca habló con el gateway.
+   punto sin verificar: el código nunca habló con el gateway. Con la lista 2 solo salen
+   marcados 2 destinatarios (GIMENEZ y CODIGO ANIMALS); ver la tabla de más arriba.
 2. **Fase C**: reanudar una campaña después de cerrar la app, export del log de omitidos, ventana
    horaria y el reporte de "clientes de esta lista sin WhatsApp" (el informe que convierte el hueco
    de datos en una tarea cerrable).
