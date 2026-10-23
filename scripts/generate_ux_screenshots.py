@@ -267,6 +267,42 @@ def generate(output_dir: Path) -> list[Path]:
     targets.append(output_dir / "04_estado_rojo_excedente.png")
     _capture(edit_dialog, targets[-1], render_canvas=True)
 
+    # #767: mercaderia suelta. Es el caso real de LULEMU (bolsas que el
+    # chofer entrega al vendedor y no van en ningun pallet). Se captura a la
+    # resolucion de la pantalla del cliente (1638x969) y a 1366x768, porque
+    # la fila de acciones de pendientes no puede apilar los textos.
+    loose_dir = output_dir / "issue_767_mercaderia_suelta"
+    loose_dir.mkdir(parents=True, exist_ok=True)
+    # Chofer y camion propios: el chofer de la carga anterior esta bloqueado
+    # por esa carga activa.
+    loose_driver = Driver.create(name="Chofer Captura Suelta", carrier=data["carrier"])
+    loose_truck = Truck.create(domain="CAP767", carrier=data["carrier"])
+    loose_order = service.create_order(
+        carrier=data["carrier"],
+        driver=loose_driver,
+        truck=loose_truck,
+        destinations=_service_destinations(data),
+        pallets=[],
+    )
+    loose_dialog = LoadOrderPalletDialog(service, loose_order)
+    loose_dialog.resize(1638, 969)
+    loose_dialog.show()
+    app.processEvents()
+    loose_dialog.pallet_widget.add_loose_allocation(
+        data["address_a"].id, data["cement"].id, 2
+    )
+    loose_dialog.pallet_widget.add_loose_allocation(
+        data["address_b"].id, data["adhesive"].id, 2
+    )
+    app.processEvents()
+    targets.append(loose_dir / "01_mercaderia_suelta_1638x969.png")
+    _capture(loose_dialog, targets[-1])
+    loose_dialog.resize(1366, 768)
+    app.processEvents()
+    targets.append(loose_dir / "02_mercaderia_suelta_1366x768.png")
+    _capture(loose_dialog, targets[-1])
+    loose_dialog.close()
+
     new_dialog.close()
     edit_dialog.close()
     database.close()

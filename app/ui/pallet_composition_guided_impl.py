@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QPushButton,
@@ -125,11 +126,27 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self.guided_partial_button.clicked.connect(self.add_selected_partial)
         pending_actions.addWidget(self.guided_partial_button)
 
+        # #767: la mercaderia suelta viaja en el camion sin ir en ningun pallet.
+        # Antes solo se podia marcar desde el editor legacy, que el workbench
+        # guiado deja oculto: la operatoria no tenia ninguna via.
+        self.guided_loose_button = QPushButton("Marcar como suelta")
+        self.guided_loose_button.setObjectName("guidedMarkLooseSelectionButton")
+        self.guided_loose_button.setToolTip(
+            "Marca la mercadería seleccionada como suelta: viaja en el camión sin ir en ningún pallet."
+        )
+        self.guided_loose_button.clicked.connect(self.mark_selected_as_loose)
+        pending_actions.addWidget(self.guided_loose_button, 2)
+        pending_layout.addLayout(pending_actions)
+
+        # El reparto automatico va en su propia fila: sumar un quinto boton a
+        # la fila de arriba apila los textos en la pantalla del cliente
+        # (1638x969).
+        pending_auto_actions = QHBoxLayout()
         self.guided_auto_button = QPushButton("Distribuir automaticamente")
         self.guided_auto_button.setObjectName("guidedAutoDistributeSelectedButton")
         self.guided_auto_button.clicked.connect(self.distribute_selected_automatically)
-        pending_actions.addWidget(self.guided_auto_button, 2)
-        pending_layout.addLayout(pending_actions)
+        pending_auto_actions.addWidget(self.guided_auto_button, 2)
+        pending_layout.addLayout(pending_auto_actions)
 
         self.guided_propose_rest_button = QPushButton("Proponer resto")
         self.guided_propose_rest_button.setObjectName("guidedProposeRemainderButton")
@@ -138,6 +155,32 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         )
         self.guided_propose_rest_button.clicked.connect(self.propose_remainder)
         pending_layout.addWidget(self.guided_propose_rest_button)
+
+        # #767: la mercaderia suelta de la carga se lista aca. El panel queda
+        # abajo a proposito: si aparece entre la grilla y los botones, el
+        # boton que el operador acaba de apretar se le mueve de debajo del
+        # mouse. En estado vacio no ocupa espacio.
+        self.guided_loose_group = QGroupBox("Mercadería suelta", pending_group)
+        self.guided_loose_group.setObjectName("guidedLooseGoodsGroup")
+        guided_loose_layout = QVBoxLayout(self.guided_loose_group)
+        guided_loose_layout.setContentsMargins(4, 4, 4, 4)
+        guided_loose_layout.setSpacing(4)
+        self.guided_loose_table = QTableWidget(0, 5)
+        self.guided_loose_table.setObjectName("guidedLooseGoodsTable")
+        self.guided_loose_table.setHorizontalHeaderLabels(
+            ("Cliente / destino", "Articulo", "Cantidad", "Kg", "Accion")
+        )
+        self.guided_loose_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.guided_loose_table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeToContents
+        )
+        self.guided_loose_table.verticalHeader().setVisible(False)
+        self.guided_loose_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.guided_loose_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.guided_loose_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        guided_loose_layout.addWidget(self.guided_loose_table, 1)
+        pending_layout.addWidget(self.guided_loose_group)
+        self.guided_loose_group.hide()
 
         current_group = QGroupBox("Pallet actual", self.guided_splitter)
         current_group.setObjectName("palletGuidedCurrentGroup")
@@ -311,6 +354,51 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self.composition_changed.emit()
         return True
 
+    def mark_selected_as_loose(self) -> bool:
+        """#767: deja la mercaderia seleccionada fuera de todo pallet.
+
+        La mercaderia suelta viaja en el camion pero no va en ningun pallet.
+        El backend ya la soporta (LoadOrderLooseAllocation); lo que faltaba
+        era la via de operacion desde la pantalla guiada.
+        """
+        rows = self._selected_pending_rows()
+        if len(rows) != 1:
+            self.issue_label.show_warning(
+                "Seleccione exactamente una línea para marcarla como suelta."
+            )
+            return False
+        row = rows[0]
+        pending = Decimal(str(row["pending"]))
+        if pending <= 0:
+            self.issue_label.show_warning(
+                "La línea seleccionada no tiene mercadería pendiente."
+            )
+            return False
+        value, accepted = QInputDialog.getDouble(
+            self,
+            "Marcar como suelta",
+            f"Cantidad a despachar suelta (máximo {_quantity_text(pending)}):",
+            float(pending),
+            0.001,
+            float(pending),
+            3,
+        )
+        if not accepted:
+            return False
+        quantity = Decimal(str(value)).quantize(Decimal("0.001"))
+        if quantity <= 0 or quantity > pending:
+            self.issue_label.show_warning(
+                "La cantidad suelta no puede superar lo pendiente de la línea."
+            )
+            return False
+        self.add_loose_allocation(
+            int(row["address_id"]), int(row["product_id"]), quantity
+        )
+        self.issue_label.show_success(
+            f"{_quantity_text(quantity)} marcadas como mercadería suelta."
+        )
+        return True
+
     def distribute_selected_automatically(self) -> bool:
         rows = self._selected_pending_rows()
         if len(rows) != 1:
@@ -468,9 +556,53 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         if getattr(self, "_guided_ready", False):
             self._refresh_guided_ui()
 
+    def _guided_remove_loose(self, index: int) -> None:
+        """#767: la mercaderia suelta vuelve a quedar pendiente."""
+        self.remove_loose_allocation(index)
+        self.issue_label.show_success(
+            "Mercadería suelta quitada: vuelve a quedar pendiente de preparar."
+        )
+
+    def _render_guided_loose_table(self) -> None:
+        if not hasattr(self, "guided_loose_table"):
+            return
+        for row in range(self.guided_loose_table.rowCount()):
+            button = self.guided_loose_table.cellWidget(row, 4)
+            if button is not None:
+                self.guided_loose_table.removeCellWidget(row, 4)
+                button.setParent(None)
+                button.deleteLater()
+        has_loose = bool(self._loose)
+        self.guided_loose_group.setVisible(has_loose)
+        self.guided_loose_table.setRowCount(len(self._loose))
+        for row_index, allocation in enumerate(self._loose):
+            destination = self._destination(int(allocation["address_id"]))
+            quantity = Decimal(str(allocation["quantity"]))
+            kilos = quantity * Decimal(str(allocation.get("peso_unitario_kg") or 0))
+            values = (
+                f"{destination.get('client_label', '')} · {destination.get('address_label', '')}",
+                allocation.get("product_label") or str(allocation["product_id"]),
+                _quantity_text(quantity),
+                _kg_text(kilos),
+            )
+            for column, value in enumerate(values):
+                self.guided_loose_table.setItem(
+                    row_index, column, QTableWidgetItem(str(value))
+                )
+            remove_button = QPushButton("Quitar")
+            remove_button.setObjectName(f"guidedRemoveLooseButton_{row_index}")
+            remove_button.setToolTip("Quitar esta mercadería suelta")
+            remove_button.clicked.connect(
+                lambda _checked=False, loose_row=row_index: self._guided_remove_loose(
+                    loose_row
+                )
+            )
+            self.guided_loose_table.setCellWidget(row_index, 4, remove_button)
+
     def _refresh_guided_ui(self) -> None:
         if not hasattr(self, "guided_pallet_combo"):
             return
+        self._render_guided_loose_table()
         selected = self._selected_sequence
         self.guided_pallet_combo.blockSignals(True)
         self.guided_pallet_combo.clear()

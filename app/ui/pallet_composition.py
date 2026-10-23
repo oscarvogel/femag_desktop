@@ -31,9 +31,11 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
     def _install_guided_workbench(self) -> None:
         super()._install_guided_workbench()
 
-        # Las cuatro acciones sobre mercaderia pendiente forman un unico flujo.
-        # La implementacion base dejaba "Proponer resto" en una segunda fila;
-        # lo movemos junto a agregar, carga parcial y distribucion automatica.
+        # Las acciones sobre mercaderia pendiente van en dos filas: la de
+        # colocacion manual y la de reparto automatico. "Proponer resto" se
+        # suma a la fila del reparto automatico, que es donde tiene sentido
+        # leerlo (#767), y la fila manual queda con tres botones para que los
+        # textos no se apilen en la pantalla del cliente (1638x969).
         pending_group = self.guided_splitter.widget(0)
         pending_layout = pending_group.layout()
         pending_layout.removeWidget(self.guided_propose_rest_button)
@@ -149,6 +151,7 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         for button in (
             self.guided_add_button,
             self.guided_partial_button,
+            self.guided_loose_button,
             self.guided_auto_button,
             self.guided_propose_rest_button,
             self.guided_new_pallet_button,
@@ -168,6 +171,22 @@ class PalletCompositionWidget(_GuidedPalletCompositionWidget):
         self.guided_partial_button.show()
         self.guided_propose_rest_button.setMinimumWidth(150)
         self.guided_propose_rest_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        # #767: marcar como suelta no necesita Kg/pallet (la mercaderia suelta
+        # no va en ningun pallet), asi que el boton no se apaga con la
+        # capacidad sin configurar y no lleva el aviso de "configure Kg/pallet".
+        self.guided_loose_button.setMinimumWidth(150)
+        self.guided_loose_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        # El panel de mercaderia suelta se muestra abajo, con alto acotado: no
+        # puede comerse la grilla de pendientes en la pantalla del cliente.
+        self.guided_loose_group.setMinimumWidth(0)
+        self.guided_loose_group.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.guided_loose_group.setMaximumHeight(150)
+        self.guided_loose_table.setMinimumWidth(0)
+        self.guided_loose_table.setMinimumHeight(60)
+        self.guided_loose_table.setMaximumHeight(110)
+        self.guided_loose_table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         self.guided_configure_capacity_button.setMinimumWidth(150)
         self.guided_configure_capacity_button.setSizePolicy(
