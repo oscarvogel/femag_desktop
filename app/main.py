@@ -17,6 +17,7 @@ from app.ui.managerial_account_risk_extension import install_managerial_account_
 from app.ui.managerial_clients_extension import install_managerial_clients_extension
 from app.ui.managerial_dashboard_extension import install_managerial_dashboard_extension
 from app.ui.product_profitability_extension import install_product_profitability_extension
+from app.ui.price_list_send_extension import install_price_list_send_extension
 from app.ui.managerial_sales_dispatch_extension import install_managerial_sales_dispatch_extension
 from app.ui.multi_station_refresh_extension import install_multi_station_refresh_extension
 from app.ui.product_code_extension import install_desktop_product_code_extension
@@ -104,6 +105,7 @@ def run_ui(*, demo_mode: bool = False, configure: bool = False) -> int:
         install_workspace_window_policy()
         install_managerial_dashboard_extension()
         install_product_profitability_extension()
+        install_price_list_send_extension()
         install_managerial_sales_dispatch_extension()
         install_managerial_account_risk_extension()
         install_managerial_clients_extension()
