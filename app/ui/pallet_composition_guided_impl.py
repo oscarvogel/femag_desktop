@@ -394,8 +394,10 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self.add_loose_allocation(
             int(row["address_id"]), int(row["product_id"]), quantity
         )
+        # "Mercaderia suelta: N." en vez de "N marcadas": con 1 unidad el
+        # plural queda mal ("1 marcadas") y la unidad no tiene genero fijo.
         self.issue_label.show_success(
-            f"{_quantity_text(quantity)} marcadas como mercadería suelta."
+            f"Mercadería suelta: {_quantity_text(quantity)}."
         )
         return True
 

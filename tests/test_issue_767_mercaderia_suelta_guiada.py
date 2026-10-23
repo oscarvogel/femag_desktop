@@ -160,6 +160,19 @@ def test_767_guided_mark_selected_as_loose_needs_exactly_one_line(db, monkeypatc
     assert widget.loose_drafts() == []
 
 
+def test_767_el_aviso_de_mercaderia_suelta_no_usa_plural_con_una_unidad(
+    db, monkeypatch
+):
+    """Con una sola unidad, "1 marcadas" queda mal (#767, revisado a ojo)."""
+    widget = _widget(db)
+    _answer(monkeypatch, 1)
+
+    _select_pending(widget)
+    assert widget.mark_selected_as_loose() is True
+
+    assert widget.issue_label.message == "Mercadería suelta: 1."
+
+
 def test_767_guided_remove_loose_goods_returns_the_line_to_pending(db, monkeypatch):
     from PyQt5.QtWidgets import QPushButton
 

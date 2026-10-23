@@ -379,6 +379,12 @@ la carga deja de consumir un pallet de mentira. El peso sí va a `TOTAL MERCADER
 2. **La prueba física del sobre con la Epson L3250** (issue #740).
 3. **La promoción a producción** (`.\release.ps1 production`) una vez probados los dos.
 
+Además, un detalle de redacción sin consecuencia funcional: este candidate se
+construyó **antes** del fix #771, así que si el operador marca **una sola** unidad
+como mercadería suelta, el aviso verde dice "1 marcadas como mercadería suelta"
+(el plural no concuerda). La mercadería se marca igual y la impresión sale bien;
+solamente el texto queda mal. Se corrige en el próximo build.
+
 Mientras tanto, `latest.json` sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`).
 
 ---
