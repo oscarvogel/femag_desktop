@@ -41,6 +41,7 @@ MENU = {
         "Choferes",
         "Transportistas",
         "Camiones",
+        "Envío de lista de precios",
     ],
     "Importación": ["Importación"],
     "Sistema": ["Usuarios", "Perfiles", "Permisos por menú", "Parámetros", "Backups", "Auditoría"],
