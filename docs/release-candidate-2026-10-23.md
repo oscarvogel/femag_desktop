@@ -1,12 +1,14 @@
 # Candidates del 23/10/2026 — FEMAG Desktop
 
-Tres candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
+Cuatro candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
 **Ninguno está promovido a producción**: falta la prueba del operador en la PC
 piloto (y la prueba física del sobre con la Epson L3250 del issue #740).
 
 | candidate | qué trae | estado |
 |---|---|---|
-| **2026.10.23.10.28.13** | todo lo del anterior + el fix #761 del import | **vigente** |
+| **2026.10.23.15.07.23** | todo lo anterior + la mercadería suelta en la pantalla de pallets (#767) | **vigente** |
+| 2026.10.23.14.26.30 | Fase B del envío de lista de precios (#763) | superado |
+| 2026.10.23.10.28.13 | todo lo del anterior + el fix #761 del import | superado |
 | 2026.10.23.09.06.55 | sobres (#740), import de lista (#705), partes de embolsado (#754) | superado |
 
 Producción (`latest.json`) sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`),
@@ -151,10 +153,10 @@ FEMAG; si no, la app sigue buscando `latest.json` y no ve este candidate.
 
 ---
 
-## Candidate vigente: 2026.10.23.14.26.30 (Fase B del envío de lista de precios)
+## Candidate superado: 2026.10.23.14.26.30 (Fase B del envío de lista de precios)
 
-Este es el **candidate vigente**: el anterior (`2026.10.23.10.28.13`) queda superado.
-Sigue **sin promover a producción**.
+Quedó superado por `2026.10.23.15.07.23` (la mercadería suelta), que se construyó
+desde un `main` que ya incluye toda la Fase B. Sigue **sin promover a producción**.
 
 | dato | valor |
 |---|---|
@@ -267,7 +269,8 @@ tilda el operador.
    Son 3-5 mensajes de prueba, intervalo de 10 s, **instancia de prueba**, con la
    autorización expresa del operador (el riesgo real es que el proveedor bloquee la línea).
 2. **La prueba física del sobre con la Epson L3250** (issue #740).
-3. **La promoción a producción** (`.elease.ps1 production`) una vez probados los dos.
+3. **La promoción a producción** (`.
+elease.ps1 production`) una vez probados los dos.
 
 Mientras tanto, `latest.json` sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`).
 
@@ -302,3 +305,98 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\release.ps1 candidate
 
 Con eso el release completa sin tocar la junction corrupta. Si vuelve a
 pasar, es el mismo problema: **no es un fallo del código bajo prueba**.
+
+---
+
+## Candidate vigente: 2026.10.23.15.07.23 (mercadería suelta en la pantalla de pallets)
+
+Este es el **candidate vigente**: el anterior (`2026.10.23.14.26.30`, Fase B del
+envío de lista de precios) queda superado. Sigue **sin promover a producción**.
+
+| dato | valor |
+|---|---|
+| version | `2026.10.23.15.07.23` |
+| source_sha | `da9f368d5aaa643253f76e7be519c98207bf0647` (main) |
+| sha256 | `7e658424be928be50710c3d0a2b55d831a56a663124b186821b1acc62967cfd9` |
+| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.556.925 bytes) |
+| release | tag `femag-candidate` en `oscarvogel/vogel-releases` |
+| download_url | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+
+### Los tres puntos verificados
+
+1. **SHA256 del instalador local** (`installer/output/FEMAG_Desktop_Produccion_Setup.exe`):
+   `7e658424...67cfd9` (43.556.925 bytes).
+2. **Digest del asset publicado** en el tag `femag-candidate`:
+   `sha256:7e658424...67cfd9` (43.556.925 bytes).
+3. **sha256 de `candidate.json`** (`apps/femag/candidate.json`):
+   `7e658424...67cfd9`.
+
+Los tres coinciden, y el tamaño del asset coincide con el del instalador local.
+
+### Qué entra en este build
+
+| PR | Issue | Qué trae |
+|---|---|---|
+| #769 | **#767** | La mercadería suelta (bolsas que viajan en el camión sin ir en ningún pallet) se puede marcar desde la pantalla de "Preparación de pallets", con cantidad parcial, y se la ve y se la quita desde un panel propio. Sin cambios de modelo, migraciones ni servicios. |
+
+Trae además **todo lo del candidate anterior** (Fase B del envío de lista de precios,
+#763), porque se construyó desde `da9f368`, que ya incluye los PR #764 a #768. El
+único commit posterior (`92d064a`) es documentación.
+
+### Validaciones ejecutadas (dentro de `release.ps1`)
+
+```
+tests                               1975 passed, 3 skipped (333,73 s)
+compileall                          exit 0
+smoke de la app                     FEMAG smoke OK
+build del instalador de producción  OK (Inno Setup 6.7.3)
+smoke del EXE congelado             OK
+chequeo de secretos del artefacto   OK
+CANDIDATE_STATUS                    OK
+```
+
+El CI del PR #769 también dio verde en los dos jobs ("Tests, compile and smoke" y
+"Windows frozen EXE and installer smoke", run 39998849626).
+
+### Cómo sale impresa la mercadería suelta
+
+Verificado con los servicios de impresión reales sobre el caso LULEMU (4 bolsas de
+25 kg):
+
+| Escenario | Columna Pallet | TOTALES |
+|---|---|---|
+| las 4 bolsas sueltas | **SUELTO** (celda fusionada sobre las dos filas) | **0 pallets** |
+| 2 en 1 pallet + 2 sueltas | **1 pallet** y **SUELTO** | **1 pallet** |
+
+Sale con la etiqueta **SUELTO** en el informe de pallets, en el remito de carga, en el
+consolidado con QR y en el Excel de armado de pallets, y **no suma al total de pallets**:
+la carga deja de consumir un pallet de mentira. El peso sí va a `TOTAL MERCADERIA`.
+
+### Lo que falta para darlo por verificado
+
+1. **La prueba del operador en la PC piloto**: marcar mercadería suelta en una carga
+   real y revisar el remito impreso.
+2. **La prueba física del sobre con la Epson L3250** (issue #740).
+3. **La promoción a producción** (`.\release.ps1 production`) una vez probados los dos.
+
+Mientras tanto, `latest.json` sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`).
+
+---
+
+## Nota operativa: el release deja un `.env.release-bak` sin restaurar
+
+El release del 23/10 terminó con `CANDIDATE_STATUS=OK` pero avisó:
+
+```
+ADVERTENCIA: .env ya existe y .env.release-bak no se restauro: revise ambos archivos a mano.
+```
+
+El script aparta el `.env` a `.env.release-bak` antes del stash y lo restaura al final.
+Como durante el release el `.env` vuelve a existir (lo regenera el build), la restauración
+se saltea y queda el backup. **No se perdió nada**: se compararon los dos archivos y
+tienen el mismo contenido, clave por clave; lo único que difiere son los finales de
+línea (`.env` quedó con LF, el backup con CRLF). El `.env` que usa la app es el que
+tiene los valores correctos.
+
+El `.env.release-bak` es un resto que aparece en cada release: **no hay que actingar
+contra él a mano**, se puede borrar cuando se quiera porque es una copia del `.env`.
