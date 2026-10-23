@@ -39,9 +39,11 @@ from app.models.load_orders import (
     LoadOrder,
     LoadOrderDestination,
     LoadOrderPalletAllocation,
+    LoadOrderProduct,
 )
 from app.models.masters import Client, ClientAddress
 from app.services.audit_service import AuditService
+from app.services.money import to_decimal
 
 #: Marca que identifica a los PDFs generados por este servicio. Se usa para
 #: saber si un archivo que ya existe en la carpeta es nuestro (y se puede
@@ -60,6 +62,13 @@ _LOGO_WIDTH_MM = 26.0
 #: PDF del sobre deja de pesar 375 KB.
 _LOGO_TARGET_PX = 320
 
+#: Cuantos renglones de mercadería se imprimen como máximo en el sobre. El
+#: bloque sube 4,6 mm por línea desde los 15,2 mm del margen inferior: con 6
+#: renglones que se parten al doble son 12 líneas, 70,4 mm, todavía por debajo
+#: del bloque del destinatario (unos 76 mm). Pasarse de eso hace que la
+#: mercadería se pise con la dirección.
+MAX_MERCHANDISE_LINES = 6
+
 
 class EnvelopeDataError(ValueError):
     """No hay datos suficientes para generar un sobre de este presupuesto."""
@@ -72,13 +81,24 @@ class EnvelopeData:
     client_name: str
     address_lines: tuple[str, ...]
     phone: str
+    contact_name: str
     budget_reference: str
     pallet_count: int | None
+    merchandise_lines: tuple[str, ...]
     warnings: tuple[str, ...] = ()
 
     @property
     def is_usable(self) -> bool:
         return bool(self.client_name.strip()) and bool(self.address_lines)
+
+    @property
+    def pallet_summary(self) -> str:
+        """Como lo escribe Secretaría a mano: ``(1 pallet)``, ``(3 pallets)``."""
+        if self.pallet_count is None:
+            return ""
+        if self.pallet_count == 1:
+            return "(1 pallet)"
+        return f"({self.pallet_count} pallets)"
 
 
 @dataclass(frozen=True)
@@ -132,15 +152,19 @@ class EnvelopePrintService:
         if not phone:
             warnings.append("El cliente no tiene teléfono cargado.")
 
-        pallet_count, pallet_warnings = self._pallet_count_for_budget(budget)
-        warnings.extend(pallet_warnings)
+        merchandise_lines, pallet_count, order_warnings = self._merchandise_for_budget(
+            budget
+        )
+        warnings.extend(order_warnings)
 
         return EnvelopeData(
             client_name=(client.name or "").strip(),
             address_lines=tuple(address_lines),
             phone=phone,
+            contact_name=(client.contact or "").strip(),
             budget_reference=budget.display_number,
             pallet_count=pallet_count,
+            merchandise_lines=tuple(merchandise_lines),
             warnings=tuple(warnings),
         )
 
@@ -208,15 +232,27 @@ class EnvelopePrintService:
             lines.append(locality)
         return lines
 
-    def _pallet_count_for_budget(self, budget: Budget) -> tuple[int | None, list[str]]:
-        """Pallets distintos con mercadería del cliente de este presupuesto."""
+    def _merchandise_for_budget(
+        self, budget: Budget
+    ) -> tuple[list[str], int | None, list[str]]:
+        """Qué mercadería lleva el cliente y en cuántos pallets.
+
+        La mercadería sale de los renglones de la orden de carga: esa es la
+        cantidad **despachada**, la misma que usan el remito, los pallets y la
+        liberación de costos (no la parte facturada, que puede estar repartida).
+
+        Los pallets son los **pallets distintos** con mercadería del cliente,
+        no la cantidad de renglones ni el identificador del pallet. Si un pallet
+        se comparte con otro cliente, se avisa: el total por cliente puede
+        sumar más que los pallets físicos.
+        """
         warnings: list[str] = []
         if budget.load_order_id is None:
             warnings.append(
                 "El presupuesto es manual: no hay orden de carga y por lo tanto "
-                "no hay pallets asociados."
+                "no hay mercadería ni pallets asociados."
             )
-            return None, warnings
+            return [], None, warnings
 
         order = LoadOrder.get_by_id(budget.load_order_id)
         destinations = [
@@ -227,9 +263,29 @@ class EnvelopePrintService:
         if not destinations:
             warnings.append(
                 "La orden de carga no tiene un destino para este cliente: "
-                "no hay pallets asociados."
+                "no hay mercadería ni pallets asociados."
             )
-            return None, warnings
+            return [], None, warnings
+
+        lines: list[str] = []
+        for row in (
+            order.products.where(LoadOrderProduct.destination << destinations)
+            .order_by(LoadOrderProduct.id)
+            .iterator()
+        ):
+            lines.append(self._merchandise_line(row.quantity, row.unit, row.product.name))
+        if not lines:
+            warnings.append(
+                "La orden de carga no tiene mercadería cargada para este cliente."
+            )
+        elif len(lines) > MAX_MERCHANDISE_LINES:
+            # El bloque de mercadería sube desde el margen inferior: si no se
+            # acota, con muchas líneas llegaría al bloque del destinatario.
+            warnings.append(
+                f"La orden tiene {len(lines)} renglones de mercadería: en el sobre "
+                f"se imprimen los primeros {MAX_MERCHANDISE_LINES}."
+            )
+            lines = lines[:MAX_MERCHANDISE_LINES]
 
         pallet_ids: set[int] = set()
         for destination in destinations:
@@ -242,24 +298,35 @@ class EnvelopePrintService:
                 f"{len(shared)} pallet(s) comparten mercadería con otro cliente: "
                 "el total por cliente puede sumar más que los pallets físicos."
             )
-        if not pallet_ids:
+        if not pallet_ids and lines:
             # Cero pallets es un dato real, pero puede significar que la
             # mercaderia de este cliente va suelta. Se avisa para que el
             # operador no lo lea como "no hay nada para cargar".
-            loose = sum(
-                len(destination.loose_allocations) for destination in destinations
+            warnings.append(
+                "El cliente tiene mercadería en la orden pero sin pallets "
+                "asignados: el total de pallets es 0."
             )
-            requested = sum(
-                float(row.quantity)
-                for destination in destinations
-                for row in destination.products
-            )
-            if loose or requested:
-                warnings.append(
-                    "El cliente tiene mercadería en la orden pero sin pallets "
-                    "asignados: el total de pallets es 0."
-                )
-        return len(pallet_ids), warnings
+        return lines, len(pallet_ids), warnings
+
+    @staticmethod
+    def _merchandise_line(quantity, unit: str, product_name: str) -> str:
+        """Una linea de mercadería, como la escribe Secretaría a mano.
+
+        ``100 PACK 10 UNID. FECULA X 1 KG`` y ``500 kg YERBA MATE``. La unidad
+        solo se escribe cuando aporta: para las que se venden por unidad, el
+        nombre del producto ya dice de qué unidad se trata.
+        """
+        value = to_decimal(quantity)
+        if value == value.to_integral_value():
+            quantity_text = f"{int(value)}"
+        else:
+            quantity_text = f"{value.normalize():f}"
+        unit_text = (unit or "").strip()
+        if unit_text.lower() in ("", "unidad", "unidades", "u", "uns"):
+            unit_text = ""
+        else:
+            unit_text = f"{unit_text} "
+        return f"{quantity_text} {unit_text}{product_name}".strip()
 
     @staticmethod
     def _shared_pallet_ids(
@@ -333,6 +400,7 @@ class EnvelopePrintService:
                 "load_order_id": budget.load_order_id,
                 "file_path": str(target),
                 "pallet_count": data.pallet_count,
+                "merchandise": list(data.merchandise_lines),
                 "warnings": list(data.warnings),
             },
         )
@@ -429,6 +497,13 @@ class EnvelopePrintService:
     def _draw_envelope(
         self, canvas, data: EnvelopeData, settings: EnvelopeSettings
     ) -> None:
+        """Dibuja el sobre con la misma disposicion que usa Secretaría a mano.
+
+        Arriba a la izquierda va el destinatario (nombre, dirección, teléfono y
+        el nombre del contacto). Abajo a la derecha va la mercadería que lleva
+        el pallet y cuántos pallets son. Abajo a la izquierda, la referencia
+        del presupuesto, que es lo único que el sobre lleva de la app.
+        """
         from reportlab.lib.units import mm
 
         width = settings.envelope_width_mm
@@ -441,9 +516,11 @@ class EnvelopePrintService:
         if settings.show_logo:
             logo = self._logo_image()
             if logo is not None:
+                # Arriba a la derecha: el bloque del destinatario vive arriba a
+                # la izquierda y la mercadería abajo a la derecha.
                 canvas.drawImage(
                     logo,
-                    mm_points(margin),
+                    mm_points(width - margin - _LOGO_WIDTH_MM),
                     mm_points(height - margin - _LOGO_WIDTH_MM),
                     width=mm_points(_LOGO_WIDTH_MM),
                     height=mm_points(_LOGO_WIDTH_MM),
@@ -451,60 +528,64 @@ class EnvelopePrintService:
                     mask="auto",
                 )
 
-        # Columna izquierda, pegada al borde inferior: que el presupuesto se
-        # lea de un vistazo sin competir con el logo.
-        if settings.show_budget_reference or settings.show_pallet_count:
-            cursor = margin + 3.2 + 7 + 5.5
-            if settings.show_budget_reference:
-                canvas.setFont("Helvetica", 8)
-                canvas.setFillColorRGB(0.35, 0.35, 0.35)
-                canvas.drawString(mm_points(margin), mm_points(cursor), "Presupuesto")
-                cursor -= 5.5
-                canvas.setFont("Helvetica-Bold", 12)
-                canvas.setFillColorRGB(0, 0, 0)
-                canvas.drawString(
-                    mm_points(margin), mm_points(cursor), data.budget_reference
-                )
-                cursor -= 7
-            if settings.show_pallet_count:
-                canvas.setFont("Helvetica", 9.5)
-                canvas.setFillColorRGB(0, 0, 0)
-                pallets = (
-                    str(data.pallet_count)
-                    if data.pallet_count is not None
-                    else "sin dato"
-                )
-                canvas.drawString(
-                    mm_points(margin), mm_points(cursor), f"Pallets: {pallets}"
-                )
-
-        # Columna derecha: destinatario, centrado verticalmente en el sobre.
-        column_width = 105.0
-        x = width - margin - column_width
-        name_lines = self._wrap(data.client_name, "Helvetica-Bold", 12, column_width)
-        address_lines: list[str] = []
-        for line in data.address_lines:
-            address_lines.extend(self._wrap(line, "Helvetica", 9.5, column_width))
-        phone_lines = [f"Tel: {data.phone}"] if data.phone else []
-
-        block_height = len(name_lines) * 5.5
-        if address_lines:
-            block_height += 1.5 + len(address_lines) * 4.6
-        if phone_lines:
-            block_height += 1.5 + len(phone_lines) * 4.4
-        cursor = height / 2 + block_height / 2 - 4.4
-
+        # Arriba a la izquierda: destinatario.
+        column_width = 130.0
+        x = margin
+        cursor = height - margin - 4.6
+        name_lines = self._wrap(data.client_name, "Helvetica-Bold", 13, column_width)
         cursor = self._draw_lines(
-            canvas, x, cursor, name_lines, "Helvetica-Bold", 12, 5.5
+            canvas, x, cursor, name_lines, "Helvetica-Bold", 13, 6
         )
-        if address_lines:
+        if data.address_lines:
+            address_lines: list[str] = []
+            for line in data.address_lines:
+                address_lines.extend(self._wrap(line, "Helvetica", 9.5, column_width))
             cursor -= 1.5
             cursor = self._draw_lines(
                 canvas, x, cursor, address_lines, "Helvetica", 9.5, 4.6
             )
-        if phone_lines:
+        if data.phone:
+            phone_line = f"Tel: {data.phone}"
+            if data.contact_name:
+                phone_line = f"{phone_line} - {data.contact_name}"
             cursor -= 1.5
-            self._draw_lines(canvas, x, cursor, phone_lines, "Helvetica", 9, 4.4)
+            self._draw_lines(canvas, x, cursor, [phone_line], "Helvetica", 9, 4.4)
+
+        # Abajo a la derecha: mercadería y cantidad de pallets.
+        merchandise_lines: list[str] = []
+        for line in data.merchandise_lines:
+            merchandise_lines.extend(self._wrap(line, "Helvetica", 9.5, 120.0))
+        summary = data.pallet_summary if settings.show_pallet_count else ""
+        if merchandise_lines or summary:
+            right = width - margin
+            bottom = margin + 3.2
+            if summary:
+                canvas.setFont("Helvetica-Bold", 10)
+                canvas.setFillColorRGB(0, 0, 0)
+                canvas.drawRightString(mm_points(right), mm_points(bottom), summary)
+            if merchandise_lines:
+                # Las líneas de mercadería suben desde el resumen. Si bajaran se
+                # pisarían con él (la última caería en la misma baseline) y la
+                # última quedaría fuera del margen inferior.
+                cursor = bottom + 4.6
+                for line in merchandise_lines:
+                    canvas.setFont("Helvetica", 9.5)
+                    canvas.setFillColorRGB(0, 0, 0)
+                    canvas.drawRightString(mm_points(right), mm_points(cursor), line)
+                    cursor += 4.6
+
+        # Abajo a la izquierda: referencia del presupuesto.
+        if settings.show_budget_reference:
+            canvas.setFont("Helvetica", 8)
+            canvas.setFillColorRGB(0.35, 0.35, 0.35)
+            canvas.drawString(
+                mm_points(margin), mm_points(margin + 3.2 + 6), "Presupuesto"
+            )
+            canvas.setFont("Helvetica-Bold", 11)
+            canvas.setFillColorRGB(0, 0, 0)
+            canvas.drawString(
+                mm_points(margin), mm_points(margin + 3.2), data.budget_reference
+            )
 
     def _draw_lines(
         self,
@@ -611,8 +692,13 @@ class EnvelopePrintService:
             client_name="CLIENTE DE EJEMPLO S.A.",
             address_lines=("CALLE 1234, PISO 2", "CORDOBA - CORDOBA"),
             phone="0351 1234567",
+            contact_name="PERSONA DE CONTACTO",
             budget_reference="PRES-000000",
             pallet_count=3,
+            merchandise_lines=(
+                "100 PACK 10 UNID. EJEMPLO X 1 KG",
+                "50 BOLSAS EJEMPLO X 10KG.",
+            ),
         )
         self._draw_envelope(canvas, sample, settings)
 

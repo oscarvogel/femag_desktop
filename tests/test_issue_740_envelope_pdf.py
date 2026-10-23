@@ -3,11 +3,16 @@
 Cubren lo que el issue pide explicito:
 
 * la pagina del PDF es el sobre real de 235 x 120 mm;
-* el logo oficial de FEMAG va en el sobre;
-* el cliente, el domicilio de destino, el telefono y la cantidad de pallets
-  salen de las fuentes reales, y los pallets se cuentan como pallets distintos
-  (no como renglones ni como identificadores);
-* la rotacion 90/270 y los desplazamientos en mm se aplican al contenido;
+* el cliente, el domicilio de destino, el telefono, el contacto y la cantidad de
+  pallets salen de las fuentes reales, y los pallets se cuentan como pallets
+  distintos (no como renglones ni como identificadores);
+* la mercaderia sale de los renglones de la orden de carga;
+* el layout es el del sobre escrito a mano: destinatario arriba a la izquierda,
+  mercaderia y pallets abajo a la derecha, presupuesto abajo a la izquierda;
+* el logo oficial de FEMAG va en el sobre solo si el puesto lo pide (por
+  omision no va: el 21/10/2026 se pidio que el sobre no llevara logo);
+* la rotacion 90/270 y los desplazamientos en mm se aplican al contenido, y
+  ningun texto queda fuera de la pagina;
 * en la misma operacion de exportacion salen N presupuestos y N sobres, con
   las fallas informadas cliente por cliente;
 * el presupuesto, el stock y la cuenta corriente no se tocan.
@@ -177,15 +182,94 @@ def test_envelope_carries_client_address_phone_budget_and_pallets(db, tmp_path):
     assert "Misiones" in text
     assert "0371-4000001" in text
     assert budget.display_number in text
-    assert "Pallets: 1" in text
+    # La cantidad de pallets se escribe como la escribe Secretaría a mano.
+    assert "(1 pallet)" in text
 
 
-def test_envelope_has_the_official_femag_logo(db, tmp_path):
+def test_envelope_prints_the_merchandise_of_the_load_order(db, tmp_path):
+    """La mercadería sale de los renglones de la orden: cantidad, unidad y producto."""
     order, client_a, _client_b, _product_a, _product_b = _order_with_pallets()
     budget = Budget.get(Budget.client == client_a)
 
     path = EnvelopePrintService(
         current_user="admin", settings=_settings()
+    ).export_envelope(budget, tmp_path)
+    text = _pdf_text(path)
+
+    assert "100 kg Fecula A" in text
+    # La mercadería del otro cliente no se imprime en este sobre.
+    assert "Fecula B" not in text
+
+
+def test_envelope_prints_the_contact_name_next_to_the_phone(db, tmp_path):
+    """El contacto del cliente va junto al teléfono, como en el sobre a mano."""
+    order, client_a, _client_b, _product_a, _product_b = _order_with_pallets()
+    client_a.contact = "PERSONA DE CONTACTO"
+    client_a.save()
+
+    budget = Budget.get(Budget.client == client_a)
+    path = EnvelopePrintService(
+        current_user="admin", settings=_settings()
+    ).export_envelope(budget, tmp_path)
+    text = _pdf_text(path)
+
+    assert "Tel: 0371-4000001 - PERSONA DE CONTACTO" in text
+
+
+def test_merchandise_lines_do_not_pile_up_on_the_pallet_summary(db, tmp_path):
+    """La mercadería sube desde el resumen: no se pisan ni salen del margen.
+
+    Este es el control del defecto que se encontró al revisar el layout: las
+    líneas de mercadería bajaban desde el resumen, la última caía en la misma
+    baseline y se pisaba con él.
+    """
+    order, client_a, _client_b, _product_a, _product_b = _order_with_pallets(
+        pallets_per_client=2
+    )
+    budget = Budget.get(Budget.client == client_a)
+    service = EnvelopePrintService(current_user="admin", settings=_settings())
+
+    texts = _device_texts(service.export_envelope(budget, tmp_path))
+
+    summary = [row for row in texts if row[0].startswith("(2 pallets")]
+    merchandise = [row for row in texts if "Fecula" in row[0]]
+    assert summary, "El sobre no lleva el resumen de pallets"
+    assert merchandise, "El sobre no lleva la mercadería"
+
+    summary_y = summary[0][2]
+    for text, _x, y in merchandise:
+        assert abs(y - summary_y) > 1, (
+            f"La mercadería se pisa con el resumen de pallets: {text!r}"
+        )
+
+    # El bloque de la derecha (mercadería y resumen) respeta el margen inferior.
+    margin_pt = 12 * 72 / 25.4
+    for text, x, y in texts:
+        if x > 300:
+            assert y >= margin_pt, (
+                f"El bloque de la derecha quedó bajo el margen: {text!r} en {y}"
+            )
+
+
+def test_envelope_has_no_logo_by_default(db, tmp_path):
+    """En el uso real de FEMAG (21/10/2026) se pidió que el sobre no lleve logo."""
+    order, client_a, _client_b, _product_a, _product_b = _order_with_pallets()
+    budget = Budget.get(Budget.client == client_a)
+
+    path = EnvelopePrintService(
+        current_user="admin", settings=_settings()
+    ).export_envelope(budget, tmp_path)
+
+    assert _has_image(path) is False
+
+
+def test_envelope_prints_the_official_femag_logo_when_the_post_wants_it(db, tmp_path):
+    """El logo sigue disponible para los puestos que lo pidan."""
+    order, client_a, _client_b, _product_a, _product_b = _order_with_pallets()
+    budget = Budget.get(Budget.client == client_a)
+
+    path = EnvelopePrintService(
+        current_user="admin", settings=_settings(show_logo=True)
     ).export_envelope(budget, tmp_path)
 
     assert _has_image(path) is True
@@ -202,7 +286,7 @@ def test_envelope_counts_distinct_pallets_and_not_detail_rows(db, tmp_path):
     assert data.pallet_count == 3
 
     text = _pdf_text(service.export_envelope(budget, tmp_path))
-    assert "Pallets: 3" in text
+    assert "(3 pallets)" in text
 
 
 def _manual_budget(client, product, quantity: float = 10.0, unit_price: float = 100.0):
@@ -236,7 +320,9 @@ def test_envelope_without_pallet_association_does_not_invent_a_number(db, tmp_pa
     assert any("manual" in warning for warning in data.warnings)
 
     text = _pdf_text(service.export_envelope(budget, tmp_path))
-    assert "Pallets: sin dato" in text
+    # Sin dato de pallets no se imprime ningun numero de pallets.
+    assert "pallet)" not in text
+    assert "Pallets:" not in text
 
 
 def test_envelope_without_destination_address_fails_instead_of_printing_blank(db, tmp_path):
@@ -292,13 +378,41 @@ def _device_positions(path) -> list[tuple[float, float]]:
     def visitor(text, cm, tm, _font, _size):
         if not text.strip():
             return
-        x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
-        y = tm[4] * cm[3] + tm[5] * cm[1] + cm[5]
+        x, y = _device_point(cm, tm)
         positions.append((x, y))
 
     for page in reader.pages:
         page.extract_text(visitor_text=visitor)
     return positions
+
+
+def _device_point(cm, tm) -> tuple[float, float]:
+    """Compone la matriz de texto con la de la pagina.
+
+    La composicion es ``x' = tm[4]*cm[0] + tm[5]*cm[2] + cm[4]`` y
+    ``y' = tm[4]*cm[1] + tm[5]*cm[3] + cm[5]``. Con ``cm[1]`` y ``cm[3]``
+    cambiados el control de "texto fuera de la pagina" daba falsos positivos
+    en las rotaciones, porque tomaba la coordenada X como si fuera la Y.
+    """
+    x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+    y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+    return x, y
+
+
+def _device_texts(path) -> list[tuple[str, float, float]]:
+    """Cada texto dibujado con su posicion en la pagina (en puntos)."""
+    reader = PdfReader(str(path))
+    rows: list[tuple[str, float, float]] = []
+
+    def visitor(text, cm, tm, _font, _size):
+        if not text.strip():
+            return
+        x, y = _device_point(cm, tm)
+        rows.append((text.strip(), x, y))
+
+    for page in reader.pages:
+        page.extract_text(visitor_text=visitor)
+    return rows
 
 
 def _translations(stream: str) -> list[tuple[float, float]]:

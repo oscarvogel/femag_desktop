@@ -1,6 +1,14 @@
 # Issue #740 - PDF de sobres automático por cliente
 
-Estado: **implementado**, pendiente la prueba física con la Epson L3250.
+## Estado
+
+**implementado**, pendiente la prueba física con la Epson L3250.
+
+El layout se ajustó el 21/10/2026 con el uso real de FEMAG: el sobre lleva el
+destinatario arriba a la izquierda, la mercadería y la cantidad de pallets abajo
+a la derecha y la referencia del presupuesto abajo a la izquierda, como lo
+escribe Secretaría a mano. En ese mismo pedido, el sobre dejó de llevar el logo
+por omisión (queda disponible para los puestos que lo pidan).
 
 ## Qué resuelve
 
@@ -39,14 +47,30 @@ pisa.
 ## De dónde salen los datos
 
 - **Cliente y teléfono**: del cliente del presupuesto.
+- **Contacto**: del contacto del cliente, que va junto al teléfono
+  (`Tel: 0371 4000001 - PERSONA DE CONTACTO`).
 - **Domicilio**: del destino de la orden de carga para ese cliente. En un
   presupuesto manual, del domicilio principal del cliente.
+- **Mercadería**: de los **renglones de la orden de carga** de ese destino:
+  cantidad, unidad y producto (`100 kg Fecula A`). Es la mercadería
+  despachada, la misma que usan el remito, los pallets y la liberación de
+  costos. Se imprimen como máximo 6 renglones; si la orden tiene más, se avisa.
 - **Pallets**: la cantidad de **pallets distintos** con mercadería asignada a
   un destino de ese cliente. No es la cantidad de renglones ni el id del pallet.
-  Si un pallet comparte mercadería con otro cliente, se avisa.
+  Se escribe como `(1 pallet)` o `(3 pallets)`. Si un pallet comparte
+  mercadería con otro cliente, se avisa.
 - Si no hay domicilio, el sobre **no se genera** y se informa qué cliente es y
   por qué. No se inventa ningún dato: el teléfono o los pallets que falten se
   avisan y el sobre sale con lo que hay.
+
+## Cómo queda el sobre
+
+| Zona | Qué lleva |
+|---|---|
+| Arriba a la izquierda | Cliente, domicilio y teléfono con el contacto |
+| Arriba a la derecha | Logo de FEMAG, solo si el puesto lo pide (`show_logo`) |
+| Abajo a la derecha | Mercadería y `(N pallets)`, la mercadería subiendo desde el margen inferior |
+| Abajo a la izquierda | `Presupuesto` y el número del presupuesto |
 
 ## Geometría del sobre
 
@@ -74,7 +98,7 @@ Archivo `%LOCALAPPDATA%\FEMAG Desktop\envelope.json`:
   "margin_mm": 12.0,
   "printer_name": "",
   "copies": 1,
-  "show_logo": true,
+  "show_logo": false,
   "show_budget_reference": true,
   "show_pallet_count": true
 }

@@ -59,7 +59,10 @@ class EnvelopeSettings:
     margin_mm: float = 12.0
     printer_name: str = ""
     copies: int = 1
-    show_logo: bool = True
+    #: El logo va apagado por omision: en el uso real de FEMAG (21/10/2026) se
+    #: pidio que el sobre no llevara logo. Queda disponible para los puestos
+    #: que lo quieran.
+    show_logo: bool = False
     show_budget_reference: bool = True
     show_pallet_count: bool = True
 
