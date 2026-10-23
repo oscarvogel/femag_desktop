@@ -1,18 +1,22 @@
 # Candidates del 23/10/2026 — FEMAG Desktop
 
-Cuatro candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
-**Ninguno está promovido a producción**: falta la prueba del operador en la PC
-piloto (y la prueba física del sobre con la Epson L3250 del issue #740).
+Cinco candidates publicados el mismo día en el canal `candidate` de `vogel-releases`.
+El último (`2026.10.23.17.21.29`) **ya está promovido a producción**; los cuatro
+anteriores quedan superados.
 
 | candidate | qué trae | estado |
 |---|---|---|
-| **2026.10.23.15.07.23** | todo lo anterior + la mercadería suelta en la pantalla de pallets (#767) | **vigente** |
+| **2026.10.23.17.21.29** | todo lo anterior + la mercadería suelta en la pantalla de pallets (#767) + el aviso de redacción (#771) | **promovido a producción** |
+| 2026.10.23.15.07.23 | la mercadería suelta en la pantalla de pallets (#767) | superado |
 | 2026.10.23.14.26.30 | Fase B del envío de lista de precios (#763) | superado |
 | 2026.10.23.10.28.13 | todo lo del anterior + el fix #761 del import | superado |
 | 2026.10.23.09.06.55 | sobres (#740), import de lista (#705), partes de embolsado (#754) | superado |
 
-Producción (`latest.json`) sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`),
-que es lo que tiene instalado la PC del cliente hoy.
+Producción (`latest.json`) está en **2026.10.23.17.21.29** (`source_sha 47736e5`,
+sha256 `1503ba6a...b972c89`, asset de 43.555.359 bytes), aprobado por el workflow
+`promote-production.yml` (run 40019209782). Es lo que va a instalar la PC del
+cliente: la mercadería suelta vuelve a tener vía de operación y el aviso de
+confirmación ya sale con la redacción correcta.
 
 ---
 
@@ -143,13 +147,14 @@ FEMAG; si no, la app sigue buscando `latest.json` y no ve este candidate.
 
 ## Pendientes
 
-1. **Prueba del operador en la PC piloto** (canal `candidate`): instalar y correr
-   el import con `docs/clientes_20261021_unificado.xlsx`. Hasta que no haya
-   prueba, `latest.json` sigue apuntando a `2026.10.21.09.36.40`.
+1. **Prueba del operador en la PC piloto**: instalar y correr el import con
+   `docs/clientes_20261021_unificado.xlsx`, y marcar mercadería suelta en una
+   carga real para revisar el remito impreso.
 2. **Prueba física del sobre con la Epson L3250** (issue #740): define
    `rotation_deg` y los desplazamientos definitivos en `envelope.json`.
-3. **Promoción a producción** con `.\release.ps1 production` desde `main`,
-   una vez approved los dos puntos anteriores.
+
+La **promoción a producción ya se hizo** el 23/10 a las 20:26 UTC: `latest.json`
+apunta a `2026.10.23.17.21.29` (run 40019209782).
 
 ---
 
@@ -308,10 +313,12 @@ pasar, es el mismo problema: **no es un fallo del código bajo prueba**.
 
 ---
 
-## Candidate vigente: 2026.10.23.15.07.23 (mercadería suelta en la pantalla de pallets)
+## Candidate superado: 2026.10.23.15.07.23 (mercadería suelta en la pantalla de pallets)
 
-Este es el **candidate vigente**: el anterior (`2026.10.23.14.26.30`, Fase B del
-envío de lista de precios) queda superado. Sigue **sin promover a producción**.
+Este candidate quedó **superado** por `2026.10.23.17.21.29`, que es el que está
+promovido a producción. Se conserva el registro porque es el primer build con la
+mercadería suelta; el único cambio del build siguiente es el texto del aviso
+(#771).
 
 | dato | valor |
 |---|---|
@@ -377,21 +384,84 @@ la carga deja de consumir un pallet de mentira. El peso sí va a `TOTAL MERCADER
 1. **La prueba del operador en la PC piloto**: marcar mercadería suelta en una carga
    real y revisar el remito impreso.
 2. **La prueba física del sobre con la Epson L3250** (issue #740).
-3. **La promoción a producción** (`.\release.ps1 production`) una vez probados los dos.
 
-Además, un detalle de redacción sin consecuencia funcional: este candidate se
-construyó **antes** del fix #771, así que si el operador marca **una sola** unidad
-como mercadería suelta, el aviso verde dice "1 marcadas como mercadería suelta"
-(el plural no concuerda). La mercadería se marca igual y la impresión sale bien;
-solamente el texto queda mal. Se corrige en el próximo build.
-
-Mientras tanto, `latest.json` sigue en **2026.10.21.09.36.40** (`source_sha 0b2d2f4`).
+Este candidate ya está superado: el `2026.10.23.17.21.29` es el que está en
+producción y además trae la redacción del aviso corregida (#771). En este build
+el aviso decía "1 marcadas como mercadería suelta" cuando la cantidad era 1; la
+mercadería se marcaba igual y la impresión salía bien, pero el texto quedaba mal.
 
 ---
 
-## Nota operativa: el release deja un `.env.release-bak` sin restaurar
+## Candidate promovido a producción: 2026.10.23.17.21.29 (mercadería suelta + aviso corregido)
 
-El release del 23/10 terminó con `CANDIDATE_STATUS=OK` pero avisó:
+Es el build que está **en producción**: `latest.json` apunta a esta versión y el
+asset `FEMAG_Desktop_Produccion_Setup.exe` del tag `latest` es este mismo
+instalador.
+
+| dato | valor |
+|---|---|
+| version | `2026.10.23.17.21.29` |
+| source_sha | `47736e55c66e5d84b86ff395dd397b77e7991884` (main) |
+| sha256 | `1503ba6aeb6a45dfe6d627835688056c1c90bcff6eee0842f0d6b6141b972c89` |
+| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.555.359 bytes) |
+| release | tags `femag-candidate` y `latest` en `oscarvogel/vogel-releases` |
+| download_url | https://github.com/oscarvogel/vogel-releases/releases/download/latest/FEMAG_Desktop_Produccion_Setup.exe |
+| publicado | 2026-10-23 20:25:25 UTC |
+| promovido | 2026-10-23 20:26:41 UTC (workflow `promote-production.yml`, run 40019209782) |
+
+### Los tres puntos verificados
+
+1. **SHA256 del instalador local** (`installer/output/FEMAG_Desktop_Produccion_Setup.exe`):
+   `1503ba6a...b972c89` (43.555.359 bytes).
+2. **Asset publicado**: el tag `femag-candidate` y el tag `latest` tienen los dos el
+   mismo archivo, 43.555.359 bytes, actualizado 20:23:07 y 20:26:41 UTC.
+3. **`candidate.json` y `latest.json`**: los dos con `sha256 1503ba6a...b972c89` y
+   `source_sha 47736e5`.
+
+### Qué entra en este build
+
+| PR | Issue | Qué trae |
+|---|---|---|
+| #769 | **#767** | La mercadería suelta (bolsas que viajan en el camión sin ir en ningún pallet) se puede marcar desde la pantalla de "Preparación de pallets", con cantidad parcial, y se la ve y se la quita desde un panel propio. Sin cambios de modelo, migraciones ni servicios. |
+| #772 | **#771** | El aviso de confirmación de la mercadería suelta no usa plural con una unidad: dice "Mercadería suelta: 1." y no "1 marcadas". Solo texto de interfaz. |
+
+Trae además **todo lo del candidate anterior** (Fase B del envío de lista de
+precios #763, la mercadería suelta #767), porque se construyó desde `47736e5`.
+
+### Validaciones ejecutadas (dentro de `release.ps1`)
+
+```
+tests                               1976 passed, 3 skipped (304,76 s)
+compileall                          exit 0
+smoke de la app                     FEMAG smoke OK
+build del instalador de producción  OK (Inno Setup 6.7.3)
+smoke del EXE congelado             OK
+chequeo de secretos del artefacto   OK
+CANDIDATE_STATUS                    OK
+```
+
+El CI del PR #772 dio verde en los dos jobs ("Tests, compile and smoke", 6m25s, y
+"Windows frozen EXE and installer smoke", 9m9s; run 40016132371). La promoción
+a producción dio verde en el job `promote-or-rollback` (22s, run 40019209782).
+
+### Cómo sale impresa la mercadería suelta
+
+Igual que en el build anterior: con la etiqueta **SUELTO** en el informe de
+pallets, en el remito de carga, en el consolidado con QR y en el Excel de armado
+de pallets, y **sin sumar al total de pallets**. El peso sí va a `TOTAL
+MERCADERIA`.
+
+### Pendientes que siguen abiertos
+
+1. **La prueba del operador en la PC piloto**: marcar mercadería suelta en una carga
+   real y revisar el remito impreso.
+2. **La prueba física del sobre con la Epson L3250** (issue #740).
+
+---
+
+## Nota operativa: el `.env.release-bak` que dejó el release anterior
+
+El release de las 15:07 terminó con `CANDIDATE_STATUS=OK` pero avisó:
 
 ```
 ADVERTENCIA: .env ya existe y .env.release-bak no se restauro: revise ambos archivos a mano.
@@ -404,5 +474,12 @@ tienen el mismo contenido, clave por clave; lo único que difiere son los finale
 línea (`.env` quedó con LF, el backup con CRLF). El `.env` que usa la app es el que
 tiene los valores correctos.
 
-El `.env.release-bak` es un resto que aparece en cada release: **no hay que actingar
-contra él a mano**, se puede borrar cuando se quiera porque es una copia del `.env`.
+**Como quedó después del release de las 17:21**: ese backup sobrante se borró
+(era copia del `.env`, verificado por hash normalizado) y el release de las 17:21
+**restauró el `.env` correctamente** ("Restaurado .env (estaba apartado como
+.env.release-bak)"). El `.env` que usa la app está en su lugar y con sus valores.
+
+El `.env.release-bak` aparece en cada release: **no hay que actuar contra él a
+mano**, se puede borrar cuando se quiera porque es una copia del `.env`. Pero si
+queda junto al `.env`, el release siguiente **aborta** con "Existe .env y tambien
+.env.release-bak": por eso conviene borrarlo antes de volver a correrlo.
