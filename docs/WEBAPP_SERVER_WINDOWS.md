@@ -143,15 +143,52 @@ hace el operario.
 
 ## Paso 2 — Copiar el código al servidor
 
+> **El instalador de FEMAG Desktop NO sirve para el servidor.** `FEMAG Desktop.exe`
+> es la aplicación de escritorio (PyQt5): es un bundle de PyInstaller cuyo
+> punto de entrada es `app/production_entrypoint.py`, y **no incluye el paquete
+> `webapp`**. Instalarlo en el servidor deja la GUI de oficina, no la webapp.
+
+El servidor necesita **el código fuente**, no un ejecutable. Y no el repo
+entero: el checkout local pesa **1,4 GB**, casi todo en venvs y builds que no
+sirven para nada acá (`.venv`, `.venv_broken`, `venv_p4`, `dist`, `build`,
+`installer/output`, `backups`, `outputs`). Lo que la webapp realmente carga al
+arrancar son 26 módulos:
+
+```text
+app.config      app.models (todos)      app.services
+audit_service   auth_service   production_part_service   stock_service
+webapp
+```
+
+Ni uno solo de `app.ui`: **el servidor no carga PyQt**. Por eso el paquete
+real son ~12 MB.
+
+### Copiar sólo lo necesario
+
 Desde la máquina de desarrollo, con el recurso compartido administrativo
 habilitado en el servidor:
 
 ```powershell
-robocopy "C:\Programacion\dante\femag_desktop" "\\SRV-FEMAG\admin\C$\FEMAG\source\femag_desktop" /MIR /XD .git .venv __pycache__ .pytest_cache docs\prints /XF .env *.credential
+robocopy "C:\Programacion\dante\femag_desktop" "\\SRV-FEMAG\admin\C$\FEMAG\source\femag_desktop" /MIR `
+    /XD .git .venv .venv_broken venv venv_p4 build dist outputs output installer backups .codegraph tests docs `
+    /XF .env *.credential *.pyc *.sqlite3
+```
+
+Y el runbook, para que quede a mano en el servidor:
+
+```powershell
+robocopy "C:\Programacion\dante\femag_desktop\docs" "\\SRV-FEMAG\admin\C$\FEMAG\source\femag_desktop\docs" WEBAPP_SERVER_WINDOWS.md WEBAPP.md
 ```
 
 El despliegue vuelve a sincronizar con `/MIR` al directorio de instalación, así
-que esta copia sólo tiene que estar reasonably al día.
+que esta copia sólo tiene que estar reasonably al día. Para actualizar, se
+vuelve a correr el `robocopy` y después el despliegue.
+
+### Alternativa: un zip
+
+Si no hay recurso compartido, se puede armar un zip con esas mismas carpetas
+(`app`, `webapp`, `requirements-web.txt` y `scripts`) y pasarlo por el medio
+que haya. **No** include el instalador de FEMAG Desktop.
 
 ## Paso 3 — Primer despliegue
 
