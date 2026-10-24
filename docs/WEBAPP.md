@@ -83,7 +83,7 @@ Variables de la sesión y de los QR de turno:
 |---|---|
 | `FEMAG_WEB_SECRET_KEY` | Secreto con el que se firman las cookies de sesión. Si no está, la webapp genera uno aleatorio y lo guarda en el directorio de configuración del puesto. **El valor fijo que tenía antes el código se quitó**: con una clave conocida cualquiera podía firmar una cookie inventada y entrar como otro usuario. |
 | `FEMAG_WEB_PUBLIC_URL` | URL pública del servidor (por ejemplo `https://femag.lan`). Es la que se imprime en los QR de turno. Sin ella se usa la URL que ve el propio servidor, que detrás de un proxy es la interna y no sirve desde el celular. |
-| `FEMAG_WEB_SECRET_FILE` | Ruta donde se guarda el secreto de sesión generado. Por defecto, `%LOCALAPPDATA%\FEMAG Desktop\webapp_secret.key` (o `~/.config/FEMAG Desktop/` en Linux). |
+| `FEMAG_WEB_SECRET_FILE` | Ruta donde se guarda el secreto de sesión generado. Por defecto, `%LOCALAPPDATA%\FEMAG Desktop\webapp_secret.key` (o `~/.config/FEMAG Desktop/` en Linux). En el despliegue del servidor se fija en `C:\ProgramData\FEMAG\webapp_secret.key`, fuera del perfil de la cuenta de servicio, y se protege con los mismos permisos que la configuración. |
 
 En un despliegue definitivo se recomienda que Waitress/Webapp escuche solo en la interfaz local y que Caddy sea el único punto publicado a la LAN.
 
