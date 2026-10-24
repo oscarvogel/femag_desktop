@@ -35,6 +35,10 @@ def test_ci_has_a_job_that_runs_the_webapp_without_the_desktop_stack():
     assert "webapp-only:" in content
     assert "python -m pip install -r requirements-web.txt -r requirements-test.txt" in content
     assert 'if python -c "import PyQt5"' in content
+    # El glob y no una lista fija: la lista de tests de la webapp cambia con
+    # cada PR, y una lista fija hacia fallar el job en la rama donde el
+    # archivo todavia no existe.
+    assert "python -m pytest tests/test_webapp_*.py -q" in content
 
 
 def test_pytest_is_a_test_dependency_and_not_a_server_dependency():

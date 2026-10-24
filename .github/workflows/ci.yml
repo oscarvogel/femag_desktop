@@ -96,13 +96,10 @@ jobs:
           python -c "import webapp; print('la webapp importa sin PyQt')"
 
       - name: Run the webapp tests
-        run: >
-          python -m pytest
-          tests/test_webapp_production.py
-          tests/test_webapp_qr_orders.py
-          tests/test_webapp_server_executable.py
-          tests/test_webapp_server_deploy_scripts.py
-          -q
+        # El glob lo expande la shell: la lista de tests de la webapp cambia
+        # con cada PR y una lista fija hacia fallar el job en la rama donde
+        # todavia no existe el archivo.
+        run: python -m pytest tests/test_webapp_*.py -q
 
   frozen-windows:
     name: Windows frozen EXE and installer smoke
