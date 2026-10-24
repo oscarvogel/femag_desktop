@@ -56,7 +56,7 @@ source .venv/bin/activate
 pip install -r requirements-web.txt
 ```
 
-La configuración de MySQL es la misma que utiliza FEMAG Desktop (`FEMAG_DB_HOST`, `FEMAG_DB_PORT`, `FEMAG_DB_NAME`, `FEMAG_DB_USER`, `FEMAG_DB_PASSWORD` o el archivo indicado por `FEMAG_ENV_FILE`).
+La configuración de MySQL es la misma que utiliza FEMAG Desktop: las variables se llaman `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD` (sin el prefijo `FEMAG_`), y se leen del archivo indicado por `FEMAG_ENV_FILE`, que por defecto es `.env`. El motor de base se elige con `FEMAG_DB_ENGINE=mysql`.
 
 ## Ejecución
 
@@ -82,7 +82,7 @@ Variables de la sesión y de los QR de turno:
 | Variable | Para qué sirve |
 |---|---|
 | `FEMAG_WEB_SECRET_KEY` | Secreto con el que se firman las cookies de sesión. Si no está, la webapp genera uno aleatorio y lo guarda en el directorio de configuración del puesto. **El valor fijo que tenía antes el código se quitó**: con una clave conocida cualquiera podía firmar una cookie inventada y entrar como otro usuario. |
-| `FEMAG_WEB_PUBLIC_URL` | URL pública del servidor (por ejemplo `https://femag.local`). Es la que se imprime en los QR de turno. Sin ella se usa la URL que ve el propio servidor, que detrás de un proxy es la interna y no sirve desde el celular. |
+| `FEMAG_WEB_PUBLIC_URL` | URL pública del servidor (por ejemplo `https://femag.lan`). Es la que se imprime en los QR de turno. Sin ella se usa la URL que ve el propio servidor, que detrás de un proxy es la interna y no sirve desde el celular. |
 | `FEMAG_WEB_SECRET_FILE` | Ruta donde se guarda el secreto de sesión generado. Por defecto, `%LOCALAPPDATA%\FEMAG Desktop\webapp_secret.key` (o `~/.config/FEMAG Desktop/` en Linux). |
 
 En un despliegue definitivo se recomienda que Waitress/Webapp escuche solo en la interfaz local y que Caddy sea el único punto publicado a la LAN.
@@ -106,7 +106,7 @@ http://IP_DEL_SERVIDOR:8000/orden/<token>
 Cuando se defina el hostname/IP estable del servidor, un cambio posterior podrá imprimir directamente una URL como:
 
 ```text
-https://femag.local/orden/<token>
+https://femag.lan/orden/<token>
 ```
 
 No será necesario modificar el modelo ni regenerar los tokens existentes.
@@ -177,7 +177,7 @@ Caddy es un servidor web/reverse proxy. En FEMAG se utilizará delante de la apl
 El flujo recomendado es:
 
 ```text
-https://femag.local
+https://femag.lan
         │
         ▼
       Caddy
@@ -199,7 +199,7 @@ Caddy funciona tanto en Windows como en Linux, por lo que esta arquitectura no c
 Una configuración inicial puede ser:
 
 ```caddyfile
-femag.local {
+femag.lan {
     tls internal
     reverse_proxy 127.0.0.1:8000
 }
@@ -211,7 +211,7 @@ No copiar esta configuración a producción sin adaptar hostname, puertos, firew
 
 ## Certificado interno y celulares
 
-Para que `https://femag.local` no muestre advertencias y habilite correctamente las APIs seguras del navegador, los celulares/tablets deben confiar en la autoridad certificadora interna que firma el certificado.
+Para que `https://femag.lan` no muestre advertencias y habilite correctamente las APIs seguras del navegador, los celulares/tablets deben confiar en la autoridad certificadora interna que firma el certificado.
 
 Alternativas para una etapa futura:
 
@@ -247,12 +247,14 @@ La aplicación Python y Caddy deben configurarse para iniciar automáticamente c
 Es preferible un nombre estable como:
 
 ```text
-femag.local
+femag.lan
 ```
 
 antes que imprimir una IP directamente en los QR. De esa forma, si la webapp cambia de servidor/IP, se modifica la resolución de nombre y no es necesario cambiar la lógica de FEMAG.
 
-La forma concreta de resolver `femag.local` dependerá de la infraestructura existente: DNS del router/servidor, DNS interno o configuración equivalente.
+El nombre **no debe terminar en `.local`**. La RFC 6762 reserva ese sufijo para mDNS: los celulares (iOS y Android) resuelven los nombres `.local` por multicast y no consultan el DNS de la LAN, así que el QR abriría en el teléfono sin encontrar el servidor. La misma RFC recomienda `.lan`, `.corp`, `.internal` o `.intranet` para redes privadas.
+
+La forma concreta de resolver `femag.lan` dependerá de la infraestructura existente: DNS del router/servidor, DNS interno o configuración equivalente.
 
 ## Despliegue futuro en otro servidor
 
@@ -262,7 +264,7 @@ Para hacerlo deberían cambiar solamente aspectos de infraestructura:
 
 - host/IP del servidor web;
 - variables de entorno de conexión MySQL si corresponde;
-- DNS de `femag.local`;
+- DNS de `femag.lan`;
 - Caddy/certificados.
 
 FEMAG Desktop no necesita trasladarse junto con la webapp.
@@ -292,16 +294,18 @@ GET /health
 
 Devuelve HTTP 200 cuando la webapp puede ejecutar una consulta contra la base configurada y HTTP 503 si no hay conexión.
 
-## Pendiente para instalación en FEMAG
+## Instalación en el servidor de la fábrica
 
-Antes del despliegue definitivo hay que relevar el servidor existente y confirmar:
+El despliegue en la LAN está resuelto con una arquitectura que no acopla el código a una máquina concreta:
 
-- si utiliza Windows o Linux;
-- IP y nombre de red;
-- dónde corre actualmente MySQL;
-- puerto y reglas de firewall;
-- Wi-Fi/red que utilizarán los celulares;
-- mecanismo disponible para DNS interno;
-- dispositivos/navegadores que utilizarán el lector QR.
+```text
+Celular/tablet -- HTTPS 443 --> Caddy --> Waitress 127.0.0.1:8000 --> MySQL
+```
 
-Con esos datos se define el Caddyfile y el mecanismo de certificados definitivo sin acoplar el código a una máquina concreta.
+Decisiones tomadas para la fábrica:
+
+- **Windows Server 2019** como servidor de la webapp.
+- **MySQL en el mismo servidor**: la webapp se conecta por loopback y los celulares nunca hablan con la base.
+- **Certificado de la CA interna de Caddy** (`tls internal`): los celulares confían en la raíz que distribuye el administrador.
+
+El procedimiento completo, con la distribución de la CA en Android e iOS, el DNS interno, el perfil de red del firewall y la evidencia que hay que dejar, está en [WEBAPP_SERVER_WINDOWS.md](WEBAPP_SERVER_WINDOWS.md).

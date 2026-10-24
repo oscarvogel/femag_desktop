@@ -1,3 +1,18 @@
--r requirements.txt
+# Dependencias de la webapp movil, y SOLO de la webapp movil.
+#
+# No se incluye `requirements.txt` a proposito: esa lista es la del escritorio
+# (PyQt5 y `pyqt5libs` desde git) y el servidor no la necesita para nada.
+# Arrastrarla obligaba al servidor de la fabrica a tener Git instalado y
+# salida a internet para descargar un paquete que la webapp nunca importa.
+#
+# La webapp no depende de PyQt: su cadena de imports (app.models, app.services,
+# app.config y webapp) usa peewee, PyMySQL, python-dotenv, Pillow, reportlab,
+# Flask y waitress. Para agregar una dependencia nueva de la webapp, agregar
+# la linea aqui y NO tocar requirements.txt.
+peewee>=3.17,<4
+PyMySQL>=1.1
+python-dotenv>=1.0
+Pillow>=10.4,<11
+reportlab>=4.0
 Flask>=3.0,<4
 waitress>=3.0,<4
