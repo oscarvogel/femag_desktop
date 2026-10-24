@@ -20,7 +20,7 @@ from flask import (
 )
 
 from app.config.database import database_proxy
-from webapp import production_service
+from webapp import audit, production_service
 from webapp.auth import (
     current_username,
     is_administrator,
@@ -253,6 +253,28 @@ self.addEventListener("fetch", event => {
             "observaciones": "",
         }
 
+    def _part_audit_payload(part, user):
+        """Lo que queda registrado de un parte en la auditoria (#778).
+
+        Con esto se sabe que parte cargo cada persona, cuando y cuanto salio,
+        sin tener que buscarlo parte por parte.
+        """
+        bags = production_service.lines_of(part)
+        consumptions = production_service.consumptions_of(part)
+        return {
+            "parte": part.id,
+            "fecha": part.production_date.isoformat(),
+            "turno": part.shift,
+            "bolsas": sum(int(bag.bags or 0) for bag in bags),
+            "kg": float(
+                sum((Decimal(str(bag.kg or 0)) for bag in bags), Decimal("0"))
+            ),
+            "materia_prima_kg": float(
+                sum((Decimal(str(item.kg or 0)) for item in consumptions), Decimal("0"))
+            ),
+            "usuario": user,
+        }
+
     def _production_context(day, shift, submitted=None):
         parts = production_service.parts_for_day(day)
         part_rows = []
@@ -325,7 +347,7 @@ self.addEventListener("fetch", event => {
                 "observaciones": observations,
             }
             try:
-                production_service.create_part(
+                part = production_service.create_part(
                     production_date=day,
                     shift=shift,
                     lines=lines,
@@ -338,6 +360,13 @@ self.addEventListener("fetch", event => {
                 return render_template(
                     "production.html", **_production_context(day, shift, submitted)
                 )
+            audit.record(
+                user=username,
+                module=audit.MODULE_PRODUCCION,
+                action=audit.ACTION_CARGA,
+                record_ref=f"ProductionPart:{part.id}",
+                new_value=_part_audit_payload(part, username),
+            )
             flash("Parte guardado. Revisalo y confirmalo cuando esté todo bien.", "success")
             return redirect(
                 url_for("production", fecha=day.isoformat(), turno=shift)
@@ -359,6 +388,13 @@ self.addEventListener("fetch", event => {
         except ValueError as exc:
             flash(str(exc), "error")
         else:
+            audit.record(
+                user=current_username(),
+                module=audit.MODULE_PRODUCCION,
+                action=audit.ACTION_CONFIRMACION,
+                record_ref=f"ProductionPart:{part.id}",
+                new_value=_part_audit_payload(part, current_username()),
+            )
             flash("Parte confirmado: las bolsas entraron al stock y la materia prima salió.", "success")
         return redirect(
             url_for(
@@ -393,6 +429,14 @@ self.addEventListener("fetch", event => {
         except ValueError as exc:
             flash(str(exc), "error")
         else:
+            audit.record(
+                user=username,
+                module=audit.MODULE_PRODUCCION,
+                action=audit.ACTION_ANULACION,
+                record_ref=f"ProductionPart:{part.id}",
+                new_value=_part_audit_payload(part, username),
+                observation=reason or None,
+            )
             flash("Parte anulado.", "success")
         return redirect(
             url_for(

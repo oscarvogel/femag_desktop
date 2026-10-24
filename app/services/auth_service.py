@@ -1,11 +1,14 @@
 import hashlib
 import hmac
+import logging
 import os
 
 from peewee import IntegrityError, fn
 
 from app.models.security import User, UserProfile
 from app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -289,14 +292,48 @@ class AuthService:
             <= 1
         )
 
-    def authenticate(self, username: str, password: str) -> User | None:
+    def _record_access(
+        self, *, user: str | None, action: str, workstation: str | None
+    ) -> None:
+        """Registra el acceso sin impedir el ingreso.
+
+        Si la tabla de auditoria esta caida, el operario tiene que poder
+        entrar igual: en la planta no hay a quien consultarle y el turno se
+        para. El problema queda en el log.
+        """
+        try:
+            self.audit_service.record(
+                user=user,
+                module="Sistema",
+                action=action,
+                workstation=workstation,
+            )
+        except Exception:
+            logger.exception("No se pudo registrar el acceso en la auditoría")
+
+    def authenticate(
+        self,
+        username: str,
+        password: str,
+        workstation: str | None = None,
+    ) -> User | None:
+        """Valida las credenciales y deja el ingreso en la auditoria.
+
+        ``workstation`` es de donde se entro: el escritorio no lo pasa (queda
+        el nombre de la maquina) y la webapp pasa la IP del celular, para que
+        en la pantalla de accesos se vea que equipo entro.
+        """
         username = (username or "").strip()
         user = self._find_user_case_insensitive(username, active_only=True)
         if user and self._verify_password(password, user.password_hash):
             self._upgrade_legacy_password_hash(user, password)
-            self.audit_service.record(user=user.username, module="Sistema", action="login exitoso")
+            self._record_access(
+                user=user.username, action="login exitoso", workstation=workstation
+            )
             return user
-        self.audit_service.record(user=username, module="Sistema", action="login fallido")
+        self._record_access(
+            user=username, action="login fallido", workstation=workstation
+        )
         return None
 
     def authorize_administrator(self, username: str, password: str) -> User | None:
