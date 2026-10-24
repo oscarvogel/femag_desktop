@@ -22,6 +22,29 @@ todavía **no** se ejecutó contra el servidor real está marcado como
 
 El celular nunca habla con MySQL ni con el puerto 8000. Sólo con el 443.
 
+## Los dos modos
+
+|  | Modo simple (sin HTTPS) | Modo con HTTPS |
+| --- | --- | --- |
+| Qué corre | Waitress en el puerto 8000, escuchando en la placa de red | Waitress en loopback + Caddy en el 443 |
+| Qué se instala en el celular | **Nada** | La raíz de Caddy (1 paso en Android, 2 en iOS) |
+| HTTPS | No | Sí, con la CA interna de Caddy |
+| Cámara dentro de la página | No | Sí |
+| Se puede instalar como PWA | No | Sí |
+| Cifrado en la LAN | No | Sí |
+| Comando | `-SkipCaddy` | el default |
+
+**Para arrancar en la fábrica, el modo simple.** El flujo que pidió Oscar
+(cargar partes de embolsado) **no usa la cámara**: el turno se elige de un
+select nativo y el QR de turno se escanea con la **cámara nativa** del celular
+(Google Lens o la app de Cámara), que no exige contexto seguro y abre el link
+igual.
+
+El modo con HTTPS queda para dos casos: cuando haya que usar el escáner de
+órdenes QR **desde la página** (el de `/produccion` no lo necesita), o cuando
+el cifrado en la LAN sea un requisito. La pantalla de órdenes ya tiene entrada
+manual, así que el modo simple no deja nada sin hacer.
+
 ## Decisiones de fábrica
 
 | Tema | Decisión |
@@ -47,10 +70,10 @@ En el servidor:
 
 - [ ] Windows Server 2019 con la placa de red en perfil **Domain o Private** (ver [Paso 5](#paso-5--perfil-de-red-y-firewall)).
 - [ ] Python 3.12 instalado. El script acepta 3.10 o superior.
-- [ ] Caddy 2.x: el binario `caddy.exe` en, por ejemplo, `C:\Caddy\caddy.exe`.
 - [ ] MySQL 8.x (o MariaDB) corriendo en el mismo servidor.
 - [ ] `femag.lan` resuelto por el DNS de la LAN.
 - [ ] Una copia del checkout del repositorio en el servidor.
+- [ ] Caddy 2.x (`C:\Caddy\caddy.exe`), **sólo si se va el modo con HTTPS**.
 
 **Git no hace falta en el servidor.** `requirements-web.txt` lista sólo lo que
 usa la webapp (peewee, PyMySQL, python-dotenv, Pillow, reportlab, Flask,
@@ -105,7 +128,8 @@ FLUSH PRIVILEGES;
 py -3.12 --version
 ```
 
-**Caddy** (descargar `caddy_2.x.x_windows_amd64.zip` de la página de releases):
+**Caddy**, sólo para el modo con HTTPS (descargar `caddy_2.x.x_windows_amd64.zip`
+de la página de releases):
 
 ```powershell
 C:\Caddy\caddy.exe version
@@ -113,6 +137,9 @@ C:\Caddy\caddy.exe version
 
 > `encode zstd gzip` en el Caddyfile requiere **Caddy 2.4 o superior**. Con una
 > versión anterior, `caddy validate` falla y el despliegue se frena.
+
+En el **modo simple** no se instala Caddy: no hace falta para nada de lo que
+hace el operario.
 
 ## Paso 2 — Copiar el código al servidor
 
@@ -129,7 +156,22 @@ que esta copia sólo tiene que estar reasonably al día.
 ## Paso 3 — Primer despliegue
 
 Copiar el script al servidor y ejecutarlo **desde una consola de PowerShell
-como administrador**:
+como administrador**.
+
+### Modo simple (sin HTTPS) — el recomendado para arrancar
+
+```powershell
+cd C:\FEMAG\source\femag_desktop
+.\scripts\deploy_webapp_server.ps1 `
+    -SourcePath C:\FEMAG\source\femag_desktop `
+    -SkipCaddy `
+    -PublicHostName femag.lan
+```
+
+La webapp queda escuchando en el puerto 8000 de la placa de red y el firewall
+abre ese puerto. El QR de turnos sale con `http://femag.lan:8000`.
+
+### Modo con HTTPS
 
 ```powershell
 cd C:\FEMAG\source\femag_desktop
@@ -138,6 +180,8 @@ cd C:\FEMAG\source\femag_desktop
     -CaddyExePath C:\Caddy\caddy.exe `
     -PublicHostName femag.lan
 ```
+
+### Lo que pasa en las dos corridas
 
 La primera vez el script crea `C:\ProgramData\FEMAG\webapp.env` a partir de la
 plantilla y **se detiene** para que se completen `DB_USER` y `DB_PASSWORD`.
@@ -153,9 +197,10 @@ El script deja:
 | Código de la webapp | `C:\FEMAG\webapp` |
 | Configuración protegida | `C:\ProgramData\FEMAG\webapp.env` |
 | Secreto de sesión | `C:\ProgramData\FEMAG\webapp_secret.key` |
-| Caddyfile | `C:\ProgramData\FEMAG\Caddyfile` |
+| Caddyfile (sólo modo HTTPS) | `C:\ProgramData\FEMAG\Caddyfile` |
 | Tarea programada | `FEMAG Webapp QR` (arranca con el sistema, corre como SYSTEM) |
-| Servicio | `FEMAG Caddy` (arranca automáticamente) |
+| Servicio | `FEMAG Caddy` (sólo modo HTTPS) |
+| Regla de firewall | `FEMAG Webapp HTTPS` (443) o `FEMAG Webapp HTTP` (8000) |
 
 ### Si el servidor tiene la red en perfil Public
 
@@ -211,6 +256,9 @@ El 443 tiene que ser alcanzable **desde la LAN** y sólo desde la LAN: el 8000
 escucha en `127.0.0.1` y no es accesible desde afuera.
 
 ## Paso 6 — Distribuir la CA raíz de Caddy
+
+> **Sólo para el modo con HTTPS.** En el modo simple no hay CA que instalar y
+> el celular no tiene que hacer nada.
 
 Caddy firma los certificados con su propia CA. Sin instalar esa raíz en el
 celular, el navegador avisa que el certificado no es confiable y **la cámara
@@ -275,16 +323,19 @@ configuración está mal, el detalle viene en el cuerpo de la respuesta.
 ### Desde un celular de la LAN
 
 1. `https://femag.lan/health` → tiene que abrir sin aviso de certificado.
+   (En el modo simple: `http://femag.lan:8000/health`.)
 2. `https://femag.lan/produccion` → redirige al login.
+   (En el modo simple: `http://femag.lan:8000/produccion`.)
 3. Entrar con un usuario de planta.
 4. Cargar un parte de prueba, confirmarlo y comprobar que el stock refleja las
    bolsas que entraron y el material que salió.
-5. Escanear con la cámara el QR de un turno → abre la pantalla con el turno
-   prellenado.
+5. Escanear con la cámara del celular el QR de un turno → abre la pantalla con
+   el turno prellenado. En el modo simple, con la **cámara nativa** del
+   celular; en el modo con HTTPS, también se puede desde la página.
 
 ### Evidencia que hay que dejar
 
-- `https://femag.lan/health` desde un celular.
+- La URL de `/health` desde un celular.
 - Una captura de la pantalla de partes con el parte cargado, con el usuario de
   planta visible.
 - La consulta del saldo en la base después de confirmar.
@@ -297,9 +348,11 @@ Con el checkout actualizado en `C:\FEMAG\source\femag_desktop`:
 cd C:\FEMAG\source\femag_desktop
 .\scripts\deploy_webapp_server.ps1 `
     -SourcePath C:\FEMAG\source\femag_desktop `
-    -CaddyExePath C:\Caddy\caddy.exe `
+    -SkipCaddy `
     -PublicHostName femag.lan
 ```
+
+(modo con HTTPS: cambiar `-SkipCaddy` por `-CaddyExePath C:\Caddy\caddy.exe`)
 
 El script sincroniza con `/MIR`, reinstala las dependencias, reescribe el
 lanzador, reinicia la tarea y recarga Caddy. **No** toca
@@ -328,10 +381,12 @@ sesiones siguen como estaban.
 
 | Síntoma | Causa probable | Qué mirar |
 | --- | --- | --- |
+| En el modo simple el celular no entra a `http://femag.lan:8000` | El puerto 8000 quedó cerrado o el perfil de red es Public | `Get-NetFirewallRule -DisplayName "FEMAG Webapp HTTP"`, `Get-NetConnectionProfile` |
+| El navegador avisa que la conexión no es segura | Es normal en el modo simple: no hay HTTPS | — |
 | El celular no entra a `https://femag.lan` | Perfil de red en Public o DNS que no resuelve | `Get-NetConnectionProfile`, `nslookup femag.lan` desde el celular |
 | El navegador avisa que el certificado no es confiable | Falta instalar la raíz de Caddy, o en iOS falta el paso de confianza completa | [Paso 6](#paso-6--distribuir-la-ca-raíz-de-caddy) |
-| La cámara no abre dentro de la webapp | Contexto no seguro: se entró por `http://` | La URL de la barra tiene que ser `https://` |
-| El QR de turno abre en `http://` o con la IP interna | Falta `FEMAG_WEB_PUBLIC_URL` | El despliegue lo define con `-PublicHostName`; tiene que empezar con `https://` |
+| La cámara no abre dentro de la webapp | Contexto no seguro: se entró por `http://`. En el modo simple es lo esperado | La URL de la barra tiene que ser `https://`; para escanear el QR de turno alcanza con la cámara nativa del celular |
+| El QR de turno abre en `http://` o con la IP interna | Falta `FEMAG_WEB_PUBLIC_URL` | El despliegue lo define con `-PublicHostName`; tiene que ser la URL que el celular puede abrir |
 | El parte no se puede confirmar | Falta materia prima, falta peso unitario o no hay inventario inicial | [Paso 0.2](#02--datos-de-fábrica) |
 | El script dice que no encuentra Python | Python no está en el PATH | `py -3.12 --version`; si no, `-PythonPath C:\ruta\python.exe` |
 | `caddy validate` falla | Caddy anterior a 2.4 (no soporta `encode zstd`) | `caddy.exe version` |

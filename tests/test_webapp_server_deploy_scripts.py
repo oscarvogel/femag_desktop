@@ -83,6 +83,12 @@ def test_windows_deployment_guide_covers_the_factory_install_steps():
     assert "root.crt" in content
     assert "systemprofile" in content
 
+    # El runbook tiene que ofrecer el modo sin HTTPS: es el que no le pide
+    # nada al operario y es el que se va a usar para arrancar.
+    assert "## Los dos modos" in content
+    assert "-SkipCaddy" in content
+    assert "cámara nativa" in content
+
     # El nombre publico no puede terminar en .local (RFC 6762 / mDNS).
     assert "femag.lan" in content
     assert "femag.local" not in content
