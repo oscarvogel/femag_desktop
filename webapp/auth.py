@@ -31,6 +31,7 @@ from flask import flash, redirect, request, session, url_for
 
 from app.models.security import User
 from app.services.auth_service import AuthService
+from webapp import audit
 
 SESSION_USER_KEY = "femag_username"
 
@@ -81,8 +82,14 @@ def resolve_secret_key() -> str:
 
 
 def login_user(username: str, password: str) -> bool:
-    """Valida las credenciales contra los usuarios de FEMAG Desktop."""
-    user = AuthService().authenticate(username, password)
+    """Valida las credenciales contra los usuarios de FEMAG Desktop.
+
+    La fila de auditoria del ingreso lleva la IP del celular: en la pantalla
+    de accesos (#779) esa IP dice desde que equipo entro cada vez.
+    """
+    user = AuthService().authenticate(
+        username, password, workstation=audit.client_station()
+    )
     if user is None:
         return False
     session.clear()
@@ -92,7 +99,9 @@ def login_user(username: str, password: str) -> bool:
 
 
 def logout_user() -> None:
+    user = current_username()
     session.clear()
+    audit.record_exit(user)
 
 
 def current_username() -> str | None:
