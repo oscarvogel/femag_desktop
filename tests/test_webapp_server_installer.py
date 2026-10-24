@@ -164,6 +164,7 @@ def test_install_script_has_the_bom_that_powershell_5_1_needs():
     )
 
 
+@WINDOWS_ONLY
 def test_install_script_parses_in_powershell_5_1():
     """Un error de sintaxis en el script se descubre en la fabrica, no aca."""
     command = (
@@ -202,6 +203,7 @@ def test_the_installation_leaves_a_log_of_what_it_did(tmp_path):
     assert "clave-de-prueba" not in contenido
 
 
+@WINDOWS_ONLY
 def test_the_build_driver_exists_and_parses_in_powershell_5_1():
     """El driver es lo que genera el .exe que se copia a la fabrica."""
     assert BUILD_SCRIPT.exists()
