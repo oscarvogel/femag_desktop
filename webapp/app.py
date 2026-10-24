@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -20,6 +21,8 @@ from flask import (
 )
 
 from app.config.database import database_proxy
+from app.services.audit_query_service import AuditQueryService
+from app.utils.datetime_utils import utc_datetime_to_local
 from webapp import audit, production_service
 from webapp.auth import (
     current_username,
@@ -468,8 +471,89 @@ self.addEventListener("fetch", event => {
             download_name="femag-qr-turnos.pdf",
         )
 
+    @app.get("/accesos")
+    @login_required
+    def accesos():
+        """Informe de accesos y de carga de partes (#779).
+
+        Solo para administradores: muestra quien entro, desde que equipo y
+        que parte cargo cada persona, sin tocar el servidor de MySQL a mano.
+        """
+        if not is_administrator():
+            flash("Sólo un administrador puede ver los accesos.", "error")
+            return redirect(url_for("production"))
+
+        service = AuditQueryService()
+        filtros = {
+            "desde": (request.args.get("desde") or "").strip(),
+            "hasta": (request.args.get("hasta") or "").strip(),
+            "usuario": (request.args.get("usuario") or "").strip(),
+            "modulo": (request.args.get("modulo") or "").strip(),
+            "accion": (request.args.get("accion") or "").strip(),
+            "referencia": (request.args.get("referencia") or "").strip(),
+        }
+        pagina = max(_entero(request.args.get("pagina"), 0), 0)
+        resultado = service.search_page(
+            module=filtros["modulo"] or None,
+            user=filtros["usuario"] or None,
+            action=filtros["accion"] or None,
+            reference=filtros["referencia"] or None,
+            date_from=_fecha(filtros["desde"]),
+            date_to=_fecha(filtros["hasta"]),
+            page=pagina,
+            page_size=50,
+        )
+
+        filas = []
+        for row in resultado.rows:
+            momento = utc_datetime_to_local(row.occurred_at)
+            filas.append(
+                {
+                    "fecha": momento.strftime("%d/%m/%Y %H:%M") if momento else "—",
+                    "usuario": row.user or "—",
+                    "modulo": row.module,
+                    "accion": row.action,
+                    "referencia": service.display_reference(row) or "—",
+                    "detalle": (
+                        service.reason_or_summary(row)
+                        or service.transition(row)
+                        or "—"
+                    ),
+                    "puesto": row.workstation or "—",
+                }
+            )
+
+        return render_template(
+            "accesos.html",
+            filas=filas,
+            opciones=service.filter_options(),
+            filtros=filtros,
+            pagina=pagina,
+            pagina_anterior=pagina - 1 if resultado.has_previous else None,
+            pagina_siguiente=pagina + 1 if resultado.has_next else None,
+        )
+
     return app
 
 
 def form_value(form, key: str) -> str:
     return (form.get(key) or "").strip()
+
+
+def _entero(valor, defecto: int = 0) -> int:
+    """Un entero de la query string, o el valor por defecto si no lo es."""
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return defecto
+
+
+def _fecha(valor) -> date | None:
+    """'AAAA-MM-DD' a fecha; si no se puede leer, no se filtra por fecha."""
+    texto = (valor or "").strip()
+    if not texto:
+        return None
+    try:
+        return datetime.strptime(texto, "%Y-%m-%d").date()
+    except ValueError:
+        return None
