@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Accesos · FEMAG{% endblock %}
+{% block content %}
+<h1>Accesos</h1>
+<p class="muted">Quién entró, desde qué equipo y qué parte cargó cada persona.</p>
+
+<form method="get" action="{{ url_for('accesos') }}" class="card filtros">
+  <label for="desde">Desde</label>
+  <input type="date" id="desde" name="desde" value="{{ filtros['desde'] }}">
+
+  <label for="hasta">Hasta</label>
+  <input type="date" id="hasta" name="hasta" value="{{ filtros['hasta'] }}">
+
+  <label for="usuario">Usuario</label>
+  <select id="usuario" name="usuario">
+    <option value="">Todos</option>
+    {% for usuario in opciones['users'] %}
+      <option value="{{ usuario }}" {% if usuario == filtros['usuario'] %}selected{% endif %}>{{ usuario }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="modulo">Módulo</label>
+  <select id="modulo" name="modulo">
+    <option value="">Todos</option>
+    {% for modulo in opciones['modules'] %}
+      <option value="{{ modulo }}" {% if modulo == filtros['modulo'] %}selected{% endif %}>{{ modulo }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="accion">Acción</label>
+  <select id="accion" name="accion">
+    <option value="">Todas</option>
+    {% for accion in opciones['actions'] %}
+      <option value="{{ accion }}" {% if accion == filtros['accion'] %}selected{% endif %}>{{ accion }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="referencia">Referencia</label>
+  <input type="text" id="referencia" name="referencia" value="{{ filtros['referencia'] }}"
+         placeholder="Parte, orden o presupuesto">
+
+  <button type="submit">Filtrar</button>
+  <a class="button secondary" href="{{ url_for('accesos') }}">Limpiar filtros</a>
+</form>
+
+<div class="card">
+  {% if filas %}
+    <div class="tabla-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha y hora</th>
+            <th>Usuario</th>
+            <th>Módulo</th>
+            <th>Acción</th>
+            <th>Referencia</th>
+            <th>Detalle</th>
+            <th>Equipo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fila in filas %}
+            <tr>
+              <td class="nowrap">{{ fila.fecha }}</td>
+              <td>{{ fila.usuario }}</td>
+              <td>{{ fila.modulo }}</td>
+              <td>{{ fila.accion }}</td>
+              <td>{{ fila.referencia }}</td>
+              <td>{{ fila.detalle }}</td>
+              <td class="nowrap">{{ fila.puesto }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">No hay accesos con esos filtros.</p>
+  {% endif %}
+</div>
+
+{% if pagina_anterior or pagina_siguiente %}
+  <div class="paginacion">
+    {% if pagina_anterior %}
+      <a class="button secondary" href="{{ url_for('accesos', pagina=pagina_anterior, **filtros) }}">Anterior</a>
+    {% endif %}
+    <span class="muted">Página {{ pagina + 1 }}</span>
+    {% if pagina_siguiente %}
+      <a class="button secondary" href="{{ url_for('accesos', pagina=pagina_siguiente, **filtros) }}">Siguiente</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}
