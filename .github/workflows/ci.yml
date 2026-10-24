@@ -146,6 +146,40 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Frozen smoke failed with exit code $($process.ExitCode)" }
           Write-Host "Frozen FEMAG smoke OK (exit code 0)"
 
+      - name: Build frozen webapp server executable
+        shell: powershell
+        run: |
+          python -m PyInstaller --noconfirm --clean installer\FEMAG_Webapp_Server.spec
+
+      - name: Smoke frozen webapp server executable
+        shell: powershell
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'femag-webapp-server-smoke'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          $env:FEMAG_CONFIG_DIR = $runtime
+          $process = Start-Process -FilePath ".\dist\FEMAG Webapp Server\FEMAG Webapp Server.exe" -ArgumentList "--smoke" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Frozen webapp server smoke failed with exit code $($process.ExitCode)" }
+          Write-Host "Frozen webapp server smoke OK (exit code 0)"
+
+      - name: Verify frozen webapp server resources
+        shell: powershell
+        run: |
+          $dist = Resolve-Path ".\dist\FEMAG Webapp Server"
+          $exe = Join-Path $dist "FEMAG Webapp Server.exe"
+          if (-not (Test-Path $exe)) { throw "Missing frozen FEMAG Webapp Server.exe" }
+
+          $templates = Get-ChildItem $dist -Recurse -File -Filter "*.html" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]webapp[\\/]templates[\\/]' }
+          if (-not $templates) { throw "Las plantillas de Flask no se empaquetaron" }
+
+          $pyqt = Get-ChildItem $dist -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '(?i)pyqt' }
+          if ($pyqt) { throw "El paquete del servidor no debe traer PyQt: $($pyqt[0].FullName)" }
+
+          $fonts = Get-ChildItem $dist -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '[\\/]reportlab[\\/]fonts[\\/]' }
+          if (-not $fonts) { throw "No se empaquetaron las fuentes de reportlab; la hoja de QR no saldria" }
+
       - name: Verify required frozen resources
         shell: powershell
         run: |
