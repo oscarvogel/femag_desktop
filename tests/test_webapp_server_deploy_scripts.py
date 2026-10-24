@@ -89,6 +89,18 @@ def test_windows_deployment_guide_covers_the_factory_install_steps():
     assert "-SkipCaddy" in content
     assert "cámara nativa" in content
 
+    # El instalador de FEMAG Desktop es la app de escritorio (PyQt5) y NO
+    # incluye el paquete webapp: hay que avisarlo antes de que alguien lo
+    # instale en el servidor creyendo que con eso alcanza.
+    assert "El instalador de FEMAG Desktop NO sirve para el servidor" in content
+    assert "no incluye el paquete" in content
+
+    # El checkout local pesa 1,4 GB de venvs y builds: hay que copiar solo lo
+    # que la webapp carga, y la webapp no carga app.ui (no necesita PyQt).
+    assert "1,4 GB" in content
+    assert "app.ui" in content
+    assert "/XD .git .venv" in content
+
     # El nombre publico no puede terminar en .local (RFC 6762 / mDNS).
     assert "femag.lan" in content
     assert "femag.local" not in content
