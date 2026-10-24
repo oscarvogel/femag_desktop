@@ -37,7 +37,11 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install dependencies
-        run: python -m pip install -r requirements-web.txt
+        # La suite completa es la del escritorio: incluye tests de UI con
+        # PyQt5. `requirements-web.txt` ya no arrastra `requirements.txt` (el
+        # servidor de la fabrica no necesita PyQt ni Git), asi que las dos
+        # listas se instalan explicitamente.
+        run: python -m pip install -r requirements.txt -r requirements-web.txt
 
       - name: Show ORM version
         run: python -c "import peewee; print('peewee', peewee.__version__)"
@@ -59,6 +63,46 @@ jobs:
 
       - name: Run smoke check
         run: python -m app.main --smoke
+
+  webapp-only:
+    name: Webapp server dependencies only
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install only the webapp dependencies
+        # Esto es exactamente lo que va instalado en el Windows Server 2019:
+        # ni PyQt, ni Git, ni salida a internet. Si esta lista vuelve a
+        # arrastrar el escritorio, el servidor de la fabrica lo va a necesitar
+        # y este job lo tiene que avisar.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-web.txt -r requirements-test.txt
+
+      - name: The webapp does not need the desktop stack
+        run: |
+          if python -c "import PyQt5" 2> /dev/null; then
+            echo "::error::El servidor webapp no debe depender de PyQt"
+            exit 1
+          fi
+          python -c "import webapp; print('la webapp importa sin PyQt')"
+
+      - name: Run the webapp tests
+        run: >
+          python -m pytest
+          tests/test_webapp_production.py
+          tests/test_webapp_qr_orders.py
+          tests/test_webapp_server_executable.py
+          tests/test_webapp_server_deploy_scripts.py
+          -q
 
   frozen-windows:
     name: Windows frozen EXE and installer smoke

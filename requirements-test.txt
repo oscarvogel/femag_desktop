@@ -1,0 +1,8 @@
+# Dependencias para correr la suite de tests.
+#
+# No son ni del escritorio ni del servidor: el escritorio ya declara pytest en
+# requirements.txt y el servidor de la fabrica no tiene que tener pytest
+# instalado. Este archivo existe para el caso intermedio: validar que la
+# webapp anda con SOLO requirements-web.txt, que es lo que va instalado en el
+# Windows Server 2019.
+pytest>=8.0
