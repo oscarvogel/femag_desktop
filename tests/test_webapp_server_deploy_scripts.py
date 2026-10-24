@@ -128,3 +128,57 @@ def test_webapp_server_script_is_utf8_with_bom_for_powershell_5_1():
     assert raw.startswith(b"\xef\xbb\xbf"), (
         "deploy_webapp_server.ps1 necesita BOM UTF-8 para que PowerShell 5.1 lo lea bien."
     )
+
+
+def test_webapp_server_can_run_without_https_and_without_caddy():
+    """El flujo de partes no usa la cámara, así que no hace falta HTTPS.
+
+    La pantalla de producción no llama a getUserMedia: el turno se elige de un
+    select nativo. El QR de turno se escanea con la cámara NATIVA del celular,
+    que no exige contexto seguro. Entonces se puede servir por http, sin Caddy
+    y sin instalar un certificado en cada teléfono.
+    """
+    content = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    # Sin Caddy la webapp tiene que escuchar en la placa, no en loopback.
+    assert '$webHost = "0.0.0.0"' in content
+    assert '$webHost = "127.0.0.1"' in content
+    assert 'set "FEMAG_WEB_HOST=$webHost"' in content
+
+    # El QR de turno tiene que llevar el puerto cuando no hay proxy inverso.
+    assert "http://${PublicHostName}:$WebPort" in content
+
+    # El firewall tiene que abrir el puerto del backend, no el 443.
+    assert 'Set-WebappFirewallRule -Port $WebPort -DisplayName "FEMAG Webapp HTTP"' in content
+
+
+def test_production_screen_does_not_need_the_camera():
+    """La pantalla que pidió Oscar (cargar partes) no usa la cámara.
+
+    Si esto cambia, el modo sin HTTPS deja de servir y hay que volver a
+    pensar el certificado.
+    """
+    template = (ROOT / "webapp" / "templates" / "production.html").read_text(encoding="utf-8")
+
+    assert "getUserMedia" not in template
+    assert "mediaDevices" not in template
+    # El turno se elige de un select nativo: son tres opciones.
+    assert '<select id="turno"' in template
+
+
+def test_webapp_session_cookie_does_not_require_https():
+    """Sin HTTPS la cookie de sesión tiene que poder viajar en http.
+
+    Flask no marca la cookie como secure salvo que se lo pidan, así que el
+    login funciona por http: por eso el modo sin Caddy es viable.
+    """
+    offenders = [
+        path.name
+        for path in (ROOT / "webapp").glob("*.py")
+        if "SESSION_COOKIE_SECURE" in path.read_text(encoding="utf-8")
+    ]
+
+    assert not offenders, (
+        f"Si la cookie de sesion exige HTTPS, el modo sin Caddy deja de poder "
+        f"iniciar sesion desde el celular: {offenders}"
+    )
