@@ -46,10 +46,52 @@ def test_webapp_server_public_name_does_not_use_the_mdns_local_suffix():
 def test_windows_deployment_guide_covers_first_install_and_redeploy():
     content = WINDOWS_GUIDE.read_text(encoding="utf-8")
 
-    assert "## Primera instalación" in content
+    assert "## Paso 3 — Primer despliegue" in content
     assert "## Re-despliegue" in content
     assert "Caddy" in content
     assert "/health" in content
+
+
+def test_windows_deployment_guide_covers_the_factory_install_steps():
+    """El runbook es lo que va a seguir el administrador en la fábrica.
+
+    Si le falta un paso, la instalación se frena en la planta y no hay a quién
+    consultar.
+    """
+    content = WINDOWS_GUIDE.read_text(encoding="utf-8")
+
+    for section in (
+        "## Paso 0 — Preparar la base",
+        "## Paso 1 — Instalar Python y Caddy",
+        "## Paso 3 — Primer despliegue",
+        "## Paso 4 — DNS interno",
+        "## Paso 5 — Perfil de red y firewall",
+        "## Paso 6 — Distribuir la CA raíz de Caddy",
+        "## Paso 7 — Validar",
+        "## Re-despliegue",
+        "## Rollback",
+        "## Problemas frecuentes",
+    ):
+        assert section in content, section
+
+    # La CA interna exige dos pasos en iOS: instalar el perfil y activar la
+    # confianza completa. Con uno solo, Safari sigue avisando.
+    assert "Certificate Trust Settings" in content
+    assert "Install a certificate" in content
+
+    # El certificado de la CA hay que sacarlo del perfil del servicio.
+    assert "root.crt" in content
+    assert "systemprofile" in content
+
+    # El runbook tiene que ofrecer el modo sin HTTPS: es el que no le pide
+    # nada al operario y es el que se va a usar para arrancar.
+    assert "## Los dos modos" in content
+    assert "-SkipCaddy" in content
+    assert "cámara nativa" in content
+
+    # El nombre publico no puede terminar en .local (RFC 6762 / mDNS).
+    assert "femag.lan" in content
+    assert "femag.local" not in content
 
 
 def test_webapp_server_dependencies_do_not_pull_the_desktop_stack():
