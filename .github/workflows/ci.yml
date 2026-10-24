@@ -180,6 +180,20 @@ jobs:
             Where-Object { $_.FullName -match '[\\/]reportlab[\\/]fonts[\\/]' }
           if (-not $fonts) { throw "No se empaquetaron las fuentes de reportlab; la hoja de QR no saldria" }
 
+      - name: Build webapp server installer
+        shell: powershell
+        run: |
+          # El instalador lleva el ejecutable congelado: si este paso compila,
+          # el paquete que se copia a la fabrica esta completo.
+          . .\scripts\Resolve-InnoSetup.ps1
+          $iscc = Resolve-InnoSetup -NoAutoInstall
+          & $iscc "/DMyAppVersion=1.0.0" "installer\FEMAG_Webapp_Server.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo al compilar el instalador del servidor webapp" }
+
+          $setup = "installer\output\FEMAG_Webapp_Server_Setup.exe"
+          if (-not (Test-Path $setup)) { throw "No se genero el instalador del servidor webapp" }
+          Write-Host "Webapp server installer OK: $setup"
+
       - name: Verify required frozen resources
         shell: powershell
         run: |

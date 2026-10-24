@@ -64,16 +64,68 @@ así que el QR de turnos abriría en el teléfono sin encontrar el servidor. La
 misma RFC recomienda `.lan`, `.corp`, `.internal` o `.intranet` para redes
 privadas. Si más adelante hay un dominio propio, mejor ese.
 
+## La forma más simple: el instalador
+
+Hay un camino de un solo paso: **`FEMAG_Webapp_Server_Setup.exe`**.
+
+1. Copiar el `.exe` al servidor.
+2. Correrlo **como administrador**.
+3. Escribir el nombre del host, el puerto del servidor web y los datos de MySQL.
+4. Terminar.
+
+El instalador deja esto andando:
+
+| Qué | Dónde |
+| --- | --- |
+| El servidor | `C:\FEMAG\webapp\FEMAG Webapp Server.exe` (no necesita Python) |
+| La configuración | `C:\ProgramData\FEMAG\webapp.env` (sólo SYSTEM y administradores) |
+| El lanzador | `C:\FEMAG\webapp\run_webapp.cmd` |
+| El arranque automático | tarea programada `FEMAG Webapp QR` (SYSTEM, se reinicia 3 veces si se cae) |
+| El firewall | regla `FEMAG Webapp Server` en el puerto elegido |
+| El registro de la instalación | `C:\ProgramData\FEMAG\logs\instalar_servidor.log` |
+
+El instalador **verifica** que el servidor responda en `/health` antes de
+terminar. Si no levanta, muestra el error, deja la cola del log en pantalla y
+termina con código de error: el administrador no se queda creyendo que quedó
+andando.
+
+Para una instalación desatendida se puede pasar todo por línea de comandos:
+
+```powershell
+FEMAG_Webapp_Server_Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+  /HOST=femag.lan /WEBPORT=8000 /DBHOST=127.0.0.1 /DBNAME=femag_desktop `
+  /DBUSER=femag_webapp /DBPASSWORD=<clave>
+```
+
+**Los pasos 1 a 3 de más abajo son del camino manual** (instalar con el script
+de despliegue). Sirven cuando hay que actualizar sin reinstalar, o para ver
+exactamente qué se está tocando. Con el instalador no hacen falta: no hay que
+instalar Python, ni copiar el checkout, ni compilar nada.
+
+El instalador se genera desde el repositorio con:
+
+```powershell
+.\scripts\build_webapp_server_installer.ps1
+```
+
+y queda en `installer\output\FEMAG_Webapp_Server_Setup.exe`.
+
 ## Requisitos previos
 
 En el servidor:
 
 - [ ] Windows Server 2019 con la placa de red en perfil **Domain o Private** (ver [Paso 5](#paso-5--perfil-de-red-y-firewall)).
-- [ ] Python 3.12 instalado. El script acepta 3.10 o superior.
 - [ ] MySQL 8.x (o MariaDB) corriendo en el mismo servidor.
 - [ ] `femag.lan` resuelto por el DNS de la LAN.
-- [ ] Una copia del checkout del repositorio en el servidor.
 - [ ] Caddy 2.x (`C:\Caddy\caddy.exe`), **sólo si se va el modo con HTTPS**.
+
+Estos tres son **sólo del camino manual**:
+
+- [ ] Python 3.12 instalado. El script acepta 3.10 o superior.
+- [ ] Una copia del checkout del repositorio en el servidor.
+
+Con el instalador no hacen falta: el servidor va congelado en un `.exe` y no
+necesita Python ni el checkout.
 
 **Git no hace falta en el servidor.** `requirements-web.txt` lista sólo lo que
 usa la webapp (peewee, PyMySQL, python-dotenv, Pillow, reportlab, Flask,
@@ -147,8 +199,11 @@ hace el operario.
 > es la aplicación de escritorio (PyQt5): es un bundle de PyInstaller cuyo
 > punto de entrada es `app/production_entrypoint.py`, y **no incluye el paquete
 > `webapp`**. Instalarlo en el servidor deja la GUI de oficina, no la webapp.
+>
+> El instalador que sí sirve es **`FEMAG_Webapp_Server_Setup.exe`**, que es
+> otro bundle: el del servidor. Ver [la forma más simple](#la-forma-más-simple-el-instalador).
 
-El servidor necesita **el código fuente**, no un ejecutable. Y no el repo
+El camino manual (este paso) necesita **el código fuente**, no un ejecutable. Y no el repo
 entero: el checkout local pesa **1,4 GB**, casi todo en venvs y builds que no
 sirven para nada acá (`.venv`, `.venv_broken`, `venv_p4`, `dist`, `build`,
 `installer/output`, `backups`, `outputs`). Lo que la webapp realmente carga al
