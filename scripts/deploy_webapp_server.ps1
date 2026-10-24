@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$SourcePath = (Split-Path -Parent $PSScriptRoot),
     [string]$InstallRoot = "C:\FEMAG\webapp",
@@ -6,9 +6,18 @@ param(
     [string]$TaskName = "FEMAG Webapp QR",
     [string]$PythonPath = "",
     [int]$WebPort = 8000,
-    [string]$PublicHostName = "femag.local",
+    # El nombre NO debe terminar en ".local": la RFC 6762 reserva ese sufijo
+    # para mDNS y los celulares (iOS y Android) resuelven los nombres .local
+    # por multicast, no por el DNS de la LAN. La RFC recomienda .lan, .corp,
+    # .internal o .intranet para redes privadas.
+    [string]$PublicHostName = "femag.lan",
     [string]$CaddyExePath = "",
     [string]$CaddyServiceName = "FEMAG Caddy",
+    [string]$FirewallProfiles = "Domain,Private",
+    # Con Caddy, la webapp escucha solo en loopback y Caddy publica el 443.
+    # Sin Caddy (-SkipCaddy), la webapp tiene que escuchar en la placa de red
+    # para que el celular la alcance: por eso el default cambia a 0.0.0.0.
+    [string]$WebHost = "",
     [switch]$SkipCaddy,
     [switch]$SkipHealthCheck
 )
@@ -27,17 +36,53 @@ function Assert-Administrator {
     }
 }
 
+function Resolve-BasePython {
+    # Windows Server 2019 no viene con Python. Se busca el launcher "py" y, si no
+    # esta, el "python" del PATH. Se prefiere 3.12, que es la version con la que
+    # se valido la webapp, pero se acepta cualquier 3.10 o superior: un servidor
+    # con 3.13 instalado no deberia quedar afuera del despliegue.
+    if ($PythonPath) {
+        if (-not (Test-Path -LiteralPath $PythonPath)) {
+            throw "No se encontró el intérprete de Python en $PythonPath."
+        }
+        return ,@($PythonPath)
+    }
+
+    $candidates = @()
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $candidates += ,@("py", "-3.12")
+        $candidates += ,@("py", "-3")
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        $candidates += ,@("python")
+    }
+
+    foreach ($candidate in $candidates) {
+        $executable = $candidate[0]
+        $prefix = @()
+        if ($candidate.Count -gt 1) { $prefix = $candidate[1..($candidate.Count - 1)] }
+        $version = & $executable @prefix -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+        if ($LASTEXITCODE -ne 0) { continue }
+        $text = ($version | Select-Object -First 1)
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+        $parts = $text.Trim().Split(".")
+        if ($parts.Count -lt 2) { continue }
+        if ([int]$parts[0] -lt 3) { continue }
+        if ([int]$parts[0] -eq 3 -and [int]$parts[1] -lt 10) { continue }
+        Write-Step "Python base: $text ($executable $($prefix -join ' '))"
+        return ,(@($executable) + $prefix)
+    }
+
+    throw "No se encontró Python 3.10 o superior. Instale Python 3.12 en el servidor o indique -PythonPath."
+}
+
 function Invoke-BasePython {
     param([string[]]$Arguments)
-    if ($PythonPath) {
-        & $PythonPath @Arguments
-    } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3.12 @Arguments
-    } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-        & python @Arguments
-    } else {
-        throw "No se encontró Python. Instale Python 3.12 o indique -PythonPath."
-    }
+    $base = Resolve-BasePython
+    $executable = $base[0]
+    $prefix = @()
+    if ($base.Count -gt 1) { $prefix = $base[1..($base.Count - 1)] }
+    & $executable @prefix @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Python base falló con código $LASTEXITCODE." }
 }
 
@@ -72,6 +117,31 @@ function Wait-ForHealthCheck {
     throw "La webapp no respondió saludable en http://127.0.0.1:$Port/health. Revise la tarea '$TaskName' y sus logs."
 }
 
+function Set-WebappFirewallRule {
+    param([int]$Port, [string]$DisplayName)
+    # El perfil de red del servidor decide si la regla de firewall aplica. En
+    # una red de fabrica el Windows Server 2019 puede quedar en perfil Public:
+    # con la regla restringida a Domain/Private el celular no entra y parece un
+    # problema de HTTPS cuando en realidad es el firewall.
+    $allowedProfiles = @($FirewallProfiles -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $invalidProfiles = @($allowedProfiles | Where-Object { $_ -notin @("Domain", "Private", "Public") })
+    if ($invalidProfiles.Count -gt 0) {
+        throw "FirewallProfiles inválido: $($invalidProfiles -join ', '). Use Domain, Private, Public o una combinación separada por comas."
+    }
+    if (-not (Get-NetFirewallRule -DisplayName $DisplayName -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $DisplayName -Direction Inbound -Action Allow `
+            -Protocol TCP -LocalPort $Port -Profile $FirewallProfiles | Out-Null
+    } else {
+        Set-NetFirewallRule -DisplayName $DisplayName -Profile $FirewallProfiles -ErrorAction SilentlyContinue | Out-Null
+    }
+    if (Get-Command Get-NetConnectionProfile -ErrorAction SilentlyContinue) {
+        $activeProfiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | ForEach-Object { $_.NetworkCategory } | Sort-Object -Unique)
+        if ($activeProfiles.Count -gt 0 -and @($activeProfiles | Where-Object { $_ -in $allowedProfiles }).Count -eq 0) {
+            Write-Warning "El perfil de red activo del servidor es '$($activeProfiles -join ', ')' y la regla de firewall cubre '$FirewallProfiles'. El celular no va a entrar hasta que coincidan: usá -FirewallProfiles $($activeProfiles -join ',') o cambiá el perfil con Set-NetConnectionProfile."
+        }
+    }
+}
+
 Assert-Administrator
 
 $SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
@@ -85,6 +155,16 @@ if ($WebPort -lt 1 -or $WebPort -gt 65535) { throw "WebPort debe estar entre 1 y
 if ([string]::IsNullOrWhiteSpace($PublicHostName)) { throw "Indique un nombre público interno con -PublicHostName." }
 if (-not $SkipCaddy -and -not $CaddyExePath) {
     throw "Indique -CaddyExePath para publicar HTTPS o use -SkipCaddy sólo para preparar el backend local."
+}
+
+# Sin Caddy no hay proxy inverso: la webapp es la que escucha en la red. Con
+# Caddy, la webapp queda en loopback y Caddy publica el 443.
+if ($WebHost) {
+    $webHost = $WebHost
+} elseif ($SkipCaddy) {
+    $webHost = "0.0.0.0"
+} else {
+    $webHost = "127.0.0.1"
 }
 
 $configDirectory = Split-Path -Parent $ConfigPath
@@ -102,6 +182,40 @@ if ($configContent -notmatch "(?m)^FEMAG_AUTO_MIGRATE_SCHEMA=0$") {
     throw "El archivo $ConfigPath debe incluir FEMAG_AUTO_MIGRATE_SCHEMA=0 para que el despliegue no altere el esquema MySQL."
 }
 Protect-ConfigFile -Path $ConfigPath
+
+# La URL publica del servidor es la que se imprime en el QR de cada turno, asi
+# que tiene que ser la que el celular puede abrir. Sale de -PublicHostName, pero
+# el archivo de configuracion puede sobreescribirla.
+if ($SkipCaddy) {
+    # Sin Caddy no hay TLS: el celu entra por http. El QR de turnos se escanea
+    # con la camara NATIVA del celular (esa no exige contexto seguro); lo que
+    # pierde HTTPS es la camara DENTRO de la pagina y la PWA instalable.
+    $publicUrl = "http://${PublicHostName}:$WebPort"
+} else {
+    $publicUrl = "https://$PublicHostName"
+}
+$publicUrlMatch = [regex]::Match($configContent, "(?m)^FEMAG_WEB_PUBLIC_URL=(.+)$")
+if ($publicUrlMatch.Success) {
+    $candidateUrl = $publicUrlMatch.Groups[1].Value.Trim()
+    if ($candidateUrl) { $publicUrl = $candidateUrl }
+}
+if (-not $SkipCaddy -and -not $publicUrl.StartsWith("https://")) {
+    throw "FEMAG_WEB_PUBLIC_URL debe empezar con https:// (valor actual: $publicUrl). La cámara del celular sólo funciona en un contexto seguro."
+}
+if ($SkipCaddy -and $publicUrl.StartsWith("https://")) {
+    Write-Warning "FEMAG_WEB_PUBLIC_URL es https pero el despliegue va sin Caddy: no hay ningún servidor atiendo TLS y el celular no va a poder entrar."
+}
+
+# El secreto con el que se firman las cookies de sesion vive fuera del perfil
+# de SYSTEM, junto a la configuracion, y con los mismos permisos restringidos.
+$secretFilePath = Join-Path $configDirectory "webapp_secret.key"
+$secretMatch = [regex]::Match($configContent, "(?m)^FEMAG_WEB_SECRET_FILE=(.+)$")
+if ($secretMatch.Success -and $secretMatch.Groups[1].Value.Trim()) {
+    $secretFilePath = $secretMatch.Groups[1].Value.Trim()
+}
+if (-not [System.IO.Path]::IsPathRooted($secretFilePath)) {
+    $secretFilePath = Join-Path $configDirectory $secretFilePath
+}
 
 Write-Step "Sincronizando código de la webapp"
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -131,12 +245,21 @@ $launcher = @"
 @echo off
 setlocal
 set "FEMAG_ENV_FILE=$ConfigPath"
-set "FEMAG_WEB_HOST=127.0.0.1"
+set "FEMAG_WEB_HOST=$webHost"
 set "FEMAG_WEB_PORT=$WebPort"
+set "FEMAG_WEB_PUBLIC_URL=$publicUrl"
+set "FEMAG_WEB_SECRET_FILE=$secretFilePath"
 cd /d "$InstallRoot"
 "$venvPython" -m webapp
 "@
+# Sin BOM: cmd.exe ve el BOM como parte del primer comando y el arranque falla.
 [System.IO.File]::WriteAllText($launcherPath, $launcher, (New-Object System.Text.UTF8Encoding($false)))
+
+if ($SkipCaddy) {
+    $taskDescription = "Escucha en ${webHost}:${WebPort} (LAN, sin TLS); el celular entra por http."
+} else {
+    $taskDescription = "Sólo escucha en localhost; Caddy publica HTTPS a la LAN."
+}
 
 Write-Step "Registrando ejecución automática"
 $action = New-ScheduledTaskAction -Execute $env:ComSpec -Argument "/d /c `"`"$launcherPath`"`""
@@ -144,7 +267,7 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
-    -Description "FEMAG Webapp QR interna. Sólo escucha en localhost; Caddy publica HTTPS a la LAN."
+    -Description "FEMAG Webapp QR interna. $taskDescription"
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
@@ -179,9 +302,23 @@ $PublicHostName {
         & $CaddyExePath reload --config $caddyConfigPath --adapter caddyfile
         if ($LASTEXITCODE -ne 0) { throw "No se pudo recargar Caddy; se conserva su configuración anterior." }
     }
-    if (-not (Get-NetFirewallRule -DisplayName "FEMAG Webapp HTTPS" -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName "FEMAG Webapp HTTPS" -Direction Inbound -Action Allow `
-            -Protocol TCP -LocalPort 443 -Profile Domain,Private | Out-Null
+    # El perfil de red del servidor decide si la regla de firewall aplica. En
+    # una red de fabrica el Windows Server 2019 puede quedar en perfil Public:
+    # con la regla restringida a Domain/Private el celular no entra y parece un
+    # problema de HTTPS cuando en realidad es el firewall.
+    Set-WebappFirewallRule -Port 443 -DisplayName "FEMAG Webapp HTTPS"
+
+    Write-Step "Verificando que Caddy publique el puerto 443"
+    $listening = $false
+    for ($attempt = 0; $attempt -lt 15; $attempt++) {
+        if (Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue) {
+            $listening = $true
+            break
+        }
+        Start-Sleep -Seconds 2
+    }
+    if (-not $listening) {
+        throw "Caddy no está escuchando en el puerto 443. Revisá el servicio '$CaddyServiceName' y que $PublicHostName resuelva a este servidor."
     }
 }
 
@@ -190,10 +327,32 @@ if (-not $SkipHealthCheck) {
     Wait-ForHealthCheck -Port $WebPort
 }
 
+if ($SkipCaddy) {
+    # Sin proxy inverso la webapp es la que atiende la red: hay que abrir su
+    # puerto, no el 443.
+    Write-Step "Publicando el backend en la LAN (puerto $WebPort, sin TLS)"
+    Set-WebappFirewallRule -Port $WebPort -DisplayName "FEMAG Webapp HTTP"
+}
+
+# El secreto de sesion lo crea la webapp en el primer arranque. Se protege con
+# los mismos permisos que la configuracion: lo lee SYSTEM y lo administran los
+# administradores.
+if (Test-Path -LiteralPath $secretFilePath) {
+    Protect-ConfigFile -Path $secretFilePath
+}
+
 Write-Host ""
 Write-Host "Despliegue listo." -ForegroundColor Green
 Write-Host "Backend: http://127.0.0.1:$WebPort/health"
-if (-not $SkipCaddy) {
+Write-Host "URL publica (la que se imprime en el QR de turnos): $publicUrl"
+if ($SkipCaddy) {
+    Write-Host "LAN: $publicUrl/health"
+    Write-Host "Sin HTTPS: el celular entra por http y el navegador avisa que no es seguro."
+    Write-Host "La camara NO funciona dentro de la pagina (hace falta HTTPS). Escanear el QR de turno con la camara NATIVA del celular: esa no exige contexto seguro y abre el link."
+    Write-Host "La PWA no se puede instalar (hace falta HTTPS): el operador entra por el navegador y se deja un favorito."
+} else {
     Write-Host "LAN: https://$PublicHostName/health"
     Write-Host "Instale la CA interna de Caddy en los celulares autorizados antes de usar la cámara."
+    $caddyStorage = Join-Path $env:SystemRoot "System32\config\systemprofile\AppData\Roaming\Caddy"
+    Write-Host "Certificado raíz para distribuir: $caddyStorage\pki\authorities\local\root.crt"
 }
