@@ -197,10 +197,14 @@ class F150Page(QWidget):
         )
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         history_layout.addWidget(self.history)
+        self.recover_button = QPushButton("Recuperar TXT del lote seleccionado")
+        self.recover_button.setObjectName("recoverF150Button")
+        history_layout.addWidget(self.recover_button)
         root.addWidget(history_group, 1)
 
         apply_button.clicked.connect(self.refresh)
         generate.clicked.connect(self._generate)
+        self.recover_button.clicked.connect(self._recover_txt)
         self.configure_origin_button.clicked.connect(self._configure_origin)
         self._load_clients()
         self.refresh()
@@ -358,6 +362,7 @@ class F150Page(QWidget):
             ]
             for column, value in enumerate(values):
                 self.history.setItem(row, column, QTableWidgetItem(str(value)))
+            self.history.item(row, 0).setData(Qt.UserRole, batch.id)
 
     def _selected_remittances(self) -> list[Remittance]:
         selected = []
@@ -391,4 +396,28 @@ class F150Page(QWidget):
             self,
             "F150 generado",
             f"Se generó {batch.batch_number} con {batch.remittance_count} remito(s).",
+        )
+
+    def _recover_txt(self) -> None:
+        row = self.history.currentRow()
+        item = self.history.item(row, 0) if row >= 0 else None
+        if item is None:
+            QMessageBox.information(self, "F150", "Seleccioná un lote del historial.")
+            return
+        batch = F150Batch.get_by_id(item.data(Qt.UserRole))
+        suggested = self.output_dir / batch.file_name
+        output_path, _filter = QFileDialog.getSaveFileName(
+            self, "Recuperar archivo F150", str(suggested),
+            "Archivo de texto (*.TXT *.txt)",
+        )
+        if not output_path:
+            return
+        try:
+            output = self.service.recover_txt(batch, output_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "No se pudo recuperar el F150", str(exc))
+            return
+        QMessageBox.information(
+            self, "F150 recuperado",
+            f"Archivo guardado en:\n{output}\nLa presentación original no fue modificada.",
         )
