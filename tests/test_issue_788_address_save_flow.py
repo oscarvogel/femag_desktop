@@ -81,7 +81,7 @@ def test_new_address_can_be_used_to_save_complete_order(db, monkeypatch, primary
     dest = LoadOrderDestination.get(LoadOrderDestination.order == order)
     assert dest.delivery_address.id == address_id
     assert len(list(dest.products)) == 1
-    assert dest.products[0].product.id == data["product"].id
+    assert list(dest.products)[0].product.id == data["product"].id
 
 
 def test_save_explains_invalid_new_address_without_dropping_draft(db):
