@@ -185,7 +185,7 @@ class LegacyDbfMasterImporter:
         action, client, warnings, completados, pisados = self._upsert_client(
             values, source_system, source_id, batch
         )
-        backfilled, updated, ignored = self._ensure_client_addresses(client, row)
+        backfilled, updated, ignored, created, completed = self._ensure_client_addresses(client, row)
         return ImportOutcome(
             action,
             tuple(warnings),
@@ -193,6 +193,8 @@ class LegacyDbfMasterImporter:
                 ("localidad_backfill", backfilled),
                 ("localidad_actualizada", updated),
                 ("localidad_respetada", ignored),
+                ("direcciones_creadas", created),
+                ("ciudad_provincia_completadas", completed),
                 ("campos_completados", completados),
                 ("campos_pisados", pisados),
             ),
@@ -314,87 +316,227 @@ class LegacyDbfMasterImporter:
         )
         return {**values, "cuit": client.cuit}
 
-    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> tuple[int, int, int]:
-        """Deja la dirección del cliente con su localidad DGR (#688).
+    def _ensure_client_addresses(self, client: Client, row: dict[str, Any]) -> tuple[int, int, int, int, int]:
+        """Deja las direcciones fiscal y de entrega con datos DGR coherentes.
 
-        ``ClientService.ensure_imported_shared_address`` **reutiliza** la
-        dirección que ya existe cuando el cliente ya tenía una, y al reutilizarla
-        no toca ``locality``. Las direcciones que se importaron el 26 de agosto,
-        cuando ``dgrlocality`` estaba vacía, quedaron así con ``locality_id =
-        NULL`` y el F150 no puede emitir: sin localidad no sale la provincia ni
-        el país del destino (#688).
+        El legacy separa los dos domicilios:
 
-        Por eso el backfill vive **acá** y no en el servicio: el servicio lo
-        comparte con el ABM de clientes (#264) y ahí una reimportación no tiene
-        por qué tocar lo que el operador dejó a mano. Acá el backfill es
-        explícito, cuenta lo que hizo y el legacy manda cuando el dato cambió.
+        - ``DOMICILIO``/``CODPOS``/``LOCALIDAD``: domicilio legal o fiscal;
+        - ``C_DOMI``/``C_CODPOS``/``C_LOCAL``: domicilio comercial o de entrega,
+          que es el que usa el remito impreso.
 
-        Devuelve ``(direcciones sin localidad que se completaron, direcciones
-        cuya localidad cambió, direcciones con otra localidad que se respetaron)``.
+        El importador anterior tomaba solo ``DOMICILIO`` como una dirección
+        compartida. Eso confundía fiscal con entrega y, además, dejaba
+        ``province = "Sin especificar"`` aunque la localidad DGR fuera válida
+        (#688, #743, #790). Ahora, cuando los dos domicilios son distintos, se
+        mantienen separados; cuando son iguales, se conserva una sola dirección
+        compartida para no duplicar.
+
+        El backfill de localidad/ciudad/provincia es conservador: en modo
+        ``patch`` solo completa vacíos o ``Sin especificar`` y nunca pisa lo que
+        el operador corrigió a mano.
+
+        Devuelve ``(localidades completadas, localidades actualizadas,
+        localidades respetadas, direcciones creadas, ciudades/provincias
+        completadas)``.
         """
-        address = self._value(row, "DOMICILIO", "DIRECCION", "ADDRESS")
-        if not address:
-            return 0, 0, 0
+        fiscal = self._address_values(
+            row,
+            address_aliases=("DOMICILIO", "DIRECCION", "ADDRESS"),
+            postal_aliases=("CODPOS", "CODIGOPOSTAL", "CP"),
+            locality_aliases=("LOCALIDAD", "CODLOC"),
+            city_aliases=("IMPOSITIVO", "CIUDAD", "CITY"),
+        )
+        delivery = self._address_values(
+            row,
+            address_aliases=("C_DOMI", "CDOMI"),
+            postal_aliases=("C_CODPOS", "CCODPOS"),
+            locality_aliases=("C_LOCAL", "CLOCAL"),
+            city_aliases=("IMPOSITIVO", "CIUDAD", "CITY"),
+        )
+        if not fiscal["address"] and not delivery["address"]:
+            return 0, 0, 0, 0, 0
+        if not delivery["address"]:
+            delivery = dict(fiscal)
+        if not fiscal["address"]:
+            fiscal = dict(delivery)
 
-        city = self._value(row, "IMPOSITIVO", "CIUDAD", "CITY", default="Sin especificar")
-        postal_code = self._value(row, "CODPOS", "CODIGOPOSTAL", "CP")
+        totals = [0, 0, 0, 0, 0]
+        if self._same_address(fiscal, delivery):
+            ClientService.consolidate_identical_fiscal_delivery(client)
+            totals = self._apply_address_totals(
+                totals,
+                self._ensure_client_address(
+                    client, CLIENT_ADDRESS_TYPE_SHARED, fiscal
+                ),
+            )
+            return tuple(totals)
+
+        # La dirección fiscal puede estar cubierta por una compartida que ya
+        # existe. En ese caso no se crea una fiscal duplicada.
+        shared = (
+            ClientAddress.select()
+            .where(
+                (ClientAddress.client == client)
+                & (ClientAddress.address_type == CLIENT_ADDRESS_TYPE_SHARED)
+            )
+            .first()
+        )
+        if shared is not None and self._same_address_text(shared.address, fiscal["address"]):
+            totals = self._apply_address_totals(
+                totals, self._fill_address_fields(shared, fiscal)
+            )
+        else:
+            totals = self._apply_address_totals(
+                totals,
+                self._ensure_client_address(
+                    client, CLIENT_ADDRESS_TYPE_FISCAL, fiscal
+                ),
+            )
+        totals = self._apply_address_totals(
+            totals,
+            self._ensure_client_address(
+                client, CLIENT_ADDRESS_TYPE_DELIVERY, delivery
+            ),
+        )
+        return tuple(totals)
+
+    @staticmethod
+    def _apply_address_totals(totals: list[int], partial: tuple[int, int, int, int, int]) -> list[int]:
+        return [left + right for left, right in zip(totals, partial)]
+
+    def _address_values(
+        self,
+        row: dict[str, Any],
+        *,
+        address_aliases: tuple[str, ...],
+        postal_aliases: tuple[str, ...],
+        locality_aliases: tuple[str, ...],
+        city_aliases: tuple[str, ...],
+    ) -> dict[str, Any]:
+        from app.services.dgr_validation import derive_city_province
+
+        address = " ".join(self._value(row, *address_aliases).split())
+        postal_code = self._value(row, *postal_aliases)
+        locality = self._find_locality(row, *locality_aliases)
+        derived_city, derived_province = derive_city_province(locality)
+        legacy_city = self._value(row, *city_aliases)
+        city = derived_city or legacy_city or "Sin especificar"
+        province = derived_province or "Sin especificar"
         observations = f"Código postal: {postal_code}" if postal_code else None
-        locality = self._find_locality(row)
-        ClientService.ensure_imported_shared_address(
-            client,
-            province="Sin especificar",
-            city=city,
-            address=address,
-            observations=observations,
-            locality=locality,
+        return {
+            "address": address,
+            "city": city,
+            "province": province,
+            "locality": locality,
+            "observations": observations,
+        }
+
+    @staticmethod
+    def _same_address_text(left: str | None, right: str | None) -> bool:
+        from app.services.dgr_validation import normalize_dgr_text
+
+        return normalize_dgr_text(left) == normalize_dgr_text(right)
+
+    def _same_address(self, left: dict[str, Any], right: dict[str, Any]) -> bool:
+        return (
+            self._same_address_text(left.get("address"), right.get("address"))
+            and (left.get("locality_id") or (left.get("locality").id if left.get("locality") else None))
+            == (right.get("locality_id") or (right.get("locality").id if right.get("locality") else None))
         )
-        return self._backfill_address_locality(client, locality)
 
-    def _backfill_address_locality(self, client: Client, locality: DgrLocality | None) -> tuple[int, int]:
-        """Le pone la localidad DGR a la dirección del cliente aunque ya exista.
+    def _ensure_client_address(
+        self, client: Client, address_type: str, values: dict[str, Any]
+    ) -> tuple[int, int, int, int, int]:
+        """Crea o completa una dirección del cliente sin duplicarla."""
+        existing = (
+            ClientAddress.select()
+            .where(
+                (ClientAddress.client == client)
+                & (ClientAddress.address_type == address_type)
+            )
+            .order_by(ClientAddress.id)
+            .first()
+        )
+        if existing is not None:
+            return self._fill_address_fields(existing, values)
 
-        Tres reglas, que son las de #688:
-
-        - si el legacy no trae localidad, **no** se toca la que ya tenía: el
-          importador no tiene nada que decir sobre ese dato;
-        - si la dirección no tenía localidad, se le pone la del legacy
-          (``backfilled``);
-        - si la dirección tenía **otra** localidad, se actualiza a la del legacy
-          (``updated``): el legacy es la fuente de verdad del dato importado.
-
-        En modo ``patch`` la tercera regla **no** aplica: si la dirección ya
-        tiene una localidad, se respeta (puede ser que el operador la haya
-        corregido a mano) y se cuenta como ``ignored``.
-
-        La escritura es idempotente: cuando la localidad ya es la del legacy no
-        se escribe nada, asi que correr la importación dos veces no cambia el
-        resultado.
-        """
-        if locality is None:
-            return 0, 0, 0
-
-        backfilled = 0
-        updated = 0
-        ignored = 0
-        addresses = ClientAddress.select().where(
+        # No duplicar una dirección del mismo domicilio que ya cubre la función
+        # pedida (por ejemplo, una compartida cuando se importa la fiscal).
+        compatible_types = {
+            CLIENT_ADDRESS_TYPE_FISCAL: (
+                CLIENT_ADDRESS_TYPE_FISCAL,
+                CLIENT_ADDRESS_TYPE_SHARED,
+            ),
+            CLIENT_ADDRESS_TYPE_DELIVERY: (
+                CLIENT_ADDRESS_TYPE_DELIVERY,
+                CLIENT_ADDRESS_TYPE_SHARED,
+            ),
+            CLIENT_ADDRESS_TYPE_SHARED: CLIENT_ADDRESS_TYPES,
+        }.get(address_type, (address_type,))
+        for candidate in ClientAddress.select().where(
             (ClientAddress.client == client)
-            & (ClientAddress.address_type.in_(CLIENT_ADDRESS_TYPES))
+            & (ClientAddress.address_type.in_(compatible_types))
+        ):
+            if self._same_address_text(candidate.address, values["address"]):
+                return self._fill_address_fields(candidate, values)
+
+        has_primary = ClientAddress.select().where(
+            (ClientAddress.client == client)
+            & (ClientAddress.active == True)  # noqa: E712
+            & (ClientAddress.is_primary == True)  # noqa: E712
+        ).exists()
+        ClientAddress.create(
+            client=client,
+            address_type=address_type,
+            province=values["province"],
+            city=values["city"],
+            address=values["address"],
+            locality=values["locality"],
+            is_primary=address_type == CLIENT_ADDRESS_TYPE_SHARED
+            or (address_type == CLIENT_ADDRESS_TYPE_DELIVERY and not has_primary),
+            observations=values["observations"],
         )
-        for address in addresses:
-            if address.locality_id == locality.id:
-                continue
+        return 0, 0, 0, 1, 0
+
+    def _fill_address_fields(
+        self, address: ClientAddress, values: dict[str, Any]
+    ) -> tuple[int, int, int, int, int]:
+        """Completa localidad/ciudad/provincia sin pisar cambios humanos."""
+        from app.services.dgr_validation import is_missing_dgr_text
+
+        locality = values.get("locality")
+        backfilled = updated = ignored = completed = 0
+        fields: list = []
+        if locality is not None:
             if address.locality_id is None:
+                address.locality = locality
                 backfilled += 1
-            elif self.mode == self.MODE_PATCH:
-                # La direccion ya tiene una localidad: puede ser que el
-                # operador la haya corregido a mano. No se toca.
-                ignored += 1
-                continue
-            else:
-                updated += 1
-            address.locality = locality
-            address.save(only=[ClientAddress.locality])
-        return backfilled, updated, ignored
+                fields.append(ClientAddress.locality)
+            elif address.locality_id != locality.id:
+                if self.mode == self.MODE_PATCH:
+                    ignored += 1
+                else:
+                    address.locality = locality
+                    updated += 1
+                    fields.append(ClientAddress.locality)
+
+        for field, key in (
+            (ClientAddress.city, "city"),
+            (ClientAddress.province, "province"),
+        ):
+            current = getattr(address, field.name)
+            value = values.get(key)
+            if is_missing_dgr_text(current) and not is_missing_dgr_text(value):
+                setattr(address, field.name, value)
+                completed += 1
+                fields.append(field)
+        if address.observations is None and values.get("observations"):
+            address.observations = values["observations"]
+            fields.append(ClientAddress.observations)
+        if fields:
+            address.save(only=fields)
+        return backfilled, updated, ignored, 0, completed
 
     def _import_carriers(self, row: dict[str, Any], source_system: str, batch: ImportBatch) -> ImportOutcome:
         source_id = self._required(row, "carriers", "CODIGO", "ID", "IDLEGACY")
@@ -612,8 +754,8 @@ class LegacyDbfMasterImporter:
         truck.save()
         return truck, "updated", tuple(warnings)
 
-    def _find_locality(self, row: dict[str, Any]) -> DgrLocality | None:
-        code = self._value(row, "LOCALIDAD", "C_LOCAL", "CODLOC")
+    def _find_locality(self, row: dict[str, Any], *aliases: str) -> DgrLocality | None:
+        code = self._value(row, *(aliases or ("LOCALIDAD", "C_LOCAL", "CODLOC")))
         if not code:
             return None
         return DgrLocality.select().where(DgrLocality.code == code).first()
@@ -790,6 +932,9 @@ class LegacyDbfMasterImporter:
         # cuántas cambiaron de localidad por culpa del legacy (#688).
         summary["clients"]["localidad_backfill"] = 0
         summary["clients"]["localidad_actualizada"] = 0
+        summary["clients"]["localidad_respetada"] = 0
+        summary["clients"]["direcciones_creadas"] = 0
+        summary["clients"]["ciudad_provincia_completadas"] = 0
         return summary
 
     def _read_dbf(self, path: str | Path, *, encoding: str) -> list[dict[str, Any]]:

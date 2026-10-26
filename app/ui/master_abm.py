@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from app.models.dgr import DgrLocality
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
     CLIENT_ADDRESS_TYPE_FISCAL,
@@ -54,12 +55,14 @@ from app.models.masters import (
 )
 from app.services.client_service import ClientService
 from app.services.client_email_service import ClientEmailService
+from app.services.dgr_validation import derive_city_province, is_missing_dgr_text
 from app.services.client_opening_balance_service import (
     ClientOpeningBalanceService,
 )
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
+from app.ui.dgr_locality_combo import create_locality_combo, selected_locality_id
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
 from app.utils.datetime_utils import as_datetime
@@ -809,22 +812,41 @@ class ClientAddressEntryDialog(QDialog):
         self.city_input.setObjectName("addressCityInput")
         self.street_input = QLineEdit()
         self.street_input.setObjectName("addressStreetInput")
+        self.locality_combo = create_locality_combo(
+            object_name="addressLocalityInput"
+        )
+        self.locality_combo.currentIndexChanged.connect(self._apply_locality)
         self.active_combo = _combo("addressActiveInput", [(True, "Activo"), (False, "Inactivo")], include_empty=False)
         form.addWidget(QLabel("Cliente"), 0, 0)
         form.addWidget(self.client_combo, 0, 1)
         form.addWidget(QLabel("Tipo"), 1, 0)
         form.addWidget(self.type_combo, 1, 1)
-        form.addWidget(QLabel("Provincia"), 2, 0)
-        form.addWidget(self.province_input, 2, 1)
-        form.addWidget(QLabel("Ciudad"), 3, 0)
-        form.addWidget(self.city_input, 3, 1)
-        form.addWidget(QLabel("Direccion"), 4, 0)
-        form.addWidget(self.street_input, 4, 1)
-        form.addWidget(QLabel("Estado"), 5, 0)
-        form.addWidget(self.active_combo, 5, 1)
+        form.addWidget(QLabel("Localidad DGR"), 2, 0)
+        form.addWidget(self.locality_combo, 2, 1)
+        form.addWidget(QLabel("Provincia"), 3, 0)
+        form.addWidget(self.province_input, 3, 1)
+        form.addWidget(QLabel("Ciudad"), 4, 0)
+        form.addWidget(self.city_input, 4, 1)
+        form.addWidget(QLabel("Direccion"), 5, 0)
+        form.addWidget(self.street_input, 5, 1)
+        form.addWidget(QLabel("Estado"), 6, 0)
+        form.addWidget(self.active_combo, 6, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveAddressButton", self._save)
+
+    def _apply_locality(self) -> None:
+        locality_id = selected_locality_id(self.locality_combo)
+        if locality_id is None:
+            return
+        locality = DgrLocality.get_or_none(DgrLocality.id == locality_id)
+        if locality is None:
+            return
+        city, province = derive_city_province(locality)
+        if is_missing_dgr_text(self.city_input.text()) and city:
+            self.city_input.setText(city)
+        if is_missing_dgr_text(self.province_input.text()) and province:
+            self.province_input.setText(province)
 
     def _load_record(self) -> None:
         if self.record_id is not None:
@@ -832,32 +854,55 @@ class ClientAddressEntryDialog(QDialog):
             _set_combo(self.client_combo, address.client.id)
             _set_combo(self.type_combo, address.address_type)
             _set_combo(self.active_combo, address.active)
+            if address.locality_id is not None:
+                _set_combo(self.locality_combo, address.locality_id)
             self.province_input.setText(address.province)
             self.city_input.setText(address.city)
             self.street_input.setText(address.address)
+            self._apply_locality()
             return
         if self.client_id is not None:
             _set_combo(self.client_combo, self.client_id)
         if self.prefill_address:
             self.street_input.setText(self.prefill_address)
+        self._apply_locality()
 
     def _save(self) -> None:
         client_id = self.client_combo.currentData()
         province = self.province_input.text().strip()
         city = self.city_input.text().strip()
         street = self.street_input.text().strip()
-        if client_id is None or not province or not city or not street:
+        if (
+            client_id is None
+            or is_missing_dgr_text(province)
+            or is_missing_dgr_text(city)
+            or is_missing_dgr_text(street)
+        ):
             focus_widget = (
                 self.client_combo
                 if client_id is None
                 else self.province_input
-                if not province
+                if is_missing_dgr_text(province)
                 else self.city_input
-                if not city
+                if is_missing_dgr_text(city)
                 else self.street_input
             )
             self.feedback.show_warning(
-                "Complete cliente, provincia, ciudad y direccion.", focus_widget=focus_widget
+                "Complete cliente, provincia, ciudad y direccion (no se acepta "
+                "'Sin especificar').",
+                focus_widget=focus_widget,
+            )
+            return
+        locality_id = selected_locality_id(self.locality_combo)
+        locality = (
+            DgrLocality.get_or_none(DgrLocality.id == locality_id)
+            if locality_id is not None
+            else None
+        )
+        if locality_id is not None and locality is None:
+            self.feedback.show_warning(
+                "La localidad DGR seleccionada ya no existe.",
+                focus_widget=self.locality_combo,
             )
             return
         try:
@@ -875,9 +920,13 @@ class ClientAddressEntryDialog(QDialog):
                         if self.is_primary is None
                         else bool(self.is_primary)
                     ),
+                    locality=locality,
                 )
             else:
                 address = ClientAddress.get_by_id(self.record_id)
+                locality_kwargs = {}
+                if locality_id is not None or address.locality_id is None:
+                    locality_kwargs["locality"] = locality
                 self.saved_record = ClientService(self.current_user).update_address(
                     address,
                     client=client,
@@ -886,6 +935,7 @@ class ClientAddressEntryDialog(QDialog):
                     city=city,
                     address=street,
                     active=bool(self.active_combo.currentData()),
+                    **locality_kwargs,
                 )
             self.accept()
         except Exception as exc:

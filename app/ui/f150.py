@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -19,17 +20,31 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from app.models.dgr import DgrLocality
 from app.models.f150 import F150Batch
 from app.models.masters import Client
 from app.models.remittances import Remittance
+from app.services.dgr_validation import (
+    derive_city_province,
+    is_missing_dgr_text,
+)
 from app.services.f150_batch_service import F150BatchService
+from app.services.f150_dgr_service import (
+    F150DgrCorrectionService,
+    ProductDgrUpdate,
+)
 from app.services.f150_encoder import F150Encoder
+from app.ui.dgr_locality_combo import (
+    create_locality_combo,
+    selected_locality_id,
+)
 
 
 F150_OUTPUT_DIR = Path("outputs") / "f150"
@@ -109,6 +124,181 @@ class OriginLocalityDialog(QDialog):
         return self._chosen
 
 
+class F150DgrCorrectionDialog(QDialog):
+    """Corrige domicilio de entrega y rubros DGR sin entrar a MySQL (#790)."""
+
+    def __init__(self, *, current_user: str, remittance: Remittance, parent=None):
+        super().__init__(parent)
+        self.setObjectName("f150DgrCorrectionDialog")
+        self.setWindowTitle("Corregir datos DGR del F150")
+        self.resize(760, 520)
+        self.service = F150DgrCorrectionService(current_user)
+        self.remittance = Remittance.get_by_id(remittance.id)
+        self.address = self.remittance.delivery_address
+        self.included = F150BatchService.is_included(self.remittance)
+        self.result_info: dict | None = None
+        self._build()
+        self._load()
+
+    def _build(self) -> None:
+        root = QVBoxLayout(self)
+        self.identity_label = QLabel()
+        self.identity_label.setWordWrap(True)
+        root.addWidget(self.identity_label)
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs, 1)
+        self._build_destination_tab()
+        self._build_products_tab()
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setObjectName("f150DgrSaveButton")
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _build_destination_tab(self) -> None:
+        tab = QWidget()
+        form = QGridLayout(tab)
+        self.address_input = QLineEdit()
+        self.address_input.setObjectName("f150DgrAddressInput")
+        self.city_input = QLineEdit()
+        self.city_input.setObjectName("f150DgrCityInput")
+        self.province_input = QLineEdit()
+        self.province_input.setObjectName("f150DgrProvinceInput")
+        self.locality_combo = create_locality_combo(
+            object_name="f150DgrLocalityCombo",
+            current_id=self.address.locality_id if self.address else None,
+        )
+        self.locality_combo.currentIndexChanged.connect(self._apply_locality)
+        self.update_snapshot_check = QCheckBox(
+            "Actualizar tambien el snapshot del remito seleccionado"
+        )
+        self.update_snapshot_check.setObjectName("f150DgrUpdateSnapshotCheck")
+        if self.included:
+            self.update_snapshot_check.setChecked(False)
+            self.update_snapshot_check.setEnabled(False)
+        else:
+            self.update_snapshot_check.setChecked(True)
+        form.addWidget(QLabel("Calle / domicilio de entrega"), 0, 0)
+        form.addWidget(self.address_input, 0, 1, 1, 3)
+        form.addWidget(QLabel("Localidad DGR"), 1, 0)
+        form.addWidget(self.locality_combo, 1, 1, 1, 3)
+        form.addWidget(QLabel("Ciudad"), 2, 0)
+        form.addWidget(self.city_input, 2, 1)
+        form.addWidget(QLabel("Provincia"), 2, 2)
+        form.addWidget(self.province_input, 2, 3)
+        form.addWidget(self.update_snapshot_check, 3, 0, 1, 4)
+        note = QLabel(
+            "La localidad se elige de la tabla DGR: no se inventan codigos. "
+            "Si el remito ya esta en un lote F150, el TXT presentado no se toca."
+        )
+        note.setWordWrap(True)
+        form.addWidget(note, 4, 0, 1, 4)
+        self.tabs.addTab(tab, "Destino")
+
+    def _build_products_tab(self) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(
+            QLabel(
+                "Rubros DGR de los productos del remito. Complete los cuatro "
+                "rubros y la unidad autorizada; no se usan valores por defecto."
+            )
+        )
+        self.products_table = QTableWidget(0, 6)
+        self.products_table.setObjectName("f150DgrProductsTable")
+        self.products_table.setHorizontalHeaderLabels(
+            ["Producto", "RH1", "RH2", "RH3", "RH4", "Unidad DGR"]
+        )
+        self.products_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.products_table, 1)
+        self.tabs.addTab(tab, "Productos")
+
+    def _load(self) -> None:
+        self.identity_label.setText(
+            f"Remito {self.remittance.physical_point_of_sale}-"
+            f"{self.remittance.physical_number} - {self.remittance.client_name}"
+        )
+        if self.address is not None:
+            self.address_input.setText(self.address.address or "")
+            self.city_input.setText(self.address.city or "")
+            self.province_input.setText(self.address.province or "")
+        self._apply_locality()
+        products = self.service.products_for(self.remittance)
+        self.products_table.setRowCount(len(products))
+        for row, product in enumerate(products):
+            name_item = QTableWidgetItem(product.name)
+            name_item.setData(Qt.UserRole, product.id)
+            name_item.setFlags(Qt.ItemIsEnabled)
+            self.products_table.setItem(row, 0, name_item)
+            for column, value in enumerate(
+                (product.rh1, product.rh2, product.rh3, product.rh4, product.unidad_dgr),
+                start=1,
+            ):
+                self.products_table.setItem(row, column, QTableWidgetItem(value or ""))
+
+    def _apply_locality(self) -> None:
+        locality_id = selected_locality_id(self.locality_combo)
+        if locality_id is None:
+            return
+        locality = DgrLocality.get_or_none(DgrLocality.id == locality_id)
+        if locality is None:
+            return
+        city, province = derive_city_province(locality)
+        if is_missing_dgr_text(self.city_input.text()) and city:
+            self.city_input.setText(city)
+        if is_missing_dgr_text(self.province_input.text()) and province:
+            self.province_input.setText(province)
+
+    def _product_updates(self) -> list[ProductDgrUpdate]:
+        updates = []
+        for row in range(self.products_table.rowCount()):
+            name_item = self.products_table.item(row, 0)
+            values = [
+                self.products_table.item(row, column).text().strip()
+                if self.products_table.item(row, column) is not None
+                else ""
+                for column in range(1, 6)
+            ]
+            if any(not value for value in values):
+                raise ValueError(
+                    f"Complete RH1..RH4 y unidad DGR para {name_item.text()}."
+                )
+            updates.append(
+                ProductDgrUpdate(
+                    product_id=int(name_item.data(Qt.UserRole)),
+                    rh1=values[0],
+                    rh2=values[1],
+                    rh3=values[2],
+                    rh4=values[3],
+                    unidad_dgr=values[4],
+                )
+            )
+        return updates
+
+    def _save(self) -> None:
+        locality_id = selected_locality_id(self.locality_combo)
+        if locality_id is None:
+            QMessageBox.warning(
+                self, "Datos DGR", "Elegi una localidad DGR de la lista."
+            )
+            return
+        try:
+            updates = self._product_updates()
+            self.result_info = self.service.correct(
+                self.remittance,
+                address=self.address_input.text(),
+                city=self.city_input.text(),
+                province=self.province_input.text(),
+                locality_id=locality_id,
+                product_updates=updates,
+                update_snapshot=self.update_snapshot_check.isChecked(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "No se pudieron guardar los datos DGR", str(exc))
+            return
+        self.accept()
+
+
 class F150Page(QWidget):
     def __init__(self, *, current_user: str, parent=None, output_dir: Path | None = None):
         super().__init__(parent)
@@ -174,6 +364,9 @@ class F150Page(QWidget):
         generate = QPushButton("Generar archivo F150")
         generate.setObjectName("generateF150Button")
         actions.addWidget(generate)
+        self.correct_dgr_button = QPushButton("Corregir datos DGR")
+        self.correct_dgr_button.setObjectName("correctF150DgrButton")
+        actions.addWidget(self.correct_dgr_button)
         self.origin_label = QLabel()
         self.origin_label.setWordWrap(True)
         actions.addWidget(self.origin_label, 1)
@@ -197,10 +390,15 @@ class F150Page(QWidget):
         )
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         history_layout.addWidget(self.history)
+        self.recover_button = QPushButton("Recuperar TXT del lote seleccionado")
+        self.recover_button.setObjectName("recoverF150Button")
+        history_layout.addWidget(self.recover_button)
         root.addWidget(history_group, 1)
 
         apply_button.clicked.connect(self.refresh)
         generate.clicked.connect(self._generate)
+        self.correct_dgr_button.clicked.connect(self._open_dgr_correction)
+        self.recover_button.clicked.connect(self._recover_txt)
         self.configure_origin_button.clicked.connect(self._configure_origin)
         self._load_clients()
         self.refresh()
@@ -358,6 +556,7 @@ class F150Page(QWidget):
             ]
             for column, value in enumerate(values):
                 self.history.setItem(row, column, QTableWidgetItem(str(value)))
+            self.history.item(row, 0).setData(Qt.UserRole, batch.id)
 
     def _selected_remittances(self) -> list[Remittance]:
         selected = []
@@ -391,4 +590,84 @@ class F150Page(QWidget):
             self,
             "F150 generado",
             f"Se generó {batch.batch_number} con {batch.remittance_count} remito(s).",
+        )
+
+    def _selected_remittance(self) -> Remittance | None:
+        row = self.table.currentRow()
+        item = self.table.item(row, 0) if row >= 0 else None
+        if item is None:
+            return None
+        return Remittance.get_by_id(item.data(Qt.UserRole))
+
+    def _open_dgr_correction(self) -> None:
+        remittance = self._selected_remittance()
+        if remittance is None:
+            QMessageBox.information(
+                self, "Datos DGR", "Selecciona un remito de la tabla."
+            )
+            return
+        try:
+            F150DgrCorrectionService(self.current_user).require_permission()
+        except PermissionError as exc:
+            QMessageBox.warning(self, "Datos DGR", str(exc))
+            return
+        dialog = F150DgrCorrectionDialog(
+            current_user=self.current_user,
+            remittance=remittance,
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted or dialog.result_info is None:
+            return
+        info = dialog.result_info
+        self.refresh()
+        message = "Datos DGR guardados."
+        if info.get("snapshot_updated"):
+            message += " Tambien se actualizo el domicilio del remito seleccionado."
+        if info.get("snapshot_skipped_reason"):
+            message += "\n\n" + info["snapshot_skipped_reason"]
+        remaining = info.get("remaining_issues") or []
+        if remaining:
+            QMessageBox.warning(
+                self,
+                "Datos DGR guardados con pendientes",
+                message
+                + "\n\nEl remito todavia tiene pendientes:\n- "
+                + "\n- ".join(remaining),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Datos DGR guardados",
+                message + "\n\nEl remito quedo listo para el F150.",
+            )
+
+    def _recover_txt(self) -> None:
+        row = self.history.currentRow()
+        item = self.history.item(row, 0) if row >= 0 else None
+        if item is None:
+            QMessageBox.information(
+                self, "F150", "Selecciona un lote del historial."
+            )
+            return
+        batch = F150Batch.get_by_id(item.data(Qt.UserRole))
+        suggested = self.output_dir / batch.file_name
+        output_path, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Recuperar archivo F150",
+            str(suggested),
+            "Archivo de texto (*.TXT *.txt)",
+        )
+        if not output_path:
+            return
+        try:
+            output = self.service.recover_txt(batch, output_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "No se pudo recuperar el F150", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "F150 recuperado",
+            f"Archivo guardado en:\n{output}\n\n"
+            "La presentacion original no fue modificada: no se creo otro lote "
+            "ni se cambio su estado, fecha, usuario o numeracion.",
         )
