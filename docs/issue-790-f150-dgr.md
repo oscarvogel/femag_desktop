@@ -175,17 +175,17 @@ oficial `scripts/publish_femag_release.ps1 candidate`.
 
 | dato | valor |
 |---|---|
-| version | `2026.10.26.17.28.37` |
-| source_sha | `ac76c02d6c9002d88e1f783ce1cc15bcd9140196` (`ac76c02`) |
-| sha256 | `f9ae1295ad9d3472b2347dc17e904a3acb18a8dc177e3e0310a2341ab91f18cd` |
-| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.584.983 bytes) |
+| version | `2026.10.26.18.13.37` |
+| source_sha | `4b9d62d82da7ed4bd22794b84723ba5b88e52687` (`4b9d62d`) |
+| sha256 | `f25daf93d73532a8fc49e45446b05b0f9ec47c78883d8a1664de5634686b0f92` |
+| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.584.812 bytes) |
 | download_url | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
 | release | https://github.com/oscarvogel/vogel-releases/releases/tag/femag-candidate |
 | candidate.json | `oscarvogel/vogel-releases/apps/femag/candidate.json` |
 
-El manifest declara `source_dirty=true` porque el workspace tenia archivos
-locales sin trackear fuera de los insumos del release; el build se hizo sobre el
-commit `ac76c02` de la rama del PR. No se promovio a `latest`.
+El manifest declara `source_dirty=false`: el build se hizo sobre el commit
+`4b9d62d` de la rama del PR, con todos los checks de CI en verde. No se promovio
+a `latest`.
 
 ### Prueba sugerida en planta (27/10)
 
