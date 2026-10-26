@@ -113,3 +113,40 @@ def test_validation_rejects_draft_and_missing_transport_data(db):
     issues = F150BatchService.validation_issues(remittance)
     assert "debe estar emitido" in issues
     assert "falta transportista con CUIT" in issues
+
+
+def test_recover_txt_copies_exact_bytes_without_second_batch(db, tmp_path):
+    import hashlib
+
+    remittance = _issued_remittance()
+    service = F150BatchService("admin")
+    original = tmp_path / "original.TXT"
+    batch = service.generate([remittance], original)
+    restored = tmp_path / "subfolder" / "copia.TXT"
+    result = service.recover_txt(batch, restored)
+
+    assert result == restored
+    assert restored.read_bytes() == original.read_bytes()
+    assert hashlib.sha256(restored.read_bytes()).hexdigest() == batch.sha256
+    assert F150Batch.select().count() == 1
+    assert F150BatchRemittance.select().count() == 1
+    refreshed = F150Batch.get_by_id(batch.id)
+    assert refreshed.file_path == batch.file_path
+    assert refreshed.sha256 == batch.sha256
+    assert AuditLog.select().where(AuditLog.action == "recuperar_txt").count() == 1
+    with pytest.raises(FileExistsError):
+        service.recover_txt(batch, restored)
+
+
+def test_recover_txt_refuses_missing_or_tampered_original(db, tmp_path):
+    remittance = _issued_remittance()
+    service = F150BatchService("admin")
+    original = tmp_path / "original.TXT"
+    batch = service.generate([remittance], original)
+    original.write_bytes(b"alterado")
+    with pytest.raises(F150ValidationError, match="SHA-256"):
+        service.recover_txt(batch, tmp_path / "copia.TXT")
+    original.unlink()
+    with pytest.raises(F150ValidationError, match="No se encontró"):
+        service.recover_txt(batch, tmp_path / "copia.TXT")
+    assert not (tmp_path / "copia.TXT").exists()
