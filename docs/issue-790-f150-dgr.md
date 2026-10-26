@@ -168,6 +168,41 @@ encoder actual (test automatizado).
   existente, historico sin evidencia y no duplicacion del lote;
 - golden master F150.
 
+## Candidate Windows
+
+Publicado en el canal `candidate` de `oscarvogel/vogel-releases` con el script
+oficial `scripts/publish_femag_release.ps1 candidate`.
+
+| dato | valor |
+|---|---|
+| version | `2026.10.26.17.28.37` |
+| source_sha | `ac76c02d6c9002d88e1f783ce1cc15bcd9140196` (`ac76c02`) |
+| sha256 | `f9ae1295ad9d3472b2347dc17e904a3acb18a8dc177e3e0310a2341ab91f18cd` |
+| asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.584.983 bytes) |
+| download_url | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+| release | https://github.com/oscarvogel/vogel-releases/releases/tag/femag-candidate |
+| candidate.json | `oscarvogel/vogel-releases/apps/femag/candidate.json` |
+
+El manifest declara `source_dirty=true` porque el workspace tenia archivos
+locales sin trackear fuera de los insumos del release; el build se hizo sobre el
+commit `ac76c02` de la rama del PR. No se promovio a `latest`.
+
+### Prueba sugerida en planta (27/10)
+
+1. Descargar el instalador y verificar el SHA256:
+   `Get-FileHash .\FEMAG_Desktop_Produccion_Setup.exe -Algorithm SHA256`.
+2. Instalar y abrir FEMAG con la base real.
+3. Ir a **Generar F150**, seleccionar el remito `0001-00010942` (ASTICOMAR).
+4. Usar **Corregir datos DGR**: localidad `CORDOBA` codigo `1030`, ciudad y
+   provincia `CORDOBA`, y completar `RH1..RH4` / unidad del producto
+   `BOLSAS ALM. DE MAIZ X 10 KG.` con los valores autorizados.
+5. Guardar y verificar que el remito quede sin pendientes; generar el F150.
+6. Repetir para `0001-00010940` (JUSTINIANO POSSE `1058`) y `0001-00010941`
+   (RIO CUARTO `1099`).
+7. Desde **Historial de lotes**, seleccionar un lote ya presentado y usar
+   **Recuperar TXT del lote seleccionado**. Elegir otra carpeta y confirmar que
+   el archivo se recupera sin crear un lote nuevo.
+
 ## Riesgos y pendientes
 
 - El candidate **no se promueve a produccion** hasta que FEMAG lo pruebe en
