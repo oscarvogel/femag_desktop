@@ -160,18 +160,45 @@ class F150BatchService:
         """
         batch = F150Batch.get_by_id(batch.id)
         original = Path(batch.file_path)
-        if not original.is_file():
-            raise F150ValidationError(
-                "No se encontró el TXT original de este lote. Los datos "
-                "históricos no alcanzan para reconstruirlo con seguridad. "
-                "Buscá una copia o respaldo del archivo original."
+        if original.is_file():
+            original_bytes = original.read_bytes()
+            if hashlib.sha256(original_bytes).hexdigest() != batch.sha256:
+                raise F150ValidationError(
+                    "El TXT original fue modificado o está dañado (SHA-256 distinto). "
+                    "No se puede recuperar este lote de manera segura."
+                )
+        else:
+            # Recuperación de lotes anteriores, cuyo TXT quedó en otra carpeta
+            # o fue eliminado. No generar un nuevo lote ni volver a incluir remitos.
+            included = list(
+                F150BatchRemittance.select()
+                .where(F150BatchRemittance.batch == batch)
+                .order_by(F150BatchRemittance.id)
             )
-        original_bytes = original.read_bytes()
-        if hashlib.sha256(original_bytes).hexdigest() != batch.sha256:
-            raise F150ValidationError(
-                "El TXT original fue modificado o está dañado (SHA-256 distinto). "
-                "No se puede recuperar este lote de manera segura."
-            )
+            if len(included) != batch.remittance_count:
+                raise F150ValidationError(
+                    "El lote no conserva todos sus remitos; no se puede regenerar."
+                )
+            try:
+                documents = [
+                    self._to_document(
+                        Remittance.get_by_id(row.remittance_id),
+                        allow_included=True,
+                    )
+                    for row in included
+                ]
+                original_bytes = self.encoder.encode(documents).encode(self.encoder.encoding)
+            except (F150ValidationError, ValueError, LookupError, AttributeError) as exc:
+                raise F150ValidationError(
+                    "No se pudo reconstruir el F150 desde los remitos actuales: "
+                    f"{exc}"
+                ) from exc
+            if hashlib.sha256(original_bytes).hexdigest() != batch.sha256:
+                raise F150ValidationError(
+                    "Los datos de los remitos cambiaron desde que se generó este "
+                    "F150. El archivo reconstruido no coincide con el SHA-256 "
+                    "original; no se guardó ningún archivo."
+                )
         output = Path(output_path)
         if output.suffix.lower() != ".txt":
             output = output.with_suffix(".TXT")
@@ -231,8 +258,8 @@ class F150BatchService:
             return ""
         return locality.country.abbr or ""
 
-    def _to_document(self, remittance: Remittance) -> F150Remittance:
-        issues = self.validation_issues(remittance)
+    def _to_document(self, remittance: Remittance, *, allow_included: bool = False) -> F150Remittance:
+        issues = self.validation_issues(remittance, allow_included=allow_included)
         if issues:
             raise F150ValidationError(
                 f"Remito {self._identity(remittance)}: " + "; ".join(issues)
@@ -310,7 +337,7 @@ class F150BatchService:
         )
 
     @staticmethod
-    def validation_issues(remittance: Remittance) -> list[str]:
+    def validation_issues(remittance: Remittance, *, allow_included: bool = False) -> list[str]:
         issues = []
         if remittance.status != Remittance.STATUS_ISSUED:
             issues.append("debe estar emitido")
@@ -331,7 +358,7 @@ class F150BatchService:
             issues.append("falta CUIT o documento del chofer")
         if not remittance.items.exists():
             issues.append("no tiene detalle")
-        if F150BatchService.is_included(remittance):
+        if not allow_included and F150BatchService.is_included(remittance):
             issues.append("ya fue incluido en un lote F150")
         origin = F150BatchService._origin_location()
         if not origin.locality_code.strip():
