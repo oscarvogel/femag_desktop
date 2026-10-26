@@ -1,3 +1,4 @@
+from app.config.database import database_proxy
 from app.models.dgr import DgrLocality
 from app.models.masters import (
     CLIENT_ADDRESS_TYPE_DELIVERY,
@@ -178,32 +179,36 @@ class ClientService:
             raise ValueError("El cliente ya tiene un domicilio fiscal")
         if normalized_type == CLIENT_ADDRESS_TYPE_SHARED:
             is_primary = True
-        if client_address_has_delivery_function(normalized_type) and is_primary:
-            (
-                ClientAddress.update(is_primary=False)
-                .where(
-                    ClientAddress.client == client,
-                    ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED)),
-                    ClientAddress.is_primary == True,  # noqa: E712
+        # El cambio de principal, el alta y la auditoria son una sola operacion.
+        # Si falla la auditoria o la insercion, el cliente no puede quedar sin
+        # principal o con un domicilio a medias (#788).
+        with database_proxy.atomic():
+            if client_address_has_delivery_function(normalized_type) and is_primary:
+                (
+                    ClientAddress.update(is_primary=False)
+                    .where(
+                        ClientAddress.client == client,
+                        ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED)),
+                        ClientAddress.is_primary == True,  # noqa: E712
+                    )
+                    .execute()
                 )
-                .execute()
+            row = ClientAddress.create(
+                client=client,
+                address_type=normalized_type,
+                province=province,
+                city=city,
+                address=address,
+                is_primary=is_primary,
+                observations=observations,
             )
-        row = ClientAddress.create(
-            client=client,
-            address_type=normalized_type,
-            province=province,
-            city=city,
-            address=address,
-            is_primary=is_primary,
-            observations=observations,
-        )
-        self.audit_service.record(
-            user=self.current_user,
-            module="Clientes",
-            action="crear domicilio",
-            record_ref=f"ClientAddress:{row.id}",
-            new_value={"client_id": client.id, "type": normalized_type, "address": address},
-        )
+            self.audit_service.record(
+                user=self.current_user,
+                module="Clientes",
+                action="crear domicilio",
+                record_ref=f"ClientAddress:{row.id}",
+                new_value={"client_id": client.id, "type": normalized_type, "address": address},
+            )
         return row
 
     def update_address(
@@ -226,32 +231,33 @@ class ClientService:
             & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_FISCAL, CLIENT_ADDRESS_TYPE_SHARED))
         ).exists():
             raise ValueError("El cliente ya tiene un domicilio fiscal")
-        if client_address_has_delivery_function(normalized_type):
-            (
-                ClientAddress.update(is_primary=False)
-                .where(
-                    (ClientAddress.client == client)
-                    & (ClientAddress.id != row.id)
-                    & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
-                    & (ClientAddress.is_primary == True)  # noqa: E712
+        with database_proxy.atomic():
+            if client_address_has_delivery_function(normalized_type):
+                (
+                    ClientAddress.update(is_primary=False)
+                    .where(
+                        (ClientAddress.client == client)
+                        & (ClientAddress.id != row.id)
+                        & ClientAddress.address_type.in_((CLIENT_ADDRESS_TYPE_DELIVERY, CLIENT_ADDRESS_TYPE_SHARED))
+                        & (ClientAddress.is_primary == True)  # noqa: E712
+                    )
+                    .execute()
                 )
-                .execute()
+                row.is_primary = True
+            row.client = client
+            row.address_type = normalized_type
+            row.province = province
+            row.city = city
+            row.address = address
+            row.active = active
+            row.save()
+            self.audit_service.record(
+                user=self.current_user,
+                module="Clientes",
+                action="editar domicilio",
+                record_ref=f"ClientAddress:{row.id}",
+                new_value={"client_id": client.id, "type": normalized_type, "address": address},
             )
-            row.is_primary = True
-        row.client = client
-        row.address_type = normalized_type
-        row.province = province
-        row.city = city
-        row.address = address
-        row.active = active
-        row.save()
-        self.audit_service.record(
-            user=self.current_user,
-            module="Clientes",
-            action="editar domicilio",
-            record_ref=f"ClientAddress:{row.id}",
-            new_value={"client_id": client.id, "type": normalized_type, "address": address},
-        )
         return row
 
     @staticmethod

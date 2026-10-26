@@ -3888,6 +3888,16 @@ class LoadOrderEntryDialog(QDialog):
 
         self.feedback = FormFeedback("loadOrderDialogFeedback")
         root.addWidget(self.feedback)
+        # El toast de FormFeedback se oculta a los pocos segundos. El motivo de
+        # bloqueo del guardado tiene que seguir visible mientras exista (#788).
+        self.save_hint = QLabel("")
+        self.save_hint.setObjectName("loadOrderSaveHint")
+        self.save_hint.setWordWrap(True)
+        self.save_hint.setStyleSheet(
+            "QLabel { color: #92400e; font-size: 12px; font-weight: 600; padding: 0 2px; }"
+        )
+        self.save_hint.hide()
+        root.addWidget(self.save_hint)
 
         footer = QHBoxLayout()
         self.previous_step_button = _action_button("previousLoadOrderStepButton", "Anterior", secondary=True)
@@ -4269,10 +4279,17 @@ class LoadOrderEntryDialog(QDialog):
                         "Seleccione cliente y destino.", focus_widget=self.address_combo
                     )
                 return
-        address = ClientAddress.get_by_id(address_id)
-        if address.client.id != client_id:
+        try:
+            address = ClientAddress.get_by_id(address_id)
+        except ClientAddress.DoesNotExist:
             self.feedback.show_error(
-                "El destino seleccionado no pertenece al cliente.",
+                "El lugar de entrega recien creado ya no existe. Vuelva a cargarlo.",
+                focus_widget=self.address_combo,
+            )
+            return
+        if not address.active or address.client.id != client_id:
+            self.feedback.show_error(
+                "El destino seleccionado no pertenece al cliente o ya no esta activo.",
                 focus_widget=self.address_combo,
             )
             return
@@ -4291,8 +4308,11 @@ class LoadOrderEntryDialog(QDialog):
             {
                 "client_id": client_id,
                 "address_id": address_id,
-                "client_label": self.client_combo.currentText(),
-                "address_label": self.address_combo.currentText(),
+                # La etiqueta sale del domicilio recien persistido, no del texto
+                # que quedo en el combo: asi no se guarda un destino con el
+                # nombre de otro cliente o de otro domicilio (#788).
+                "client_label": address.client.name,
+                "address_label": f"{address.client.name} - {address.address}, {address.city}",
                 "observations": None,
                 "products": [],
             }
@@ -4519,27 +4539,92 @@ class LoadOrderEntryDialog(QDialog):
         )
         self._update_save_button_state()
 
-    def _is_ready_to_save(self) -> bool:
+    def _save_blocking_issue(
+        self,
+    ) -> tuple[str | None, QWidget | None, int | None, int | None]:
+        """Motivo de bloqueo, control a enfocar, paso y renglon involucrados (#788).
+
+        El operador tiene que saber que falta y adonde ir. Devolver solo un booleano
+        dejaba el boton Guardar sin respuesta visible.
+        """
         if self.driver_combo.currentData() is None:
-            return False
+            return "Seleccione un chofer.", self.driver_combo, 0, None
         if self.carrier_combo.currentData() is None:
-            return False
+            return (
+                "El chofer no tiene un transportista válido.",
+                self.driver_combo,
+                0,
+                None,
+            )
         if self.truck_combo.currentData() is None:
-            return False
+            return "Seleccione un camión / patente.", self.truck_combo, 0, None
         if not self.destinations:
-            return False
-        for destination in self.destinations:
-            if destination.get("client_id") is None or destination.get("address_id") is None:
-                return False
+            return (
+                "Agregue al menos un cliente y destino.",
+                self.client_combo,
+                1,
+                None,
+            )
+        for row, destination in enumerate(self.destinations):
+            name = destination.get("client_label") or "el cliente"
+            if destination.get("client_id") is None:
+                return f"Revise el cliente de {name}.", self.client_combo, 1, row
+            address_id = destination.get("address_id")
+            if address_id is None:
+                return (
+                    f"El destino de {name} no quedó seleccionado. Vuelva a agregarlo.",
+                    self.address_combo,
+                    1,
+                    row,
+                )
+            # Los domicilios nuevos se persisten antes que la orden. Confirmar que
+            # el ID todavía existe y sigue asociado al cliente original.
+            address = ClientAddress.get_or_none(ClientAddress.id == address_id)
+            if address is None or address.client_id != destination["client_id"] or not address.active:
+                return (
+                    f"El domicilio de entrega de {name} ya no es válido. Revise el destino.",
+                    self.destination_table,
+                    1,
+                    row,
+                )
             products = destination.get("products") or []
             if not products:
-                return False
+                return (
+                    f"Agregue al menos un producto para {name}.",
+                    self.add_product_button,
+                    2,
+                    row,
+                )
             for product in products:
                 if product.get("product_id") is None:
-                    return False
+                    return (
+                        f"Revise el producto sin seleccionar de {name}.",
+                        self.add_product_button,
+                        2,
+                        row,
+                    )
                 if product.get("quantity") is None or product.get("quantity") <= 0:
-                    return False
-        return self._duplicate_merchandise_message() is None
+                    return (
+                        f"Revise la cantidad del producto de {name}.",
+                        self.add_product_button,
+                        2,
+                        row,
+                    )
+        duplicate = self._duplicate_merchandise_message()
+        if duplicate:
+            return (
+                f"No se puede guardar: {duplicate} Quite el duplicado.",
+                self.product_table,
+                2,
+                None,
+            )
+        return None, None, None, None
+
+    def _save_blocking_reason(self) -> str | None:
+        return self._save_blocking_issue()[0]
+
+    def _is_ready_to_save(self) -> bool:
+        return self._save_blocking_reason() is None
 
     def _duplicate_merchandise_message(self) -> str | None:
         seen_destinations: set[tuple[int, int]] = set()
@@ -4570,14 +4655,18 @@ class LoadOrderEntryDialog(QDialog):
     def _update_save_button_state(self) -> None:
         if not hasattr(self, "save_button"):
             return
-        ready = self._is_ready_to_save()
-        self.save_button.setEnabled(ready)
-        if ready:
-            self.save_button.setToolTip("Guardar orden.")
-        elif self._duplicate_merchandise_message():
-            self.save_button.setToolTip("Quite la mercaderia duplicada antes de guardar.")
-        else:
-            self.save_button.setToolTip("Complete chofer, camion, destino y productos para guardar.")
+        reason = self._save_blocking_reason()
+        # El botón permanece accionable para que el operador conozca el motivo
+        # exacto del bloqueo al hacer clic. No se guarda si hay errores.
+        self.save_button.setEnabled(True)
+        self.save_button.setToolTip(reason or "Guardar orden.")
+        if hasattr(self, "save_hint"):
+            if reason:
+                self.save_hint.setText(f"Para guardar: {reason}")
+                self.save_hint.show()
+            else:
+                self.save_hint.clear()
+                self.save_hint.hide()
 
     def _selected_trailer_domain(self) -> str | None:
         if not hasattr(self, "trailer_combo"):
@@ -4591,17 +4680,21 @@ class LoadOrderEntryDialog(QDialog):
         return cleaned or None
 
     def _save(self) -> None:
-        if not self._is_ready_to_save():
-            duplicate_message = self._duplicate_merchandise_message()
-            if duplicate_message:
-                self.feedback.show_error(
-                    f"No se puede guardar: {duplicate_message} Quite el duplicado.",
-                    focus_widget=self.product_table,
-                )
-            else:
-                self.feedback.show_warning(
-                    "Complete chofer, camion, destino y productos antes de guardar."
-                )
+        reason, focus_widget, step, destination_row = self._save_blocking_issue()
+        if reason:
+            if destination_row is not None and 0 <= destination_row < len(self.destinations):
+                self.destination_table.setCurrentCell(destination_row, 0)
+            if step is not None:
+                self._go_to_step(step)
+            self.feedback.show_warning(reason, focus_widget=focus_widget)
+            # Diagnostico seguro: cantidades y estados, sin nombres ni domicilios.
+            logger.warning(
+                "Guardar orden bloqueado: %s (destinos=%s, paso=%s, renglon=%s)",
+                reason,
+                len(self.destinations),
+                step,
+                destination_row,
+            )
             self._update_save_button_state()
             return
         if self.driver_combo.currentData() is None:
@@ -4665,7 +4758,15 @@ class LoadOrderEntryDialog(QDialog):
                 )
             self.accept()
         except Exception as exc:
-            self.feedback.show_error(str(exc))
+            logger.exception("No se pudo guardar la orden de carga")
+            message = str(exc).strip()
+            if not message:
+                message = (
+                    f"No se pudo guardar la orden ({type(exc).__name__}). "
+                    "El borrador se conserva; puede reintentar."
+                )
+            self.feedback.show_error(message)
+            self._update_save_button_state()
 
 
 def _billing_split_values(product: dict) -> tuple[float, float]:
