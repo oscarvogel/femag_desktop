@@ -552,7 +552,13 @@ def test_recuperar_txt_error_de_ruta_no_modifica_el_lote(db, tmp_path):
 def test_golden_master_f150_se_reproduce_byte_a_byte():
     from scripts.verify_f150_corpus import parse
 
+    # El archivo real contiene CUIT/nombres/domicilios y esta gitignoreado a
+    # proposito (``F.150-*.TXT``). En CI no existe; localmente el release lo
+    # verifica. El contrato de layout sin datos personales ya lo cubre
+    # ``test_f150_encoder.py`` con su registro legacy hardcodeado.
     path = Path("docs/F.150-05-10-2026B.TXT")
+    if not path.is_file():
+        pytest.skip("golden master real no versionado (docs/F.150-*.TXT)")
     raw = path.read_bytes()
     generated = F150Encoder().encode(parse(path)).encode(F150Encoder.encoding)
     assert generated == raw
