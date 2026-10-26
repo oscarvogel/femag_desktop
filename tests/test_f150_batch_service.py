@@ -147,6 +147,33 @@ def test_recover_txt_refuses_missing_or_tampered_original(db, tmp_path):
     with pytest.raises(F150ValidationError, match="SHA-256"):
         service.recover_txt(batch, tmp_path / "copia.TXT")
     original.unlink()
-    with pytest.raises(F150ValidationError, match="No se encontró"):
-        service.recover_txt(batch, tmp_path / "copia.TXT")
-    assert not (tmp_path / "copia.TXT").exists()
+    assert service.recover_txt(batch, tmp_path / "copia.TXT").read_bytes()
+    assert (tmp_path / "copia.TXT").read_bytes() != b"alterado"
+
+
+def test_regenerate_missing_file_matches_original_and_preserves_batch(db, tmp_path):
+    remittance = _issued_remittance()
+    service = F150BatchService("admin")
+    original = tmp_path / "first.TXT"
+    batch = service.generate([remittance], original)
+    expected = original.read_bytes()
+    original.unlink()
+    recovered = service.recover_txt(batch, tmp_path / "second.TXT")
+    assert recovered.read_bytes() == expected
+    assert F150Batch.select().count() == 1
+    assert F150BatchRemittance.select().count() == 1
+
+
+def test_regenerate_missing_file_rejects_changed_data(db, tmp_path):
+    remittance = _issued_remittance()
+    service = F150BatchService("admin")
+    original = tmp_path / "first.TXT"
+    batch = service.generate([remittance], original)
+    original.unlink()
+    remittance.observations = "CAMBIO POSTERIOR"
+    remittance.save()
+    target = tmp_path / "second.TXT"
+    with pytest.raises(F150ValidationError, match="no coincide"):
+        service.recover_txt(batch, target)
+    assert not target.exists()
+    assert F150Batch.select().count() == 1
