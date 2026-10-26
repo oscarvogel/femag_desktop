@@ -152,6 +152,49 @@ class F150BatchService:
                 output.unlink()
             raise
 
+    def recover_txt(self, batch: F150Batch, output_path: str | Path) -> Path:
+        """Recupera un lote existente desde los bytes originales verificables.
+
+        Los snapshots históricos no contienen todos los campos del TXT. Por
+        seguridad, jamás se recalcula desde los remitos actuales.
+        """
+        batch = F150Batch.get_by_id(batch.id)
+        original = Path(batch.file_path)
+        if not original.is_file():
+            raise F150ValidationError(
+                "No se encontró el TXT original de este lote. Los datos "
+                "históricos no alcanzan para reconstruirlo con seguridad. "
+                "Buscá una copia o respaldo del archivo original."
+            )
+        original_bytes = original.read_bytes()
+        if hashlib.sha256(original_bytes).hexdigest() != batch.sha256:
+            raise F150ValidationError(
+                "El TXT original fue modificado o está dañado (SHA-256 distinto). "
+                "No se puede recuperar este lote de manera segura."
+            )
+        output = Path(output_path)
+        if output.suffix.lower() != ".txt":
+            output = output.with_suffix(".TXT")
+        if output.exists():
+            raise FileExistsError(f"El archivo de destino ya existe: {output}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        # Exclusivo: una recuperación nunca debe pisar un archivo existente.
+        with output.open("xb") as handle:
+            handle.write(original_bytes)
+        try:
+            self.audit_service.record(
+                user=self.current_user,
+                module="F150",
+                action="recuperar_txt",
+                record_ref=f"F150Batch:{batch.id}",
+                new_value={"batch_number": batch.batch_number, "sha256": batch.sha256},
+            )
+        except Exception:
+            # El archivo ya se recuperó: un error de auditoría no debe hacer
+            # creer que falló la copia ni borrar el resultado del usuario.
+            raise
+        return output
+
     @staticmethod
     def _format_cuit(value: str) -> str:
         """Normaliza un CUIT al formato XX-XXXXXXXX-X del sistema anterior."""
