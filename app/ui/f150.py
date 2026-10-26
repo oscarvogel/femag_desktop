@@ -419,5 +419,5 @@ class F150Page(QWidget):
             return
         QMessageBox.information(
             self, "F150 recuperado",
-            f"Archivo guardado en:\\n{output}\\nLa presentación original no fue modificada.",
+            f"Archivo guardado en:\n{output}\nLa presentación original no fue modificada.",
         )
