@@ -489,8 +489,15 @@ def test_existing_duplicate_order_can_be_opened_and_repaired_without_silent_merg
     save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
 
     assert len(dialog.destinations[0]["products"]) == 2
-    assert save_button.isEnabled() is False
+    # El boton sigue accionable, pero el motivo queda visible (#788).
+    assert save_button.isEnabled() is True
+    assert "duplicad" in dialog.save_hint.text().lower()
     assert "mercaderia duplicada" in dialog.feedback.text()
+
+    save_button.click()
+    app.processEvents()
+    assert dialog.created_order is None
+    assert "duplicad" in dialog.feedback.text().lower()
 
     product_table = dialog.findChild(QTableWidget, "loadOrderProductDraftTable")
     product_table.setCurrentCell(1, 0)
@@ -499,6 +506,7 @@ def test_existing_duplicate_order_can_be_opened_and_repaired_without_silent_merg
 
     assert len(dialog.destinations[0]["products"]) == 1
     assert save_button.isEnabled() is True
+    assert dialog.save_hint.text() == ""
     save_button.click()
 
     assert dialog.created_order is not None
@@ -548,7 +556,7 @@ def test_load_order_page_blocks_pallet_editor_for_persisted_duplicate_lines(db, 
     assert "edite la orden" in feedback.lower()
 
 
-def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, monkeypatch):
+def test_load_order_dialog_explains_why_save_is_blocked_and_never_leaves_it_inert(db, monkeypatch):
     from PyQt5.QtWidgets import QApplication, QComboBox, QDialog, QPushButton, QTableWidget
 
     from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -574,20 +582,24 @@ def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, 
     save_button = dialog.findChild(QPushButton, "saveLoadOrderButton")
 
     assert save_button is not None
-    assert save_button.isEnabled() is False
+    # Nunca queda inerte: esta habilitado y el motivo se ve sin hacer hover.
+    assert save_button.isEnabled() is True
+    assert "chofer" in dialog.save_hint.text().lower()
 
     _set_combo(dialog.findChild(QComboBox, "loadOrderDriverInput"), driver.id)
     _set_combo(dialog.findChild(QComboBox, "loadOrderTruckInput"), truck.id)
     app.processEvents()
 
-    assert save_button.isEnabled() is False
+    assert save_button.isEnabled() is True
+    assert "cliente y destino" in dialog.save_hint.text().lower()
 
     _set_combo(dialog.findChild(QComboBox, "loadOrderClientInput"), client.id)
     _set_combo(dialog.findChild(QComboBox, "loadOrderAddressInput"), address.id)
     dialog.findChild(QPushButton, "addLoadOrderClientButton").click()
     app.processEvents()
 
-    assert save_button.isEnabled() is False
+    assert save_button.isEnabled() is True
+    assert "producto" in dialog.save_hint.text().lower()
 
     dialog.findChild(QTableWidget, "loadOrderDestinationDraftTable").setCurrentCell(0, 0)
 
@@ -605,12 +617,14 @@ def test_load_order_dialog_enables_save_only_when_required_data_is_complete(db, 
     app.processEvents()
 
     assert save_button.isEnabled() is True
+    assert dialog.save_hint.text() == ""
 
     dialog.findChild(QTableWidget, "loadOrderProductDraftTable").setCurrentCell(0, 0)
     dialog.findChild(QPushButton, "removeLoadOrderProductButton").click()
     app.processEvents()
 
-    assert save_button.isEnabled() is False
+    assert save_button.isEnabled() is True
+    assert "producto" in dialog.save_hint.text().lower()
 
 
 def test_load_order_dialog_selects_new_destination_for_next_product(db, monkeypatch):
