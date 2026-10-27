@@ -232,6 +232,17 @@ def build_master_abm_page(
     if config.title == "Productos" and PermissionService().is_administrator(user):
         cost_button = _action_button("productCostButton", "Costo / historial", secondary=True)
         actions.addWidget(cost_button)
+    product_active_button = None
+    if config.title == "Productos":
+        product_active_button = _action_button(
+            "toggleProductActiveButton", "Dar de baja", secondary=True
+        )
+        product_active_button.setEnabled(can_modify)
+        if not can_modify:
+            product_active_button.setToolTip(
+                "El perfil actual no permite modificar este maestro."
+            )
+        actions.addWidget(product_active_button)
     actions.addStretch(1)
     layout.addLayout(actions)
     table = QTableWidget(0, len(config.columns))
@@ -290,6 +301,53 @@ def build_master_abm_page(
             if dialog.exec_() == QDialog.Accepted:
                 feedback.show_success("Costo actualizado y registrado en el historial.")
         cost_button.clicked.connect(open_cost)
+    if product_active_button is not None:
+        def sync_product_active_button(*_signal_args) -> None:
+            row_id = table_controller.selected_id()
+            if row_id is None:
+                product_active_button.setText("Dar de baja")
+                product_active_button.setEnabled(False)
+                return
+            product = Product.get_by_id(row_id)
+            product_active_button.setText(
+                "Dar de baja" if product.active else "Reactivar"
+            )
+            product_active_button.setEnabled(can_modify)
+
+        def toggle_product_active() -> None:
+            row_id = table_controller.selected_id()
+            if row_id is None:
+                feedback.show_warning(
+                    "Seleccione un producto para dar de baja o reactivar.",
+                    focus_widget=table,
+                )
+                return
+            product = Product.get_by_id(row_id)
+            requested_active = not bool(product.active)
+            action = "reactivar" if requested_active else "dar de baja"
+            answer = QMessageBox.question(
+                page,
+                "Confirmar cambio de estado",
+                f"¿Confirma {action} el producto «{product.name}»?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+            try:
+                MasterService(current_user).set_product_active(
+                    product, requested_active
+                )
+                table_controller.refresh()
+                sync_product_active_button()
+                status = "reactivado" if requested_active else "dado de baja"
+                feedback.show_success(f"Producto {status} correctamente.")
+            except Exception as exc:
+                feedback.show_error(str(exc))
+
+        product_active_button.clicked.connect(toggle_product_active)
+        table.currentCellChanged.connect(sync_product_active_button)
+        sync_product_active_button()
     page.master_table_controller = table_controller
     page.refresh = table_controller.refresh
     table_controller.refresh()

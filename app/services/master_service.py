@@ -134,6 +134,25 @@ class MasterService:
         product.save()
         return product
 
+    def set_product_active(self, product: Product, active: bool) -> Product:
+        """Activate or deactivate a product without changing its history."""
+        active = bool(active)
+        previous = bool(product.active)
+        if previous == active:
+            return product
+
+        product.active = active
+        product.save(only=[Product.active])
+        self.audit_service.record(
+            user=self.current_user,
+            module="Maestros",
+            action="activar producto" if active else "desactivar producto",
+            record_ref=f"Product:{product.id}",
+            old_value={"active": previous},
+            new_value={"active": active},
+        )
+        return product
+
     @staticmethod
     def _normalize_product_code(codigo: str | None) -> str | None:
         normalized = (codigo or "").strip()
