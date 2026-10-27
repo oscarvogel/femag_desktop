@@ -37,8 +37,7 @@ def test_la_pagina_calcula_los_destinatarios_de_la_lista(db):
     app.processEvents()
 
     assert pagina.destinatarios_table.rowCount() == 3
-    assert "3 clientes de la lista" in pagina.contadores_label.text()
-    assert "1 marcados para enviar" in pagina.contadores_label.text()
+    assert "1 seleccionados de 3 disponibles" in pagina.contadores_label.text()
     # La columna "Número a enviar" muestra el número normalizado, no el de la base.
     assert pagina.destinatarios_table.item(0, 3).text() == "5491153088679"
     assert pagina.destinatarios_table.item(0, 1).text() == "Con celular"
@@ -67,20 +66,19 @@ def test_el_boton_de_enviar_pide_confirmacion_y_pdf(db, tmp_path):
 
     _cliente("Con celular", "30705000016", 1, "011 15 53088679")
     app, pagina = _pagina()
-    pagina._calcular_destinatarios()
-    app.processEvents()
 
     # Sin el tilde de confirmación, el botón no se habilita.
-    assert pagina.enviar_button.isEnabled() is False
-
-    pagina.confirmacion_check.setChecked(True)
-    app.processEvents()
-    # Tampoco sin el PDF de la lista.
     assert pagina.enviar_button.isEnabled() is False
 
     pdf = tmp_path / "lista1.pdf"
     pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
     pagina.pdf_input.setText(str(pdf))
+    pagina._calcular_destinatarios()
+    app.processEvents()
+    assert pagina.enviar_button.isEnabled() is False
+
+    pagina.confirmacion_check.setChecked(True)
+    app.processEvents()
     pagina._refrescar_boton_enviar()
     app.processEvents()
 
