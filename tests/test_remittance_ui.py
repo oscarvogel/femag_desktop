@@ -632,6 +632,92 @@ def test_manual_dialog_saves_the_transport_filled_from_the_driver(db):
     assert remittance.trailer_domain == "GH567IJ"
 
 
+def _header_layout(dialog):
+    from PyQt5.QtWidgets import QGroupBox
+
+    group = dialog.findChild(QGroupBox, "remittanceHeaderGroup")
+    return group.layout()
+
+
+def _widget_grid_position(layout, widget):
+    for index in range(layout.count()):
+        if layout.itemAt(index).widget() is widget:
+            row, column, _row_span, _column_span = layout.getItemPosition(index)
+            return row, column
+    raise AssertionError("El control no esta en la cabecera del remito")
+
+
+def _label_grid_position(layout, text):
+    from PyQt5.QtWidgets import QLabel
+
+    for index in range(layout.count()):
+        widget = layout.itemAt(index).widget()
+        if isinstance(widget, QLabel) and widget.text() == text:
+            row, column, _row_span, _column_span = layout.getItemPosition(index)
+            return row, column
+    raise AssertionError(f"No se encontro la etiqueta {text!r}")
+
+
+def test_manual_dialog_shows_driver_before_the_rest_of_the_transport(db):
+    """El orden visual del transporte es Chofer, Transportista, Camion y Acoplado (#795)."""
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittance_order")
+    app.processEvents()
+    layout = _header_layout(dialog)
+
+    driver = _widget_grid_position(layout, dialog.driver_combo)
+    carrier = _widget_grid_position(layout, dialog.carrier_combo)
+    truck = _widget_grid_position(layout, dialog.truck_combo)
+    trailer = _widget_grid_position(layout, dialog.trailer_input)
+
+    assert driver < carrier < truck < trailer
+    # El acoplado ya no comparte la fila de Fecha / N. remito.
+    assert trailer[0] > driver[0]
+    assert _label_grid_position(layout, "Acoplado") == (trailer[0], trailer[1] - 1)
+
+    labels = [
+        _label_grid_position(layout, text)
+        for text in ("Chofer", "Transportista", "Camión", "Acoplado")
+    ]
+    assert labels == sorted(labels)
+
+
+def test_manual_dialog_tab_moves_from_driver_to_carrier_truck_and_trailer(db):
+    """La navegacion con Tab respeta el orden del transporte (#795)."""
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.remittances import RemittanceDialog
+    from tests.conftest import _master_data
+
+    def assert_focus_inside(control):
+        focused = app.focusWidget()
+        assert focused is control or control.isAncestorOf(focused)
+
+    _master_data()
+    app = QApplication.instance() or QApplication([])
+    dialog = RemittanceDialog(current_user="ui_remittance_tab_order")
+    dialog.show()
+    app.processEvents()
+
+    dialog.driver_combo.setFocus()
+    QTest.keyClick(dialog.driver_combo, Qt.Key_Tab)
+    assert_focus_inside(dialog.carrier_combo)
+
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
+    assert_focus_inside(dialog.truck_combo)
+
+    QTest.keyClick(app.focusWidget(), Qt.Key_Tab)
+    assert_focus_inside(dialog.trailer_input)
+
+
 def test_manual_dialog_address_has_autocomplete(db):
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication

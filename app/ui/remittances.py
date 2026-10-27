@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -32,14 +33,16 @@ from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.remittances import Remittance, RemittanceSeries
 from app.services.f150_batch_service import F150BatchService
+from app.services.money import ZERO_MONEY, money_sum, quantize_money
 from app.services.pricing import price_for_client_list
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import RemittanceSeriesService, RemittanceService
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.combo_autocomplete import (
+    SEARCH_COLUMNS_ROLE,
+    SearchableComboBox,
     combo_current_data,
     commit_combo_text,
-    enable_combo_autocomplete,
 )
 from app.ui.remittance_history_dialog import RemittanceHistoryDialog
 
@@ -49,7 +52,7 @@ F150_OUTPUT_DIR = Path("outputs") / "f150"
 
 DRIVER_HINT = (
     "Elegi el chofer: el transportista, el camion y el acoplado se completan solos. "
-    "Si escribis la patente del acoplado a mano, esa manda."
+    "Si escribis la patente del acoplado a mano, esa manda. F2 abre la busqueda."
 )
 
 
@@ -69,25 +72,30 @@ class RemittanceDialog(QDialog):
         form.setVerticalSpacing(8)
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
-        self.client_combo = QComboBox()
-        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
-        self.address_combo = QComboBox()
-        enable_combo_autocomplete(self.address_combo, placeholder="Buscar domicilio...")
-        self.carrier_combo = QComboBox()
+        self.client_combo = SearchableComboBox(
+            placeholder="Buscar cliente...",
+            search_headers=("Cliente", "CUIT"),
+        )
+        self.address_combo = SearchableComboBox(
+            placeholder="Buscar domicilio...",
+            search_headers=("Domicilio", "Ciudad", "Provincia"),
+        )
+        self.carrier_combo = SearchableComboBox(
+            placeholder="Buscar transportista...",
+            search_headers=("Transportista", "CUIT"),
+        )
         self.carrier_combo.setObjectName("remittanceCarrierInput")
-        self.truck_combo = QComboBox()
+        self.truck_combo = SearchableComboBox(
+            placeholder="Buscar camión...",
+            search_headers=("Camión", "Acoplado", "Transportista"),
+        )
         self.truck_combo.setObjectName("remittanceTruckInput")
-        self.driver_combo = QComboBox()
+        self.driver_combo = SearchableComboBox(
+            placeholder="Buscar chofer...",
+            hint=DRIVER_HINT,
+            search_headers=("Chofer", "Documento", "Transportista"),
+        )
         self.driver_combo.setObjectName("remittanceDriverInput")
-        for combo, placeholder in (
-            (self.carrier_combo, "Buscar transportista..."),
-            (self.truck_combo, "Buscar camión..."),
-            (self.driver_combo, "Buscar chofer..."),
-        ):
-            enable_combo_autocomplete(combo, placeholder=placeholder)
-        # El transporte sale del chofer: al elegirlo se completan el transportista,
-        # el camion y el acoplado (#756).
-        self.driver_combo.lineEdit().setToolTip(DRIVER_HINT)
         # Numero de remito manual: no se usa talonario correlativo. Se acepta
         # cualquier numero libre y se valida que no este usado (solo al emitir
         # es obligatorio).
@@ -121,22 +129,24 @@ class RemittanceDialog(QDialog):
         point_number_widget.setLayout(number_box)
         form.addWidget(QLabel("N° remito"), 0, 2)
         form.addWidget(point_number_widget, 0, 3)
-        form.addWidget(QLabel("Acoplado"), 0, 4)
-        form.addWidget(self.trailer_input, 0, 5)
         form.addWidget(QLabel("Cliente"), 1, 0)
         form.addWidget(self.client_combo, 1, 1, 1, 2)
         form.addWidget(QLabel("Domicilio"), 1, 3)
         form.addWidget(self.address_combo, 1, 4, 1, 2)
-        form.addWidget(QLabel("Transportista"), 2, 0)
-        form.addWidget(self.carrier_combo, 2, 1)
-        form.addWidget(QLabel("Camión"), 2, 2)
-        form.addWidget(self.truck_combo, 2, 3)
-        form.addWidget(QLabel("Chofer"), 2, 4)
-        form.addWidget(self.driver_combo, 2, 5)
-        form.addWidget(QLabel("Doc. N° / referencia"), 3, 0)
-        form.addWidget(self.reference_input, 3, 1, 1, 2)
-        form.addWidget(QLabel("Observaciones"), 3, 3)
-        form.addWidget(self.observations_input, 3, 4, 1, 2)
+        # El transporte se carga en el orden real de uso: chofer primero y
+        # despues transportista, camion y acoplado (#795).
+        form.addWidget(QLabel("Chofer"), 2, 0)
+        form.addWidget(self.driver_combo, 2, 1)
+        form.addWidget(QLabel("Transportista"), 2, 2)
+        form.addWidget(self.carrier_combo, 2, 3)
+        form.addWidget(QLabel("Camión"), 2, 4)
+        form.addWidget(self.truck_combo, 2, 5)
+        form.addWidget(QLabel("Acoplado"), 3, 0)
+        form.addWidget(self.trailer_input, 3, 1)
+        form.addWidget(QLabel("Doc. N° / referencia"), 3, 2)
+        form.addWidget(self.reference_input, 3, 3)
+        form.addWidget(QLabel("Observaciones"), 3, 4)
+        form.addWidget(self.observations_input, 3, 5)
         for column in (1, 3, 5):
             form.setColumnStretch(column, 1)
         root.addWidget(header_group)
@@ -145,16 +155,17 @@ class RemittanceDialog(QDialog):
         detail_label.setObjectName("remittanceDetailTitle")
         root.addWidget(detail_label)
 
-        self.items = QTableWidget(0, 4)
+        self.items = QTableWidget(0, 5)
         self.items.setObjectName("remittanceItemsTable")
         self.items.setMinimumHeight(280)
         self.items.setHorizontalHeaderLabels(
-            ["Producto", "Cantidad", "Precio unit.", "Descripción impresa"]
+            ["Producto", "Cantidad", "Precio unit.", "Descripción impresa", "Subtotal"]
         )
         self.items.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.items.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.items.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.items.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.items.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         root.addWidget(self.items, 1)
 
         add_row = QPushButton("+ Agregar producto")
@@ -162,12 +173,53 @@ class RemittanceDialog(QDialog):
         add_row.clicked.connect(self._add_item_row)
         root.addWidget(add_row)
 
+        total_bar = QFrame()
+        total_bar.setObjectName("remittanceTotalBar")
+        total_bar.setFrameShape(QFrame.StyledPanel)
+        total_layout = QHBoxLayout(total_bar)
+        total_layout.setContentsMargins(12, 8, 12, 8)
+        total_layout.setSpacing(10)
+        self.total_title_label = QLabel("TOTAL GENERAL")
+        self.total_title_label.setObjectName("remittanceTotalTitle")
+        self.total_title_label.setStyleSheet("font-size: 13px; font-weight: 800;")
+        self.total_hint_label = QLabel("")
+        self.total_hint_label.setObjectName("remittanceTotalHint")
+        self.total_hint_label.setStyleSheet("font-size: 11px;")
+        self.total_hint_label.hide()
+        self.total_value_label = QLabel("$ 0.00")
+        self.total_value_label.setObjectName("remittanceTotalValue")
+        self.total_value_label.setStyleSheet("font-size: 24px; font-weight: 800;")
+        self.total_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        total_layout.addWidget(self.total_title_label)
+        total_layout.addWidget(self.total_hint_label)
+        total_layout.addStretch(1)
+        total_layout.addWidget(self.total_value_label)
+        root.addWidget(total_bar)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Save).setText("Guardar")
         buttons.button(QDialogButtonBox.Cancel).setText("Cancelar")
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+        # La tabulacion sigue el mismo orden visual: el chofer manda sobre el
+        # resto del transporte (#795).
+        tab_order = (
+            self.date_input,
+            self.point_input,
+            self.number_input,
+            self.client_combo,
+            self.address_combo,
+            self.driver_combo,
+            self.carrier_combo,
+            self.truck_combo,
+            self.trailer_input,
+            self.reference_input,
+            self.observations_input,
+        )
+        for first, second in zip(tab_order, tab_order[1:]):
+            QWidget.setTabOrder(first, second)
 
         # El transporte del remito se deduce del chofer (#756).
         self._syncing_transport = False
@@ -178,6 +230,8 @@ class RemittanceDialog(QDialog):
         self.trailer_input.textEdited.connect(self._mark_trailer_edited)
         self.point_input.editingFinished.connect(self._refresh_number_availability)
         self.number_input.editingFinished.connect(self._refresh_number_availability)
+        self.items.model().rowsInserted.connect(lambda *_: self._refresh_total())
+        self.items.model().rowsRemoved.connect(lambda *_: self._refresh_total())
         self._load_clients()
         self._load_transport()
         if self.remittance is not None:
@@ -185,20 +239,31 @@ class RemittanceDialog(QDialog):
         elif self.items.rowCount() == 0:
             self._add_item_row()
         self._refresh_number_availability()
+        self._refresh_total()
+
+    @staticmethod
+    def _add_search_item(combo: SearchableComboBox, label: str, value, columns: tuple) -> None:
+        combo.addItem(label, value)
+        combo.setItemData(combo.count() - 1, tuple(columns), SEARCH_COLUMNS_ROLE)
 
     def _load_clients(self) -> None:
         self.client_combo.clear()
         for client in Client.select().where(Client.active == True).order_by(Client.name):  # noqa: E712
-            self.client_combo.addItem(client.name, client.id)
+            self._add_search_item(
+                self.client_combo,
+                client.name,
+                client.id,
+                (client.name, client.cuit or ""),
+            )
+        self.client_combo.setCurrentIndex(-1)
         self._resync_completer(self.client_combo)
         self._refresh_addresses()
 
     def _refresh_addresses(self) -> None:
         self.address_combo.clear()
         client_id = combo_current_data(self.client_combo)
-        if client_id is None:
-            client_id = self.client_combo.currentData()
         if not client_id:
+            self.address_combo.setCurrentIndex(-1)
             self._resync_completer(self.address_combo)
             return
         query = (
@@ -208,7 +273,13 @@ class RemittanceDialog(QDialog):
         )
         for address in query:
             label = f"{address.address} - {address.city}, {address.province}"
-            self.address_combo.addItem(label, address.id)
+            self._add_search_item(
+                self.address_combo,
+                label,
+                address.id,
+                (address.address, address.city, address.province),
+            )
+        self.address_combo.setCurrentIndex(-1)
         self._resync_completer(self.address_combo)
 
     @staticmethod
@@ -227,25 +298,48 @@ class RemittanceDialog(QDialog):
         try:
             for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
                 combo.clear()
-                combo.addItem("Sin asignar", None)
-            for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name):  # noqa: E712
+                self._add_search_item(combo, "Sin asignar", None, ("Sin asignar",))
+            carrier_names = {carrier.id: carrier.name for carrier in Carrier.select()}
+            carriers = list(
+                Carrier.select().where(Carrier.active == True).order_by(Carrier.name)  # noqa: E712
+            )
+            for carrier in carriers:
                 label = carrier.name
                 if carrier.cuit:
                     label += f" · {carrier.cuit}"
-                self.carrier_combo.addItem(label, carrier.id)
+                self._add_search_item(
+                    self.carrier_combo,
+                    label,
+                    carrier.id,
+                    (carrier.name, carrier.cuit or ""),
+                )
             for truck in Truck.select().where(Truck.active == True).order_by(Truck.domain):  # noqa: E712
                 label = truck.domain
                 if truck.trailer_domain:
                     label += f" / {truck.trailer_domain}"
-                if truck.carrier:
-                    label += f" · {truck.carrier.name}"
-                self.truck_combo.addItem(label, truck.id)
+                carrier_name = carrier_names.get(truck.carrier_id, "")
+                if carrier_name:
+                    label += f" · {carrier_name}"
+                self._add_search_item(
+                    self.truck_combo,
+                    label,
+                    truck.id,
+                    (truck.domain, truck.trailer_domain or "", carrier_name),
+                )
             for driver in Driver.select().where(Driver.active == True).order_by(Driver.name):  # noqa: E712
                 label = driver.name
                 document = driver.cuit or driver.document
                 if document:
                     label += f" · {document}"
-                self.driver_combo.addItem(label, driver.id)
+                carrier_name = carrier_names.get(driver.carrier_id, "")
+                self._add_search_item(
+                    self.driver_combo,
+                    label,
+                    driver.id,
+                    (driver.name, document or "", carrier_name),
+                )
+            for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
+                combo.setCurrentIndex(-1)
         finally:
             self._syncing_transport = False
         for combo in (self.carrier_combo, self.truck_combo, self.driver_combo):
@@ -373,11 +467,20 @@ class RemittanceDialog(QDialog):
     def _add_item_row(self, product_id=None, quantity="", description="", unit_price=None) -> None:
         row = self.items.rowCount()
         self.items.insertRow(row)
-        combo = QComboBox()
+        combo = SearchableComboBox(
+            placeholder="Buscar producto...",
+            search_headers=("Código", "Producto"),
+        )
+        combo.setObjectName(f"remittanceItemProductInput{row}")
         for product in Product.select().where(Product.active == True).order_by(Product.name):  # noqa: E712
-            combo.addItem(product.name, product.id)
-        enable_combo_autocomplete(combo, placeholder="Buscar producto...")
+            self._add_search_item(
+                combo,
+                product.name,
+                product.id,
+                (product.codigo or "", product.name),
+            )
         self._resync_completer(combo)
+        combo.setCurrentIndex(-1)
         if product_id:
             index = combo.findData(product_id)
             if index >= 0:
@@ -399,12 +502,69 @@ class RemittanceDialog(QDialog):
         description_input = QLineEdit(description)
         description_input.setObjectName(f"remittanceItemDescriptionInput{row}")
         description_input.setPlaceholderText("Descripción que se imprimirá")
+        subtotal_item = QTableWidgetItem("$ 0.00")
+        subtotal_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        subtotal_item.setFlags(subtotal_item.flags() & ~Qt.ItemIsEditable)
+        quantity_input.textChanged.connect(lambda _text: self._refresh_total())
+        price_input.textChanged.connect(lambda _text: self._refresh_total())
         self.items.setCellWidget(row, 0, combo)
         self.items.setCellWidget(row, 1, quantity_input)
         self.items.setCellWidget(row, 2, price_input)
         self.items.setCellWidget(row, 3, description_input)
+        self.items.setItem(row, 4, subtotal_item)
         if unit_price is None:
             self._autofill_price(row, price_input)
+        self._refresh_total()
+
+    @staticmethod
+    def _decimal_from_text(text: str) -> Decimal | None:
+        text = (text or "").strip()
+        if not text:
+            return None
+        try:
+            return Decimal(text.replace(",", "."))
+        except InvalidOperation:
+            try:
+                return Decimal(text.replace(".", "").replace(",", "."))
+            except InvalidOperation:
+                return None
+
+    def _refresh_total(self) -> None:
+        line_totals = []
+        has_invalid_lines = False
+        for row in range(self.items.rowCount()):
+            quantity_widget = self.items.cellWidget(row, 1)
+            price_widget = self.items.cellWidget(row, 2)
+            subtotal_item = self.items.item(row, 4)
+            quantity_text = (quantity_widget.text() if quantity_widget else "").strip()
+            price_text = (price_widget.text() if price_widget else "").strip()
+            if not quantity_text and not price_text:
+                if subtotal_item is not None:
+                    subtotal_item.setText("$ 0.00")
+                continue
+            quantity = self._decimal_from_text(quantity_text)
+            unit_price = self._decimal_from_text(price_text)
+            if quantity is None or unit_price is None or quantity < 0 or unit_price < 0:
+                has_invalid_lines = True
+                if subtotal_item is not None:
+                    subtotal_item.setText("Revisar")
+                continue
+            subtotal = quantize_money(quantity * unit_price)
+            line_totals.append(subtotal)
+            if subtotal_item is not None:
+                subtotal_item.setText(f"$ {subtotal:,.2f}")
+        total = money_sum(line_totals) if line_totals else ZERO_MONEY
+        if has_invalid_lines:
+            hint = "Hay renglones incompletos o inválidos."
+            self.total_value_label.setText("$ —")
+            self.total_hint_label.setText(hint)
+            self.total_hint_label.show()
+            self.total_value_label.setToolTip(hint)
+        else:
+            self.total_value_label.setText(f"$ {total:,.2f}")
+            self.total_hint_label.clear()
+            self.total_hint_label.hide()
+            self.total_value_label.setToolTip("")
 
     def _autofill_price(self, row: int, price_input: QLineEdit) -> None:
         """Sugiere el precio de la lista del cliente si el campo esta vacio."""

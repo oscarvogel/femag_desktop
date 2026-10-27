@@ -116,7 +116,12 @@ from app.ui.theme import (
 from app.ui.customer_payment_dialog import ClientPaymentDialog
 from app.ui.client_manual_debit_dialog import ClientManualDebitDialog
 from app.ui.client_manual_credit_dialog import ClientManualCreditDialog
-from app.ui.combo_autocomplete import enable_combo_autocomplete, matching_combo_index
+from app.ui.combo_autocomplete import (
+    SEARCH_COLUMNS_ROLE,
+    SearchableComboBox,
+    enable_combo_autocomplete,
+    matching_combo_index,
+)
 from app.ui.money import configure_money_input
 from app.services.aviso_service import AvisoService
 from app.services.audit_service import AuditService
@@ -3714,18 +3719,26 @@ class LoadOrderEntryDialog(QDialog):
         self.order_date.setCalendarPopup(True)
         self.order_date.setDisplayFormat("dd/MM/yyyy")
         self.order_date.setDate(QDate.currentDate())
-        self.carrier_combo = QComboBox()
+        self.carrier_combo = SearchableComboBox(
+            placeholder="Buscar transportista...",
+            search_headers=("Transportista", "CUIT"),
+        )
         self.carrier_combo.setObjectName("loadOrderCarrierInput")
-        enable_combo_autocomplete(self.carrier_combo, placeholder="Buscar transportista...")
-        self.truck_combo = QComboBox()
+        self.truck_combo = SearchableComboBox(
+            placeholder="Buscar camion...",
+            search_headers=("Camión", "Transportista"),
+        )
         self.truck_combo.setObjectName("loadOrderTruckInput")
-        enable_combo_autocomplete(self.truck_combo, placeholder="Buscar camion...")
-        self.trailer_combo = QComboBox()
+        self.trailer_combo = SearchableComboBox(
+            placeholder="Sin semi / acoplado",
+            search_headers=("Acoplado",),
+        )
         self.trailer_combo.setObjectName("loadOrderTrailerInput")
-        enable_combo_autocomplete(self.trailer_combo, placeholder="Sin semi / acoplado")
-        self.driver_combo = QComboBox()
+        self.driver_combo = SearchableComboBox(
+            placeholder="Buscar chofer...",
+            search_headers=("Chofer", "Documento", "Transportista"),
+        )
         self.driver_combo.setObjectName("loadOrderDriverInput")
-        enable_combo_autocomplete(self.driver_combo, placeholder="Buscar chofer...")
         self.observations_input = QLineEdit()
         self.observations_input.setObjectName("loadOrderObservationsInput")
         self.observations_input.setPlaceholderText("Observaciones generales")
@@ -3754,12 +3767,17 @@ class LoadOrderEntryDialog(QDialog):
         destination_title.setObjectName("sectionTitle")
         destination_layout.addWidget(destination_title)
         destination_inputs = QGridLayout()
-        self.client_combo = QComboBox()
+        self.client_combo = SearchableComboBox(
+            placeholder="Buscar cliente...",
+            search_headers=("Cliente", "CUIT"),
+        )
         self.client_combo.setObjectName("loadOrderClientInput")
-        enable_combo_autocomplete(self.client_combo, placeholder="Buscar cliente...")
-        self.address_combo = QComboBox()
+        self.address_combo = SearchableComboBox(
+            placeholder="Buscar destino...",
+            search_headers=("Domicilio", "Ciudad", "Provincia"),
+            preserve_unmatched=True,
+        )
         self.address_combo.setObjectName("loadOrderAddressInput")
-        enable_combo_autocomplete(self.address_combo, placeholder="Buscar destino...")
         self._keep_typed_destination()
         self.add_destination_button = _action_button(
             "addLoadOrderClientButton", "Agregar cliente/destino"
@@ -3998,10 +4016,10 @@ class LoadOrderEntryDialog(QDialog):
         self._go_to_step(self.step_stack.currentIndex() + 1)
 
     def _populate_options(self) -> None:
-        _fill_combo(self.driver_combo, _driver_options())
-        _fill_combo(self.carrier_combo, _carrier_options())
+        _fill_combo(self.driver_combo, _driver_options(with_columns=True))
+        _fill_combo(self.carrier_combo, _carrier_options(with_columns=True))
         self.carrier_combo.setEnabled(False)
-        _fill_combo(self.client_combo, _client_options())
+        _fill_combo(self.client_combo, _client_options(with_columns=True))
         self._refresh_address_options()
 
     def _load_order(self) -> None:
@@ -4090,9 +4108,9 @@ class LoadOrderEntryDialog(QDialog):
             return
         carrier_id = carrier.id
         if self.carrier_combo.findData(carrier_id) < 0:
-            _fill_combo(self.carrier_combo, _carrier_options())
+            _fill_combo(self.carrier_combo, _carrier_options(with_columns=True))
         _set_combo(self.carrier_combo, carrier_id)
-        truck_options = _truck_options(carrier_id=carrier_id)
+        truck_options = _truck_options(carrier_id=carrier_id, with_columns=True)
         _fill_combo(self.truck_combo, truck_options)
         if len(truck_options) == 1:
             self.truck_combo.setCurrentIndex(1)
@@ -4110,9 +4128,9 @@ class LoadOrderEntryDialog(QDialog):
         self._update_save_button_state()
 
     def _populate_trailer_options(self, *, carrier_id: int | None, preferred: str | None = None) -> None:
-        options = _trailer_options(carrier_id=carrier_id)
+        options = _trailer_options(carrier_id=carrier_id, with_columns=True)
         _fill_combo(self.trailer_combo, options)
-        if preferred and any(value == preferred for _value, value in options):
+        if preferred and any(option[1] == preferred for option in options):
             self.trailer_combo.setCurrentIndex(self.trailer_combo.findData(preferred))
         elif len(options) == 1:
             self.trailer_combo.setCurrentIndex(1)
@@ -4167,7 +4185,11 @@ class LoadOrderEntryDialog(QDialog):
 
     def _refresh_address_options(self, *, preferred: int | None = None) -> None:
         client_id = self.client_combo.currentData()
-        options = _address_options(client_id=client_id)
+        options = (
+            _address_options(client_id=client_id, with_columns=True)
+            if client_id is not None
+            else []
+        )
         _fill_combo(self.address_combo, options)
         if preferred is not None and self.address_combo.findData(preferred) >= 0:
             _set_combo(self.address_combo, preferred)
@@ -4811,9 +4833,11 @@ class LoadOrderProductDialog(QDialog):
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(6)
 
-        self.product_combo = QComboBox()
+        self.product_combo = SearchableComboBox(
+            placeholder="Buscar producto...",
+            search_headers=("Código", "Producto"),
+        )
         self.product_combo.setObjectName("productDialogProductInput")
-        enable_combo_autocomplete(self.product_combo, placeholder="Buscar producto...")
         self.quantity_input = QDoubleSpinBox()
         self.quantity_input.setObjectName("productDialogQuantityInput")
         self.quantity_input.setRange(0, 999999)
@@ -4906,7 +4930,7 @@ class LoadOrderProductDialog(QDialog):
         footer.addWidget(self.add_button)
         layout.addLayout(footer)
 
-        _fill_combo(self.product_combo, _product_options())
+        _fill_combo(self.product_combo, _product_search_options())
         self.product_combo.currentIndexChanged.connect(self._on_product_changed)
         self.quantity_input.valueChanged.connect(self._on_total_changed)
         self.cantidad_despues_input.valueChanged.connect(self._on_split_changed)
@@ -5358,12 +5382,15 @@ def _combo(object_name: str, options: list[tuple[object, str]], *, include_empty
     return combo
 
 
-def _fill_combo(combo: QComboBox, options: list[tuple[object, str]], *, include_empty: bool = True) -> None:
+def _fill_combo(combo: QComboBox, options: list[tuple], *, include_empty: bool = True) -> None:
     combo.clear()
     if include_empty:
         combo.addItem("", None)
-    for value, label in options:
+    for option in options:
+        value, label = option[0], option[1]
         combo.addItem(label, value)
+        if len(option) > 2 and option[2] is not None:
+            combo.setItemData(combo.count() - 1, tuple(option[2]), SEARCH_COLUMNS_ROLE)
 
 
 def _set_combo(combo: QComboBox, value: object) -> None:
@@ -5372,14 +5399,19 @@ def _set_combo(combo: QComboBox, value: object) -> None:
         combo.setCurrentIndex(index)
 
 
-def _client_options() -> list[tuple[int, str]]:
+def _client_options(*, with_columns: bool = False) -> list[tuple]:
     try:
-        return [(client.id, client.name) for client in Client.select().where(Client.active == True).order_by(Client.name)]  # noqa: E712
+        clients = list(
+            Client.select().where(Client.active == True).order_by(Client.name)  # noqa: E712
+        )
     except (InterfaceError, OperationalError):
         return []
+    if with_columns:
+        return [(client.id, client.name, (client.name, client.cuit or "")) for client in clients]
+    return [(client.id, client.name) for client in clients]
 
 
-def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
+def _address_options(client_id: int | None = None, *, with_columns: bool = False) -> list[tuple]:
     try:
         query = ClientAddress.select().join(Client).where(
             (ClientAddress.active == True)  # noqa: E712
@@ -5387,12 +5419,22 @@ def _address_options(client_id: int | None = None) -> list[tuple[int, str]]:
         )
         if client_id is not None:
             query = query.where(ClientAddress.client == client_id)
-        return [
-            (address.id, f"{address.client.name} - {address.address}, {address.city}")
-            for address in query.order_by(Client.name, ClientAddress.city)
-        ]
+        addresses = list(query.order_by(Client.name, ClientAddress.city))
     except (InterfaceError, OperationalError):
         return []
+    if with_columns:
+        return [
+            (
+                address.id,
+                f"{address.client.name} - {address.address}, {address.city}",
+                (address.address, address.city, address.province),
+            )
+            for address in addresses
+        ]
+    return [
+        (address.id, f"{address.client.name} - {address.address}, {address.city}")
+        for address in addresses
+    ]
 
 
 def _find_client_delivery_address(client_id: int, typed: str) -> ClientAddress | None:
@@ -5426,38 +5468,68 @@ def _product_options() -> list[tuple[int, str]]:
         return []
 
 
-def _carrier_options() -> list[tuple[int, str]]:
+def _carrier_options(*, with_columns: bool = False) -> list[tuple]:
     try:
-        return [(carrier.id, carrier.name) for carrier in Carrier.select().where(Carrier.active == True).order_by(Carrier.name)]  # noqa: E712
+        carriers = list(
+            Carrier.select().where(Carrier.active == True).order_by(Carrier.name)  # noqa: E712
+        )
     except (InterfaceError, OperationalError):
         return []
+    if with_columns:
+        return [
+            (carrier.id, carrier.name, (carrier.name, carrier.cuit or ""))
+            for carrier in carriers
+        ]
+    return [(carrier.id, carrier.name) for carrier in carriers]
 
 
-def _truck_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
+def _truck_options(carrier_id: int | None = None, *, with_columns: bool = False) -> list[tuple]:
     try:
         if carrier_id is None:
             return []
-        return [
-            (truck.id, truck.domain)
-            for truck in Truck.select()
+        trucks = list(
+            Truck.select()
             .where((Truck.active == True) & (Truck.carrier == carrier_id))  # noqa: E712
             .order_by(Truck.domain)
-        ]
+        )
     except (InterfaceError, OperationalError):
         return []
+    if with_columns:
+        carrier = Carrier.get_or_none(carrier_id)
+        carrier_name = carrier.name if carrier is not None else ""
+        return [
+            (truck.id, truck.domain, (truck.domain, carrier_name))
+            for truck in trucks
+        ]
+    return [(truck.id, truck.domain) for truck in trucks]
 
 
-def _driver_options(carrier_id: int | None = None) -> list[tuple[int, str]]:
+def _driver_options(carrier_id: int | None = None, *, with_columns: bool = False) -> list[tuple]:
     try:
         query = Driver.select().where(Driver.active == True)  # noqa: E712
         if carrier_id is not None:
             query = query.where(Driver.carrier == carrier_id)
-        return [(driver.id, driver.name) for driver in query.order_by(Driver.name)]
+        drivers = list(query.order_by(Driver.name))
     except (InterfaceError, OperationalError):
         return []
+    if with_columns:
+        carrier_names = {carrier.id: carrier.name for carrier in Carrier.select()}
+        return [
+            (
+                driver.id,
+                driver.name,
+                (
+                    driver.name,
+                    driver.cuit or driver.document or "",
+                    carrier_names.get(driver.carrier_id, ""),
+                ),
+            )
+            for driver in drivers
+        ]
+    return [(driver.id, driver.name) for driver in drivers]
 
 
-def _trailer_options(carrier_id: int | None = None) -> list[tuple[str, str]]:
+def _trailer_options(carrier_id: int | None = None, *, with_columns: bool = False) -> list[tuple]:
     try:
         if carrier_id is None:
             return []
@@ -5474,7 +5546,22 @@ def _trailer_options(carrier_id: int | None = None) -> list[tuple[str, str]]:
             domain = LoadOrderService._normalize_trailer_domain(truck.trailer_domain or "")
             if domain and domain not in seen:
                 seen[domain] = None
-        return [(domain, domain) for domain in sorted(seen)]
+        domains = sorted(seen)
+    except (InterfaceError, OperationalError):
+        return []
+    if with_columns:
+        return [(domain, domain, (domain,)) for domain in domains]
+    return [(domain, domain) for domain in domains]
+
+
+def _product_search_options() -> list[tuple]:
+    try:
+        products = {product.id: product for product in Product.select()}
+        return [
+            (value, label, (products[value].codigo or "", products[value].name))
+            for value, label in _product_options()
+            if value in products
+        ]
     except (InterfaceError, OperationalError):
         return []
 
