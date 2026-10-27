@@ -121,22 +121,24 @@ class RemittanceDialog(QDialog):
         point_number_widget.setLayout(number_box)
         form.addWidget(QLabel("N° remito"), 0, 2)
         form.addWidget(point_number_widget, 0, 3)
-        form.addWidget(QLabel("Acoplado"), 0, 4)
-        form.addWidget(self.trailer_input, 0, 5)
         form.addWidget(QLabel("Cliente"), 1, 0)
         form.addWidget(self.client_combo, 1, 1, 1, 2)
         form.addWidget(QLabel("Domicilio"), 1, 3)
         form.addWidget(self.address_combo, 1, 4, 1, 2)
-        form.addWidget(QLabel("Transportista"), 2, 0)
-        form.addWidget(self.carrier_combo, 2, 1)
-        form.addWidget(QLabel("Camión"), 2, 2)
-        form.addWidget(self.truck_combo, 2, 3)
-        form.addWidget(QLabel("Chofer"), 2, 4)
-        form.addWidget(self.driver_combo, 2, 5)
-        form.addWidget(QLabel("Doc. N° / referencia"), 3, 0)
-        form.addWidget(self.reference_input, 3, 1, 1, 2)
-        form.addWidget(QLabel("Observaciones"), 3, 3)
-        form.addWidget(self.observations_input, 3, 4, 1, 2)
+        # El transporte se carga en el orden real de uso: chofer primero y
+        # despues transportista, camion y acoplado (#795).
+        form.addWidget(QLabel("Chofer"), 2, 0)
+        form.addWidget(self.driver_combo, 2, 1)
+        form.addWidget(QLabel("Transportista"), 2, 2)
+        form.addWidget(self.carrier_combo, 2, 3)
+        form.addWidget(QLabel("Camión"), 2, 4)
+        form.addWidget(self.truck_combo, 2, 5)
+        form.addWidget(QLabel("Acoplado"), 3, 0)
+        form.addWidget(self.trailer_input, 3, 1)
+        form.addWidget(QLabel("Doc. N° / referencia"), 3, 2)
+        form.addWidget(self.reference_input, 3, 3)
+        form.addWidget(QLabel("Observaciones"), 3, 4)
+        form.addWidget(self.observations_input, 3, 5)
         for column in (1, 3, 5):
             form.setColumnStretch(column, 1)
         root.addWidget(header_group)
@@ -168,6 +170,24 @@ class RemittanceDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+        # La tabulacion sigue el mismo orden visual: el chofer manda sobre el
+        # resto del transporte (#795).
+        tab_order = (
+            self.date_input,
+            self.point_input,
+            self.number_input,
+            self.client_combo,
+            self.address_combo,
+            self.driver_combo,
+            self.carrier_combo,
+            self.truck_combo,
+            self.trailer_input,
+            self.reference_input,
+            self.observations_input,
+        )
+        for first, second in zip(tab_order, tab_order[1:]):
+            QWidget.setTabOrder(first, second)
 
         # El transporte del remito se deduce del chofer (#756).
         self._syncing_transport = False
