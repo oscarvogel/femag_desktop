@@ -168,10 +168,12 @@ encoder actual (test automatizado).
   existente, historico sin evidencia y no duplicacion del lote;
 - golden master F150.
 
-## Candidate Windows
+## Release Windows en produccion
 
-Publicado en el canal `candidate` de `oscarvogel/vogel-releases` con el script
-oficial `scripts/publish_femag_release.ps1 candidate`.
+Publicado como candidate con `scripts/publish_femag_release.ps1 candidate` y
+promovido a produccion el 27/10/2026 con
+`scripts/publish_femag_release.ps1 promote -Confirmation PROMOTE`, despues de la
+prueba en planta.
 
 | dato | valor |
 |---|---|
@@ -179,13 +181,16 @@ oficial `scripts/publish_femag_release.ps1 candidate`.
 | source_sha | `4b9d62d82da7ed4bd22794b84723ba5b88e52687` (`4b9d62d`) |
 | sha256 | `f25daf93d73532a8fc49e45446b05b0f9ec47c78883d8a1664de5634686b0f92` |
 | asset | `FEMAG_Desktop_Produccion_Setup.exe` (43.584.812 bytes) |
-| download_url | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
-| release | https://github.com/oscarvogel/vogel-releases/releases/tag/femag-candidate |
+| download_url produccion | https://github.com/oscarvogel/vogel-releases/releases/download/latest/FEMAG_Desktop_Produccion_Setup.exe |
+| download_url candidate | https://github.com/oscarvogel/vogel-releases/releases/download/femag-candidate/FEMAG_Desktop_Produccion_Setup.exe |
+| release produccion | https://github.com/oscarvogel/vogel-releases/releases/tag/latest |
+| latest.json | `oscarvogel/vogel-releases/apps/femag/latest.json` |
 | candidate.json | `oscarvogel/vogel-releases/apps/femag/candidate.json` |
+| version anterior | `2026.10.23.17.21.29` (`femag-previous`) |
 
 El manifest declara `source_dirty=false`: el build se hizo sobre el commit
-`4b9d62d` de la rama del PR, con todos los checks de CI en verde. No se promovio
-a `latest`.
+`4b9d62d` de la rama del PR, con todos los checks de CI en verde. `latest.json`
+quedo en esta version y la anterior quedo archivada en `previous.json`.
 
 ### Prueba sugerida en planta (27/10)
 
