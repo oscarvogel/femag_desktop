@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import asdict
 from datetime import date
@@ -9,10 +10,15 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from app.config.database import database_proxy
+from app.config.secure_credentials import default_config_dir
 from app.models.f150 import F150Batch, F150BatchRemittance
 from app.models.remittances import Remittance
 from app.models.system import AppParameter, NumberSequence
 from app.services.audit_service import AuditService
+from app.services.dgr_validation import (
+    destination_address_issues,
+    snapshot_destination_issues,
+)
 from app.services.f150_encoder import (
     F150Carrier,
     F150Driver,
@@ -30,10 +36,23 @@ F150_ORIGIN_PARAMETER = "f150.origin"
 
 
 class F150BatchService:
-    def __init__(self, current_user: str, audit_service: AuditService | None = None):
+    def __init__(
+        self,
+        current_user: str,
+        audit_service: AuditService | None = None,
+        archive_dir: str | Path | None = None,
+    ):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
         self.encoder = F150Encoder()
+        if archive_dir is None:
+            configured = os.getenv("FEMAG_F150_ARCHIVE_DIR")
+            archive_dir = (
+                Path(configured)
+                if configured
+                else default_config_dir() / "outputs" / "f150" / "archive"
+            )
+        self.archive_dir = Path(archive_dir)
 
     @staticmethod
     def eligible_remittances(
@@ -97,6 +116,7 @@ class F150BatchService:
         encoded = content.encode(self.encoder.encoding)
         digest = hashlib.sha256(encoded).hexdigest()
         created_output = False
+        created_archive: Path | None = None
         try:
             with database_proxy.atomic():
                 repeated = [
@@ -131,6 +151,23 @@ class F150BatchService:
                         physical_number=remittance.physical_number,
                         snapshot=self._snapshot(remittance, document),
                     )
+                # Ultima revalidacion antes de escribir el TXT: si otro puesto
+                # cambio el domicilio o un rubro entre la seleccion y este
+                # punto, el lote se revierte en vez de emitir un archivo con
+                # datos que ya no cumplen el contrato DGR.
+                fresh_issues = []
+                for current in (Remittance.get_by_id(row.id) for row in selected):
+                    fresh_issues.extend(
+                        self.validation_issues(current, allow_included=True)
+                    )
+                if fresh_issues:
+                    raise F150ValidationError(
+                        "El F150 cambio antes de generarse: "
+                        + "; ".join(dict.fromkeys(fresh_issues))
+                    )
+                created_archive = self._persist_archive(
+                    batch.batch_number, digest, encoded
+                )
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(encoded)
                 created_output = True
@@ -150,7 +187,164 @@ class F150BatchService:
         except Exception:
             if created_output and output.exists():
                 output.unlink()
+            if created_archive is not None and created_archive.exists():
+                try:
+                    created_archive.unlink()
+                except OSError:
+                    pass
             raise
+
+    def _archive_path(self, batch_number: str, digest: str) -> Path:
+        return self.archive_dir / f"{batch_number}-{digest}.TXT"
+
+    def _persist_archive(
+        self, batch_number: str, digest: str, encoded: bytes
+    ) -> Path | None:
+        """Guarda una copia inmutable del TXT para poder recuperarlo despues.
+
+        Devuelve la ruta cuando la creo en esta llamada y ``None`` cuando ya
+        existia con el mismo SHA-256. Si existe con otro contenido, se aborta:
+        un archivo distinto bajo el mismo lote no es una recuperacion segura.
+        """
+        path = self._archive_path(batch_number, digest)
+        if path.exists():
+            current = hashlib.sha256(path.read_bytes()).hexdigest()
+            if current != digest:
+                raise F150ValidationError(
+                    "El archivo de recuperacion del F150 existe pero fue "
+                    "modificado (SHA-256 distinto). No se sobrescribe."
+                )
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("xb") as handle:
+                handle.write(encoded)
+        except FileExistsError:
+            current = hashlib.sha256(path.read_bytes()).hexdigest()
+            if current != digest:
+                raise F150ValidationError(
+                    "Otro proceso creo un archivo de recuperacion distinto para "
+                    "este F150. No se sobrescribe."
+                ) from None
+            return None
+        return path
+
+    def _read_archive(self, batch: F150Batch) -> bytes | None:
+        path = self._archive_path(batch.batch_number, batch.sha256)
+        if not path.is_file():
+            return None
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != batch.sha256:
+            raise F150ValidationError(
+                "El archivo de recuperacion del F150 fue modificado o esta "
+                "dañado (SHA-256 distinto). No se puede recuperar de forma segura."
+            )
+        return data
+
+    def _read_original(self, batch: F150Batch) -> bytes | None:
+        if not batch.file_path:
+            return None
+        original = Path(batch.file_path)
+        if not original.is_file():
+            return None
+        data = original.read_bytes()
+        if hashlib.sha256(data).hexdigest() != batch.sha256:
+            raise F150ValidationError(
+                "El TXT original fue modificado o esta dañado (SHA-256 distinto). "
+                "No se puede recuperar este lote de manera segura."
+            )
+        return data
+
+    def _reconstruct_bytes(self, batch: F150Batch) -> bytes:
+        """Reconstruye el TXT desde los remitos, solo si coincide con el SHA."""
+        included = list(
+            F150BatchRemittance.select()
+            .where(F150BatchRemittance.batch == batch)
+            .order_by(F150BatchRemittance.id)
+        )
+        if len(included) != batch.remittance_count:
+            raise F150ValidationError(
+                "El lote no conserva todos sus remitos; no se puede regenerar "
+                "sin inventar contenido."
+            )
+        try:
+            documents = [
+                self._to_document(
+                    Remittance.get_by_id(row.remittance_id),
+                    allow_included=True,
+                )
+                for row in included
+            ]
+            data = self.encoder.encode(documents).encode(self.encoder.encoding)
+        except (F150ValidationError, ValueError, LookupError, AttributeError) as exc:
+            raise F150ValidationError(
+                "No se pudo reconstruir el F150 desde los remitos actuales: "
+                f"{exc}"
+            ) from exc
+        if hashlib.sha256(data).hexdigest() != batch.sha256:
+            raise F150ValidationError(
+                "Los datos de los remitos cambiaron desde que se genero este "
+                "F150. El archivo reconstruido no coincide con el SHA-256 "
+                "original; no se guardo ningun archivo. El TXT historico no "
+                "se puede recuperar sin la copia original."
+            )
+        return data
+
+    def recover_txt(self, batch: F150Batch, output_path: str | Path) -> Path:
+        """Recupera un lote existente sin crear otra presentacion.
+
+        Orden de fuentes: copia inmutable administrada por FEMAG, TXT original
+        en la ruta registrada, y por ultimo reconstruccion desde los remitos.
+        En los tres casos se exige que el SHA-256 coincida con el del lote.
+        """
+        batch = F150Batch.get_by_id(batch.id)
+        data = self._read_archive(batch)
+        source = "archivo_recuperacion"
+        if data is None:
+            data = self._read_original(batch)
+            source = "txt_original"
+        if data is None:
+            data = self._reconstruct_bytes(batch)
+            source = "reconstruido_verificado"
+        if hashlib.sha256(data).hexdigest() != batch.sha256:
+            raise F150ValidationError(
+                "El contenido recuperado no coincide con el SHA-256 del lote. "
+                "No se guardo ningun archivo."
+            )
+
+        if source != "archivo_recuperacion":
+            # Un historico que todavia tenia el original se archiva para que
+            # no vuelva a depender de una carpeta que el operador olvido.
+            path = self._archive_path(batch.batch_number, batch.sha256)
+            if not path.exists():
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("xb") as handle:
+                        handle.write(data)
+                except OSError:
+                    pass
+
+        output = Path(output_path)
+        if output.suffix.lower() != ".txt":
+            output = output.with_suffix(".TXT")
+        if output.exists():
+            raise FileExistsError(f"El archivo de destino ya existe: {output}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("xb") as handle:
+            handle.write(data)
+        self.audit_service.record(
+            user=self.current_user,
+            module="F150",
+            action="recuperar_txt",
+            record_ref=f"F150Batch:{batch.id}",
+            new_value={
+                "batch_number": batch.batch_number,
+                "sha256": batch.sha256,
+                "source": source,
+                "file_name": output.name,
+            },
+        )
+        return output
 
     @staticmethod
     def _format_cuit(value: str) -> str:
@@ -188,8 +382,10 @@ class F150BatchService:
             return ""
         return locality.country.abbr or ""
 
-    def _to_document(self, remittance: Remittance) -> F150Remittance:
-        issues = self.validation_issues(remittance)
+    def _to_document(
+        self, remittance: Remittance, *, allow_included: bool = False
+    ) -> F150Remittance:
+        issues = self.validation_issues(remittance, allow_included=allow_included)
         if issues:
             raise F150ValidationError(
                 f"Remito {self._identity(remittance)}: " + "; ".join(issues)
@@ -267,7 +463,9 @@ class F150BatchService:
         )
 
     @staticmethod
-    def validation_issues(remittance: Remittance) -> list[str]:
+    def validation_issues(
+        remittance: Remittance, *, allow_included: bool = False
+    ) -> list[str]:
         issues = []
         if remittance.status != Remittance.STATUS_ISSUED:
             issues.append("debe estar emitido")
@@ -288,17 +486,18 @@ class F150BatchService:
             issues.append("falta CUIT o documento del chofer")
         if not remittance.items.exists():
             issues.append("no tiene detalle")
-        if F150BatchService.is_included(remittance):
+        if not allow_included and F150BatchService.is_included(remittance):
             issues.append("ya fue incluido en un lote F150")
         origin = F150BatchService._origin_location()
         if not origin.locality_code.strip():
             issues.append("falta origen DGR (parámetro f150.origin)")
         address = remittance.delivery_address
         issues.extend(
-            F150BatchService._locality_issues(
-                address.locality if address else None, section="destino"
+            destination_address_issues(
+                address, section="destino", require_locality=True
             )
         )
+        issues.extend(snapshot_destination_issues(remittance, section="destino"))
         carrier = remittance.carrier
         if carrier is not None:
             if not (carrier.tipo or "").strip():

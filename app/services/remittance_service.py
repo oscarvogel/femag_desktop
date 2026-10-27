@@ -7,6 +7,10 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
+from app.services.dgr_validation import (
+    destination_address_issues,
+    snapshot_destination_issues,
+)
 from app.services.pricing import as_money, price_for_client_list
 
 
@@ -534,6 +538,25 @@ class RemittanceService:
             raise ValueError("Debe asignar un chofer antes de emitir el remito.")
         if not (remittance.driver.cuit or remittance.driver_document):
             raise ValueError("El chofer debe tener CUIT o documento antes de emitir el remito.")
+        address_issues = destination_address_issues(
+            remittance.delivery_address, section="destino", require_locality=False
+        )
+        if address_issues:
+            raise ValueError(
+                "No se puede emitir el remito: " + "; ".join(address_issues)
+            )
+        # El snapshot se refresca desde el domicilio maestro elegido. Asi un
+        # remito nuevo hereda la calle/ciudad/provincia reales y no queda con
+        # el valor viejo de una edicion anterior del maestro. Solo aplica al
+        # emitir: los remitos ya emitidos no se tocan.
+        remittance.delivery_address_text = remittance.delivery_address.address
+        remittance.delivery_city = remittance.delivery_address.city
+        remittance.delivery_province = remittance.delivery_address.province
+        snapshot_issues = snapshot_destination_issues(remittance, section="destino")
+        if snapshot_issues:
+            raise ValueError(
+                "No se puede emitir el remito: " + "; ".join(snapshot_issues)
+            )
         old_snapshot = self._snapshot(remittance)
         with database_proxy.atomic():
             if not remittance.physical_point_of_sale or not remittance.physical_number:

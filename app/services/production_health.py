@@ -9,11 +9,13 @@ class HealthCheckResult:
     ok: bool
     checks: tuple[str, ...]
     error: str = ""
+    warnings: tuple[str, ...] = ()
 
 
 def run_production_health_check() -> HealthCheckResult:
     """Validate a production installation without changing business data."""
     checks: list[str] = []
+    warnings: list[str] = []
     database = None
     try:
         from app.config.logging_config import configure_logging
@@ -65,7 +67,42 @@ def run_production_health_check() -> HealthCheckResult:
             validate_runtime_schema(database)
             checks.append("schema-readonly")
 
-        return HealthCheckResult(ok=True, checks=tuple(checks))
+        # Diagnostico no destructivo del destino DGR: no corrige ni emite nada.
+        # Los remitos historicos invalidos se informan como aviso para que el
+        # operador los vea, pero no impiden abrir la aplicacion ni generan un
+        # falso "health OK" sin contexto. Solo aplica a la base real: el smoke
+        # SQLite aislado del EXE no tiene tablas de negocio.
+        if settings.db_engine == "mysql":
+            from app.models.f150 import F150BatchRemittance
+            from app.models.remittances import Remittance
+            from app.services.f150_batch_service import F150BatchService
+
+            included_ids = {
+                row.remittance_id
+                for row in F150BatchRemittance.select(F150BatchRemittance.remittance)
+            }
+            ready = 0
+            blocked = 0
+            for remittance in Remittance.select().where(
+                Remittance.status == Remittance.STATUS_ISSUED
+            ):
+                if remittance.id in included_ids:
+                    continue
+                if F150BatchService.validation_issues(remittance):
+                    blocked += 1
+                else:
+                    ready += 1
+            checks.append(f"f150-dgr: {ready} listos, {blocked} bloqueados")
+            if blocked:
+                warnings.append(
+                    f"{blocked} remito(s) emitido(s) tienen el destino DGR incompleto "
+                    "o datos de producto faltantes. Se corrigen desde Generar F150 > "
+                    "Corregir datos DGR."
+                )
+
+        return HealthCheckResult(
+            ok=True, checks=tuple(checks), warnings=tuple(warnings)
+        )
     except Exception as exc:
         return HealthCheckResult(ok=False, checks=tuple(checks), error=f"{type(exc).__name__}: {exc}")
     finally:

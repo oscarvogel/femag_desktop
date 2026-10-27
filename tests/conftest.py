@@ -25,6 +25,7 @@ def _isolate_femag_env(monkeypatch, tmp_path):
     """
     non_existent_env = tmp_path / "missing.env"
     monkeypatch.setenv("FEMAG_ENV_FILE", str(non_existent_env))
+    monkeypatch.setenv("FEMAG_F150_ARCHIVE_DIR", str(tmp_path / "f150_archive"))
     for var in (
         "FEMAG_DB_ENGINE",
         "FEMAG_SQLITE_PATH",

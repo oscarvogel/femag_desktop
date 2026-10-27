@@ -66,6 +66,8 @@ def production_health_check() -> int:
     result = run_production_health_check()
     if result.ok:
         print(f"FEMAG production health OK: {', '.join(result.checks)}")
+        for warning in result.warnings:
+            print(f"FEMAG production health WARNING: {warning}")
         return 0
     print(
         f"FEMAG production health FAILED after [{', '.join(result.checks)}]: {result.error}",
