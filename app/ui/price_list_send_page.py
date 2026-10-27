@@ -20,6 +20,7 @@ operador lo tilda a mano.
 from __future__ import annotations
 
 import csv
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -53,6 +54,7 @@ from app.services.price_list_campaign_service import (
 from app.services.price_list_send_service import (
     INTERVALO_MAXIMO,
     INTERVALO_MINIMO,
+    Pendiente,
     PriceListCampaignRunner,
     clave_campana,
     destinatarios_pendientes,
@@ -72,6 +74,28 @@ ETIQUETA_ESTADO = {
     ESTADO_FALLIDO: "falló",
     ESTADO_OMITIDO: "omitido",
 }
+
+
+def texto_confirmacion_envio(seleccionados: int, disponibles: int) -> str:
+    """El texto obligatorio del modal previo al envío (#793).
+
+    Se separa de la pantalla para poder testear el texto exacto sin abrir un diálogo modal.
+    """
+    cantidad = int(seleccionados)
+    total = int(disponibles)
+    if cantidad == 1:
+        destino = "1 cliente"
+        seleccionado = "seleccionado"
+        determinante = "este cliente"
+    else:
+        destino = f"{cantidad} clientes"
+        seleccionado = "seleccionados"
+        determinante = f"estos {cantidad} clientes"
+    return (
+        f"Estás por enviar la lista de precios a {destino} {seleccionado} "
+        f"de {total} disponibles.\n\n"
+        f"¿Confirmás el envío únicamente a {determinante}?"
+    )
 
 
 class PriceListSendSignals(QObject):
@@ -111,11 +135,18 @@ class PriceListSendPage(QWidget):
         self._envios_error = ""
         self.worker: PriceListSendWorker | None = None
         self.destinatarios = []
+        self.destinatarios_por_id: dict[int, object] = {}
+        self.destinatarios_visibles = []
+        self.seleccionados: set[int] = set()
         self.pendientes = []
         self.pendientes_restantes = []
         self.fallidos = []
         self.estado_filas: dict[int, dict] = {}
         self.clave_campana_actual = ""
+        self._pintando_tabla = False
+        self._iniciando = False
+        self._suprimir_invalidacion_pdf = False
+        self._pdf_anterior = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
@@ -158,12 +189,13 @@ class PriceListSendPage(QWidget):
         self.pdf_input.setObjectName("priceListSendPdfInput")
         self.pdf_input.setReadOnly(True)
         self.pdf_input.setPlaceholderText("Elegí el PDF de esta lista")
-        elegir_pdf = QPushButton("Seleccionar PDF")
-        elegir_pdf.setObjectName("priceListSendPickPdfButton")
-        elegir_pdf.clicked.connect(self._elegir_pdf)
+        self.pdf_input.textChanged.connect(self._al_cambiar_pdf)
+        self.elegir_pdf_button = QPushButton("Seleccionar PDF")
+        self.elegir_pdf_button.setObjectName("priceListSendPickPdfButton")
+        self.elegir_pdf_button.clicked.connect(self._elegir_pdf)
         fila_pdf = QHBoxLayout()
         fila_pdf.addWidget(self.pdf_input, 1)
-        fila_pdf.addWidget(elegir_pdf)
+        fila_pdf.addWidget(self.elegir_pdf_button)
         contenedor_pdf = QWidget()
         contenedor_pdf.setLayout(fila_pdf)
         form.addRow("PDF", contenedor_pdf)
@@ -184,12 +216,12 @@ class PriceListSendPage(QWidget):
         self.intervalo_spin.setValue(180)
         self.intervalo_spin.setSuffix(" s")
         self.intervalo_spin.valueChanged.connect(self._al_cambiar_el_intervalo)
-        modo_prueba = QPushButton("Usar 10 s (modo prueba)")
-        modo_prueba.setObjectName("priceListSendTestSpeedButton")
-        modo_prueba.clicked.connect(self._usar_velocidad_de_prueba)
+        self.modo_prueba_button = QPushButton("Usar 10 s (modo prueba)")
+        self.modo_prueba_button.setObjectName("priceListSendTestSpeedButton")
+        self.modo_prueba_button.clicked.connect(self._usar_velocidad_de_prueba)
         fila_intervalo = QHBoxLayout()
         fila_intervalo.addWidget(self.intervalo_spin)
-        fila_intervalo.addWidget(modo_prueba)
+        fila_intervalo.addWidget(self.modo_prueba_button)
         contenedor_intervalo = QWidget()
         contenedor_intervalo.setLayout(fila_intervalo)
         form.addRow("Intervalo entre envíos", contenedor_intervalo)
@@ -217,14 +249,40 @@ class PriceListSendPage(QWidget):
         layout = QVBoxLayout(grupo)
 
         acciones = QHBoxLayout()
-        calcular = QPushButton("Calcular destinatarios")
-        calcular.setObjectName("priceListSendCalculateButton")
-        calcular.clicked.connect(self._calcular_destinatarios)
-        acciones.addWidget(calcular)
+        self.calcular_button = QPushButton("Calcular destinatarios")
+        self.calcular_button.setObjectName("priceListSendCalculateButton")
+        self.calcular_button.clicked.connect(self._calcular_destinatarios)
+        acciones.addWidget(self.calcular_button)
         self.contadores_label = QLabel("Todavía no calculaste los destinatarios.")
         self.contadores_label.setObjectName("priceListSendCountersLabel")
         acciones.addWidget(self.contadores_label, 1)
         layout.addLayout(acciones)
+
+        filtros = QHBoxLayout()
+        self.busqueda_input = QLineEdit()
+        self.busqueda_input.setObjectName("priceListSendSearchInput")
+        self.busqueda_input.setPlaceholderText(
+            "Buscar por nombre, teléfono registrado o número de WhatsApp..."
+        )
+        self.busqueda_input.setClearButtonEnabled(True)
+        self.busqueda_input.textChanged.connect(self._al_buscar)
+        filtros.addWidget(self.busqueda_input, 1)
+        self.seleccionar_todos_button = QPushButton("Seleccionar todos")
+        self.seleccionar_todos_button.setObjectName("priceListSendSelectAllButton")
+        self.seleccionar_todos_button.clicked.connect(self._seleccionar_todos)
+        filtros.addWidget(self.seleccionar_todos_button)
+        self.deseleccionar_todos_button = QPushButton("Deseleccionar todos")
+        self.deseleccionar_todos_button.setObjectName("priceListSendDeselectAllButton")
+        self.deseleccionar_todos_button.clicked.connect(self._deseleccionar_todos)
+        filtros.addWidget(self.deseleccionar_todos_button)
+        layout.addLayout(filtros)
+
+        self.alcance_label = QLabel(
+            "Seleccionar todos incluye solo a los clientes con un número válido para WhatsApp."
+        )
+        self.alcance_label.setObjectName("priceListSendScopeHint")
+        self.alcance_label.setWordWrap(True)
+        layout.addWidget(self.alcance_label)
 
         self.destinatarios_table = QTableWidget(0, 5)
         self.destinatarios_table.setObjectName("priceListSendRecipientsTable")
@@ -241,6 +299,7 @@ class PriceListSendPage(QWidget):
         for columna in (2, 3, 4):
             header.setSectionResizeMode(columna, QHeaderView.ResizeToContents)
         layout.addWidget(self.destinatarios_table)
+        self._actualizar_controles_seleccion()
         return grupo
 
     def _bloque_enviar(self) -> QGroupBox:
@@ -324,15 +383,67 @@ class PriceListSendPage(QWidget):
 
     def _cargar_configuracion(self) -> None:
         config = self.servicio.config(self.lista_combo.currentData())
-        self.pdf_input.setText(config.pdf_path)
+        self._suprimir_invalidacion_pdf = True
+        try:
+            self.pdf_input.setText(config.pdf_path)
+        finally:
+            self._suprimir_invalidacion_pdf = False
+        self._pdf_anterior = self.pdf_input.text().strip()
         self.mensaje_input.setPlainText(config.mensaje)
 
+    def _limpiar_cola_pendiente(self) -> None:
+        """Descarta restos de una campaña anterior (fallidos o lote pendiente)."""
+        self.pendientes_restantes = []
+        self.fallidos = []
+        boton = getattr(self, "reintentar_button", None)
+        if boton is not None:
+            boton.setText("Reintentar fallidos")
+            boton.setEnabled(False)
+
     def _al_cambiar_lista(self) -> None:
+        tenia_seleccion = bool(self.seleccionados)
         self._cargar_configuracion()
         self.destinatarios = []
+        self.destinatarios_por_id = {}
+        self.destinatarios_visibles = []
+        self.seleccionados = set()
+        self._limpiar_cola_pendiente()
         self.destinatarios_table.setRowCount(0)
+        if tenia_seleccion:
+            self.feedback.show_warning(
+                "Cambiaste la lista: se descartó la selección anterior. "
+                "Volvé a calcular los destinatarios."
+            )
         self._refrescar_contadores()
         self._refrescar_boton_enviar()
+
+    def _al_cambiar_pdf(self) -> None:
+        """Invalidar la selección si el operador cambia el PDF (#793).
+
+        La selección pertenece a una lista y a un documento concretos. Mandar el PDF nuevo a
+        una selección vieja sería un error silencioso, así que se descarta y se pide revisar.
+        """
+        texto = self.pdf_input.text().strip()
+        if texto == self._pdf_anterior:
+            return
+        self._pdf_anterior = texto
+        if self._suprimir_invalidacion_pdf:
+            return
+        habia_cola = bool(self.pendientes_restantes or self.fallidos)
+        if habia_cola:
+            self._limpiar_cola_pendiente()
+        if not self.seleccionados:
+            if habia_cola:
+                self.feedback.show_warning(
+                    "Cambiaste el PDF: se descartaron los envíos pendientes de reintento."
+                )
+            return
+        self.seleccionados.clear()
+        self._pintar_tabla_destinatarios()
+        self.feedback.show_warning(
+            "Cambiaste el PDF: se descartó la selección anterior. "
+            "Revisá los destinatarios y volvé a seleccionar."
+        )
 
     def _elegir_pdf(self) -> None:
         ruta, _ = QFileDialog.getOpenFileName(
@@ -343,18 +454,24 @@ class PriceListSendPage(QWidget):
         )
         if not ruta:
             return
+        tenia_seleccion = bool(self.seleccionados)
         self.pdf_input.setText(ruta)
+        if tenia_seleccion:
+            return
         self.feedback.show_info(f"Elegiste {Path(ruta).name}. Guardá la configuración para dejarlo asociado.")
 
     def _usar_velocidad_de_prueba(self) -> None:
         self.intervalo_spin.setValue(10)
-        self.feedback.show_info("Intervalo de 10 segundos. Sirve para pruebas, no para una campaña real.")
+        self.feedback.show_info(
+            "Intervalo de 10 segundos entre mensajes (no limita la cantidad de destinatarios). "
+            "Sirve para pruebas controladas, no para una campaña real."
+        )
 
     def _al_cambiar_el_intervalo(self) -> None:
         if self.intervalo_spin.value() < INTERVALO_MINIMO:
             self.feedback.show_warning(
-                "Intervalo de 10 segundos: es el modo prueba. "
-                "Sirve para sacar 3 o 4 mensajes de prueba, no para una campaña real."
+                "Intervalo de 10 segundos entre mensajes: es el modo prueba. "
+                "No cambia a quién se le envía: la audiencia son los clientes seleccionados."
             )
         self._refrescar_contadores()
 
@@ -369,7 +486,12 @@ class PriceListSendPage(QWidget):
         except Exception as exc:  # noqa: BLE001 - va a la pantalla
             self.feedback.show_warning(str(exc))
             return
-        self.pdf_input.setText(config.pdf_path)
+        self._suprimir_invalidacion_pdf = True
+        try:
+            self.pdf_input.setText(config.pdf_path)
+        finally:
+            self._suprimir_invalidacion_pdf = False
+        self._pdf_anterior = self.pdf_input.text().strip()
         self.feedback.show_info(
             f"Guardado: PDF {Path(config.pdf_path).name if config.pdf_path else 'sin definir'}"
             f" para la lista {config.lista}."
@@ -387,53 +509,184 @@ class PriceListSendPage(QWidget):
             return
 
         self.destinatarios = list(audiencia.destinatarios)
-        self.destinatarios_table.setRowCount(len(self.destinatarios))
-        for fila, destinatario in enumerate(self.destinatarios):
-            item_marca = QTableWidgetItem("")
-            item_marca.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            item_marca.setCheckState(Qt.Checked if destinatario.marcado else Qt.Unchecked)
-            item_marca.setData(Qt.UserRole, destinatario.client_id)
-            self.destinatarios_table.setItem(fila, 0, item_marca)
-            self.destinatarios_table.setItem(fila, 1, QTableWidgetItem(destinatario.nombre))
-            self.destinatarios_table.setItem(fila, 2, QTableWidgetItem(destinatario.telefono_original))
-            self.destinatarios_table.setItem(fila, 3, QTableWidgetItem(destinatario.telefono_normalizado))
-            detalle = destinatario.estado
-            if destinatario.motivo:
-                detalle = f"{destinatario.estado} ({destinatario.motivo})"
-            self.destinatarios_table.setItem(fila, 4, QTableWidgetItem(detalle))
+        self.destinatarios_por_id = {d.client_id: d for d in self.destinatarios}
+        self._limpiar_cola_pendiente()
+        # Recalcular invalida la selección anterior: se vuelve a la selección sugerida
+        # (solo celulares sin ambigüedad), nunca a un conjunto viejo.
+        self.seleccionados = {
+            d.client_id for d in self.destinatarios if d.marcado and d.enviable
+        }
+        self._pintar_tabla_destinatarios()
+        self._refrescar_boton_enviar()
 
+    def _texto_busqueda(self) -> str:
+        return self.busqueda_input.text().strip().casefold()
+
+    @staticmethod
+    def _coincide_busqueda(destinatario, texto: str) -> bool:
+        if not texto:
+            return True
+        campos = (
+            destinatario.nombre,
+            destinatario.telefono_original,
+            destinatario.telefono_normalizado,
+        )
+        if any(texto in str(campo or "").casefold() for campo in campos):
+            return True
+        digitos_buscados = re.sub(r"\D", "", texto)
+        if not digitos_buscados:
+            return False
+        digitos_destino = re.sub(r"\D", "", " ".join(str(campo or "") for campo in campos))
+        return digitos_buscados in digitos_destino
+
+    def _pintar_tabla_destinatarios(self) -> None:
+        """Repinta la tabla aplicando el filtro, sin tocar la selección real.
+
+        La fuente de verdad es ``self.seleccionados`` (IDs de cliente), no las filas visibles:
+        así buscar no borra lo que ya estaba marcado.
+        """
+        texto = self._texto_busqueda()
+        self.destinatarios_visibles = [
+            destinatario
+            for destinatario in self.destinatarios
+            if self._coincide_busqueda(destinatario, texto)
+        ]
+
+        self._pintando_tabla = True
+        try:
+            self.destinatarios_table.setRowCount(len(self.destinatarios_visibles))
+            for fila, destinatario in enumerate(self.destinatarios_visibles):
+                item_marca = QTableWidgetItem("")
+                if destinatario.enviable:
+                    item_marca.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                    item_marca.setCheckState(
+                        Qt.Checked
+                        if destinatario.client_id in self.seleccionados
+                        else Qt.Unchecked
+                    )
+                else:
+                    item_marca.setFlags(Qt.ItemIsEnabled)
+                    item_marca.setCheckState(Qt.Unchecked)
+                item_marca.setData(Qt.UserRole, destinatario.client_id)
+                self.destinatarios_table.setItem(fila, 0, item_marca)
+                self.destinatarios_table.setItem(fila, 1, QTableWidgetItem(destinatario.nombre))
+                self.destinatarios_table.setItem(
+                    fila, 2, QTableWidgetItem(destinatario.telefono_original)
+                )
+                self.destinatarios_table.setItem(
+                    fila, 3, QTableWidgetItem(destinatario.telefono_normalizado)
+                )
+                detalle = destinatario.estado
+                if destinatario.motivo:
+                    detalle = f"{destinatario.estado} ({destinatario.motivo})"
+                self.destinatarios_table.setItem(fila, 4, QTableWidgetItem(detalle))
+        finally:
+            self._pintando_tabla = False
+
+        self._actualizar_etiquetas_alcance()
         self._refrescar_contadores()
         self._refrescar_boton_enviar()
 
-    def _al_cambiar_un_destinatario(self, item: QTableWidgetItem) -> None:
-        if item.column() != 0:
+    def _actualizar_etiquetas_alcance(self) -> None:
+        if self._texto_busqueda():
+            visibles = len(self.destinatarios_visibles)
+            self.seleccionar_todos_button.setText(f"Seleccionar visibles ({visibles})")
+            self.deseleccionar_todos_button.setText("Deseleccionar visibles")
+            self.alcance_label.setText(
+                "Hay un filtro activo: los botones de selección actúan solo sobre los "
+                "resultados visibles. La selección anterior se conserva."
+            )
+        else:
+            self.seleccionar_todos_button.setText("Seleccionar todos")
+            self.deseleccionar_todos_button.setText("Deseleccionar todos")
+            self.alcance_label.setText(
+                "Seleccionar todos incluye solo a los clientes con un número válido para WhatsApp."
+            )
+
+    def _al_buscar(self) -> None:
+        self._pintar_tabla_destinatarios()
+
+    def _seleccionar_todos(self) -> None:
+        if self.worker is not None:
             return
+        for destinatario in self.destinatarios_visibles:
+            if destinatario.enviable:
+                self.seleccionados.add(destinatario.client_id)
+        self._pintar_tabla_destinatarios()
+
+    def _deseleccionar_todos(self) -> None:
+        if self.worker is not None:
+            return
+        for destinatario in self.destinatarios_visibles:
+            self.seleccionados.discard(destinatario.client_id)
+        self._pintar_tabla_destinatarios()
+
+    def _actualizar_controles_seleccion(self) -> None:
+        activo = self.worker is None
+        hay = bool(self.destinatarios)
+        self.seleccionar_todos_button.setEnabled(activo and hay)
+        self.deseleccionar_todos_button.setEnabled(activo and hay)
+
+    def _al_cambiar_un_destinatario(self, item: QTableWidgetItem) -> None:
+        if self._pintando_tabla or item.column() != 0 or self.worker is not None:
+            return
+        client_id = item.data(Qt.UserRole)
+        destinatario = self.destinatarios_por_id.get(client_id)
+        if destinatario is None or not destinatario.enviable:
+            item.setCheckState(Qt.Unchecked)
+            self.feedback.show_warning(
+                "Ese cliente no tiene un número válido para WhatsApp: no se puede seleccionar."
+            )
+            return
+        if item.checkState() == Qt.Checked:
+            self.seleccionados.add(client_id)
+        else:
+            self.seleccionados.discard(client_id)
         self._refrescar_contadores()
         self._refrescar_boton_enviar()
 
     def _refrescar_contadores(self) -> None:
-        marcados = sum(1 for fila in range(self.destinatarios_table.rowCount())
-                       if self.destinatarios_table.item(fila, 0)
-                       and self.destinatarios_table.item(fila, 0).checkState() == Qt.Checked)
         totales = len(self.destinatarios)
+        marcados = sum(
+            1 for client_id in self.seleccionados if client_id in self.destinatarios_por_id
+        )
         if not totales:
             self.contadores_label.setText("Todavía no calculaste los destinatarios.")
+            self.aviso_texto.setText(
+                "Primero calculá los destinatarios y elegí a qué clientes querés enviarles la lista."
+            )
+            self._actualizar_controles_seleccion()
             return
-        self.contadores_label.setText(
-            f"{totales} clientes de la lista · {marcados} marcados para enviar"
-        )
-        self.aviso_texto.setText(
-            f"Se van a mandar {marcados} mensajes desde tu instancia de WhatsApp. "
-            "Revisá el PDF y los números antes de confirmar."
-        )
+
+        contador = f"{marcados} seleccionados de {totales} disponibles"
+        if self._texto_busqueda():
+            contador += f" · {len(self.destinatarios_visibles)} visibles"
+        self.contadores_label.setText(contador)
+
+        if not marcados:
+            self.aviso_texto.setText(
+                "No hay clientes seleccionados. Marcá al menos uno para habilitar el envío."
+            )
+        else:
+            self.aviso_texto.setText(
+                f"Se van a mandar {marcados} mensajes desde tu instancia de WhatsApp. "
+                "Revisá el PDF, la línea y los números antes de confirmar."
+            )
+        self._actualizar_controles_seleccion()
 
     def _refrescar_boton_enviar(self) -> None:
+        if self.worker is not None:
+            pausado = bool(getattr(self.worker.runner, "pausado", False))
+            self.enviar_button.setText("Reanudar envío" if pausado else "Iniciar envío")
+            self.enviar_button.setEnabled(pausado)
+            return
         puede = (
             self.confirmacion_check.isChecked()
-            and self._pendientes_marcados()
+            and bool(self.seleccionados)
             and self.pdf_input.text().strip()
-            and not self.worker
+            and not self._iniciando
         )
+        self.enviar_button.setText("Iniciar envío")
         self.enviar_button.setEnabled(bool(puede))
 
     # ------------------------------------------------------------------ envio
@@ -453,49 +706,137 @@ class PriceListSendPage(QWidget):
                 self._envios_error = str(exc)
         return self._envios
 
-    def _pendientes_marcados(self):
+    def _destinatarios_seleccionados(self):
+        """Los destinatarios marcados, tomados de los IDs reales y no de las filas visibles.
+
+        Recorre la audiencia calculada (no la tabla filtrada) para que un cliente seleccionado
+        que quedó oculto por la búsqueda siga entrando en la cola. Deduplica por ``client_id``.
+        """
         pendientes = []
-        for fila in range(self.destinatarios_table.rowCount()):
-            item = self.destinatarios_table.item(fila, 0)
-            if item is None or item.checkState() != Qt.Checked:
+        vistos: set[int] = set()
+        for destinatario in self.destinatarios:
+            if destinatario.client_id not in self.seleccionados:
                 continue
-            client_id = item.data(Qt.UserRole)
-            for destinatario in self.destinatarios:
-                if destinatario.client_id == client_id:
-                    pendientes.append(destinatario)
-                    break
+            if destinatario.client_id in vistos or not destinatario.enviable:
+                continue
+            vistos.add(destinatario.client_id)
+            pendientes.append(destinatario)
         return pendientes
 
+    def _validar_destinatarios_antes_de_enviar(self, pendientes):
+        """Revalida los seleccionados contra la base y devuelve (destinatarios, disponibles).
+
+        Si la lista cambió (alta/baja, teléfono distinto, cliente inactivo), no se envía nada:
+        se pide recalcular para que una selección vieja no mande mensajes a quien no corresponde.
+        """
+        lista = self.lista_combo.currentData()
+        try:
+            audiencia = self.servicio.calcular_audiencia(lista)
+        except Exception as exc:  # noqa: BLE001 - va a la pantalla
+            self.feedback.show_warning(str(exc))
+            return None, 0
+
+        actuales = {d.client_id: d for d in audiencia.destinatarios}
+        if set(actuales) != set(self.destinatarios_por_id):
+            self.feedback.show_warning(
+                "Los destinatarios de la lista cambiaron desde que los calculaste. "
+                "Volvé a calcularlos y revisá la selección antes de enviar."
+            )
+            return None, 0
+
+        validados = []
+        rechazados = []
+        for pendiente in pendientes:
+            actual = actuales.get(pendiente.client_id)
+            if (
+                actual is None
+                or not actual.enviable
+                or actual.telefono_normalizado != pendiente.telefono_normalizado
+            ):
+                rechazados.append(pendiente)
+                continue
+            validados.append(actual)
+
+        if rechazados:
+            self.feedback.show_warning(
+                "Alguno de los clientes seleccionados ya no tiene un número válido para WhatsApp "
+                "o cambió su teléfono. Recalculá los destinatarios y volvé a seleccionar."
+            )
+            return None, 0
+
+        return validados, audiencia.total
+
+    def _reiniciar_seguimiento(self) -> None:
+        """Una campaña nueva no debe mezclar el seguimiento de una anterior."""
+        self.estado_filas = {}
+        self.fallidos = []
+        self.pendientes_restantes = []
+        self.reintentar_button.setText("Reintentar fallidos")
+        self.reintentar_button.setEnabled(False)
+        self.resumen_label.setText("Sin envíos.")
+        self._pintar_seguimiento()
+
+    def _pedir_confirmacion_envio(self, seleccionados: int, disponibles: int) -> bool:
+        """Modal obligatorio con las cantidades reales (#793)."""
+        caja = QMessageBox(self)
+        caja.setObjectName("priceListSendConfirmationDialog")
+        caja.setWindowTitle("Confirmar el envío")
+        caja.setIcon(QMessageBox.Warning)
+        caja.setText(texto_confirmacion_envio(seleccionados, disponibles))
+        boton_cancelar = caja.addButton("Cancelar", QMessageBox.RejectRole)
+        boton_confirmar = caja.addButton("Confirmar envío", QMessageBox.AcceptRole)
+        caja.setDefaultButton(boton_cancelar)
+        caja.exec_()
+        return caja.clickedButton() is boton_confirmar
+
     def _iniciar_envio(self) -> None:
-        pendientes = self._pendientes_marcados()
+        if self.worker is not None:
+            if self.worker.runner.pausado:
+                self.worker.runner.reanudar()
+                self.pausar_button.setEnabled(True)
+                self._refrescar_boton_enviar()
+            return
+        if self._iniciando:
+            return
+
+        pendientes = self._destinatarios_seleccionados()
         if not pendientes:
-            self.feedback.show_warning("No hay destinatarios marcados.")
+            self.feedback.show_warning(
+                "No hay clientes seleccionados. Marcá al menos uno para iniciar el envío."
+            )
             return
         if not self.pdf_input.text().strip():
             self.feedback.show_warning("Elegí el PDF de la lista de precios.")
+            return
+        try:
+            self.servicio.validar_pdf(self.pdf_input.text())
+        except Exception as exc:  # noqa: BLE001 - va a la pantalla
+            self.feedback.show_warning(str(exc))
             return
         if not self.confirmacion_check.isChecked():
             self.feedback.show_warning("Tildá la confirmación para enviar desde tu línea.")
             return
 
-        instancia = self._resolver_instancia()
-        if not instancia:
-            return
+        self._iniciando = True
+        try:
+            instancia = self._resolver_instancia()
+            if not instancia:
+                return
 
-        respuesta = QMessageBox.question(
-            self,
-            "Confirmar el envío",
-            f"Se enviarán {len(pendientes)} mensajes desde tu instancia de WhatsApp.\n\n"
-            f"PDF: {Path(self.pdf_input.text()).name}\n\n"
-            "¿Seguís?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if respuesta != QMessageBox.Yes:
-            return
+            validados, disponibles = self._validar_destinatarios_antes_de_enviar(pendientes)
+            if validados is None:
+                return
 
-        self.pendientes = pendientes
-        self._iniciar_worker(pendientes, lote_inicial=self.lote_spin.value())
+            if not self._pedir_confirmacion_envio(len(validados), disponibles):
+                # Cancelar no crea tareas ni modifica la campaña.
+                return
+
+            self.pendientes = validados
+            self._reiniciar_seguimiento()
+            self._iniciar_worker(validados, lote_inicial=self.lote_spin.value())
+        finally:
+            self._iniciando = False
+            self._refrescar_boton_enviar()
 
     def _resolver_instancia(self) -> str:
         envios = self.envios
@@ -520,10 +861,33 @@ class PriceListSendPage(QWidget):
             # Reanudar no vuelve a mandar a quien ya tiene un envio terminal en la campaña.
             pendientes = destinatarios_pendientes(clave, pendientes)
 
+        # Defensa final: la cola nunca puede tener dos veces al mismo cliente.
+        unicos = []
+        vistos: set[int] = set()
+        for pendiente in pendientes:
+            if pendiente.client_id in vistos:
+                continue
+            vistos.add(pendiente.client_id)
+            unicos.append(pendiente)
+        pendientes = unicos
+        self.pendientes = list(pendientes)
+
+        # El motor espera ``Pendiente`` (número efectivo + mensaje ya sustituido); la pantalla
+        # trabaja con ``Destinatario``. La conversión ocurre acá, después de la idempotencia.
+        a_enviar = [
+            Pendiente(
+                client_id=destinatario.client_id,
+                nombre=destinatario.nombre,
+                telefono=destinatario.telefono_normalizado,
+                caption=config.mensaje_para(destinatario.nombre),
+            )
+            for destinatario in pendientes
+        ]
+
         runner = PriceListCampaignRunner(
             clave=clave,
             pdf_path=self.pdf_input.text().strip(),
-            pendientes=pendientes,
+            pendientes=a_enviar,
             usuario=self.user,
             envios=self.envios,
             instance_id=self._resolver_instancia(),
@@ -538,14 +902,30 @@ class PriceListSendPage(QWidget):
         self.pausar_button.setEnabled(True)
         self.cancelar_button.setEnabled(True)
         self.exportar_button.setEnabled(True)
+        self._set_seleccion_habilitada(False)
         self._refrescar_boton_enviar()
+
+    def _set_seleccion_habilitada(self, habilitado: bool) -> None:
+        """Bloquea la selección y la preparación mientras corre una cola (#793)."""
+        self.destinatarios_table.setEnabled(habilitado)
+        self.lista_combo.setEnabled(habilitado)
+        self.elegir_pdf_button.setEnabled(habilitado)
+        self.calcular_button.setEnabled(habilitado)
+        self.guardar_button.setEnabled(habilitado)
+        if not habilitado:
+            self.seleccionar_todos_button.setEnabled(False)
+            self.deseleccionar_todos_button.setEnabled(False)
+            self.enviar_button.setText("Iniciar envío")
+        else:
+            self._actualizar_controles_seleccion()
 
     def _pausar(self) -> None:
         if self.worker is None:
             return
         self.worker.runner.pausar()
         self.pausar_button.setEnabled(False)
-        self.resumen_label.setText("En pausa. Volvé a tocar \"Iniciar envío\" para seguir.")
+        self._refrescar_boton_enviar()
+        self.resumen_label.setText("En pausa. Tocá \"Reanudar envío\" para seguir.")
 
     def _cancelar(self) -> None:
         if self.worker is None:
@@ -554,6 +934,8 @@ class PriceListSendPage(QWidget):
         self.cancelar_button.setEnabled(False)
 
     def _reintentar_fallidos(self) -> None:
+        if self.worker is not None:
+            return
         if self.pendientes_restantes:
             # El lote inicial se detuvo: se sigue con los que quedaron.
             pendientes = list(self.pendientes_restantes)
@@ -595,25 +977,29 @@ class PriceListSendPage(QWidget):
         self.pausar_button.setEnabled(False)
         self.cancelar_button.setEnabled(False)
         self.reintentar_button.setEnabled(bool(self.fallidos))
+        self.enviar_button.setText("Iniciar envío")
         self.resumen_label.setText(
             f"{resultado.enviados} enviados · {resultado.fallidos} fallidos · "
             f"{resultado.omitidos} omitidos. {resultado.motivo}".strip()
         )
         if resultado.detenido_por == "lote_inicial":
-            # Quedan los que no se tocaron: el operador decide si sigue.
+            # Solo se continúa con los seleccionados que efectivamente entraron a la cola.
             self.pendientes_restantes = [
                 destinatario
-                for destinatario in self.destinatarios
+                for destinatario in self.pendientes
                 if destinatario.client_id not in self.estado_filas
             ]
             self.feedback.show_info(resultado.motivo)
             self.reintentar_button.setText("Continuar con los que quedan")
             self.reintentar_button.setEnabled(True)
+        self._set_seleccion_habilitada(True)
         self._refrescar_boton_enviar()
 
     def _al_error(self, mensaje: str) -> None:
         self.worker = None
+        self.enviar_button.setText("Iniciar envío")
         self.feedback.show_warning(f"No se pudo completar el envío: {mensaje}")
+        self._set_seleccion_habilitada(True)
         self._refrescar_boton_enviar()
 
     def _pintar_seguimiento(self) -> None:
