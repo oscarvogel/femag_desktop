@@ -1,0 +1,58 @@
+# FEMAG Web - entorno DEMO local para validar la imagen de Coolify (#803).
+#
+# MySQL no publica el puerto 3306: solo la web lo alcanza por la red interna.
+# No usar este archivo con datos reales ni en produccion. Para Coolify, crear
+# los servicios MySQL y aplicacion por separado (ver docs/FEMAG_WEB_COOLIFY_DEPLOY.md).
+
+services:
+  db:
+    image: mysql:8.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-femag_web}
+      MYSQL_USER: ${DB_USER:-femag}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD en el archivo demo.env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD en el archivo demo.env}
+    volumes:
+      - femag_web_demo_mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/coolify/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FEMAG_DB_ENGINE: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-femag_web}
+      DB_USER: ${DB_USER:-femag}
+      DB_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD en el archivo demo.env}
+      FEMAG_SECURE_CONFIG: "0"
+      FEMAG_WEB_SECRET_KEY: ${FEMAG_WEB_SECRET_KEY:?defina FEMAG_WEB_SECRET_KEY en el archivo demo.env}
+      FEMAG_WEB_PUBLIC_URL: ${FEMAG_WEB_PUBLIC_URL:-http://localhost:8080}
+      FEMAG_WEB_AUTO_INIT_SCHEMA: ${FEMAG_WEB_AUTO_INIT_SCHEMA:-1}
+      FEMAG_WEB_SEED_DEMO: ${FEMAG_WEB_SEED_DEMO:-1}
+      FEMAG_DEMO: ${FEMAG_DEMO:-1}
+      FEMAG_WEB_DEMO_ADMIN_USER: ${FEMAG_WEB_DEMO_ADMIN_USER:-demo}
+      FEMAG_WEB_DEMO_ADMIN_PASSWORD: ${FEMAG_WEB_DEMO_ADMIN_PASSWORD:?defina FEMAG_WEB_DEMO_ADMIN_PASSWORD en el archivo demo.env}
+      FEMAG_WEB_DEMO_ORDER_TOKEN: ${FEMAG_WEB_DEMO_ORDER_TOKEN:-demo-web-order-2026}
+    ports:
+      - ${WEB_PORT:-8080}:8000
+    restart: unless-stopped
+
+volumes:
+  femag_web_demo_mysql:

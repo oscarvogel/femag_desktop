@@ -149,6 +149,9 @@ detenerse sin afectar Desktop ni la webapp LAN.
 El despliegue inicial usa datos sintéticos o demo. No se clona la base completa
 de fábrica ni se cargan credenciales productivas en la primera fase.
 
+Runbook de despliegue y rollback:
+[`FEMAG_WEB_COOLIFY_DEPLOY.md`](FEMAG_WEB_COOLIFY_DEPLOY.md).
+
 ### 4.3 Ambientes
 
 | Ambiente | Datos | HTTPS | Uso |

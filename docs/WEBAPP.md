@@ -14,7 +14,7 @@ La webapp vive en `webapp/` y comparte los modelos Peewee y la configuración de
 
 ## Arquitectura
 
-La webapp está pensada para ejecutarse inicialmente dentro de la red de FEMAG y poder trasladarse más adelante a otro servidor sin modificar FEMAG Desktop.
+La webapp está pensada para ejecutarse inicialmente dentro de la red de FEMAG y poder trasladarse más adelante a otro servidor sin modificar FEMAG Desktop. Para el despliegue en contenedor/Coolify ver [`FEMAG_WEB_COOLIFY_DEPLOY.md`](FEMAG_WEB_COOLIFY_DEPLOY.md).
 
 ```text
 PCs FEMAG Desktop (PyQt) ─┐

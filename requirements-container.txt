@@ -1,0 +1,8 @@
+# Dependencias del contenedor Linux de FEMAG Web (Coolify, #803).
+#
+# Parte de la lista de la webapp y agrega solo el servidor WSGI de Linux.
+# No incluye nada del escritorio: ni PyQt, ni git+, ni pytest.
+# Waitress sigue siendo el servidor del Windows Server 2019 y no se instala en
+# la imagen Linux; gunicorn ocupa su lugar en el contenedor.
+-r requirements-web.txt
+gunicorn>=22,<24
