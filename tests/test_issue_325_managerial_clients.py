@@ -1,6 +1,10 @@
+import os
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.models.accounting import ClientAccountMovement
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
@@ -144,3 +148,59 @@ def test_inverted_dates_raise(db):
         ManagerialClientsService().report(
             ManagerialClientsFilters(start=date(2026, 9, 5), end=date(2026, 9, 4))
         )
+
+
+def _ui_row(client_id: int, name: str, tonnes: float) -> dict:
+    return {
+        "client_id": client_id,
+        "client_name": name,
+        "period_total": tonnes * 1000,
+        "period_tonnes": tonnes,
+        "period_orders": 1,
+        "average_ticket": tonnes * 1000,
+        "last_dispatch": date(2026, 9, 1),
+        "days_since_dispatch": 10,
+        "last_payment": None,
+        "balance": 0.0,
+        "overdue": 0.0,
+        "days_overdue": None,
+        "returns_count": 0,
+        "distinct_lots": 0,
+        "has_activity": True,
+        "is_new": False,
+        "recovered": False,
+        "idle": False,
+    }
+
+
+def test_ui_sorts_columns_by_numeric_value(db):
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.managerial_clients import ManagerialClientsDialog
+
+    app = QApplication.instance() or QApplication([])
+    rows = (
+        _ui_row(1, "Nueve", 9.0),
+        _ui_row(2, "Ochenta y ocho", 88.5),
+        _ui_row(3, "Ocho", 8.225),
+    )
+    totals = SimpleNamespace(
+        clients=3, with_activity=3, without_activity=0, new_clients=0,
+        recovered_clients=0, total=105725.0, overdue=0.0,
+    )
+    service = SimpleNamespace(report=lambda filters: SimpleNamespace(totals=totals, rows=rows))
+    dialog = ManagerialClientsDialog(service=service)
+    try:
+        dialog.table.sortItems(2, Qt.DescendingOrder)
+        tonnes = [
+            float(dialog.table.item(row, 2).text().replace(",", ""))
+            for row in range(dialog.table.rowCount())
+        ]
+        assert tonnes == [88.5, 9.0, 8.225]
+        dialog.table.selectRow(0)
+        assert dialog.selected_client_id() == 2
+        assert dialog.selected_client_name() == "Ochenta y ocho"
+    finally:
+        dialog.deleteLater()
+        app.processEvents()
