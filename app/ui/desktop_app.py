@@ -642,6 +642,7 @@ class FemagDesktopWindow(QMainWindow):
                         user=self.user,
                         current_user=self.shell.username,
                         view_ledger_callback=self._open_customer_ledger_for_client,
+                        print_envelope_callback=self._print_envelope_for_budget,
                         parent=self,
                     ),
                 )
@@ -1646,29 +1647,32 @@ class FemagDesktopWindow(QMainWindow):
             return
         _open_print_output(pdf_path)
 
+    def _print_envelope_for_budget(self, budget) -> None:
+        if not hasattr(self, "_print_output_dir"):
+            self._print_output_dir = Path.cwd()
+        try:
+            pdf_path = EnvelopePrintService(
+                current_user=self.shell.username
+            ).export_envelope(budget, self._print_output_dir)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Sobre", f"No se pudo generar el sobre: {exc}"
+            )
+            return
+        _open_print_output(pdf_path)
+
     def _print_envelope_for_movement(self, movement) -> None:
         """Genera el PDF del sobre del presupuesto guardado del movimiento (#740).
 
         No altera el presupuesto, ni el stock, ni la cuenta corriente: solo
         escribe el archivo del sobre y lo abre.
         """
-        if not hasattr(self, "_print_output_dir"):
-            self._print_output_dir = Path.cwd()
-
         try:
             budget = self._budget_for_movement(movement)
         except Exception as exc:
             QMessageBox.warning(self, "Sobre", str(exc))
             return
-
-        try:
-            pdf_path = EnvelopePrintService(
-                current_user=self.shell.username
-            ).export_envelope(budget, self._print_output_dir)
-        except Exception as exc:
-            QMessageBox.warning(self, "Sobre", f"No se pudo generar el sobre: {exc}")
-            return
-        _open_print_output(pdf_path)
+        self._print_envelope_for_budget(budget)
 
     def _email_account_statement(self, client) -> None:
         if not hasattr(self, "_print_output_dir"):

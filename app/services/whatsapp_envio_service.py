@@ -86,6 +86,33 @@ class WhatsAppEnvioService:
         envio.save()
         return envio
 
+    def create_text_attempt(
+        self,
+        *,
+        tipo_documento: str,
+        documento_id: str,
+        destinatario: str,
+        message: str,
+        usuario=None,
+    ) -> WhatsAppEnvio:
+        phone = normalize_phone(destinatario)
+        instance_id = self._resolve_instance_for_user(usuario)
+        envio = WhatsAppEnvio.create(
+            tipo_documento=tipo_documento,
+            documento_id=str(documento_id),
+            destinatario=phone,
+            instance_id=instance_id,
+            external_ref=f"pending:{tipo_documento}:{documento_id}:{time.time_ns()}",
+            caption=message,
+            nombre_archivo="mensaje_de_texto",
+            mime_type="text/plain",
+            estado="preparing",
+            usuario=usuario,
+        )
+        envio.external_ref = f"femag:{tipo_documento}:{documento_id}:{envio.id}"
+        envio.save()
+        return envio
+
     def _apply_status(self, envio: WhatsAppEnvio, data: dict) -> WhatsAppEnvio:
         envio.estado = str(data.get("status") or envio.estado)
         envio.provider_message_id = data.get("providerMessageId") or envio.provider_message_id
@@ -112,6 +139,52 @@ class WhatsAppEnvioService:
                 phone=envio.destinatario,
                 file_path=Path(pdf_path),
                 caption=envio.caption,
+                external_ref=envio.external_ref,
+                actor_id=str(envio.usuario_id) if envio.usuario_id else None,
+                actor_name=getattr(envio.usuario, "display_name", None)
+                or getattr(envio.usuario, "username", None),
+                instance_id=envio.instance_id,
+            )
+            envio.message_id = data.get("messageId")
+            envio.estado = data.get("status") or "queued"
+            envio.error = None
+            envio.save()
+            if not envio.message_id:
+                raise RuntimeError("El gateway no devolvió messageId.")
+
+            for _ in range(max(0, poll_attempts)):
+                status = self.client.get_message(
+                    envio.message_id,
+                    instance_id=envio.instance_id,
+                )
+                self._apply_status(envio, status)
+                if envio.estado in TERMINAL_STATUSES:
+                    break
+                if poll_interval:
+                    time.sleep(poll_interval)
+            return envio
+        except Exception as exc:
+            envio.estado = "failed"
+            envio.error = str(exc)
+            if envio.failed_at is None:
+                envio.failed_at = datetime.now().astimezone()
+            envio.save()
+            raise
+
+    def send_text(
+        self,
+        *,
+        envio: WhatsAppEnvio,
+        message: str,
+        poll_attempts: int = 4,
+        poll_interval: float = 1.0,
+    ) -> WhatsAppEnvio:
+        try:
+            if not envio.instance_id:
+                raise ValueError("El envío no tiene una instancia de WhatsApp registrada.")
+            data = self.client.send_text(
+                phone=envio.destinatario,
+                message=message,
                 external_ref=envio.external_ref,
                 actor_id=str(envio.usuario_id) if envio.usuario_id else None,
                 actor_name=getattr(envio.usuario, "display_name", None)
