@@ -42,11 +42,13 @@ def test_historical_order_without_token_is_backfilled_on_use(db):
     assert persisted.qr_token
 
 
-def test_operational_print_service_builds_qr_from_opaque_token(db):
+def test_operational_print_service_builds_navigable_url_qr(db):
     from reportlab.graphics.shapes import Drawing
 
     from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
+    from app.services.webapp_configuration_service import WebappConfigurationService
 
+    WebappConfigurationService.save_public_url("http://192.168.0.111:8000/")
     order = _order(1)
     service = ConsolidatedLoadOrderPrintService(current_user="admin")
 
@@ -55,7 +57,17 @@ def test_operational_print_service_builds_qr_from_opaque_token(db):
     assert isinstance(qr, Drawing)
     assert qr.width > 0
     assert qr.height > 0
-    assert service._qr_payload(order) == f"FEMAG:LOAD_ORDER:{order.qr_token}"
+    assert service._qr_payload(order) == f"http://192.168.0.111:8000/orden/{order.qr_token}"
+
+
+def test_operational_print_service_omits_qr_when_server_url_is_missing(db):
+    from app.services.qr_load_order_print_service import ConsolidatedLoadOrderPrintService
+
+    order = _order(1)
+    service = ConsolidatedLoadOrderPrintService(current_user="admin")
+
+    assert service._qr_payload(order) is None
+    assert service._qr_drawing(order) is None
 
 
 def test_operation_service_uses_qr_print_service(db, tmp_path):

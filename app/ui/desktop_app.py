@@ -160,6 +160,7 @@ from app.ui.production_contrast import ProductionContrastPage
 from app.ui.stock_count import StockCountPage
 from app.ui.stock_initial_inventory import StockInitialInventoryPage
 from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
+from app.ui.webapp_configuration import WebappConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -617,6 +618,12 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page(
             "whatsapp_configuration",
             WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),
+        )
+        self._add_page(
+            "webapp_configuration",
+            WebappConfigurationPage(
+                user=self.user, current_user=self.shell.username, parent=self
+            ),
         )
         self._add_page("user_management", UserManagementPage(user=self.user, parent=self))
         self._add_page("audit_query", AuditQueryPage(parent=self))

@@ -354,7 +354,10 @@ class LoadOrderPalletExcelExportService:
     @staticmethod
     def _add_qr_image(sheet, order: LoadOrder, printer) -> None:
         try:
-            png = renderPM.drawToString(printer._qr_drawing(order), fmt="PNG")
+            drawing = printer._qr_drawing(order)
+            if drawing is None:
+                return
+            png = renderPM.drawToString(drawing, fmt="PNG")
             image = PILImage.open(BytesIO(png))
             image.load()
             excel_image = ExcelImage(image)

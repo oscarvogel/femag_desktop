@@ -14,12 +14,34 @@ from app.models.load_orders import (
     LoadOrderProduct,
 )
 from app.models.masters import PalletType
+from app.services.auth_service import AuthService
 from webapp import create_app
 from webapp.order_service import (
     OrderUnavailableError,
     get_order_by_token,
     normalize_qr_token,
 )
+
+PASSWORD = "clave-de-prueba-123"
+
+
+def _login_operador(client):
+    AuthService().create_user(
+        "operador",
+        PASSWORD,
+        "Secretaría",
+        display_name="operador",
+        actor="test",
+    )
+    return client.post(
+        "/login", data={"username": "operador", "password": PASSWORD}
+    )
+
+
+def _csrf_after_get(client, token):
+    client.get(f"/orden/{token}")
+    with client.session_transaction() as session:
+        return session["femag_csrf_token"]
 
 
 def _order_with_line():
@@ -47,6 +69,15 @@ def test_qr_payload_and_raw_token_resolve_same_order(db):
     assert normalize_qr_token(order.qr_payload()) == order.qr_token
     assert get_order_by_token(order.qr_payload()).id == order.id
     assert get_order_by_token(order.qr_token).id == order.id
+
+
+def test_navigable_qr_url_resolves_same_order(db):
+    order, _ = _order_with_line()
+
+    url = f"http://192.168.0.111:8000/orden/{order.qr_token}"
+
+    assert normalize_qr_token(url) == order.qr_token
+    assert get_order_by_token(url).id == order.id
 
 
 def test_home_offers_camera_qr_scanner(db):
@@ -138,10 +169,14 @@ def test_mobile_order_post_updates_lot_and_manufacture_date(db):
     order, line = _order_with_line()
     app = create_app()
     app.config.update(TESTING=True)
+    client = app.test_client()
+    _login_operador(client)
+    csrf = _csrf_after_get(client, order.qr_token)
 
-    response = app.test_client().post(
+    response = client.post(
         f"/orden/{order.qr_token}",
         data={
+            "csrf_token": csrf,
             f"lote_{line.id}": "LOTE-2026-08",
             f"fecha_{line.id}": "2026-08-27",
         },

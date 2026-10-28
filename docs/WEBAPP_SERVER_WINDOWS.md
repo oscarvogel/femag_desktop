@@ -489,5 +489,7 @@ sesiones siguen como estaban.
 - La **migración de esquema** y los **datos de fábrica**: son [Paso 0](#paso-0--preparar-la-base-bloqueante) y no son código.
 - El **perfil "Producción"** en la matriz de permisos: los usuarios del webapp
   heredan los perfiles del escritorio.
-- Las **rutas de órdenes QR** (`/orden/<token>`), que todavía no autentican.
+- El **detalle de seguridad de las rutas de órdenes QR** (`/orden/<token>`): la
+  consulta sigue siendo pública por token y la escritura de lote/fecha exige
+  sesión y CSRF. Ver [WEBAPP.md](WEBAPP.md).
 - El **modo offline**: la webapp es online-first.

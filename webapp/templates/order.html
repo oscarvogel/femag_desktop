@@ -11,6 +11,12 @@
   </div>
 </div>
 <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if not current_username() %}
+  <div class="card">
+    <p class="muted">Para guardar lote y fecha tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
+  </div>
+  {% endif %}
   <div class="card">
     <h2>Productos</h2>
     {% if lines %}
