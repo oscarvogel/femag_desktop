@@ -39,6 +39,20 @@ def _short(value: date | None) -> str:
     return value.strftime("%d/%m/%Y") if value else "-"
 
 
+class NumericTableItem(QTableWidgetItem):
+    def __init__(self, text: str, value: float | int):
+        super().__init__(text)
+        self.setData(Qt.UserRole, value)
+
+    def __lt__(self, other):
+        if isinstance(other, QTableWidgetItem):
+            left = self.data(Qt.UserRole)
+            right = other.data(Qt.UserRole)
+            if left is not None and right is not None:
+                return left < right
+        return super().__lt__(other)
+
+
 class ManagerialClientsDialog(QDialog):
     HEADERS = (
         "Cliente",
@@ -239,26 +253,38 @@ class ManagerialClientsDialog(QDialog):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            values = (
-                row["client_name"],
-                _money(row["period_total"]),
-                f"{row['period_tonnes']:,.3f}",
-                row["period_orders"],
-                _money(row["average_ticket"]),
-                _short(row["last_dispatch"]),
-                row["days_since_dispatch"] if row["days_since_dispatch"] is not None else "-",
-                _short(row["last_payment"]),
-                _money(row["balance"]),
-                _money(row["overdue"]),
-                row["days_overdue"] if row["days_overdue"] is not None else "-",
-                row["returns_count"],
-                row["distinct_lots"],
-                self._commercial_state(row),
+            days_idle = row["days_since_dispatch"]
+            days_overdue = row["days_overdue"]
+            items = (
+                QTableWidgetItem(row["client_name"]),
+                NumericTableItem(_money(row["period_total"]), row["period_total"]),
+                NumericTableItem(f"{row['period_tonnes']:,.3f}", row["period_tonnes"]),
+                NumericTableItem(str(row["period_orders"]), row["period_orders"]),
+                NumericTableItem(_money(row["average_ticket"]), row["average_ticket"]),
+                NumericTableItem(
+                    _short(row["last_dispatch"]),
+                    row["last_dispatch"].toordinal() if row["last_dispatch"] else 0,
+                ),
+                NumericTableItem(
+                    str(days_idle) if days_idle is not None else "-",
+                    days_idle if days_idle is not None else -1,
+                ),
+                NumericTableItem(
+                    _short(row["last_payment"]),
+                    row["last_payment"].toordinal() if row["last_payment"] else 0,
+                ),
+                NumericTableItem(_money(row["balance"]), row["balance"]),
+                NumericTableItem(_money(row["overdue"]), row["overdue"]),
+                NumericTableItem(
+                    str(days_overdue) if days_overdue is not None else "-",
+                    days_overdue if days_overdue is not None else -1,
+                ),
+                NumericTableItem(str(row["returns_count"]), row["returns_count"]),
+                NumericTableItem(str(row["distinct_lots"]), row["distinct_lots"]),
+                QTableWidgetItem(self._commercial_state(row)),
             )
-            for c, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
+            for c, item in enumerate(items):
                 if c in {1, 2, 3, 4, 8, 9}:
-                    item.setData(Qt.UserRole, float(str(value).replace(",", "")))
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if c == 0:
                     item.setData(Qt.UserRole + 1, int(row["client_id"]))
@@ -268,15 +294,18 @@ class ManagerialClientsDialog(QDialog):
 
     def selected_client_id(self) -> int | None:
         row = self.table.currentRow()
-        if row < 0 or row >= len(self._rows):
+        if row < 0:
             return None
-        return int(self._rows[row]["client_id"])
+        item = self.table.item(row, 0)
+        value = item.data(Qt.UserRole + 1) if item is not None else None
+        return int(value) if value is not None else None
 
     def selected_client_name(self) -> str:
         row = self.table.currentRow()
-        if row < 0 or row >= len(self._rows):
+        if row < 0:
             return ""
-        return str(self._rows[row]["client_name"])
+        item = self.table.item(row, 0)
+        return item.text() if item is not None else ""
 
     def open_history(self):
         client_id = self.selected_client_id()
