@@ -973,7 +973,7 @@ class MasterDetailDialog(QDialog):
             .order_by(Driver.name)
         )
         self.add_tab(
-            f"Choferes habituales ({len(drivers)})",
+            f"Choferes ({len(drivers)})",
             self.table_tab(
                 headers=["Nombre", "Documento", "Teléfono", "Estado", "Disponibilidad"],
                 rows=[
