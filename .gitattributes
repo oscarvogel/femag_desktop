@@ -1,1 +1,6 @@
 *.pdf binary
+
+# Los scripts de contenedor se ejecutan en Linux: siempre LF, aunque el checkout sea Windows.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf

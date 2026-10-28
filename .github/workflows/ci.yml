@@ -101,6 +101,67 @@ jobs:
         # todavia no existe el archivo.
         run: python -m pytest tests/test_webapp_*.py -q
 
+  webapp-container:
+    name: Webapp container build and health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build webapp image
+        run: docker build -f deploy/coolify/Dockerfile -t femag-web:ci .
+
+      - name: Start webapp container with demo data
+        run: |
+          docker run -d --name femag-web-ci \
+            -p 18000:8000 \
+            -e FEMAG_DB_ENGINE=sqlite \
+            -e FEMAG_DEMO=1 \
+            -e FEMAG_SECURE_CONFIG=0 \
+            -e FEMAG_SQLITE_PATH=/tmp/femag_web_ci.sqlite3 \
+            -e FEMAG_WEB_AUTO_INIT_SCHEMA=1 \
+            -e FEMAG_WEB_SEED_DEMO=1 \
+            -e FEMAG_WEB_DEMO_ADMIN_PASSWORD=ci-demo-pass-123 \
+            -e FEMAG_WEB_SECRET_KEY=ci-container-secret \
+            -e FEMAG_WEB_PUBLIC_URL=http://127.0.0.1:18000 \
+            femag-web:ci
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18000/health > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs femag-web-ci
+          exit 1
+
+      - name: Smoke pages and demo order
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          health = json.load(urllib.request.urlopen("http://127.0.0.1:18000/health"))
+          assert health == {"database": True, "status": "ok"}, health
+          for path in ("/login", "/orden/demo-web-order-2026"):
+              with urllib.request.urlopen(f"http://127.0.0.1:18000{path}") as response:
+                  assert response.status == 200, (path, response.status)
+          print("container smoke OK")
+          PY
+
+      - name: Container logs
+        if: always()
+        run: docker logs femag-web-ci
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f femag-web-ci
+
   frozen-windows:
     name: Windows frozen EXE and installer smoke
     runs-on: windows-latest
