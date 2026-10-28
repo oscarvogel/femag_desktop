@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.femag.local/femag_web_sync_v1/order-snapshot.schema.json",
+  "title": "FEMAG Web Sync v1 - Snapshot de ordenes",
+  "description": "Proyeccion minima de ordenes publicables desde la fabrica hacia FEMAG Web.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "generated_at",
+    "cursor",
+    "orders"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "snapshot_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cursor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "orders": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/order"
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "order": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_uid",
+        "order_number",
+        "status",
+        "version",
+        "order_date",
+        "published_at",
+        "updated_at",
+        "client",
+        "destination",
+        "lines",
+        "pallets"
+      ],
+      "properties": {
+        "order_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "order_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "Pendiente",
+            "Borrador",
+            "Emitida",
+            "Cerrada",
+            "Anulada"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "order_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "published_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cancelled_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "client": {
+          "$ref": "#/$defs/client"
+        },
+        "destination": {
+          "$ref": "#/$defs/destination"
+        },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "pallets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pallet"
+          }
+        }
+      }
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_uid",
+        "name"
+      ],
+      "properties": {
+        "client_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destination_uid",
+        "city",
+        "address"
+      ],
+      "properties": {
+        "destination_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 255
+        }
+      }
+    },
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line_uid",
+        "product_name",
+        "quantity",
+        "unit",
+        "lote",
+        "fecha_elaboracion"
+      ],
+      "properties": {
+        "line_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "product_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "quantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "lote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "fecha_elaboracion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        }
+      }
+    },
+    "pallet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pallet_uid",
+        "sequence"
+      ],
+      "properties": {
+        "pallet_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 100
+        },
+        "weight_kg": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

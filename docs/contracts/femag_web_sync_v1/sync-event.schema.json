@@ -1,0 +1,478 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.femag.local/femag_web_sync_v1/sync-event.schema.json",
+  "title": "FEMAG Web Sync v1 - Evento",
+  "description": "Sobre comun para eventos entre FEMAG Web y FEMAG Sync.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "origin",
+    "occurred_at",
+    "aggregate_type",
+    "aggregate_id",
+    "aggregate_version",
+    "idempotency_key",
+    "cursor",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "event_type": {
+      "enum": [
+        "order_lote_fecha_updated",
+        "order_lote_applied",
+        "order_cancelled",
+        "order_request_created",
+        "order_request_cancelled",
+        "order_request_decided"
+      ]
+    },
+    "origin": {
+      "enum": [
+        "factory",
+        "cloud"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "aggregate_type": {
+      "enum": [
+        "order",
+        "order_line",
+        "order_request"
+      ]
+    },
+    "aggregate_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "aggregate_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "cursor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_lote_fecha_updated"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "cloud"
+          },
+          "aggregate_type": {
+            "const": "order_line"
+          },
+          "payload": {
+            "$ref": "#/$defs/loteFechaUpdated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_lote_applied"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "factory"
+          },
+          "aggregate_type": {
+            "const": "order_line"
+          },
+          "payload": {
+            "$ref": "#/$defs/loteApplied"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_cancelled"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "factory"
+          },
+          "aggregate_type": {
+            "const": "order"
+          },
+          "payload": {
+            "$ref": "#/$defs/orderCancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_request_created"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "cloud"
+          },
+          "aggregate_type": {
+            "const": "order_request"
+          },
+          "payload": {
+            "$ref": "#/$defs/orderRequestCreated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_request_cancelled"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "cloud"
+          },
+          "aggregate_type": {
+            "const": "order_request"
+          },
+          "payload": {
+            "$ref": "#/$defs/orderRequestCancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_request_decided"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "factory"
+          },
+          "aggregate_type": {
+            "const": "order_request"
+          },
+          "payload": {
+            "$ref": "#/$defs/orderRequestDecided"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_uid",
+        "role"
+      ],
+      "properties": {
+        "user_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "role": {
+          "enum": [
+            "gerencia",
+            "operario",
+            "cliente",
+            "administrador",
+            "sync"
+          ]
+        },
+        "display_name": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "loteFechaUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_uid",
+        "line_uid",
+        "lote",
+        "fecha_elaboracion",
+        "expected_version"
+      ],
+      "properties": {
+        "order_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "line_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "lote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "fecha_elaboracion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "loteApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_uid",
+        "line_uid",
+        "lote",
+        "fecha_elaboracion",
+        "applied_version",
+        "applied_at"
+      ],
+      "properties": {
+        "order_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "line_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "lote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "fecha_elaboracion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "applied_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "applied_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "orderCancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_uid",
+        "order_number",
+        "cancelled_at"
+      ],
+      "properties": {
+        "order_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "order_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cancelled_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "orderRequestCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_uid",
+        "client_uid",
+        "items",
+        "delivery_address_uid"
+      ],
+      "properties": {
+        "request_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "client_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "delivery_address_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/requestItem"
+          }
+        },
+        "observations": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1000
+        }
+      }
+    },
+    "requestItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_uid",
+        "quantity",
+        "unit"
+      ],
+      "properties": {
+        "product_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "quantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        }
+      }
+    },
+    "orderRequestCancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_uid"
+      ],
+      "properties": {
+        "request_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        }
+      }
+    },
+    "orderRequestDecided": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_uid",
+        "decision",
+        "decided_at"
+      ],
+      "properties": {
+        "request_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "decision": {
+          "enum": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

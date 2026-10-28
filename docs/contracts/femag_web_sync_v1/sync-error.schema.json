@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.femag.local/femag_web_sync_v1/sync-error.schema.json",
+  "title": "FEMAG Web Sync v1 - ACK / error",
+  "description": "Respuesta de aplicacion o rechazo de un evento de sincronizacion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "result"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "result": {
+      "enum": [
+        "applied",
+        "duplicate",
+        "conflict",
+        "rejected"
+      ]
+    },
+    "applied_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "enum": [
+              "conflict",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "validation_error",
+            "auth_failed",
+            "forbidden",
+            "not_found",
+            "version_conflict",
+            "order_cancelled",
+            "duplicate_event",
+            "rate_limited",
+            "temporary_unavailable",
+            "internal_error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
