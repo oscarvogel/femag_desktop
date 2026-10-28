@@ -15,8 +15,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Coolify ejecuta su healthcheck con curl o wget dentro del contenedor.
 RUN groupadd --system femag \
-    && useradd --system --gid femag --create-home femag
+    && useradd --system --gid femag --create-home femag \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-web.txt requirements-container.txt ./
 RUN python -m pip install --no-cache-dir -r requirements-container.txt

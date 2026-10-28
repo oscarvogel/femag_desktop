@@ -24,6 +24,7 @@ def test_dockerfile_uses_only_the_webapp_requirements():
     assert "USER femag" in dockerfile
     assert "EXPOSE 8000" in dockerfile
     assert "HEALTHCHECK" in dockerfile
+    assert "curl" in dockerfile
 
 
 def test_container_requirements_add_gunicorn_without_desktop():
