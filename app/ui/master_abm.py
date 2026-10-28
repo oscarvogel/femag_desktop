@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from peewee import JOIN, InterfaceError, OperationalError
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, QEvent, QObject, Qt
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -63,6 +63,12 @@ from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 from app.ui.dgr_locality_combo import create_locality_combo, selected_locality_id
+from app.ui.master_detail_dialogs import (
+    CarrierDetailDialog,
+    ClientDetailDialog,
+    DriverDetailDialog,
+    TruckDetailDialog,
+)
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
 from app.utils.datetime_utils import as_datetime
@@ -77,6 +83,20 @@ AUTO_ABM_TECHNICAL_DEBT = (
 )
 
 
+DETAIL_KIND_ROUTES = {
+    "client": "clients",
+    "carrier": "carriers",
+    "driver": "drivers",
+    "truck": "trucks",
+}
+DETAIL_KIND_TITLES = {
+    "client": "Clientes",
+    "carrier": "Transportistas",
+    "driver": "Choferes",
+    "truck": "Camiones",
+}
+
+
 @dataclass(frozen=True)
 class MasterAbmConfig:
     title: str
@@ -87,6 +107,7 @@ class MasterAbmConfig:
     edit_button_name: str
     sort_column: int = 0
     search_placeholder: str = ""
+    detail_dialog_class: type[QDialog] | None = None
 
 
 def normalize_master_text(value: object) -> str:
@@ -190,6 +211,33 @@ class MasterTableController:
             self.search_feedback.show_info(f"No se encontraron coincidencias para «{query}».")
         else:
             self.search_feedback.clear_message()
+
+
+class _MasterActivationFilter(QObject):
+    def __init__(self, table: QTableWidget, callback):
+        super().__init__(table)
+        self.table = table
+        self.callback = callback
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.table
+            and event.type() == QEvent.KeyPress
+            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+            and self.table.currentRow() >= 0
+        ):
+            self.callback()
+            return True
+        return False
+
+
+def enable_master_activation(table: QTableWidget, callback) -> None:
+    """Open a detail card with Enter or double click without editing cells."""
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    table.itemDoubleClicked.connect(lambda *_args: callback())
+    activation_filter = _MasterActivationFilter(table, callback)
+    table.installEventFilter(activation_filter)
+    table._master_activation_filter = activation_filter
 
 
 def build_master_abm_page(
@@ -350,6 +398,52 @@ def build_master_abm_page(
         sync_product_active_button()
     page.master_table_controller = table_controller
     page.refresh = table_controller.refresh
+    if config.detail_dialog_class is not None:
+        def detail_can_edit(kind: str) -> bool:
+            title = DETAIL_KIND_TITLES.get(kind)
+            if title is None:
+                return False
+            return _can_use_menu_action(user, "Maestros", "modificar", title)
+
+        def detail_edit(kind: str, record_id: int) -> bool:
+            if not detail_can_edit(kind):
+                feedback.show_warning(
+                    "El perfil actual no permite modificar este maestro."
+                )
+                return False
+            route = DETAIL_KIND_ROUTES.get(kind)
+            config_for_kind = master_abm_configs().get(route) if route else None
+            if config_for_kind is None:
+                return False
+            dialog = config_for_kind.dialog_class(
+                current_user=current_user,
+                record_id=record_id,
+                parent=parent,
+            )
+            if dialog.exec_() != QDialog.Accepted:
+                return False
+            table_controller.refresh()
+            feedback.show_success("Registro actualizado.")
+            return True
+
+        def open_detail() -> None:
+            row_id = table_controller.selected_id()
+            if row_id is None:
+                feedback.show_warning(
+                    "Seleccione un registro para ver su ficha.", focus_widget=table
+                )
+                return
+            config.detail_dialog_class(
+                current_user=current_user,
+                record_id=row_id,
+                parent=parent,
+                user=user,
+                can_edit_callback=detail_can_edit,
+                edit_callback=detail_edit,
+            ).exec_()
+            table.setFocus()
+
+        enable_master_activation(table, open_detail)
     table_controller.refresh()
     return page
 
@@ -364,6 +458,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             "newClientButton",
             "editClientButton",
             search_placeholder="Buscar clientes por nombre o CUIT...",
+            detail_dialog_class=ClientDetailDialog,
         ),
         "salespeople": MasterAbmConfig(
             "Vendedores",
@@ -409,6 +504,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             "newDriverButton",
             "editDriverButton",
             search_placeholder="Buscar choferes por nombre o transportista...",
+            detail_dialog_class=DriverDetailDialog,
         ),
         "carriers": MasterAbmConfig(
             "Transportistas",
@@ -418,6 +514,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             "newCarrierButton",
             "editCarrierButton",
             search_placeholder="Buscar transportistas por nombre o razón social...",
+            detail_dialog_class=CarrierDetailDialog,
         ),
         "trucks": MasterAbmConfig(
             "Camiones",
@@ -427,6 +524,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
             "newTruckButton",
             "editTruckButton",
             search_placeholder="Buscar camiones por patente o transportista...",
+            detail_dialog_class=TruckDetailDialog,
         ),
     }
 
@@ -2005,7 +2103,12 @@ def _client_address_rows(client_id: int) -> list[list[object]]:
 
 
 def build_client_abm_page(
-    *, user, current_user: str, view_ledger_callback=None, parent=None
+    *,
+    user,
+    current_user: str,
+    view_ledger_callback=None,
+    print_envelope_callback=None,
+    parent=None,
 ) -> QWidget:
     page = _page("Clientes", "ABM de clientes con domicilios")
     layout = page.layout()
@@ -2202,6 +2305,48 @@ def build_client_abm_page(
             refresh_clients()
             client_feedback.show_success("Cliente actualizado.")
 
+    def open_client_detail() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.show_warning(
+                "Seleccione un cliente para ver su ficha.", focus_widget=client_table
+            )
+            return
+
+        def detail_can_edit(kind: str) -> bool:
+            return kind == "client" and can_modify
+
+        def detail_edit(kind: str, record_id: int) -> bool:
+            if not detail_can_edit(kind):
+                client_feedback.show_warning(
+                    "El perfil actual no permite modificar este maestro."
+                )
+                return False
+            dialog = ClientEntryDialog(
+                current_user=current_user,
+                record_id=record_id,
+                parent=parent,
+            )
+            if dialog.exec_() != QDialog.Accepted:
+                return False
+            refresh_clients()
+            client_feedback.show_success("Cliente actualizado.")
+            return True
+
+        dialog = ClientDetailDialog(
+            current_user=current_user,
+            record_id=cid,
+            parent=parent,
+            user=user,
+            can_edit_callback=detail_can_edit,
+            edit_callback=detail_edit,
+            view_ledger_callback=view_ledger_callback,
+            print_envelope_callback=print_envelope_callback,
+        )
+        dialog.exec_()
+        if not getattr(dialog, "navigated_away", False):
+            client_table.setFocus()
+
     def edit_client_phone() -> None:
         """Cambia solo el teléfono del cliente seleccionado (#705)."""
         from app.ui.client_phone_edit_dialog import ClientPhoneEditDialog
@@ -2367,6 +2512,7 @@ def build_client_abm_page(
     edit_place_btn.clicked.connect(open_edit_place)
     toggle_place_btn.clicked.connect(toggle_place_active)
     client_table.currentCellChanged.connect(lambda *_: refresh_places())
+    enable_master_activation(client_table, open_client_detail)
 
     page.client_table_controller = client_table_controller
     page.client_places_table_controller = places_table_controller
