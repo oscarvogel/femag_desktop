@@ -25,11 +25,15 @@ from app.models.audit import AuditLog
 #: pantalla de accesos no tengan que distinguir el origen.
 MODULE_SISTEMA = "Sistema"
 MODULE_PRODUCCION = "Produccion"
+MODULE_DESPACHOS = "Despachos"
 
 #: Accesos. "login exitoso" y "login fallido" los escribe ``AuthService``;
 #: la salida la escribe esta webapp porque el escritorio no la necesita.
 ACTION_INGRESO = "login exitoso"
 ACTION_SALIDA = "salida"
+
+#: Carga de lote y fecha de elaboracion en ordenes de carga.
+ACTION_LOTE = "carga de lote"
 
 #: Carga de partes desde el celular.
 ACTION_CARGA = "carga de parte"

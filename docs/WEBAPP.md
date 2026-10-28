@@ -87,29 +87,48 @@ Variables de la sesión y de los QR de turno:
 
 En un despliegue definitivo se recomienda que Waitress/Webapp escuche solo en la interfaz local y que Caddy sea el único punto publicado a la LAN.
 
-## Flujo con el QR actual
+## Flujo con el QR de órdenes (#801)
 
-El QR impreso actualmente contiene:
-
-```text
-FEMAG:LOAD_ORDER:<token>
-```
-
-La portada incluye **Escanear QR**. En un navegador compatible abre la cámara trasera, detecta el QR, copia automáticamente el valor leído y abre la orden. También se mantiene el ingreso manual como fallback.
-
-La orden puede abrirse directamente con:
+El QR de las órdenes se imprime con una **URL navegable**, no con el texto
+legado:
 
 ```text
-http://IP_DEL_SERVIDOR:8000/orden/<token>
+http://192.168.0.111:8000/orden/<token>
 ```
 
-Cuando se defina el hostname/IP estable del servidor, un cambio posterior podrá imprimir directamente una URL como:
+La URL base se configura desde FEMAG Desktop en **Sistema > Servidor web** y
+se guarda en la base central, así que la comparten todos los puestos. Se acepta
+`http://` o `https://`, con puerto opcional y sin ruta; el slash final se
+normaliza. El valor de ejemplo para el piloto en la LAN de fábrica es
+`http://192.168.0.111:8000`.
 
-```text
-https://femag.lan/orden/<token>
-```
+- Cada QR nuevo se arma con la URL configurada y el `qr_token` existente. No se
+  regeneran tokens ni se toca el modelo de órdenes.
+- Si no hay URL configurada, la orden se imprime **sin QR** y con un aviso para
+  configurar el servidor. No se imprime el formato legado para no mostrar un
+  acceso que un lector genérico no puede abrir.
+- Debajo del QR se imprime la dirección del servidor y el número de orden para
+  poder abrir la orden a mano.
+- Cambiar la URL afecta solo a las impresiones nuevas. Un QR ya impreso no
+  cambia: para acceder con navegador hay que reimprimir la orden.
 
-No será necesario modificar el modelo ni regenerar los tokens existentes.
+La portada incluye **Escanear QR**. En un navegador compatible abre la cámara
+trasera, detecta el QR, copia automáticamente el valor leído y abre la orden.
+El escáner acepta tanto la URL nueva como el formato legado
+`FEMAG:LOAD_ORDER:<token>` y el token suelto.
+
+### Escritura protegida
+
+El token del QR identifica la orden pero **no autoriza a escribirla**. Para
+guardar lote y fecha de elaboración:
+
+- la webapp exige una sesión iniciada con un usuario de FEMAG Desktop;
+- el formulario lleva un token CSRF atado a la sesión;
+- cada guardado deja una fila de auditoría en el módulo `Despachos`, con el
+  usuario, la IP del celular y los renglones modificados.
+
+La consulta de la orden por token sigue siendo pública y muestra solo los datos
+operativos necesarios para cargar el lote.
 
 ## Registro de producción desde el celular
 
@@ -279,9 +298,10 @@ Estado de la autenticación:
 
 - `/produccion` **exige iniciar sesión** con un usuario de FEMAG (#754). Es lo que
   permite saber quién cargó cada parte.
-- `/orden/<token>` **sigue sin login**: se abre por el QR de la orden y cualquiera
-  que conozca el token puede cargar lote y fecha. Ponerle login es un cambio
-  aparte (#364), no se mezcló con la captura de producción.
+- `/orden/<token>` permite **consultar** la orden con el token del QR, pero
+  **modificar lote y fecha exige sesión iniciada y token CSRF** (#801). Cada
+  cambio queda auditado en el módulo `Despachos` con el usuario y la IP del
+  celular. El QR identifica la orden; no autoriza a escribirla.
 - El secreto con el que se firman las cookies de sesión no puede ser un valor
   fijo del repositorio: se resuelve por `FEMAG_WEB_SECRET_KEY` o por un archivo
   aleatorio del directorio de configuración del puesto.

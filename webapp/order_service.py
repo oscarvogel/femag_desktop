@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import date
+from urllib.parse import urlparse
 
 from peewee import DoesNotExist
 
@@ -13,6 +15,7 @@ from app.models.load_orders import (
 )
 
 QR_PREFIX = "FEMAG:LOAD_ORDER:"
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class OrderNotFoundError(LookupError):
@@ -27,13 +30,26 @@ class OrderUnavailableError(LookupError):
     pass
 
 
+def _token_from_url(raw: str) -> str | None:
+    """Extrae el token de una URL ``/orden/<token>``, absoluta o relativa."""
+    parsed = urlparse(raw)
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) == 2 and parts[0] == "orden":
+        return parts[1]
+    return None
+
+
 def normalize_qr_token(value: str) -> str:
     raw = (value or "").strip()
     if raw.startswith(QR_PREFIX):
         raw = raw[len(QR_PREFIX) :].strip()
+    elif "://" in raw or raw.startswith("/orden/"):
+        raw = _token_from_url(raw) or ""
     if not raw:
         raise InvalidQrPayloadError("El QR no contiene un identificador de orden válido.")
-    if len(raw) > 64:
+    if not TOKEN_PATTERN.fullmatch(raw):
         raise InvalidQrPayloadError("El identificador de la orden no es válido.")
     return raw
 

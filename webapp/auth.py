@@ -34,6 +34,7 @@ from app.services.auth_service import AuthService
 from webapp import audit
 
 SESSION_USER_KEY = "femag_username"
+CSRF_SESSION_KEY = "femag_csrf_token"
 
 #: La sesion vive lo que dura un turno de trabajo: el mismo celular no vuelve
 #: a pedir la clave a la manana, pero a la noche ya esta cerrada.
@@ -107,6 +108,28 @@ def logout_user() -> None:
 def current_username() -> str | None:
     username = session.get(SESSION_USER_KEY)
     return username if isinstance(username, str) and username else None
+
+
+def csrf_token() -> str:
+    """Token del formulario, atado a la sesion del navegador.
+
+    El QR identifica la orden, no autoriza a escribirla: el POST de lote y
+    fecha exige sesion iniciada y este token para que otra pagina no pueda
+    enviar el formulario en nombre del operario.
+    """
+    token = session.get(CSRF_SESSION_KEY)
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        session[CSRF_SESSION_KEY] = token
+    return token
+
+
+def csrf_token_is_valid() -> bool:
+    expected = session.get(CSRF_SESSION_KEY) or ""
+    provided = request.form.get("csrf_token") or ""
+    return bool(expected) and bool(provided) and secrets.compare_digest(
+        str(expected), str(provided)
+    )
 
 
 def is_administrator() -> bool:

@@ -25,6 +25,8 @@ from app.services.audit_query_service import AuditQueryService
 from app.utils.datetime_utils import utc_datetime_to_local
 from webapp import audit, production_service
 from webapp.auth import (
+    csrf_token,
+    csrf_token_is_valid,
     current_username,
     is_administrator,
     login_required,
@@ -82,6 +84,7 @@ def create_app(*, secret_key: str | None = None) -> Flask:
         return {
             "current_username": current_username,
             "is_administrator": is_administrator,
+            "csrf_token": csrf_token,
         }
 
     @app.get("/manifest.webmanifest")
@@ -224,6 +227,26 @@ self.addEventListener("fetch", event => {
 
         lines = order_lines(order)
         if request.method == "POST":
+            username = current_username()
+            if not username:
+                flash("Iniciá sesión para modificar el lote y la fecha de la orden.", "error")
+                return redirect(
+                    url_for(
+                        "login",
+                        next=url_for("order_detail", token=order.ensure_qr_token()),
+                    )
+                )
+            if not csrf_token_is_valid():
+                return (
+                    render_template(
+                        "error.html",
+                        message=(
+                            "La sesión expiró o el formulario no es válido. "
+                            "Volvé a abrir la orden e intentá de nuevo."
+                        ),
+                    ),
+                    400,
+                )
             try:
                 with database_proxy.atomic():
                     for line in lines:
@@ -233,6 +256,29 @@ self.addEventListener("fetch", event => {
                             lote=request.form.get(f"lote_{line.id}"),
                             fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
                         )
+                lines = order_lines(order)
+                audit.record(
+                    user=username,
+                    module=audit.MODULE_DESPACHOS,
+                    action=audit.ACTION_LOTE,
+                    record_ref=f"LoadOrder:{order.id}",
+                    new_value={
+                        "orden": order.order_number,
+                        "renglones": [
+                            {
+                                "renglon": line.id,
+                                "producto": line.product.name,
+                                "lote": line.lote,
+                                "fecha_elaboracion": (
+                                    line.fecha_elaboracion.isoformat()
+                                    if line.fecha_elaboracion
+                                    else None
+                                ),
+                            }
+                            for line in lines
+                        ],
+                    },
+                )
                 flash("Lote y fecha de elaboración guardados.", "success")
                 return redirect(url_for("order_detail", token=order.ensure_qr_token()))
             except (ValueError, OrderNotFoundError) as exc:
