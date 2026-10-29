@@ -96,6 +96,7 @@ class SyncCursor(BaseModel):
 
     STREAM_FACTORY = "factory"
     STREAM_CLOUD = "cloud"
+    STREAM_FACTORY_SNAPSHOT = "factory_snapshot"
 
     stream = CharField(max_length=32, unique=True)
     cursor_value = IntegerField(default=0)

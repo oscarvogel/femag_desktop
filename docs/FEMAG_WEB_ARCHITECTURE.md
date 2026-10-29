@@ -120,6 +120,9 @@ Responsable de:
 - exponer estado observable: última sync, lag, pendientes y fallidos;
 - sobrevivir reinicios sin duplicar ni perder eventos.
 
+Runbook de la primera rebanada del agente:
+[`FEMAG_SYNC_AGENT.md`](FEMAG_SYNC_AGENT.md).
+
 ## 4. Infraestructura
 
 ### 4.1 Fábrica
