@@ -62,9 +62,14 @@ El servidor de fábrica **no necesita Python**.
 5. Revisar `C:\ProgramData\FEMAG\logs\sync_agent.log`.
 
 Si el usuario MySQL de la webapp no puede crear tablas, el instalador falla
-con un mensaje claro. En ese caso hay que ejecutar una vez `--init-schema` con
-un usuario administrador de MySQL o pedirle al responsable de la base que cree
-las tablas de `SYNC_MODELS`.
+con un mensaje claro. En ese caso, ejecutar una vez el SQL incluido con un
+usuario administrador de MySQL:
+
+```bash
+mysql -u root -p femag_desktop < C:\FEMAG\sync\sync_schema.sql
+```
+
+Después volver a ejecutar el instalador o la tarea.
 
 Para regenerar el instalador:
 
