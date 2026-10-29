@@ -213,3 +213,11 @@ def test_annulled_projected_order_is_rejected(db):
 
     assert response.status_code == 409
     assert b"anulada" in response.data.lower()
+
+def test_closed_projected_order_opens_for_reprint(db):
+    SyncSnapshotService.apply_snapshot(_snapshot(_order(status="Cerrada")))
+
+    response = _app().test_client().get("/orden/token-real-fabrica")
+
+    assert response.status_code == 200
+    assert b"Orden #500" in response.data

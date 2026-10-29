@@ -114,6 +114,18 @@ def test_publish_snapshot_sends_orders_and_updates_local_cursor(db):
     assert 0 < client.snapshots[0]["cursor"] <= 2_147_483_647
 
 
+def test_snapshot_includes_closed_orders(db):
+    order, _, _, _ = _order(number=94003)
+    order.status = LoadOrder.STATUS_CLOSED
+    order.save(only=[LoadOrder.status])
+    client = _FakeClient()
+
+    result = SyncOrderPublisher().publish_snapshot(client)
+
+    assert result["orders"] == 1
+    assert client.snapshots[0]["orders"][0]["status"] == "Cerrada"
+
+
 def test_publisher_skips_order_without_client_and_destination(db):
     _order(number=94002, with_destination=False)
     client = _FakeClient()

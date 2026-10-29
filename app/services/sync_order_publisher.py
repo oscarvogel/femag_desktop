@@ -17,6 +17,7 @@ from app.services.sync_service import SyncService
 PUBLISHABLE_STATUSES = (
     LoadOrder.STATUS_PENDING,
     LoadOrder.STATUS_ISSUED,
+    LoadOrder.STATUS_CLOSED,
     LoadOrder.STATUS_ANNULLED,
 )
 
