@@ -15,7 +15,7 @@ from peewee import (
 )
 from playhouse.migrate import SqliteMigrator, migrate
 
-from app.models import ALL_MODELS
+from app.models import ALL_MODELS, SYNC_MODELS
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,19 @@ def validate_runtime_schema(database) -> None:
         )
 
 
+def validate_sync_schema(database) -> None:
+    """Valida solo las tablas de sync, sin bloquear puestos de escritorio."""
+    missing = [
+        model._meta.table_name
+        for model in SYNC_MODELS
+        if not database.table_exists(model._meta.table_name)
+    ]
+    if missing:
+        raise SchemaValidationError(
+            "Faltan tablas de sincronizacion: " + ", ".join(sorted(missing))
+        )
+
+
 def _runtime_schema_snapshot(database):
     if _is_mysql_database(database):
         return _mysql_schema_snapshot(database)
@@ -174,8 +187,9 @@ def _mysql_schema_snapshot(database):
 
 
 def ensure_runtime_schema(database) -> None:
-    database.create_tables(ALL_MODELS, safe=True)
-    for model in ALL_MODELS:
+    models = [*ALL_MODELS, *SYNC_MODELS]
+    database.create_tables(models, safe=True)
+    for model in models:
         _ensure_model_columns(database, model)
     _drop_legacy_production_kilos(database)
     if hasattr(database, "atomic"):
