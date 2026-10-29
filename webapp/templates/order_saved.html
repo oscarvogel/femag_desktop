@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Orden {{ order.order_number }} guardada · FEMAG{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Orden #{{ order.order_number }} guardada</h1>
+  <p class="muted">La planilla terminó de guardar. Podés volver a la orden para corregir algo o buscar otra.</p>
+  <div class="summary">
+    <div><span>Fecha</span>{{ order.date.strftime('%d/%m/%Y') if order.date else '-' }}</div>
+    <div><span>Estado</span>{{ order.status }}</div>
+    <div><span>Cliente</span>{{ order.client.name if order.client else '-' }}</div>
+    <div><span>Camión</span>{{ order.truck.domain if order.truck else '-' }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Lote y fecha registrados</h2>
+  {% if lines %}
+    {% for line in lines %}
+    <div class="line">
+      <strong>{{ line.product.name }}</strong>
+      <p class="muted">Lote: {{ line.lote or 'Sin lote' }}</p>
+      <p class="muted">Fecha de elaboración: {{ line.fecha_elaboracion.strftime('%d/%m/%Y') if line.fecha_elaboracion else 'Sin fecha' }}</p>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p>La orden no tiene productos cargados.</p>
+  {% endif %}
+</div>
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+  <a class="button" href="{{ url_for('order_detail', token=order.qr_token) }}">Volver a la orden</a>
+  <a class="button secondary" href="{{ url_for('home') }}">Buscar otra orden</a>
+</div>
+{% endblock %}

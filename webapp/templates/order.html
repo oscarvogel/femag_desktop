@@ -10,7 +10,7 @@
     <div><span>Camión</span>{{ order.truck.domain if order.truck else '-' }}</div>
   </div>
 </div>
-<form method="post">
+<form method="post" id="lot-save-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if not current_username() %}
   <div class="card">
@@ -136,6 +136,17 @@
   closeButton.addEventListener('click', stopScanner);
   panel.addEventListener('click', event => { if (event.target === panel) stopScanner(); });
   window.addEventListener('pagehide', stopScanner);
+
+  const saveForm = document.getElementById('lot-save-form');
+  if (saveForm) {
+    saveForm.addEventListener('submit', () => {
+      const button = saveForm.querySelector('button[type="submit"]');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Guardando…';
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}

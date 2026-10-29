@@ -174,6 +174,7 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
     )
 
     assert response.status_code == 200
+    assert "Orden #80101 guardada".encode() in response.data
     line = LoadOrderProduct.get_by_id(line.id)
     assert line.lote == "LOTE-2026-08"
     assert line.fecha_elaboracion == date(2026, 8, 27)
@@ -185,3 +186,55 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
     assert rows[0].workstation == "127.0.0.1"
     assert rows[0].new_value["orden"] == 80101
     assert rows[0].new_value["renglones"][0]["lote"] == "LOTE-2026-08"
+
+def test_post_redirects_to_confirmation_with_saved_values(db):
+    order, line = _order_with_line()
+    _create_user()
+    client = _app().test_client()
+    _login(client)
+    csrf = _csrf_after_get(client, order.qr_token)
+
+    response = client.post(
+        f"/orden/{order.qr_token}",
+        data={
+            "csrf_token": csrf,
+            f"lote_{line.id}": "LOTE-2026-09",
+            f"fecha_{line.id}": "2026-09-01",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(
+        f"/orden/{order.qr_token}/guardado"
+    )
+
+    page = client.get(f"/orden/{order.qr_token}/guardado")
+    assert page.status_code == 200
+    assert "Orden #80101 guardada".encode() in page.data
+    assert b"LOTE-2026-09" in page.data
+    assert "01/09/2026".encode() in page.data
+    assert b"Volver a la orden" in page.data
+    assert b"Buscar otra orden" in page.data
+
+
+def test_saving_same_values_twice_only_audits_once(db):
+    order, line = _order_with_line()
+    _create_user()
+    client = _app().test_client()
+    _login(client)
+    csrf = _csrf_after_get(client, order.qr_token)
+    payload = {
+        "csrf_token": csrf,
+        f"lote_{line.id}": "LOTE-2026-10",
+        f"fecha_{line.id}": "2026-10-02",
+    }
+
+    first = client.post(f"/orden/{order.qr_token}", data=payload)
+    second = client.post(f"/orden/{order.qr_token}", data=payload)
+
+    assert first.status_code == 302
+    assert second.status_code == 302
+    rows = list(
+        AuditLog.select().where(AuditLog.action == "carga de lote")
+    )
+    assert len(rows) == 1

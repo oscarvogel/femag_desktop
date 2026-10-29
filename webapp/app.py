@@ -248,6 +248,9 @@ self.addEventListener("fetch", event => {
                     400,
                 )
             try:
+                before = {
+                    line.id: (line.lote, line.fecha_elaboracion) for line in lines
+                }
                 with database_proxy.atomic():
                     for line in lines:
                         update_order_line(
@@ -257,30 +260,39 @@ self.addEventListener("fetch", event => {
                             fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
                         )
                 lines = order_lines(order)
-                audit.record(
-                    user=username,
-                    module=audit.MODULE_DESPACHOS,
-                    action=audit.ACTION_LOTE,
-                    record_ref=f"LoadOrder:{order.id}",
-                    new_value={
-                        "orden": order.order_number,
-                        "renglones": [
-                            {
-                                "renglon": line.id,
-                                "producto": line.product.name,
-                                "lote": line.lote,
-                                "fecha_elaboracion": (
-                                    line.fecha_elaboracion.isoformat()
-                                    if line.fecha_elaboracion
-                                    else None
-                                ),
-                            }
-                            for line in lines
-                        ],
-                    },
+                changed = any(
+                    (line.lote, line.fecha_elaboracion) != before.get(line.id)
+                    for line in lines
                 )
-                flash("Lote y fecha de elaboración guardados.", "success")
-                return redirect(url_for("order_detail", token=order.ensure_qr_token()))
+                if changed:
+                    audit.record(
+                        user=username,
+                        module=audit.MODULE_DESPACHOS,
+                        action=audit.ACTION_LOTE,
+                        record_ref=f"LoadOrder:{order.id}",
+                        new_value={
+                            "orden": order.order_number,
+                            "renglones": [
+                                {
+                                    "renglon": line.id,
+                                    "producto": line.product.name,
+                                    "lote": line.lote,
+                                    "fecha_elaboracion": (
+                                        line.fecha_elaboracion.isoformat()
+                                        if line.fecha_elaboracion
+                                        else None
+                                    ),
+                                }
+                                for line in lines
+                            ],
+                        },
+                    )
+                    flash("Lote y fecha de elaboración guardados.", "success")
+                else:
+                    flash("No había cambios para guardar.", "success")
+                return redirect(
+                    url_for("order_saved", token=order.ensure_qr_token())
+                )
             except (ValueError, OrderNotFoundError) as exc:
                 flash(str(exc), "error")
                 lines = order_lines(order)
@@ -290,6 +302,21 @@ self.addEventListener("fetch", event => {
             order=order,
             lines=lines,
             line_context=order_line_context(order, lines),
+        )
+
+    @app.get("/orden/<token>/guardado")
+    def order_saved(token: str):
+        try:
+            order = get_order_by_token(token)
+        except OrderUnavailableError as exc:
+            return render_template("error.html", message=str(exc)), 409
+        except (InvalidQrPayloadError, OrderNotFoundError) as exc:
+            return render_template("error.html", message=str(exc)), 404
+
+        return render_template(
+            "order_saved.html",
+            order=order,
+            lines=order_lines(order),
         )
 
     def _blank_submitted():
