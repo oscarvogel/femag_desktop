@@ -131,8 +131,10 @@ La consulta de la orden por token sigue siendo pública y muestra solo los datos
 operativos necesarios para cargar el lote.
 
 En la instancia cloud, `/orden/<token>` busca primero la orden local y, si no
-existe, la **proyección de sync**. Las órdenes proyectadas se muestran en modo
-lectura hasta implementar el envío de eventos cloud → fábrica (#805).
+existe, la **proyección de sync**. Lote y fecha se pueden editar; el cambio
+queda en la proyección y se encola como evento cloud → fábrica. La pantalla
+muestra **Pendiente de sincronización** hasta que el agente lo aplica y
+confirma el ACK. Un snapshot posterior no pisa ese valor pendiente.
 
 Después de guardar, la webapp muestra una **pantalla de confirmación** con la
 orden, los lotes y las fechas registradas, y los botones para volver a la orden

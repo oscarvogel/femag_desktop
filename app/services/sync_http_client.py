@@ -10,6 +10,7 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from urllib.parse import urlparse
 
@@ -85,6 +86,20 @@ class SyncHttpClient:
 
     def post_event(self, event: dict) -> dict:
         return self._request("POST", "/api/sync/v1/events", event)
+
+    def get_events(self, cursor: int = 0, limit: int = 50) -> dict:
+        query = urllib.parse.urlencode({"cursor": int(cursor), "limit": int(limit)})
+        return self._request("GET", f"/api/sync/v1/events?{query}")
+
+    def ack_event(self, event_id: str, result: str, error: str | None = None) -> dict:
+        payload = {"result": result}
+        if error:
+            payload["error"] = str(error)[:1000]
+        return self._request(
+            "POST",
+            f"/api/sync/v1/events/{urllib.parse.quote(event_id)}/ack",
+            payload,
+        )
 
     def get_status(self) -> dict:
         return self._request("GET", "/api/sync/v1/status")
