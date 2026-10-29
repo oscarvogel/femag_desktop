@@ -19,16 +19,19 @@ from flask import (
     send_file,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app.config.database import database_proxy
 from app.services.audit_query_service import AuditQueryService
 from app.utils.datetime_utils import utc_datetime_to_local
 from webapp import audit, production_service
 from webapp.auth import (
+    SESSION_LIFETIME,
     csrf_token,
     csrf_token_is_valid,
     current_username,
     is_administrator,
+    login_is_rate_limited,
     login_required,
     login_user,
     logout_user,
@@ -75,8 +78,41 @@ def create_app(*, secret_key: str | None = None) -> Flask:
     # URL publica del servidor, cuando hay un proxy (Caddy) delante. Sin esto
     # el QR de turno se imprimiria con la direccion interna del servidor.
     app.config["PUBLIC_URL"] = os.getenv("FEMAG_WEB_PUBLIC_URL", "").strip()
+    public_url = app.config["PUBLIC_URL"]
+    uses_https = public_url.lower().startswith("https://")
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=uses_https,
+        PERMANENT_SESSION_LIFETIME=SESSION_LIFETIME,
+        PREFERRED_URL_SCHEME="https" if uses_https else "http",
+    )
+    if uses_https:
+        # Traefik termina el TLS y reenvia a gunicorn por HTTP interno.
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=1,
+            x_proto=1,
+            x_host=1,
+        )
     # Los numeros se muestran como se leen aca: punto de miles y coma decimal.
     app.jinja_env.filters["kg"] = production_service.kg_text
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault(
+            "Permissions-Policy",
+            "camera=(self), microphone=(), geolocation=()",
+        )
+        if uses_https or request.is_secure:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+        return response
 
     @app.context_processor
     def _inject_auth():
@@ -187,6 +223,12 @@ self.addEventListener("fetch", event => {
         if request.method == "POST":
             username = (request.form.get("username") or "").strip()
             password = request.form.get("password") or ""
+            if login_is_rate_limited(username, station=audit.client_station()):
+                flash(
+                    "Demasiados intentos fallidos. Esperá unos minutos e intentá de nuevo.",
+                    "error",
+                )
+                return render_template("login.html"), 429
             if login_user(username, password):
                 flash("Sesión iniciada.", "success")
                 return redirect(redirect_after_login("production"))
