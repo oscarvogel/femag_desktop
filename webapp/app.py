@@ -52,6 +52,7 @@ from webapp.projected_order_service import (
     get_projected_order_by_token,
     projected_line_context,
     projected_order_lines,
+    update_projected_line,
 )
 from webapp.qr_sheet import build_turno_sheet
 from webapp.sync_api import sync_api
@@ -284,16 +285,80 @@ self.addEventListener("fetch", event => {
             return render_template("error.html", message=str(exc)), 404
 
         if is_projected:
-            if request.method == "POST":
-                flash(
-                    "La edición de lote y fecha desde la nube estará disponible "
-                    "en la próxima etapa.",
-                    "error",
-                )
-                return redirect(
-                    url_for("order_detail", token=order.ensure_qr_token())
-                )
             lines = projected_order_lines(order)
+            if request.method == "POST":
+                username = current_username()
+                if not username:
+                    flash(
+                        "Iniciá sesión para modificar el lote y la fecha de la orden.",
+                        "error",
+                    )
+                    return redirect(
+                        url_for(
+                            "login",
+                            next=url_for(
+                                "order_detail", token=order.ensure_qr_token()
+                            ),
+                        )
+                    )
+                if not csrf_token_is_valid():
+                    return (
+                        render_template(
+                            "error.html",
+                            message=(
+                                "La sesión expiró o el formulario no es válido. "
+                                "Volvé a abrir la orden e intentá de nuevo."
+                            ),
+                        ),
+                        400,
+                    )
+                try:
+                    changed = False
+                    for line in lines:
+                        if update_projected_line(
+                            order,
+                            line.id,
+                            lote=request.form.get(f"lote_{line.id}"),
+                            fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
+                        ):
+                            changed = True
+                    if changed:
+                        audit.record(
+                            user=username,
+                            module=audit.MODULE_DESPACHOS,
+                            action=audit.ACTION_LOTE,
+                            record_ref=f"SyncOrder:{order.order_uid}",
+                            new_value={
+                                "orden": order.order_number,
+                                "renglones": [
+                                    {
+                                        "renglon": line.id,
+                                        "producto": line.product.name,
+                                        "lote": request.form.get(
+                                            f"lote_{line.id}"
+                                        ),
+                                        "fecha_elaboracion": request.form.get(
+                                            f"fecha_{line.id}"
+                                        ),
+                                    }
+                                    for line in lines
+                                ],
+                            },
+                        )
+                        flash(
+                            "Lote y fecha guardados. Pendiente de sincronización "
+                            "con fábrica.",
+                            "success",
+                        )
+                    else:
+                        flash("No había cambios para guardar.", "success")
+                    return redirect(
+                        url_for("order_saved", token=order.ensure_qr_token())
+                    )
+                except (ValueError, OrderUnavailableError) as exc:
+                    flash(str(exc), "error")
+                    lines = projected_order_lines(order)
+
             return render_template(
                 "order.html",
                 order=order,
@@ -385,16 +450,22 @@ self.addEventListener("fetch", event => {
     @app.get("/orden/<token>/guardado")
     def order_saved(token: str):
         try:
-            order = get_order_by_token(token)
+            order, is_projected = _load_order(token)
         except OrderUnavailableError as exc:
             return render_template("error.html", message=str(exc)), 409
         except (InvalidQrPayloadError, OrderNotFoundError) as exc:
             return render_template("error.html", message=str(exc)), 404
 
+        lines = (
+            projected_order_lines(order)
+            if is_projected
+            else order_lines(order)
+        )
         return render_template(
             "order_saved.html",
             order=order,
-            lines=order_lines(order),
+            lines=lines,
+            is_projected=is_projected,
         )
 
     def _blank_submitted():

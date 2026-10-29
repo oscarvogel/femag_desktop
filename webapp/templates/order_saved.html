@@ -1,9 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Orden {{ order.order_number }} guardada · FEMAG{% endblock %}
+{% block title %}Orden {{ order.order_number }} {{ 'pendiente de sincronización' if is_projected else 'guardada' }} · FEMAG{% endblock %}
 {% block content %}
 <div class="card">
+  {% if is_projected %}
+  <h1>Orden #{{ order.order_number }} pendiente de sincronización</h1>
+  <p class="muted">Los datos quedaron en la nube. Se aplicarán en la fábrica cuando el agente sincronice.</p>
+  {% else %}
   <h1>Orden #{{ order.order_number }} guardada</h1>
   <p class="muted">La planilla terminó de guardar. Podés volver a la orden para corregir algo o buscar otra.</p>
+  {% endif %}
   <div class="summary">
     <div><span>Fecha</span>{{ order.date.strftime('%d/%m/%Y') if order.date else '-' }}</div>
     <div><span>Estado</span>{{ order.status }}</div>

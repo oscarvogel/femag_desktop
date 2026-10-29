@@ -6,10 +6,11 @@ de lectura, sin crear movimientos ni modificar la base de fabrica.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from app.config.database import database_proxy
-from app.models.sync import SyncCursor, SyncProjection, utc_now_naive
+from app.models.sync import SyncCursor, SyncOutbox, SyncProjection, utc_now_naive
 from app.services.sync_service import SyncService
 
 REQUIRED_ORDER_FIELDS = (
@@ -50,6 +51,36 @@ def _parse_datetime(value) -> datetime | None:
     return parsed
 
 
+def _merge_pending_lotes(order: dict) -> dict:
+    """Un snapshot no pisa un lote/fecha que la nube todavía no confirmó."""
+    merged = deepcopy(order)
+    lines = [
+        line for line in (merged.get("lines") or []) if isinstance(line, dict)
+    ]
+    line_ids = [str(line.get("line_uid") or "") for line in lines]
+    line_ids = [line_id for line_id in line_ids if line_id]
+    if not line_ids:
+        return merged
+
+    pending = {}
+    for event in SyncOutbox.select().where(
+        (SyncOutbox.event_type == "order_lote_fecha_updated")
+        & (SyncOutbox.aggregate_type == "order_line")
+        & (SyncOutbox.aggregate_id.in_(line_ids))
+        & (SyncOutbox.status == SyncOutbox.STATUS_PENDING)
+    ):
+        if isinstance(event.payload, dict):
+            pending[event.aggregate_id] = (
+                event.payload.get("lote"),
+                event.payload.get("fecha_elaboracion"),
+            )
+    for line in lines:
+        values = pending.get(str(line.get("line_uid") or ""))
+        if values is not None:
+            line["lote"], line["fecha_elaboracion"] = values
+    return merged
+
+
 class SyncSnapshotService:
     @staticmethod
     def apply_order_snapshot(order: dict) -> tuple[SyncProjection, bool]:
@@ -87,7 +118,7 @@ class SyncSnapshotService:
             "order_number": int(order["order_number"]),
             "status": str(order["status"]),
             "version": version,
-            "payload": order,
+            "payload": _merge_pending_lotes(order),
             "source_updated_at": _parse_datetime(order.get("updated_at")),
             "cancelled_at": _parse_datetime(order.get("cancelled_at")),
         }
