@@ -12,9 +12,11 @@ param(
     [string]$SyncEnvSource = "",
     [string]$BaseUrl = "",
     [string]$Token = "",
+    [string]$ParamsFile = "",
     [string]$TaskName = "FEMAG Sync Agent",
     [int]$IntervalMinutes = 5,
     [switch]$SkipTask,
+    [switch]$RunSnapshot,
     [switch]$RunNow
 )
 
@@ -89,6 +91,13 @@ foreach ($required in @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD
     }
 }
 
+$installParams = @{}
+if (-not [string]::IsNullOrWhiteSpace($ParamsFile)) {
+    $installParams = Read-EnvFile -Path $ParamsFile
+}
+$initDbUser = $installParams["InitDbUser"]
+$initDbPassword = $installParams["InitDbPassword"]
+
 $sourcePath = $SyncEnvSource
 if ([string]::IsNullOrWhiteSpace($sourcePath) -and (Test-Path -LiteralPath $ConfigPath)) {
     $sourcePath = $ConfigPath
@@ -138,9 +147,43 @@ if (-not (Test-Path -LiteralPath $logDir)) {
 }
 
 Write-Host "Preparando esquema de sincronizacion..." -ForegroundColor Cyan
-$initOutput = & $exe --init-schema 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "No se pudo preparar el esquema de sync. El usuario MySQL debe tener permiso para crear tablas. Detalle: $initOutput"
+$initEnvPath = ""
+$previousSyncEnvFile = $env:FEMAG_SYNC_ENV_FILE
+$previousEnvFile = $env:FEMAG_ENV_FILE
+try {
+    if (-not [string]::IsNullOrWhiteSpace($initDbUser)) {
+        $initValues = [ordered]@{}
+        foreach ($key in $values.Keys) {
+            $initValues[$key] = $values[$key]
+        }
+        $initValues["DB_USER"] = $initDbUser
+        $initValues["DB_PASSWORD"] = $initDbPassword
+        $initEnvPath = Join-Path $env:TEMP ("femag-sync-init-" + [guid]::NewGuid().ToString("N") + ".env")
+        $initValues["FEMAG_ENV_FILE"] = $initEnvPath
+        Write-EnvFile -Path $initEnvPath -Values $initValues
+        Protect-ConfigFile -Path $initEnvPath
+        $env:FEMAG_SYNC_ENV_FILE = $initEnvPath
+        $env:FEMAG_ENV_FILE = $initEnvPath
+    }
+    $initOutput = & $exe --init-schema 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudo preparar el esquema de sync. Detalle: $initOutput"
+    }
+} finally {
+    $env:FEMAG_SYNC_ENV_FILE = $previousSyncEnvFile
+    $env:FEMAG_ENV_FILE = $previousEnvFile
+    if ($initEnvPath -and (Test-Path -LiteralPath $initEnvPath)) {
+        Remove-Item -LiteralPath $initEnvPath -Force
+    }
+}
+
+if ($RunSnapshot) {
+    Write-Host "Ejecutando primera sincronizacion..." -ForegroundColor Cyan
+    $snapshotOutput = & $exe --snapshot 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "La primera sincronizacion fallo. Revise $($values['FEMAG_SYNC_LOG_FILE']). Detalle: $snapshotOutput"
+    }
+    Write-Host $snapshotOutput
 }
 
 if (-not $SkipTask) {
