@@ -29,6 +29,7 @@ listado de procesos). Se lee del entorno.
 ```bash
 python -m app.jobs.sync_agent --snapshot
 python -m app.jobs.sync_agent --status
+python -m app.jobs.sync_agent --init-schema
 ```
 
 `--snapshot`:
@@ -55,8 +56,15 @@ El servidor de fábrica **no necesita Python**.
    - lee `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD` desde
      `C:\ProgramData\FEMAG\webapp.env`;
    - escribe y protege `C:\ProgramData\FEMAG\sync.env`;
+   - crea las tablas de sync con `FEMAG Sync Agent.exe --init-schema`
+     (el usuario MySQL necesita permiso para crear tablas);
    - registra la tarea **FEMAG Sync Agent** cada 5 minutos como SYSTEM.
 5. Revisar `C:\ProgramData\FEMAG\logs\sync_agent.log`.
+
+Si el usuario MySQL de la webapp no puede crear tablas, el instalador falla
+con un mensaje claro. En ese caso hay que ejecutar una vez `--init-schema` con
+un usuario administrador de MySQL o pedirle al responsable de la base que cree
+las tablas de `SYNC_MODELS`.
 
 Para regenerar el instalador:
 

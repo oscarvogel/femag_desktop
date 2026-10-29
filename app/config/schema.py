@@ -121,6 +121,13 @@ def validate_runtime_schema(database) -> None:
         )
 
 
+def ensure_sync_schema(database) -> None:
+    """Crea solo las tablas de sync, sin tocar las tablas de negocio."""
+    database.create_tables(SYNC_MODELS, safe=True)
+    for model in SYNC_MODELS:
+        _ensure_model_columns(database, model)
+
+
 def validate_sync_schema(database) -> None:
     """Valida solo las tablas de sync, sin bloquear puestos de escritorio."""
     missing = [
@@ -187,10 +194,10 @@ def _mysql_schema_snapshot(database):
 
 
 def ensure_runtime_schema(database) -> None:
-    models = [*ALL_MODELS, *SYNC_MODELS]
-    database.create_tables(models, safe=True)
-    for model in models:
+    database.create_tables(ALL_MODELS, safe=True)
+    for model in ALL_MODELS:
         _ensure_model_columns(database, model)
+    ensure_sync_schema(database)
     _drop_legacy_production_kilos(database)
     if hasattr(database, "atomic"):
         _backfill_client_emails(database)
