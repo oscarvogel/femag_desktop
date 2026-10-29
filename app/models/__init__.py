@@ -106,3 +106,22 @@ ALL_MODELS = [
     StockCount,
     StockCountLine,
 ]
+from app.models.sync import (
+    SyncConflict,
+    SyncCursor,
+    SyncEntityMap,
+    SyncInbox,
+    SyncOutbox,
+)
+
+
+#: Tablas de sincronizacion (#804). No se exigen en la validacion del
+#: escritorio para no bloquear puestos viejos antes de la migracion; se crean
+#: con ``ensure_runtime_schema`` y las usa el agente/API de sync.
+SYNC_MODELS = [
+    SyncEntityMap,
+    SyncOutbox,
+    SyncInbox,
+    SyncCursor,
+    SyncConflict,
+]

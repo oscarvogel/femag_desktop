@@ -1000,9 +1000,13 @@ def test_ensure_runtime_schema_relaxes_nullable_columns_for_mysql_tables():
 
 
 def _model_by_table(table_name):
-    from app.models import ALL_MODELS
+    from app.models import ALL_MODELS, SYNC_MODELS
 
-    return next(model for model in ALL_MODELS if model._meta.table_name == table_name)
+    return next(
+        model
+        for model in [*ALL_MODELS, *SYNC_MODELS]
+        if model._meta.table_name == table_name
+    )
 
 
 

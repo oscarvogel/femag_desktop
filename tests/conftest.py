@@ -43,13 +43,14 @@ def _isolate_femag_env(monkeypatch, tmp_path):
 @pytest.fixture()
 def db():
     from app.config.database import bind_database
-    from app.models import ALL_MODELS
+    from app.models import ALL_MODELS, SYNC_MODELS
 
+    models = [*ALL_MODELS, *SYNC_MODELS]
     bind_database(TEST_DB)
     TEST_DB.connect(reuse_if_open=True)
-    TEST_DB.create_tables(ALL_MODELS)
+    TEST_DB.create_tables(models)
     yield TEST_DB
-    TEST_DB.drop_tables(ALL_MODELS)
+    TEST_DB.drop_tables(models)
     TEST_DB.close()
 
 
