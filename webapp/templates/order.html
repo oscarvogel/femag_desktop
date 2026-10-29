@@ -66,11 +66,13 @@
 
 <div id="lot-scanner" class="scanner-panel" hidden>
   <div class="scanner-card">
-    <h2>Escanear lote</h2>
+    <div class="scanner-header">
+      <h2>Escanear lote</h2>
+      <button id="lot-scanner-close" type="button">Cancelar</button>
+    </div>
     <p class="muted">Apuntá la cámara al código QR o código de barras del lote.</p>
     <video id="lot-scanner-video" playsinline muted></video>
     <p id="lot-scanner-status" class="muted">Preparando cámara…</p>
-    <button id="lot-scanner-close" type="button">Cancelar</button>
   </div>
 </div>
 
@@ -82,6 +84,9 @@
   .scan-lot-button { width: auto; min-height: 46px; padding: 10px 14px; white-space: nowrap; }
   .scanner-panel { position: fixed; inset: 0; z-index: 1000; background: rgba(12, 22, 32, .82); padding: 18px; overflow: auto; }
   .scanner-card { max-width: 560px; margin: 4vh auto; background: white; border-radius: 14px; padding: 16px; }
+  .scanner-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .scanner-header h2 { margin: 0; }
+  .scanner-header button { width: auto; min-height: 40px; padding: 8px 16px; white-space: nowrap; }
   #lot-scanner-video { display: block; width: 100%; min-height: 240px; max-height: 55vh; object-fit: cover; border-radius: 10px; background: #111; margin: 12px 0; }
   @media (max-width: 430px) {
     .lot-row { grid-template-columns: 1fr; }
@@ -98,19 +103,34 @@
   let stream = null;
   let scanning = false;
   let targetInput = null;
+  let scannerHistoryPushed = false;
 
-  function stopScanner() {
+  function stopScanner(fromHistory = false) {
     scanning = false;
     if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
     video.srcObject = null;
     panel.hidden = true;
     targetInput = null;
+    if (scannerHistoryPushed) {
+      scannerHistoryPushed = false;
+      if (!fromHistory) {
+        history.back();
+      }
+    }
   }
 
   async function startScanner(inputId) {
     targetInput = document.getElementById(inputId);
     if (!targetInput) return;
     panel.hidden = false;
+    if (!scannerHistoryPushed) {
+      try {
+        history.pushState({ femagScanner: true }, '', location.href);
+        scannerHistoryPushed = true;
+      } catch (error) {
+        scannerHistoryPushed = false;
+      }
+    }
     status.textContent = 'Solicitando acceso a la cámara…';
     if (!window.isSecureContext) { status.textContent = 'La cámara requiere HTTPS (o localhost). Podés ingresar el lote manualmente.'; return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { status.textContent = 'Este navegador no permite acceder a la cámara.'; return; }
@@ -141,9 +161,23 @@
   }
 
   document.querySelectorAll('.scan-lot-button').forEach(button => button.addEventListener('click', () => startScanner(button.dataset.target)));
-  closeButton.addEventListener('click', stopScanner);
-  panel.addEventListener('click', event => { if (event.target === panel) stopScanner(); });
-  window.addEventListener('pagehide', stopScanner);
+  closeButton.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    stopScanner();
+  });
+  panel.addEventListener('click', event => {
+    if (event.target === panel) {
+      event.preventDefault();
+      stopScanner();
+    }
+  });
+  window.addEventListener('popstate', () => {
+    if (!panel.hidden) {
+      stopScanner(true);
+    }
+  });
+  window.addEventListener('pagehide', () => stopScanner(true));
 
   const saveForm = document.getElementById('lot-save-form');
   if (saveForm) {

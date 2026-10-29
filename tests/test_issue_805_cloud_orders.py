@@ -94,6 +94,9 @@ def test_projected_order_opens_by_qr_token(db):
     assert "Orden sincronizada desde la fábrica".encode() in response.data
     assert b'name="lote_' in response.data
     assert b"Guardar lote y fecha" in response.data
+    assert b"scanner-header" in response.data
+    assert b"history.pushState" in response.data
+    assert b"popstate" in response.data
 
 
 def test_home_scanner_opens_projected_order(db):
