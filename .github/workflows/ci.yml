@@ -282,7 +282,8 @@ jobs:
           $env:FEMAG_SQLITE_PATH = $db
           $env:FEMAG_DEMO = '1'
           $env:FEMAG_SECURE_CONFIG = '0'
-          python scripts/init_db.py
+          $init = Start-Process -FilePath ".\dist\FEMAG Sync Agent\FEMAG Sync Agent.exe" -ArgumentList "--init-schema" -Wait -PassThru
+          if ($init.ExitCode -ne 0) { throw "Sync agent schema init failed with exit code $($init.ExitCode)" }
           $process = Start-Process -FilePath ".\dist\FEMAG Sync Agent\FEMAG Sync Agent.exe" -ArgumentList "--status" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Sync agent smoke failed with exit code $($process.ExitCode)" }
           $pyqt = Get-ChildItem ".\dist\FEMAG Sync Agent" -Recurse -File -ErrorAction SilentlyContinue |

@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from app.config.database import initialize_runtime_database
-from app.config.schema import validate_sync_schema
+from app.config.schema import ensure_sync_schema, validate_sync_schema
 from app.services.sync_http_client import SyncHttpClient
 from app.services.sync_order_publisher import SyncOrderPublisher
 from app.services.sync_service import SyncService
@@ -71,6 +71,19 @@ def _client_from_env() -> SyncHttpClient:
     )
 
 
+def run_init_schema() -> int:
+    database = initialize_runtime_database()
+    database.connect(reuse_if_open=True)
+    try:
+        ensure_sync_schema(database)
+        validate_sync_schema(database)
+        print("Esquema de sincronizacion listo.")
+        return 0
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
 def run_snapshot(limit: int | None = None) -> int:
     database = initialize_runtime_database()
     database.connect(reuse_if_open=True)
@@ -105,18 +118,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agente de sincronizacion FEMAG.")
     parser.add_argument("--snapshot", action="store_true", help="Publicar snapshot completo")
     parser.add_argument("--status", action="store_true", help="Mostrar estado local de sync")
+    parser.add_argument(
+        "--init-schema",
+        action="store_true",
+        help="Crear las tablas de sync (requiere permiso DDL)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Limite de ordenes")
     args = parser.parse_args(argv)
 
     try:
+        if args.init_schema:
+            return run_init_schema()
         if args.status:
             return run_status()
         return run_snapshot(limit=args.limit)
     except SystemExit as exc:
         logger.error("%s", exc)
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    except Exception:
+    except Exception as exc:
         logger.exception("Fallo el agente de sincronizacion")
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
 

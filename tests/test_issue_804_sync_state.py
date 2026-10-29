@@ -166,3 +166,21 @@ def test_ensure_runtime_schema_creates_sync_tables(tmp_path):
         assert "syncinbox" in tables
     finally:
         database.close()
+
+def test_ensure_sync_schema_creates_only_sync_tables(tmp_path):
+    from peewee import SqliteDatabase
+
+    from app.config.database import bind_database
+    from app.config.schema import ensure_sync_schema, validate_sync_schema
+
+    database = SqliteDatabase(str(tmp_path / "sync-only.sqlite3"))
+    bind_database(database)
+    database.connect(reuse_if_open=True)
+    try:
+        ensure_sync_schema(database)
+        validate_sync_schema(database)
+        tables = set(database.get_tables())
+        assert "syncoutbox" in tables
+        assert "loadorder" not in tables
+    finally:
+        database.close()

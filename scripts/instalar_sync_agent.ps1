@@ -137,6 +137,12 @@ if (-not (Test-Path -LiteralPath $logDir)) {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 }
 
+Write-Host "Preparando esquema de sincronizacion..." -ForegroundColor Cyan
+$initOutput = & $exe --init-schema 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo preparar el esquema de sync. El usuario MySQL debe tener permiso para crear tablas. Detalle: $initOutput"
+}
+
 if (-not $SkipTask) {
     $action = New-ScheduledTaskAction `
         -Execute $exe `
