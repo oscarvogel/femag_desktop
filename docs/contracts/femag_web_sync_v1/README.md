@@ -35,6 +35,10 @@ implementar. La arquitectura general está en
 | `GET` | `/api/sync/v1/status` | Estado observable de sync |
 | `GET` | `/health` | Salud del servicio |
 
+La primera implementación cubre snapshots de órdenes, pull de eventos, ACK y
+status en `webapp/sync_api.py`. El agente que publica y aplica esos eventos se
+implementa en la siguiente rebanada de #804.
+
 ### Autenticación
 
 Cabeceras mínimas:
@@ -86,7 +90,7 @@ Tipos v1:
 
 El snapshot incluye `orders[]` con:
 
-- `order_uid`, `order_number`, `status`, `version`;
+- `order_uid`, `order_number`, `qr_token`, `status`, `version`;
 - `order_date`, `published_at`, `updated_at`, `cancelled_at`;
 - `client`: `client_uid`, `name`;
 - `destination`: `destination_uid`, `city`, `address`;
