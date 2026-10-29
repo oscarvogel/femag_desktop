@@ -311,6 +311,11 @@ Estado de la autenticación:
 - El secreto con el que se firman las cookies de sesión no puede ser un valor
   fijo del repositorio: se resuelve por `FEMAG_WEB_SECRET_KEY` o por un archivo
   aleatorio del directorio de configuración del puesto.
+- Con `FEMAG_WEB_PUBLIC_URL` en `https://`, las cookies se marcan `Secure`,
+  `HttpOnly` y `SameSite=Lax`, la sesión dura 12 horas y se envían cabeceras
+  HSTS, `X-Frame-Options`, `nosniff` y `Referrer-Policy`.
+- El login se bloquea temporalmente tras 5 intentos fallidos por usuario o
+  equipo en 15 minutos.
 
 ## Healthcheck
 

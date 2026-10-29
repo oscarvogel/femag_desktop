@@ -29,6 +29,8 @@ from pathlib import Path
 
 from flask import flash, redirect, request, session, url_for
 
+from app.models.audit import AuditLog
+from app.models.base import utc_now
 from app.models.security import User
 from app.services.auth_service import AuthService
 from webapp import audit
@@ -39,6 +41,10 @@ CSRF_SESSION_KEY = "femag_csrf_token"
 #: La sesion vive lo que dura un turno de trabajo: el mismo celular no vuelve
 #: a pedir la clave a la manana, pero a la noche ya esta cerrada.
 SESSION_LIFETIME = timedelta(hours=12)
+
+#: Intentos fallidos por usuario o por equipo antes de bloquear el login.
+MAX_FAILED_LOGINS = 5
+FAILED_LOGIN_WINDOW = timedelta(minutes=15)
 
 SECRET_FILE_NAME = "webapp_secret.key"
 
@@ -108,6 +114,40 @@ def logout_user() -> None:
 def current_username() -> str | None:
     username = session.get(SESSION_USER_KEY)
     return username if isinstance(username, str) and username else None
+
+
+def login_is_rate_limited(username: str, *, station: str | None = None) -> bool:
+    """Evita probar claves sin limite desde el mismo usuario o celular.
+
+    Se apoya en la auditoria que ya escribe ``AuthService``: no agrega una
+    tabla nueva. Si la auditoria falla, el login no se bloquea por ese error.
+    """
+    since = utc_now() - FAILED_LOGIN_WINDOW
+    conditions = []
+    if username:
+        conditions.append(AuditLog.user == username)
+    if station:
+        conditions.append(AuditLog.workstation == station)
+    if not conditions:
+        return False
+    condition = conditions[0]
+    for extra in conditions[1:]:
+        condition = condition | extra
+    try:
+        failures = (
+            AuditLog.select()
+            .where(
+                (AuditLog.module == "Sistema")
+                & (AuditLog.action == "login fallido")
+                & (AuditLog.occurred_at >= since)
+                & condition
+            )
+            .count()
+        )
+    except Exception:
+        audit.logger.exception("No se pudo evaluar el limite de intentos de login")
+        return False
+    return failures >= MAX_FAILED_LOGINS
 
 
 def csrf_token() -> str:

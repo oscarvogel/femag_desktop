@@ -220,19 +220,15 @@ def test_production_screen_does_not_need_the_camera():
     assert '<select id="turno"' in template
 
 
-def test_webapp_session_cookie_does_not_require_https():
+def test_webapp_session_cookie_does_not_require_https(monkeypatch):
     """Sin HTTPS la cookie de sesión tiene que poder viajar en http.
 
-    Flask no marca la cookie como secure salvo que se lo pidan, así que el
-    login funciona por http: por eso el modo sin Caddy es viable.
+    El modo sin Caddy sigue siendo viable: la cookie solo se marca ``Secure``
+    cuando ``FEMAG_WEB_PUBLIC_URL`` es HTTPS.
     """
-    offenders = [
-        path.name
-        for path in (ROOT / "webapp").glob("*.py")
-        if "SESSION_COOKIE_SECURE" in path.read_text(encoding="utf-8")
-    ]
+    from webapp import create_app
 
-    assert not offenders, (
-        f"Si la cookie de sesion exige HTTPS, el modo sin Caddy deja de poder "
-        f"iniciar sesion desde el celular: {offenders}"
-    )
+    monkeypatch.delenv("FEMAG_WEB_PUBLIC_URL", raising=False)
+    app = create_app(secret_key="secreto-de-prueba")
+
+    assert app.config["SESSION_COOKIE_SECURE"] is False
