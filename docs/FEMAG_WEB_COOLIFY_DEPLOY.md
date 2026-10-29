@@ -107,6 +107,7 @@ Variables mínimas:
 | `FEMAG_SECURE_CONFIG` | Sí | `0` en Linux |
 | `FEMAG_WEB_SECRET_KEY` | Sí | Secreto largo y aleatorio |
 | `FEMAG_WEB_PUBLIC_URL` | Sí | `https://dominio` sin slash final |
+| `FEMAG_SYNC_API_TOKEN` | No | Token de máquina para `/api/sync/v1`; vacío deshabilita la API |
 | `APP_ENV` | Sí | `production` |
 | `FEMAG_WEB_AUTO_INIT_SCHEMA` | Demo | `1` solo en demo; producción `0` |
 | `FEMAG_WEB_SEED_DEMO` | Demo | `1` solo en demo; producción `0` |

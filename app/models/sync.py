@@ -123,3 +123,22 @@ class SyncConflict(BaseModel):
 
     class Meta:
         indexes = ((("status", "created_at"), False),)
+
+class SyncProjection(BaseModel):
+    """Copia de lectura que la nube guarda de un recurso de fabrica."""
+
+    RESOURCE_ORDER = "order"
+
+    resource_type = CharField()
+    resource_uid = CharField(max_length=36)
+    qr_token = CharField(max_length=64, null=True, unique=True)
+    order_number = IntegerField(null=True)
+    status = CharField(null=True)
+    version = IntegerField(default=1)
+    payload = JSONTextField()
+    source_updated_at = DateTimeField(null=True)
+    published_at = DateTimeField(default=utc_now_naive)
+    cancelled_at = DateTimeField(null=True)
+
+    class Meta:
+        indexes = ((("resource_type", "resource_uid"), True),)

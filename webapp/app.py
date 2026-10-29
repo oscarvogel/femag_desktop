@@ -49,6 +49,7 @@ from webapp.order_service import (
     update_order_line,
 )
 from webapp.qr_sheet import build_turno_sheet
+from webapp.sync_api import sync_api
 
 
 def _production_target(value: str) -> str | None:
@@ -97,6 +98,7 @@ def create_app(*, secret_key: str | None = None) -> Flask:
         )
     # Los numeros se muestran como se leen aca: punto de miles y coma decimal.
     app.jinja_env.filters["kg"] = production_service.kg_text
+    app.register_blueprint(sync_api)
 
     @app.after_request
     def _security_headers(response):

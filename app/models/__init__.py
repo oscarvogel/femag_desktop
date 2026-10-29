@@ -112,6 +112,7 @@ from app.models.sync import (
     SyncEntityMap,
     SyncInbox,
     SyncOutbox,
+    SyncProjection,
 )
 
 
@@ -124,4 +125,5 @@ SYNC_MODELS = [
     SyncInbox,
     SyncCursor,
     SyncConflict,
+    SyncProjection,
 ]

@@ -46,6 +46,7 @@
         "order_uid",
         "order_number",
         "status",
+        "qr_token",
         "version",
         "order_date",
         "published_at",
@@ -113,6 +114,12 @@
           "items": {
             "$ref": "#/$defs/pallet"
           }
+        },
+        "qr_token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
         }
       }
     },
