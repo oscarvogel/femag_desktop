@@ -46,30 +46,25 @@ python -m app.jobs.sync_agent --init-schema
 
 El servidor de fábrica **no necesita Python**.
 
-1. Generar/copiar `FEMAG_Sync_Agent_Setup.exe` y el archivo `femag_sync.env`
-   (URL + token) a la máquina.
-2. Copiar `femag_sync.env` a `C:\ProgramData\FEMAG\sync.env` o ejecutar el
-   instalador con `/SYNCENV=C:\ruta\femag_sync.env`.
-3. Ejecutar `FEMAG_Sync_Agent_Setup.exe` como administrador.
+1. Copiar `FEMAG_Sync_Agent_Setup.exe` y `femag_sync.env` **a la misma
+   carpeta** del servidor.
+2. Ejecutar `FEMAG_Sync_Agent_Setup.exe` como administrador.
+3. En la página **MySQL administrador**, ingresar una vez un usuario con
+   permiso para crear tablas (por ejemplo `root`). No se guarda.
 4. El instalador:
    - copia el EXE a `C:\FEMAG\sync`;
+   - copia `femag_sync.env` a `C:\ProgramData\FEMAG\sync.env`;
    - lee `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD` desde
      `C:\ProgramData\FEMAG\webapp.env`;
-   - escribe y protege `C:\ProgramData\FEMAG\sync.env`;
-   - crea las tablas de sync con `FEMAG Sync Agent.exe --init-schema`
-     (el usuario MySQL necesita permiso para crear tablas);
+   - crea las tablas de sync en la base correcta usando el usuario
+     administrador;
+   - ejecuta la primera sincronización;
    - registra la tarea **FEMAG Sync Agent** cada 5 minutos como SYSTEM.
 5. Revisar `C:\ProgramData\FEMAG\logs\sync_agent.log`.
 
-Si el usuario MySQL de la webapp no puede crear tablas, el instalador falla
-con un mensaje claro. En ese caso, ejecutar una vez el SQL incluido con un
-usuario administrador de MySQL:
-
-```bash
-mysql -u root -p femag_desktop < C:\FEMAG\sync\sync_schema.sql
-```
-
-Después volver a ejecutar el instalador o la tarea.
+Si se prefiere instalación desatendida, se puede pasar
+`/SYNCENV=C:\ruta\femag_sync.env`. El SQL de respaldo queda en
+`C:\FEMAG\sync\sync_schema.sql` y es idempotente.
 
 Para regenerar el instalador:
 

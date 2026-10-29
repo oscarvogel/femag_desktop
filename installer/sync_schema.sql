@@ -1,10 +1,10 @@
 -- Tablas de sincronizacion de FEMAG (#804).
--- Ejecutar una sola vez sobre la base de fabrica si el instalador no puede
--- crearlas por permisos del usuario MySQL:
+-- Se puede ejecutar varias veces: crea tablas e indices solo si faltan.
 --
---   mysql -u root -p femag_desktop < sync_schema.sql
+--   mysql -u root -p NOMBRE_BASE < sync_schema.sql
 --
--- Luego volver a instalar/arrancar el agente.
+-- No usar contra la base equivocada: el nombre de la base es el DB_NAME de
+-- C:\ProgramData\FEMAG\webapp.env.
 
 CREATE TABLE IF NOT EXISTS `syncconflict` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -21,8 +21,6 @@ CREATE TABLE IF NOT EXISTS `syncconflict` (
   `resolved_at` DATETIME,
   `resolved_by` VARCHAR(255)
 );
-CREATE UNIQUE INDEX `syncconflict_event_id` ON `syncconflict` (`event_id`);
-CREATE INDEX `syncconflict_status_created_at` ON `syncconflict` (`status`, `created_at`);
 
 CREATE TABLE IF NOT EXISTS `synccursor` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -33,7 +31,6 @@ CREATE TABLE IF NOT EXISTS `synccursor` (
   `last_synced_at` DATETIME,
   `last_error` TEXT
 );
-CREATE UNIQUE INDEX `synccursor_stream` ON `synccursor` (`stream`);
 
 CREATE TABLE IF NOT EXISTS `syncentitymap` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -45,8 +42,6 @@ CREATE TABLE IF NOT EXISTS `syncentitymap` (
   `local_version` INTEGER NOT NULL,
   `last_published_version` INTEGER
 );
-CREATE UNIQUE INDEX `syncentitymap_global_uid` ON `syncentitymap` (`global_uid`);
-CREATE UNIQUE INDEX `syncentitymap_entity_type_local_id` ON `syncentitymap` (`entity_type`, `local_id`);
 
 CREATE TABLE IF NOT EXISTS `syncinbox` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -67,8 +62,6 @@ CREATE TABLE IF NOT EXISTS `syncinbox` (
   `received_at` DATETIME NOT NULL,
   `applied_at` DATETIME
 );
-CREATE UNIQUE INDEX `syncinbox_event_id` ON `syncinbox` (`event_id`);
-CREATE INDEX `syncinbox_status_cursor_value` ON `syncinbox` (`status`, `cursor_value`);
 
 CREATE TABLE IF NOT EXISTS `syncoutbox` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -88,9 +81,6 @@ CREATE TABLE IF NOT EXISTS `syncoutbox` (
   `last_error` TEXT,
   `sent_at` DATETIME
 );
-CREATE UNIQUE INDEX `syncoutbox_event_id` ON `syncoutbox` (`event_id`);
-CREATE UNIQUE INDEX `syncoutbox_idempotency_key` ON `syncoutbox` (`idempotency_key`);
-CREATE INDEX `syncoutbox_status_next_attempt_at` ON `syncoutbox` (`status`, `next_attempt_at`);
 
 CREATE TABLE IF NOT EXISTS `syncprojection` (
   `id` INTEGER AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -107,5 +97,42 @@ CREATE TABLE IF NOT EXISTS `syncprojection` (
   `published_at` DATETIME NOT NULL,
   `cancelled_at` DATETIME
 );
-CREATE UNIQUE INDEX `syncprojection_qr_token` ON `syncprojection` (`qr_token`);
-CREATE UNIQUE INDEX `syncprojection_resource_type_resource_uid` ON `syncprojection` (`resource_type`, `resource_uid`);
+
+DROP PROCEDURE IF EXISTS `femag_sync_add_index`;
+
+DELIMITER //
+CREATE PROCEDURE `femag_sync_add_index`(
+  IN p_table VARCHAR(64),
+  IN p_index VARCHAR(64),
+  IN p_ddl TEXT
+)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = p_table
+      AND index_name = p_index
+  ) THEN
+    SET @femag_sql = p_ddl;
+    PREPARE femag_stmt FROM @femag_sql;
+    EXECUTE femag_stmt;
+    DEALLOCATE PREPARE femag_stmt;
+  END IF;
+END//
+DELIMITER ;
+
+CALL `femag_sync_add_index`('syncconflict', 'syncconflict_event_id', 'CREATE UNIQUE INDEX `syncconflict_event_id` ON `syncconflict` (`event_id`)');
+CALL `femag_sync_add_index`('syncconflict', 'syncconflict_status_created_at', 'CREATE INDEX `syncconflict_status_created_at` ON `syncconflict` (`status`, `created_at`)');
+CALL `femag_sync_add_index`('synccursor', 'synccursor_stream', 'CREATE UNIQUE INDEX `synccursor_stream` ON `synccursor` (`stream`)');
+CALL `femag_sync_add_index`('syncentitymap', 'syncentitymap_global_uid', 'CREATE UNIQUE INDEX `syncentitymap_global_uid` ON `syncentitymap` (`global_uid`)');
+CALL `femag_sync_add_index`('syncentitymap', 'syncentitymap_entity_type_local_id', 'CREATE UNIQUE INDEX `syncentitymap_entity_type_local_id` ON `syncentitymap` (`entity_type`, `local_id`)');
+CALL `femag_sync_add_index`('syncinbox', 'syncinbox_event_id', 'CREATE UNIQUE INDEX `syncinbox_event_id` ON `syncinbox` (`event_id`)');
+CALL `femag_sync_add_index`('syncinbox', 'syncinbox_status_cursor_value', 'CREATE INDEX `syncinbox_status_cursor_value` ON `syncinbox` (`status`, `cursor_value`)');
+CALL `femag_sync_add_index`('syncoutbox', 'syncoutbox_event_id', 'CREATE UNIQUE INDEX `syncoutbox_event_id` ON `syncoutbox` (`event_id`)');
+CALL `femag_sync_add_index`('syncoutbox', 'syncoutbox_idempotency_key', 'CREATE UNIQUE INDEX `syncoutbox_idempotency_key` ON `syncoutbox` (`idempotency_key`)');
+CALL `femag_sync_add_index`('syncoutbox', 'syncoutbox_status_next_attempt_at', 'CREATE INDEX `syncoutbox_status_next_attempt_at` ON `syncoutbox` (`status`, `next_attempt_at`)');
+CALL `femag_sync_add_index`('syncprojection', 'syncprojection_qr_token', 'CREATE UNIQUE INDEX `syncprojection_qr_token` ON `syncprojection` (`qr_token`)');
+CALL `femag_sync_add_index`('syncprojection', 'syncprojection_resource_type_resource_uid', 'CREATE UNIQUE INDEX `syncprojection_resource_type_resource_uid` ON `syncprojection` (`resource_type`, `resource_uid`)');
+
+DROP PROCEDURE `femag_sync_add_index`;
