@@ -27,8 +27,10 @@ docs/prints/
 # Env files: the ".env" rule above only matches that exact filename, so named
 # env files such as managerial_summary.env stayed exposed. No .env is tracked.
 *.env
-# Database dumps. No .sql file is tracked in this repo.
+# Database dumps. No .sql dump is tracked in this repo.
 *.sql
+# Esquema de sync (DDL, no es un dump de datos).
+!installer/sync_schema.sql
 # Client documents: real personal and financial data, never versioned.
 # No tracked file matches these prefixes (see output/pdf/ and docs/prints/).
 extracto_*.pdf

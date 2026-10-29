@@ -41,6 +41,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 [Files]
 Source: "..\dist\FEMAG Sync Agent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\scripts\instalar_sync_agent.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "sync_schema.sql"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Desinstalar FEMAG Sync Agent"; Filename: "{uninstallexe}"
