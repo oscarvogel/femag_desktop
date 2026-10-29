@@ -21,6 +21,7 @@ from pathlib import Path
 
 from app.config.database import initialize_runtime_database
 from app.config.schema import ensure_sync_schema, validate_sync_schema
+from app.services.sync_event_consumer import SyncEventConsumer
 from app.services.sync_http_client import SyncHttpClient
 from app.services.sync_order_publisher import SyncOrderPublisher
 from app.services.sync_service import SyncService
@@ -99,6 +100,28 @@ def run_snapshot(limit: int | None = None) -> int:
             database.close()
 
 
+def run_sync(limit: int | None = None) -> int:
+    database = initialize_runtime_database()
+    database.connect(reuse_if_open=True)
+    try:
+        validate_sync_schema(database)
+        client = _client_from_env()
+        inbound = SyncEventConsumer(client).pull_and_apply()
+        publisher = SyncOrderPublisher(limit=limit)
+        snapshot = publisher.publish_snapshot(client)
+        print(
+            json.dumps(
+                {"inbound": inbound, "snapshot": snapshot},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if not snapshot["skipped"] else 1
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
 def run_status() -> int:
     database = initialize_runtime_database()
     database.connect(reuse_if_open=True)
@@ -116,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging()
     logger = logging.getLogger("femag.sync_agent")
     parser = argparse.ArgumentParser(description="Agente de sincronizacion FEMAG.")
+    parser.add_argument("--sync", action="store_true", help="Aplicar eventos y publicar snapshot")
     parser.add_argument("--snapshot", action="store_true", help="Publicar snapshot completo")
     parser.add_argument("--status", action="store_true", help="Mostrar estado local de sync")
     parser.add_argument(
@@ -131,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_init_schema()
         if args.status:
             return run_status()
+        if args.sync:
+            return run_sync(limit=args.limit)
         return run_snapshot(limit=args.limit)
     except SystemExit as exc:
         logger.error("%s", exc)

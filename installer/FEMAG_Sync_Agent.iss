@@ -48,7 +48,7 @@ Source: "sync_schema.sql"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\Desinstalar FEMAG Sync Agent"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\instalar_sync_agent.ps1"" -InstallRoot ""{app}"" -ConfigPath ""{commonappdata}\FEMAG\sync.env"" -WebappEnvPath ""{commonappdata}\FEMAG\webapp.env"" -ParamsFile ""{tmp}\femag-sync-params.txt"" -RunSnapshot"; StatusMsg: "Instalando, creando tablas y sincronizando..."; Flags: waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\instalar_sync_agent.ps1"" -InstallRoot ""{app}"" -ConfigPath ""{commonappdata}\FEMAG\sync.env"" -WebappEnvPath ""{commonappdata}\FEMAG\webapp.env"" -ParamsFile ""{tmp}\femag-sync-params.txt"" -RunSync"; StatusMsg: "Instalando, creando tablas y sincronizando..."; Flags: waituntilterminated
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Unregister-ScheduledTask -TaskName 'FEMAG Sync Agent' -Confirm:`$false -ErrorAction SilentlyContinue"""; Flags: runhidden waituntilterminated; RunOnceId: "FEMAGSyncAgentCleanup"

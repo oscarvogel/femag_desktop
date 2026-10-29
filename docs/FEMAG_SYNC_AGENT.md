@@ -1,8 +1,8 @@
 # FEMAG Sync — agente de fábrica (#804)
 
-Primera rebanada del agente: publica un **snapshot completo** de órdenes desde
-la MySQL de fábrica hacia FEMAG Web. Todavía no aplica eventos de lote/fecha ni
-procesa incrementales.
+El agente publica un **snapshot completo** de órdenes desde la MySQL de fábrica
+hacia FEMAG Web y aplica los eventos de lote/fecha que la nube deja pendientes.
+Los incrementales por orden quedan para una etapa posterior.
 
 ## Requisitos
 
@@ -27,20 +27,23 @@ listado de procesos). Se lee del entorno.
 ## Ejecución
 
 ```bash
+python -m app.jobs.sync_agent --sync
 python -m app.jobs.sync_agent --snapshot
 python -m app.jobs.sync_agent --status
 python -m app.jobs.sync_agent --init-schema
 ```
 
-`--snapshot`:
+`--sync` (lo que ejecuta la tarea programada):
 
-1. Selecciona órdenes en estado `Pendiente`, `Emitida` o `Anulada`.
-2. Asigna UUID estables a orden, renglón, cliente, destino y pallet.
-3. Arma el snapshot según `docs/contracts/femag_web_sync_v1/`.
-4. Lo envía a `POST /api/sync/v1/snapshots/orders`.
-5. Guarda el cursor local `factory_snapshot` y muestra un resumen JSON.
+1. Trae los eventos pendientes de la nube.
+2. Aplica solo `lote` y `fecha_elaboracion`, validando orden, renglón, estado y
+   versión.
+3. Deja rastro en `SyncInbox` y auditoría.
+4. Confirma el ACK a la nube.
+5. Publica el snapshot actualizado de fábrica.
 
-`--status` muestra el estado local de outbox, inbox, cursores y conflictos.
+`--snapshot` publica solo el snapshot. `--status` muestra outbox, inbox,
+cursores y conflictos. `--init-schema` crea las tablas de sync.
 
 ## Instalación en fábrica (EXE + tarea programada)
 
@@ -82,12 +85,14 @@ indicar otro archivo con `FEMAG_SYNC_ENV_FILE`.
 - Solo conexiones HTTPS salientes; no se abren puertos en fábrica.
 - El token viaja en `Authorization: Bearer` y no se registra en logs.
 - El snapshot no incluye precios, costos, saldos, stock, remitos ni contabilidad.
-- No se modifican órdenes ni movimientos: el publicador solo lee.
+- El consumidor solo puede escribir `lote` y `fecha_elaboracion`; no toca
+  cantidades, stock, remitos ni contabilidad.
+- Si la orden está anulada o la versión no coincide, el evento va a conflicto
+  y no se aplica.
 
 ## Pendiente
 
 - Eventos incrementales por orden creada/modificada/anulada.
-- Consumo de eventos cloud → fábrica para lote/fecha.
 - Outbox en el envío del snapshot (hoy es un POST directo).
-- Empaquetado, servicio, bloqueo de instancia única y métricas.
-- Lectura de la proyección desde la pantalla cloud (#805).
+- Bloqueo de instancia única, métricas y resolución de conflictos desde UI.
+- Actualización masiva de versiones de orden para conflictos más finos.

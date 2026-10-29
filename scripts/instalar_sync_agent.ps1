@@ -16,7 +16,7 @@ param(
     [string]$TaskName = "FEMAG Sync Agent",
     [int]$IntervalMinutes = 5,
     [switch]$SkipTask,
-    [switch]$RunSnapshot,
+    [switch]$RunSync,
     [switch]$RunNow
 )
 
@@ -177,19 +177,19 @@ try {
     }
 }
 
-if ($RunSnapshot) {
+if ($RunSync) {
     Write-Host "Ejecutando primera sincronizacion..." -ForegroundColor Cyan
-    $snapshotOutput = & $exe --snapshot 2>&1
+    $syncOutput = & $exe --sync 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "La primera sincronizacion fallo. Revise $($values['FEMAG_SYNC_LOG_FILE']). Detalle: $snapshotOutput"
+        throw "La primera sincronizacion fallo. Revise $($values['FEMAG_SYNC_LOG_FILE']). Detalle: $syncOutput"
     }
-    Write-Host $snapshotOutput
+    Write-Host $syncOutput
 }
 
 if (-not $SkipTask) {
     $action = New-ScheduledTaskAction `
         -Execute $exe `
-        -Argument "--snapshot" `
+        -Argument "--sync" `
         -WorkingDirectory $InstallRoot
     $trigger = New-ScheduledTaskTrigger `
         -Once `
