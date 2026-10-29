@@ -111,6 +111,7 @@ def test_publish_snapshot_sends_orders_and_updates_local_cursor(db):
         SyncCursor.stream == SyncCursor.STREAM_FACTORY_SNAPSHOT
     )
     assert cursor.cursor_value == client.snapshots[0]["cursor"]
+    assert 0 < client.snapshots[0]["cursor"] <= 2_147_483_647
 
 
 def test_publisher_skips_order_without_client_and_destination(db):

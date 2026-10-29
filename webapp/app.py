@@ -48,6 +48,11 @@ from webapp.order_service import (
     order_lines,
     update_order_line,
 )
+from webapp.projected_order_service import (
+    get_projected_order_by_token,
+    projected_line_context,
+    projected_order_lines,
+)
 from webapp.qr_sheet import build_turno_sheet
 from webapp.sync_api import sync_api
 
@@ -124,6 +129,15 @@ def create_app(*, secret_key: str | None = None) -> Flask:
             "is_administrator": is_administrator,
             "csrf_token": csrf_token,
         }
+
+    def _load_order(token: str):
+        try:
+            return get_order_by_token(token), False
+        except OrderNotFoundError:
+            projected = get_projected_order_by_token(token)
+            if projected is None:
+                raise
+            return projected, True
 
     @app.get("/manifest.webmanifest")
     def manifest():
@@ -254,7 +268,7 @@ self.addEventListener("fetch", event => {
                 return redirect(production_target)
             try:
                 token = normalize_qr_token(raw)
-                get_order_by_token(token)
+                _load_order(token)
                 return redirect(url_for("order_detail", token=token))
             except (InvalidQrPayloadError, OrderNotFoundError, OrderUnavailableError) as exc:
                 flash(str(exc), "error")
@@ -263,11 +277,30 @@ self.addEventListener("fetch", event => {
     @app.route("/orden/<token>", methods=["GET", "POST"])
     def order_detail(token: str):
         try:
-            order = get_order_by_token(token)
+            order, is_projected = _load_order(token)
         except OrderUnavailableError as exc:
             return render_template("error.html", message=str(exc)), 409
         except (InvalidQrPayloadError, OrderNotFoundError) as exc:
             return render_template("error.html", message=str(exc)), 404
+
+        if is_projected:
+            if request.method == "POST":
+                flash(
+                    "La edición de lote y fecha desde la nube estará disponible "
+                    "en la próxima etapa.",
+                    "error",
+                )
+                return redirect(
+                    url_for("order_detail", token=order.ensure_qr_token())
+                )
+            lines = projected_order_lines(order)
+            return render_template(
+                "order.html",
+                order=order,
+                lines=lines,
+                line_context=projected_line_context(order, lines),
+                is_projected=True,
+            )
 
         lines = order_lines(order)
         if request.method == "POST":
@@ -346,6 +379,7 @@ self.addEventListener("fetch", event => {
             order=order,
             lines=lines,
             line_context=order_line_context(order, lines),
+            is_projected=False,
         )
 
     @app.get("/orden/<token>/guardado")

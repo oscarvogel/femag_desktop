@@ -10,9 +10,14 @@
     <div><span>Camión</span>{{ order.truck.domain if order.truck else '-' }}</div>
   </div>
 </div>
+{% if is_projected %}
+<div class="card">
+  <p class="muted">Orden sincronizada desde la fábrica. La edición de lote y fecha desde la nube estará disponible en la próxima etapa.</p>
+</div>
+{% endif %}
 <form method="post" id="lot-save-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  {% if not current_username() %}
+  {% if not current_username() and not is_projected %}
   <div class="card">
     <p class="muted">Para guardar lote y fecha tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
   </div>
@@ -38,6 +43,10 @@
             {% endif %}
           </strong></div>
         </div>
+        {% if is_projected %}
+        <p class="muted">Lote: {{ line.lote or 'Sin lote' }}</p>
+        <p class="muted">Fecha de elaboración: {{ line.fecha_elaboracion.strftime('%d/%m/%Y') if line.fecha_elaboracion else 'Sin fecha' }}</p>
+        {% else %}
         <label for="lote_{{ line.id }}">Lote</label>
         <div class="lot-row">
           <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar lote">
@@ -45,13 +54,14 @@
         </div>
         <label for="fecha_{{ line.id }}">Fecha de elaboración</label>
         <input id="fecha_{{ line.id }}" name="fecha_{{ line.id }}" type="date" value="{{ line.fecha_elaboracion.isoformat() if line.fecha_elaboracion else '' }}">
+        {% endif %}
       </div>
       {% endfor %}
     {% else %}
       <p>La orden no tiene productos cargados.</p>
     {% endif %}
   </div>
-  {% if lines %}<button type="submit">Guardar lote y fecha</button>{% endif %}
+  {% if lines and not is_projected %}<button type="submit">Guardar lote y fecha</button>{% endif %}
 </form>
 <div style="height:12px"></div>
 <a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>

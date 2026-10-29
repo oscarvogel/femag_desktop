@@ -175,7 +175,8 @@ class SyncOrderPublisher:
             "schema_version": "1.0",
             "snapshot_id": str(uuid4()),
             "generated_at": _iso_now(),
-            "cursor": int(time() * 1000),
+            # Segundos: el cursor se guarda en una columna INT de MySQL.
+            "cursor": int(time()),
             "orders": payloads,
         }
         return snapshot, skipped
