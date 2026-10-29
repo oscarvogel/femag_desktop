@@ -41,11 +41,33 @@ python -m app.jobs.sync_agent --status
 
 `--status` muestra el estado local de outbox, inbox, cursores y conflictos.
 
-## Programación
+## Instalación en fábrica (EXE + tarea programada)
 
-Queda para la etapa de operación empaquetar el agente como EXE/servicio y
-registrar una tarea programada. Mientras tanto se puede ejecutar con el
-Programador de tareas de Windows usando el Python del proyecto.
+El servidor de fábrica **no necesita Python**.
+
+1. Generar/copiar `FEMAG_Sync_Agent_Setup.exe` y el archivo `femag_sync.env`
+   (URL + token) a la máquina.
+2. Copiar `femag_sync.env` a `C:\ProgramData\FEMAG\sync.env` o ejecutar el
+   instalador con `/SYNCENV=C:\ruta\femag_sync.env`.
+3. Ejecutar `FEMAG_Sync_Agent_Setup.exe` como administrador.
+4. El instalador:
+   - copia el EXE a `C:\FEMAG\sync`;
+   - lee `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD` desde
+     `C:\ProgramData\FEMAG\webapp.env`;
+   - escribe y protege `C:\ProgramData\FEMAG\sync.env`;
+   - registra la tarea **FEMAG Sync Agent** cada 5 minutos como SYSTEM.
+5. Revisar `C:\ProgramData\FEMAG\logs\sync_agent.log`.
+
+Para regenerar el instalador:
+
+```powershell
+.\scripts\build_sync_agent_installer.ps1
+```
+
+Salida: `installer\output\FEMAG_Sync_Agent_Setup.exe`.
+
+El agente busca `C:\ProgramData\FEMAG\sync.env` por defecto; también se puede
+indicar otro archivo con `FEMAG_SYNC_ENV_FILE`.
 
 ## Seguridad
 
