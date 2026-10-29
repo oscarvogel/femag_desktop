@@ -130,6 +130,12 @@ guardar lote y fecha de elaboración:
 La consulta de la orden por token sigue siendo pública y muestra solo los datos
 operativos necesarios para cargar el lote.
 
+Después de guardar, la webapp muestra una **pantalla de confirmación** con la
+orden, los lotes y las fechas registradas, y los botones para volver a la orden
+o buscar otra. Así el operario sabe que el guardado terminó y no repite el
+envío. El botón se deshabilita mientras se envía el formulario y un guardado
+sin cambios no genera otra fila de auditoría.
+
 ## Registro de producción desde el celular
 
 En la planta embolsan varias personas y el dueño pidió que quedara registrado
