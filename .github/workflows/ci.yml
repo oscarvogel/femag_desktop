@@ -255,6 +255,51 @@ jobs:
           if (-not (Test-Path $setup)) { throw "No se genero el instalador del servidor webapp" }
           Write-Host "Webapp server installer OK: $setup"
 
+      - name: Build sync agent executable
+        shell: powershell
+        run: python -m PyInstaller --noconfirm --clean installer\FEMAG_Sync_Agent.spec
+
+      - name: Smoke frozen sync agent
+        shell: powershell
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'femag-sync-agent-smoke'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          $config = Join-Path $runtime 'sync.env'
+          $db = Join-Path $runtime 'sync.sqlite3'
+          $lines = @(
+            "FEMAG_DB_ENGINE=sqlite",
+            "FEMAG_SQLITE_PATH=$db",
+            "FEMAG_DEMO=1",
+            "FEMAG_SECURE_CONFIG=0",
+            "FEMAG_SYNC_BASE_URL=https://example.com",
+            "FEMAG_SYNC_API_TOKEN=test",
+            "FEMAG_SYNC_LOG_FILE=$(Join-Path $runtime 'sync.log')"
+          )
+          [System.IO.File]::WriteAllLines($config, $lines, (New-Object System.Text.UTF8Encoding($false)))
+          $env:FEMAG_SYNC_ENV_FILE = $config
+          $env:FEMAG_ENV_FILE = $config
+          $env:FEMAG_DB_ENGINE = 'sqlite'
+          $env:FEMAG_SQLITE_PATH = $db
+          $env:FEMAG_DEMO = '1'
+          $env:FEMAG_SECURE_CONFIG = '0'
+          python scripts/init_db.py
+          $process = Start-Process -FilePath ".\dist\FEMAG Sync Agent\FEMAG Sync Agent.exe" -ArgumentList "--status" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Sync agent smoke failed with exit code $($process.ExitCode)" }
+          $pyqt = Get-ChildItem ".\dist\FEMAG Sync Agent" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '(?i)pyqt' }
+          if ($pyqt) { throw "El agente no debe incluir PyQt: $($pyqt[0].FullName)" }
+          Write-Host "Frozen sync agent smoke OK"
+
+      - name: Build sync agent installer
+        shell: powershell
+        run: |
+          . .\scripts\Resolve-InnoSetup.ps1
+          $iscc = Resolve-InnoSetup -NoAutoInstall
+          & $iscc "/DMyAppVersion=1.0.0" "installer\FEMAG_Sync_Agent.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup fallo al compilar el instalador del agente de sync" }
+          if (-not (Test-Path "installer\output\FEMAG_Sync_Agent_Setup.exe")) { throw "No se genero el instalador del agente de sync" }
+          Write-Host "Sync agent installer OK"
+
       - name: Verify required frozen resources
         shell: powershell
         run: |

@@ -17,12 +17,33 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 from app.config.database import initialize_runtime_database
 from app.config.schema import validate_sync_schema
 from app.services.sync_http_client import SyncHttpClient
 from app.services.sync_order_publisher import SyncOrderPublisher
 from app.services.sync_service import SyncService
+
+DEFAULT_SYNC_ENV = Path(r"C:\ProgramData\FEMAG\sync.env")
+
+
+def _load_config() -> Path | None:
+    """Carga sync.env antes de leer la base y las variables de sync."""
+    configured = os.getenv("FEMAG_SYNC_ENV_FILE", "").strip()
+    path = Path(configured) if configured else DEFAULT_SYNC_ENV
+    if not path.is_file():
+        if configured:
+            raise SystemExit(f"No existe el archivo de configuración {path}.")
+        return None
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(path, override=False)
+    except ImportError:
+        pass
+    os.environ.setdefault("FEMAG_ENV_FILE", str(path))
+    return path
 
 
 def _configure_logging() -> None:
@@ -78,6 +99,7 @@ def run_status() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_config()
     _configure_logging()
     logger = logging.getLogger("femag.sync_agent")
     parser = argparse.ArgumentParser(description="Agente de sincronizacion FEMAG.")
