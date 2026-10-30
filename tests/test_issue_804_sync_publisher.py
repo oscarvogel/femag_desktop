@@ -3,6 +3,8 @@
 import io
 import json
 import urllib.error
+from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -10,7 +12,10 @@ from conftest import _master_data
 
 from app.models.load_orders import (
     LoadOrder,
+    LoadOrderDestination,
+    LoadOrderLooseAllocation,
     LoadOrderPallet,
+    LoadOrderPalletAllocation,
     LoadOrderProduct,
 )
 from app.models.sync import SyncCursor
@@ -187,3 +192,66 @@ def test_http_client_maps_http_errors():
 
     assert exc.value.status == 409
     assert "version_conflict" in exc.value.body
+
+def test_snapshot_includes_pallet_and_loose_contents(db):
+    data = _master_data()
+    order = LoadOrder.create(
+        order_number=94004,
+        client=data["client"],
+        delivery_address=data["address"],
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        status=LoadOrder.STATUS_ISSUED,
+    )
+    destination = LoadOrderDestination.create(
+        order=order,
+        client=data["client"],
+        delivery_address=data["address"],
+        sequence=1,
+    )
+    LoadOrderProduct.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=80,
+        unit="bolsa",
+        lote="LOTE-RENGLON",
+        fecha_elaboracion=date(2026, 10, 20),
+    )
+    pallet = LoadOrderPallet.create(order=order, sequence=1)
+    allocation = LoadOrderPalletAllocation.create(
+        pallet=pallet,
+        destination=destination,
+        product=data["product"],
+        quantity=60,
+        peso_unitario_kg=Decimal("25"),
+        lote="LOTE-PALLET",
+        fecha_elaboracion=date(2026, 10, 21),
+    )
+    loose = LoadOrderLooseAllocation.create(
+        order=order,
+        destination=destination,
+        product=data["product"],
+        quantity=20,
+        peso_unitario_kg=Decimal("25"),
+        lote="LOTE-SUELTO",
+        fecha_elaboracion=date(2026, 10, 22),
+    )
+
+    first = SyncOrderPublisher().build_order(order)
+    second = SyncOrderPublisher().build_order(order)
+
+    content = first["pallets"][0]["contents"][0]
+    loose_content = first["loose_contents"][0]
+    assert content["content_uid"] == second["pallets"][0]["contents"][0]["content_uid"]
+    assert content["content_uid"]
+    assert content["product_name"] == data["product"].name
+    assert content["quantity"] == 60
+    assert content["unit"] == "bolsa"
+    assert content["lote"] == "LOTE-PALLET"
+    assert content["fecha_elaboracion"] == "2026-10-21"
+    assert content["client_name"] == data["client"].name
+    assert loose_content["content_uid"]
+    assert loose_content["lote"] == "LOTE-SUELTO"
+    assert loose_content["fecha_elaboracion"] == "2026-10-22"

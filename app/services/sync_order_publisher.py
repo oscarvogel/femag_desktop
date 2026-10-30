@@ -10,7 +10,13 @@ from datetime import datetime, timezone
 from time import time
 from uuid import uuid4
 
-from app.models.load_orders import LoadOrder, LoadOrderPallet, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 from app.models.sync import SyncCursor, SyncEntityMap
 from app.services.sync_service import SyncService
 
@@ -84,6 +90,47 @@ class SyncOrderPublisher:
             f"La orden #{order.order_number} no tiene domicilio de entrega."
         )
 
+    @staticmethod
+    def _unit_for_allocation(allocation, line_units: dict) -> str:
+        return (
+            line_units.get((allocation.destination_id, allocation.product_id))
+            or line_units.get((None, allocation.product_id))
+            or allocation.product.unit
+            or ""
+        )
+
+    @staticmethod
+    def _content_payload(allocation, *, entity_type: str, line_units: dict) -> dict:
+        destination = allocation.destination
+        client = destination.client if destination is not None else None
+        address = (
+            destination.delivery_address if destination is not None else None
+        )
+        destination_label = " - ".join(
+            part
+            for part in (
+                address.address if address is not None else "",
+                address.city if address is not None else "",
+            )
+            if part
+        )
+        return {
+            "content_uid": SyncService.ensure_entity_uid(
+                entity_type, allocation.id
+            ).global_uid,
+            "product_name": allocation.product.name,
+            "quantity": float(allocation.quantity or 0),
+            "unit": SyncOrderPublisher._unit_for_allocation(allocation, line_units),
+            "lote": allocation.lote,
+            "fecha_elaboracion": (
+                allocation.fecha_elaboracion.isoformat()
+                if allocation.fecha_elaboracion
+                else None
+            ),
+            "client_name": client.name if client is not None else "",
+            "destination": destination_label,
+        }
+
     def build_order(self, order: LoadOrder) -> dict:
         client = self._client_for_order(order)
         destination = self._destination_for_order(order)
@@ -102,11 +149,55 @@ class SyncOrderPublisher:
             .where(LoadOrderProduct.order == order)
             .order_by(LoadOrderProduct.id)
         )
+        line_units = {}
+        for line in lines:
+            line_units[(line.destination_id, line.product_id)] = line.unit
+            line_units.setdefault((None, line.product_id), line.unit)
         pallets = list(
             LoadOrderPallet.select()
             .where(LoadOrderPallet.order == order)
             .order_by(LoadOrderPallet.sequence)
         )
+        pallet_payloads = []
+        for pallet in pallets:
+            allocations = list(
+                LoadOrderPalletAllocation.select()
+                .where(LoadOrderPalletAllocation.pallet == pallet)
+                .order_by(LoadOrderPalletAllocation.id)
+            )
+            pallet_payloads.append(
+                {
+                    "pallet_uid": SyncService.ensure_entity_uid(
+                        SyncEntityMap.ENTITY_PALLET, pallet.id
+                    ).global_uid,
+                    "sequence": int(pallet.sequence),
+                    "type": (
+                        pallet.pallet_type.type if pallet.pallet_type else None
+                    ),
+                    "weight_kg": float(pallet.weight or 0),
+                    "contents": [
+                        self._content_payload(
+                            allocation,
+                            entity_type=SyncEntityMap.ENTITY_PALLET_CONTENT,
+                            line_units=line_units,
+                        )
+                        for allocation in allocations
+                    ],
+                }
+            )
+        loose_allocations = list(
+            LoadOrderLooseAllocation.select()
+            .where(LoadOrderLooseAllocation.order == order)
+            .order_by(LoadOrderLooseAllocation.id)
+        )
+        loose_contents = [
+            self._content_payload(
+                allocation,
+                entity_type=SyncEntityMap.ENTITY_LOOSE_CONTENT,
+                line_units=line_units,
+            )
+            for allocation in loose_allocations
+        ]
 
         return {
             "order_uid": order_entity.global_uid,
@@ -146,19 +237,8 @@ class SyncOrderPublisher:
                 }
                 for line in lines
             ],
-            "pallets": [
-                {
-                    "pallet_uid": SyncService.ensure_entity_uid(
-                        SyncEntityMap.ENTITY_PALLET, pallet.id
-                    ).global_uid,
-                    "sequence": int(pallet.sequence),
-                    "type": (
-                        pallet.pallet_type.type if pallet.pallet_type else None
-                    ),
-                    "weight_kg": float(pallet.weight or 0),
-                }
-                for pallet in pallets
-            ],
+            "pallets": pallet_payloads,
+            "loose_contents": loose_contents,
         }
 
     def build_snapshot(self, orders: list[LoadOrder] | None = None) -> tuple[dict, list[dict]]:

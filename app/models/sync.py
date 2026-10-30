@@ -28,6 +28,8 @@ class SyncEntityMap(BaseModel):
     ENTITY_CLIENT = "client"
     ENTITY_DESTINATION = "destination"
     ENTITY_PALLET = "pallet"
+    ENTITY_PALLET_CONTENT = "pallet_content"
+    ENTITY_LOOSE_CONTENT = "loose_content"
 
     entity_type = CharField()
     local_id = CharField(max_length=64)
