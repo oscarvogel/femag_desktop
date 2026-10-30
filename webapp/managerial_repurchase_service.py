@@ -58,9 +58,14 @@ def _date_label(value) -> str:
     parsed = as_datetime(value)
     if parsed is None:
         return "—"
-    if isinstance(parsed, datetime):
-        return parsed.strftime("%d/%m/%Y")
     return parsed.strftime("%d/%m/%Y")
+
+
+def _iso_date(value) -> str:
+    parsed = as_datetime(value)
+    if parsed is None:
+        return ""
+    return parsed.strftime("%Y-%m-%d")
 
 
 class ManagerialRepurchaseService:
@@ -208,6 +213,16 @@ def _build_view(payload: dict) -> dict:
                 "previous_raw": float(row.get("previous_tonnes") or 0),
                 "current_raw": float(row.get("current_tonnes") or 0),
                 "diff_raw": float(row.get("diff_tonnes") or 0),
+                "variation_raw": (
+                    float(row.get("variation_percent"))
+                    if row.get("variation_percent") is not None
+                    else -1_000_000_000
+                ),
+                "last_raw": _iso_date(
+                    row.get("current_last_date")
+                    or row.get("previous_last_date")
+                ),
+                "total_raw": float(row.get("current_total") or 0),
                 "current_total": _money_full(row.get("current_total")),
                 "status": status,
                 "status_label": STATUS_LABELS.get(status, status),

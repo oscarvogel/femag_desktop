@@ -129,6 +129,7 @@
           <label for="filtro-orden">Orden</label>
           <select id="filtro-orden">
             <option value="default">Sin recompra primero</option>
+            <option value="custom">Orden por columna</option>
             <option value="previous">Mayor TN anterior</option>
             <option value="current">Mayor TN actual</option>
             <option value="diff">Mayor caída</option>
@@ -151,20 +152,20 @@
       <table class="rep-table" id="tabla-recompra">
         <thead>
           <tr>
-            <th>Cliente</th>
-            <th>Vendedor</th>
-            <th>Últ. compra</th>
-            <th class="num">TN ant.</th>
-            <th class="num">TN actual</th>
-            <th class="num">Dif. TN</th>
-            <th class="num">Var. %</th>
-            <th class="num">Val. actual</th>
-            <th>Situación</th>
+            <th aria-sort="none"><button type="button" class="sort-button" data-sort="client">Cliente<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th aria-sort="none"><button type="button" class="sort-button" data-sort="salesperson">Vendedor<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th aria-sort="none"><button type="button" class="sort-button" data-sort="last">Últ. compra<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="prev">TN ant.<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="current">TN actual<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="diff">Dif. TN<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="variation">Var. %<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="total">Val. actual<span class="sort-indicator" aria-hidden="true"></span></button></th>
+            <th aria-sort="none"><button type="button" class="sort-button" data-sort="status">Situación<span class="sort-indicator" aria-hidden="true"></span></button></th>
           </tr>
         </thead>
         <tbody>
           {% for row in dashboard.rows %}
-          <tr class="status-{{ row.status }}" data-status="{{ row.status }}" data-client="{{ row.client|lower }}" data-prev="{{ row.previous_raw }}" data-current="{{ row.current_raw }}" data-diff="{{ row.diff_raw }}" data-variation="{{ row.variation }}">
+          <tr class="status-{{ row.status }}" data-status="{{ row.status }}" data-client="{{ row.client|lower }}" data-salesperson="{{ row.salesperson|lower }}" data-last="{{ row.last_raw }}" data-prev="{{ row.previous_raw }}" data-current="{{ row.current_raw }}" data-diff="{{ row.diff_raw }}" data-variation="{{ row.variation_raw }}" data-total="{{ row.total_raw }}">
             <td class="client">{{ row.client }}</td>
             <td class="muted-cell">{{ row.salesperson }}</td>
             <td>{{ row.last_purchase }}</td>
@@ -207,8 +208,38 @@
         compro_mas: 3,
         nuevo: 4
       };
+      let sortKey = null;
+      let sortDirection = 1;
 
       const normalize = (value) => (value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const numeric = (value) => Number(value || 0);
+      const compareText = (a, b) => normalize(a).localeCompare(normalize(b), "es");
+
+      function compareRows(a, b, key, direction) {
+        let result = 0;
+        if (key === "client") result = compareText(a.dataset.client, b.dataset.client);
+        else if (key === "salesperson") result = compareText(a.dataset.salesperson, b.dataset.salesperson);
+        else if (key === "last") result = String(a.dataset.last || "").localeCompare(String(b.dataset.last || ""));
+        else if (key === "status") result = statusOrder[a.dataset.status] - statusOrder[b.dataset.status];
+        else result = numeric(a.dataset[key]) - numeric(b.dataset[key]);
+        if (result === 0) result = compareText(a.dataset.client, b.dataset.client);
+        return result * direction;
+      }
+
+      function updateIndicators() {
+        document.querySelectorAll(".rep-table th[aria-sort]").forEach((th) => {
+          th.setAttribute("aria-sort", "none");
+          const indicator = th.querySelector(".sort-indicator");
+          if (indicator) indicator.textContent = "";
+        });
+        if (!sortKey) return;
+        const button = document.querySelector(`.sort-button[data-sort="${sortKey}"]`);
+        if (!button) return;
+        const th = button.closest("th");
+        th.setAttribute("aria-sort", sortDirection === 1 ? "ascending" : "descending");
+        const indicator = button.querySelector(".sort-indicator");
+        if (indicator) indicator.textContent = sortDirection === 1 ? "▲" : "▼";
+      }
 
       function apply() {
         const query = normalize(search.value.trim());
@@ -220,25 +251,49 @@
           return true;
         });
         visible.sort((a, b) => {
-          if (selectedOrder === "previous") return Number(b.dataset.prev) - Number(a.dataset.prev);
-          if (selectedOrder === "current") return Number(b.dataset.current) - Number(a.dataset.current);
-          if (selectedOrder === "diff") return Number(a.dataset.diff) - Number(b.dataset.diff);
-          if (selectedOrder === "client") return a.dataset.client.localeCompare(b.dataset.client, "es");
+          if (sortKey) return compareRows(a, b, sortKey, sortDirection);
+          if (selectedOrder === "previous") return numeric(b.dataset.prev) - numeric(a.dataset.prev) || compareText(a.dataset.client, b.dataset.client);
+          if (selectedOrder === "current") return numeric(b.dataset.current) - numeric(a.dataset.current) || compareText(a.dataset.client, b.dataset.client);
+          if (selectedOrder === "diff") return numeric(a.dataset.diff) - numeric(b.dataset.diff) || compareText(a.dataset.client, b.dataset.client);
+          if (selectedOrder === "client") return compareText(a.dataset.client, b.dataset.client);
           return statusOrder[a.dataset.status] - statusOrder[b.dataset.status]
-            || Number(b.dataset.prev) - Number(a.dataset.prev)
-            || a.dataset.client.localeCompare(b.dataset.client, "es");
+            || numeric(b.dataset.prev) - numeric(a.dataset.prev)
+            || compareText(a.dataset.client, b.dataset.client);
         });
         tbody.replaceChildren(...visible);
         count.textContent = String(visible.length);
       }
 
-      [status, order].forEach((element) => element.addEventListener("change", apply));
+      status.addEventListener("change", apply);
+      order.addEventListener("change", () => {
+        sortKey = null;
+        updateIndicators();
+        apply();
+      });
+      document.querySelectorAll(".sort-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.sort;
+          if (sortKey === key) {
+            sortDirection *= -1;
+          } else {
+            sortKey = key;
+            sortDirection = ["prev", "current", "diff", "variation", "total"].includes(key) ? -1 : 1;
+          }
+          order.value = "custom";
+          updateIndicators();
+          apply();
+        });
+      });
       search.addEventListener("input", apply);
       reset.addEventListener("click", () => {
         status.value = "";
         order.value = "default";
         search.value = "";
+        sortKey = null;
+        updateIndicators();
         apply();
+      });
+      apply();
       });
       apply();
     })();
