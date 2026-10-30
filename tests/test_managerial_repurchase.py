@@ -407,3 +407,181 @@ def test_repurchase_tabla_se_ordena_por_clic_en_columnas(db):
         assert names() == sorted(names())
     finally:
         dialog.close()
+
+
+def test_repurchase_mensaje_seguimiento_usa_la_ultima_compra():
+    from app.services.repurchase_followup_service import (
+        build_followup_message_for_row,
+        last_purchase,
+    )
+
+    row = {
+        "current_quantity": 1500,
+        "current_last_date": "2026-10-20",
+        "previous_quantity": 100,
+        "previous_last_date": "2026-09-20",
+    }
+    quantity, purchase_date = last_purchase(row)
+    assert (quantity, purchase_date) == (1500, "2026-10-20")
+    message = build_followup_message_for_row(row, "bolsa")
+    assert "1.500 bolsas" in message
+    assert "20/10/2026" in message
+    assert "reponer su stock" in message
+
+    # Si no compró en el actual, usa la compra del anterior y singular.
+    previous_only = {
+        "previous_quantity": 1,
+        "previous_last_date": "2026-09-20",
+    }
+    assert "1 bolsa" in build_followup_message_for_row(previous_only, "bolsa")
+
+    # Sin compras no inventa una fecha ni una cantidad.
+    assert "Quisiera saber" in build_followup_message_for_row({}, "bolsa")
+    assert "bolsas" not in build_followup_message_for_row({}, "bolsa")
+
+
+def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
+    from types import SimpleNamespace
+
+    from PyQt5.QtWidgets import QApplication, QDialog
+
+    import app.ui.managerial_repurchase_dialog as dialog_module
+    from app.models.masters import Product
+    from app.reports.managerial_dashboard import ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+
+    app = QApplication.instance() or QApplication([])
+    prod = Product.create(name="WaProd", unit="bolsa", peso_unitario_kg=10)
+    cli = _mkclient("Cli WhatsApp", "30700001091")
+    cli.phone = "3743 123456"
+    cli.save()
+    _mkorder(1091, date(2026, 9, 3), cli, prod, 10, 1000)
+    _mkorder(1092, date(2026, 10, 3), cli, prod, 150, 15000)
+    current = ReportPeriod(date(2026, 10, 1), date(2026, 10, 12), "Actual")
+
+    captured: dict = {}
+
+    class FakeDialog:
+        def __init__(self, **kwargs):
+            captured["dialog"] = kwargs
+
+        def exec_(self):
+            return QDialog.Accepted
+
+        def phone(self):
+            return "+5493743123456"
+
+        def message(self):
+            return "Mensaje editado por el operador."
+
+    class FakeService:
+        def create_text_attempt(self, **kwargs):
+            captured["attempt"] = kwargs
+            return SimpleNamespace(id=321)
+
+    class FakeSignal:
+        def connect(self, *_args, **_kwargs):
+            return None
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            captured["worker"] = kwargs
+            self.signals = SimpleNamespace(
+                succeeded=FakeSignal(), failed=FakeSignal(), finished=FakeSignal()
+            )
+
+    class FakePool:
+        def start(self, _worker):
+            captured["started"] = True
+
+    class FakeQThreadPool:
+        @staticmethod
+        def globalInstance():
+            return FakePool()
+
+    monkeypatch.setattr(dialog_module, "WhatsAppTextDialog", FakeDialog)
+    monkeypatch.setattr(dialog_module, "WhatsAppEnvioService", FakeService)
+    monkeypatch.setattr(dialog_module, "WhatsAppTextWorker", FakeWorker)
+    monkeypatch.setattr(dialog_module, "QThreadPool", FakeQThreadPool)
+
+    dialog = ManagerialRepurchaseDialog(
+        current=current, initial_product_id=prod.id
+    )
+    try:
+        assert not dialog.whatsapp_button.isEnabled()
+        dialog.table.selectRow(0)
+        assert dialog.whatsapp_button.isEnabled()
+
+        row = dialog._selected_row()
+        assert row is not None
+        dialog.send_whatsapp()
+
+        assert captured["dialog"]["phone"] == "3743 123456"
+        assert "150 bolsas" in captured["dialog"]["default_message"]
+        assert captured["dialog"]["default_message"].endswith(
+            "Quisiera saber si necesita reponer su stock."
+        )
+        attempt = captured["attempt"]
+        assert attempt["tipo_documento"] == "seguimiento_recompra"
+        assert attempt["destinatario"] == "+5493743123456"
+        assert attempt["message"] == "Mensaje editado por el operador."
+        assert attempt["documento_id"].startswith(f"recompra:{cli.id}:{prod.id}:")
+        assert captured["started"] is True
+        assert "enviando" in dialog.whatsapp_status_label.text().lower()
+    finally:
+        dialog.close()
+
+
+def test_repurchase_whatsapp_text_dialog_propone_numero_local():
+    from PyQt5.QtWidgets import QApplication
+
+    from app.ui.whatsapp_send import WhatsAppTextDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = WhatsAppTextDialog(
+        recipient_name="Cliente Local", phone="3743 123456"
+    )
+    try:
+        assert dialog.proposal_button.isVisibleTo(dialog)
+        assert "revisar" in dialog.normalized_label.text().lower()
+        assert "+5493743123456" in dialog.normalized_label.text()
+
+        dialog.proposal_button.click()
+
+        assert dialog.phone() == "+5493743123456"
+        assert "Número final: +5493743123456" in dialog.normalized_label.text()
+        assert not dialog.proposal_button.isVisibleTo(dialog)
+    finally:
+        dialog.close()
+
+
+def test_repurchase_imprimir_genera_pdf_con_reporte_visible(db, tmp_path):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Product
+    from app.reports.managerial_dashboard import ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+
+    app = QApplication.instance() or QApplication([])
+    prod = Product.create(name="PdfProd", unit="bolsa", peso_unitario_kg=10)
+    cli = _mkclient("Cli Impresion", "30700001101")
+    _mkorder(1101, date(2026, 9, 3), cli, prod, 100, 10000)
+    _mkorder(1102, date(2026, 10, 3), cli, prod, 40, 4000)
+    current = ReportPeriod(date(2026, 10, 1), date(2026, 10, 12), "Actual")
+
+    dialog = ManagerialRepurchaseDialog(
+        current=current, initial_product_id=prod.id
+    )
+    try:
+        out = dialog.export_report_pdf(tmp_path / "recompra.pdf")
+        assert out.exists() and out.stat().st_size > 1000
+
+        from pypdf import PdfReader
+
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(str(out)).pages)
+        assert "Cli Impresion" in text
+        assert "Dif. TN" in text
+        assert "Sin recompra" in text or "Compr" in text
+        assert "PdfProd" in text
+    finally:
+        dialog.close()
