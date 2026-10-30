@@ -20,7 +20,11 @@ import sys
 from pathlib import Path
 
 from app.config.database import initialize_runtime_database
-from app.config.schema import ensure_sync_schema, validate_sync_schema
+from app.config.schema import (
+    ensure_runtime_schema,
+    ensure_sync_schema,
+    validate_sync_schema,
+)
 from app.services.sync_event_consumer import SyncEventConsumer
 from app.services.sync_http_client import SyncHttpClient
 from app.services.sync_order_publisher import SyncOrderPublisher
@@ -76,6 +80,9 @@ def run_init_schema() -> int:
     database = initialize_runtime_database()
     database.connect(reuse_if_open=True)
     try:
+        # El agente tambien migra las columnas de lote/fecha por contenido:
+        # la fabrica puede tener instalada una version anterior del escritorio.
+        ensure_runtime_schema(database)
         ensure_sync_schema(database)
         validate_sync_schema(database)
         print("Esquema de sincronizacion listo.")
