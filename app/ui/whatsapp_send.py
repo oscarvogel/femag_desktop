@@ -138,6 +138,10 @@ class WhatsAppTextDialog(QDialog):
         self.normalized_label = QLabel("")
         self.normalized_label.setObjectName("whatsappTextNormalizedPhone")
         root.addWidget(self.normalized_label)
+        self.proposal_button = QPushButton("Usar el número propuesto")
+        self.proposal_button.setObjectName("whatsappTextUseProposalButton")
+        self.proposal_button.setVisible(False)
+        root.addWidget(self.proposal_button)
         self.feedback = FormFeedback("whatsappTextFeedback")
         root.addWidget(self.feedback)
 
@@ -153,10 +157,25 @@ class WhatsAppTextDialog(QDialog):
         root.addLayout(actions)
 
         self.phone_input.textChanged.connect(self._preview_phone)
+        self.proposal_button.clicked.connect(self._use_proposed_phone)
         self._preview_phone()
+
+    def _proposed_phone(self, classification) -> str:
+        if classification.propuesta:
+            return classification.propuesta
+        if classification.es_posible and classification.normalizado:
+            return classification.normalizado
+        return ""
+
+    def _use_proposed_phone(self) -> None:
+        proposal = self._proposed_phone(clasificar_telefono(self.phone_input.text()))
+        if proposal:
+            self.phone_input.setText(f"+{proposal}")
 
     def _preview_phone(self) -> None:
         classification = clasificar_telefono(self.phone_input.text())
+        proposal = self._proposed_phone(classification)
+        self.proposal_button.setVisible(bool(proposal))
         if classification.es_enviable:
             self.normalized_label.setText(
                 f"Número final: +{classification.normalizado}"
@@ -166,9 +185,11 @@ class WhatsAppTextDialog(QDialog):
                 f"Teléfono {classification.etiqueta.lower()}: {classification.motivo}."
             )
         else:
+            detail = f"revisar antes de enviar ({classification.motivo})"
+            if proposal:
+                detail = f"se enviaría a +{proposal}; {detail}"
             self.normalized_label.setText(
-                f"Teléfono {classification.etiqueta.lower()}: "
-                f"revisar antes de enviar ({classification.motivo})."
+                f"Teléfono {classification.etiqueta.lower()}: {detail}."
             )
 
     def _confirm(self) -> None:

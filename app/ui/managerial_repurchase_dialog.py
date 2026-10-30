@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from datetime import date
+import os
+import tempfile
+from datetime import date, datetime
+from pathlib import Path
 
-from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QColor, QPainter, QPainterPath
+from PyQt5.QtCore import QDate, QThreadPool, QUrl, Qt
+from PyQt5.QtGui import QColor, QDesktopServices, QPainter, QPainterPath
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -23,9 +26,13 @@ from PyQt5.QtWidgets import (
 )
 
 from app.config.database import database_proxy
-from app.models.masters import Product
+from app.models.masters import Client, Product
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
+from app.reports.managerial_repurchase_pdf import export_repurchase_pdf
 from app.services.permission_service import PermissionService
+from app.services.repurchase_followup_service import build_followup_message_for_row
+from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.ui.whatsapp_send import WhatsAppTextDialog, WhatsAppTextWorker
 
 
 def _fmt_tn(value: float) -> str:
@@ -69,6 +76,15 @@ STATUS_RANK = {
     "igual": 2,
     "compro_mas": 3,
     "nuevo": 4,
+}
+
+WHATSAPP_STATUS_LABELS = {
+    "queued": "encolado",
+    "processing": "procesando",
+    "accepted": "aceptado por WhatsApp",
+    "delivered": "entregado",
+    "read": "leído",
+    "failed": "fallido",
 }
 
 # Columnas que se abren ordenadas de mayor a menor al hacer clic: fechas y
@@ -246,6 +262,7 @@ class ManagerialRepurchaseDialog(QDialog):
         self.resize(1240, 820)
         self.setMinimumSize(900, 600)
         self.service = service or ManagerialDashboardService()
+        self._whatsapp_workers: set[WhatsAppTextWorker] = set()
         current = current or ReportPeriod.preset("este mes")
         previous = current.previous_equivalent()
 
@@ -376,12 +393,29 @@ class ManagerialRepurchaseDialog(QDialog):
         self._sort_order = Qt.DescendingOrder
         self.table.verticalHeader().setVisible(False)
         self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        self.table.itemSelectionChanged.connect(self._update_whatsapp_button)
         root.addWidget(self.table, 1)
 
         close = QPushButton("Cerrar")
         close.clicked.connect(self.accept)
         footer = QHBoxLayout()
-        footer.addStretch(1)
+        self.whatsapp_button = QPushButton("WhatsApp")
+        self.whatsapp_button.setObjectName("repurchaseWhatsappButton")
+        self.whatsapp_button.setEnabled(False)
+        self.whatsapp_button.setToolTip(
+            "Seleccioná un cliente en la tabla para enviarle un WhatsApp de seguimiento."
+        )
+        self.whatsapp_button.clicked.connect(self.send_whatsapp)
+        self.print_button = QPushButton("Imprimir (PDF)")
+        self.print_button.setObjectName("repurchasePrintButton")
+        self.print_button.setToolTip("Genera el PDF del informe y lo abre para imprimir o guardar.")
+        self.print_button.clicked.connect(self.print_report)
+        self.whatsapp_status_label = QLabel("")
+        self.whatsapp_status_label.setObjectName("repurchaseWhatsappStatusLabel")
+        self.whatsapp_status_label.setWordWrap(True)
+        footer.addWidget(self.whatsapp_button)
+        footer.addWidget(self.print_button)
+        footer.addWidget(self.whatsapp_status_label, 1)
         footer.addWidget(close)
         root.addLayout(footer)
         self._apply_initial_filters(
@@ -517,6 +551,8 @@ class ManagerialRepurchaseDialog(QDialog):
             )
             for j, (value, sort_key) in enumerate(zip(values, sort_keys)):
                 item = _SortableItem(str(value), sort_key, row["client_name"] or "")
+                if j == 0:
+                    item.setData(Qt.UserRole, row)
                 if j in (3, 4, 5, 6, 7):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if row["status"] == "sin_recompra":
@@ -526,6 +562,7 @@ class ManagerialRepurchaseDialog(QDialog):
                     item.setBackground(alert_bg)
                     item.setForeground(alert_fg)
                 self.table.setItem(i, j, item)
+        self._update_whatsapp_button()
         self._apply_sort()
 
     def _on_header_clicked(self, column: int) -> None:
@@ -556,6 +593,194 @@ class ManagerialRepurchaseDialog(QDialog):
         self._sort_column = None
         self.table.horizontalHeader().setSortIndicatorShown(False)
         self.refresh()
+
+    # --------------------------------------------------------------- WhatsApp
+
+    def _selected_row(self) -> dict | None:
+        row_index = self.table.currentRow()
+        if row_index < 0:
+            return None
+        item = self.table.item(row_index, 0)
+        data = item.data(Qt.UserRole) if item is not None else None
+        return data if isinstance(data, dict) else None
+
+    def _update_whatsapp_button(self) -> None:
+        has_selection = self._selected_row() is not None
+        self.whatsapp_button.setEnabled(has_selection)
+        if has_selection:
+            self.whatsapp_button.setToolTip(
+                "Envía un WhatsApp de seguimiento al cliente seleccionado."
+            )
+        else:
+            self.whatsapp_button.setToolTip(
+                "Seleccioná un cliente en la tabla para enviarle un WhatsApp de seguimiento."
+            )
+
+    def _current_user(self):
+        parent = self.parent()
+        return getattr(parent, "user", None) if parent is not None else None
+
+    @staticmethod
+    def _row_unit(row: dict) -> str:
+        try:
+            return Product.get_by_id(int(row["product_id"])).unit or "unidad"
+        except Exception:
+            return "unidad"
+
+    def _followup_message_for_row(self, row: dict) -> str:
+        return build_followup_message_for_row(row, self._row_unit(row))
+
+    @staticmethod
+    def _whatsapp_document_id(client_id: int, row: dict, period: ReportPeriod) -> str:
+        product = row.get("product_id") or "todos"
+        return (
+            f"recompra:{client_id}:{product}:"
+            f"{period.start:%Y%m%d}:{period.end:%Y%m%d}"
+        )
+
+    def send_whatsapp(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            QMessageBox.information(
+                self, "WhatsApp", "Seleccioná un cliente en la tabla."
+            )
+            return
+        try:
+            client = Client.get_by_id(int(row["client_id"]))
+        except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
+            QMessageBox.warning(
+                self, "WhatsApp", f"No se pudo leer el cliente:\n{exc}"
+            )
+            return
+
+        dialog = WhatsAppTextDialog(
+            recipient_name=client.name,
+            phone=client.phone or "",
+            default_message=self._followup_message_for_row(row),
+            window_title="Enviar WhatsApp de seguimiento",
+            parent=self,
+        )
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        message = dialog.message()
+        try:
+            service = WhatsAppEnvioService()
+            current, _ = self._current_periods()
+            envio = service.create_text_attempt(
+                tipo_documento="seguimiento_recompra",
+                documento_id=self._whatsapp_document_id(client.id, row, current),
+                destinatario=dialog.phone(),
+                message=message,
+                usuario=self._current_user(),
+            )
+        except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
+            QMessageBox.warning(self, "WhatsApp", str(exc))
+            return
+
+        self.whatsapp_status_label.setText("WhatsApp: enviando...")
+        worker = WhatsAppTextWorker(
+            envio_id=envio.id,
+            message=message,
+            service=service,
+        )
+        self._whatsapp_workers.add(worker)
+        worker.signals.succeeded.connect(self._whatsapp_succeeded)
+        worker.signals.failed.connect(self._whatsapp_failed)
+        worker.signals.finished.connect(
+            lambda current_worker=worker: self._whatsapp_workers.discard(current_worker)
+        )
+        QThreadPool.globalInstance().start(worker)
+
+    def _whatsapp_succeeded(self, envio) -> None:
+        status = WHATSAPP_STATUS_LABELS.get(envio.estado, envio.estado)
+        message_id = f" (ID {envio.message_id})" if envio.message_id else ""
+        self.whatsapp_status_label.setText(f"WhatsApp: {status}{message_id}")
+
+    def _whatsapp_failed(self, message: str) -> None:
+        self.whatsapp_status_label.setText(f"WhatsApp: error - {message}")
+        QMessageBox.warning(
+            self, "WhatsApp", f"No se pudo completar el envío:\n{message}"
+        )
+
+    # -------------------------------------------------------------- Impresión
+
+    def _displayed_table_rows(self) -> list[list[str]]:
+        rows: list[list[str]] = []
+        for row_index in range(self.table.rowCount()):
+            values = []
+            for column in range(self.table.columnCount()):
+                item = self.table.item(row_index, column)
+                values.append(item.text() if item is not None else "")
+            rows.append(values)
+        return rows
+
+    def _filters_note(self) -> str:
+        parts: list[str] = []
+        if self.status_combo.currentData():
+            parts.append(f"Situación: {self.status_combo.currentText()}")
+        client_query = self.search_input.text().strip()
+        if client_query:
+            parts.append(f"Cliente: {client_query}")
+        if self._sort_column is not None:
+            header = self.table.horizontalHeaderItem(self._sort_column)
+            order = "descendente" if self._sort_order == Qt.DescendingOrder else "ascendente"
+            parts.append(f"Orden: {header.text() if header else ''} {order}")
+        elif self.order_combo.currentData() not in (None, "default"):
+            parts.append(f"Orden: {self.order_combo.currentText()}")
+        return " · ".join(parts)
+
+    def export_report_pdf(self, path: str | Path) -> Path:
+        """Genera el PDF con lo que muestra la tabla y el resumen en pantalla."""
+        chart_png = self._chart_temp_png()
+        try:
+            return export_repurchase_pdf(
+                path,
+                title=f"A quién se le vendió: {self.product_combo.currentText()}",
+                previous_kpi=self.prev_kpi.text(),
+                current_kpi=self.cur_kpi.text(),
+                variation_text=self.variation_label.text(),
+                summary_text=self.summary_label.text(),
+                chart_caption=self.chart_caption.text(),
+                chart_image=chart_png,
+                headers=[
+                    (self.table.horizontalHeaderItem(column).text()
+                     if self.table.horizontalHeaderItem(column) is not None else "")
+                    for column in range(self.table.columnCount())
+                ],
+                rows=self._displayed_table_rows(),
+                filters_note=self._filters_note(),
+                generated_at=datetime.now(),
+            )
+        finally:
+            if chart_png:
+                try:
+                    os.unlink(chart_png)
+                except OSError:
+                    pass
+
+    def print_report(self) -> None:
+        target_handle, target_name = tempfile.mkstemp(
+            prefix="femag_recompra_", suffix=".pdf"
+        )
+        os.close(target_handle)
+        try:
+            out = self.export_report_pdf(target_name)
+        except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
+            try:
+                os.unlink(target_name)
+            except OSError:
+                pass
+            QMessageBox.warning(
+                self, "Imprimir recompra", f"No se pudo generar el PDF:\n{exc}"
+            )
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(out.resolve()))):
+            QMessageBox.information(
+                self,
+                "Imprimir recompra",
+                f"El PDF se generó correctamente en:\n{out}",
+            )
 
     def _alert_colors(self, *, dark: bool | None = None) -> tuple[QColor, QColor]:
         """Fondo y texto de la fila 'sin recompra' con contraste en ambos temas.
