@@ -202,6 +202,7 @@ def ensure_runtime_schema(database) -> None:
     if hasattr(database, "atomic"):
         _backfill_client_emails(database)
         _backfill_product_classification(database)
+        _backfill_allocation_lote(database)
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
         _repair_payment_movement_amounts(database)
@@ -212,6 +213,98 @@ def ensure_runtime_schema(database) -> None:
         _ensure_budget_timing_index(database)
         _ensure_return_line_timing_index(database)
     _ensure_sqlite_index_integrity(database)
+
+
+def _line_for_content(order_id: int, destination_id: int, product_id: int):
+    from app.models.load_orders import LoadOrderProduct
+
+    line = (
+        LoadOrderProduct.select()
+        .where(
+            (LoadOrderProduct.order == order_id)
+            & (LoadOrderProduct.destination == destination_id)
+            & (LoadOrderProduct.product == product_id)
+        )
+        .order_by(LoadOrderProduct.id)
+        .first()
+    )
+    if line is not None:
+        return line
+    return (
+        LoadOrderProduct.select()
+        .where(
+            (LoadOrderProduct.order == order_id)
+            & (LoadOrderProduct.destination.is_null(True))
+            & (LoadOrderProduct.product == product_id)
+        )
+        .order_by(LoadOrderProduct.id)
+        .first()
+    )
+
+
+def _backfill_allocation_lote(database) -> None:
+    """Copia el lote/fecha del renglon a los contenidos que aun no lo tienen.
+
+    El modelo viejo guardaba un unico lote/fecha en el renglon. Al pasar a
+    contenidos por pallet, se conserva ese dato en cada allocation existente.
+    """
+    from app.models.load_orders import (
+        LoadOrderLooseAllocation,
+        LoadOrderPalletAllocation,
+    )
+
+    null_lote = LoadOrderPalletAllocation.lote.is_null(True)
+    null_date = LoadOrderPalletAllocation.fecha_elaboracion.is_null(True)
+    with database.atomic():
+        for allocation in LoadOrderPalletAllocation.select().where(null_lote | null_date):
+            line = _line_for_content(
+                allocation.pallet.order_id,
+                allocation.destination_id,
+                allocation.product_id,
+            )
+            if line is None:
+                continue
+            changed = False
+            if allocation.lote is None and line.lote:
+                allocation.lote = line.lote
+                changed = True
+            if allocation.fecha_elaboracion is None and line.fecha_elaboracion:
+                allocation.fecha_elaboracion = line.fecha_elaboracion
+                changed = True
+            if changed:
+                allocation.save(
+                    only=[
+                        LoadOrderPalletAllocation.lote,
+                        LoadOrderPalletAllocation.fecha_elaboracion,
+                    ]
+                )
+
+        loose_null_lote = LoadOrderLooseAllocation.lote.is_null(True)
+        loose_null_date = LoadOrderLooseAllocation.fecha_elaboracion.is_null(True)
+        for allocation in LoadOrderLooseAllocation.select().where(
+            loose_null_lote | loose_null_date
+        ):
+            line = _line_for_content(
+                allocation.order_id,
+                allocation.destination_id,
+                allocation.product_id,
+            )
+            if line is None:
+                continue
+            changed = False
+            if allocation.lote is None and line.lote:
+                allocation.lote = line.lote
+                changed = True
+            if allocation.fecha_elaboracion is None and line.fecha_elaboracion:
+                allocation.fecha_elaboracion = line.fecha_elaboracion
+                changed = True
+            if changed:
+                allocation.save(
+                    only=[
+                        LoadOrderLooseAllocation.lote,
+                        LoadOrderLooseAllocation.fecha_elaboracion,
+                    ]
+                )
 
 
 def _backfill_product_classification(database) -> None:
