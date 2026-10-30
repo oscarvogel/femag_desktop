@@ -63,9 +63,41 @@ ORDER_OPTIONS = (
     ("Cliente A–Z", "client"),
 )
 
+STATUS_RANK = {
+    "sin_recompra": 0,
+    "compro_menos": 1,
+    "igual": 2,
+    "compro_mas": 3,
+    "nuevo": 4,
+}
+
+# Columnas que se abren ordenadas de mayor a menor al hacer clic: fechas y
+# números. "Dif. TN" ascendente muestra primero al que más dejó de comprar.
+_DESCENDING_BY_DEFAULT = frozenset({2, 3, 4, 5, 6, 7})
+
 
 def _fmt_money(value: float) -> str:
     return f"$ {value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+class _SortableItem(QTableWidgetItem):
+    """Celda con texto formateado y clave de orden real.
+
+    El texto visible usa separadores de miles y comas decimales, así que
+    ordenar por texto daría un resultado incorrecto (por ejemplo 99.000 antes
+    que 8.500). Cada celda guarda la clave numérica/fecha con la que debe
+    compararse y desempata por cliente para que el orden sea estable.
+    """
+
+    def __init__(self, text: str, sort_key: object, tie_breaker: str = ""):
+        super().__init__(text)
+        self._sort_key = sort_key
+        self._tie_breaker = tie_breaker
+
+    def __lt__(self, other: object) -> bool:  # noqa: D105 - comparación Qt
+        if not isinstance(other, _SortableItem):
+            return super().__lt__(other)
+        return (self._sort_key, self._tie_breaker) < (other._sort_key, other._tie_breaker)
 
 
 class RepurchaseBarChart(QWidget):
@@ -267,7 +299,7 @@ class ManagerialRepurchaseDialog(QDialog):
         self.search_input.setPlaceholderText("Buscar cliente…")
         self.search_input.textChanged.connect(self.refresh)
         self.status_combo.currentIndexChanged.connect(self.refresh)
-        self.order_combo.currentIndexChanged.connect(self.refresh)
+        self.order_combo.currentIndexChanged.connect(self._on_order_changed)
         second.addWidget(QLabel("Situación:"))
         second.addWidget(self.status_combo)
         second.addWidget(QLabel("Orden:"))
@@ -336,6 +368,12 @@ class ManagerialRepurchaseDialog(QDialog):
             header.setSectionResizeMode(column, header.Interactive)
         header.setStretchLastSection(False)
         header.setMinimumSectionSize(80)
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(False)
+        header.setToolTip("Clic en una columna para ordenar; otro clic invierte el sentido.")
+        header.sectionClicked.connect(self._on_header_clicked)
+        self._sort_column: int | None = None
+        self._sort_order = Qt.DescendingOrder
         self.table.verticalHeader().setVisible(False)
         self.table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         root.addWidget(self.table, 1)
@@ -464,8 +502,21 @@ class ManagerialRepurchaseDialog(QDialog):
                 f"$ {row['current_total']:,.2f}",
                 STATUS_LABELS.get(row["status"], row["status"]),
             )
-            for j, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
+            sort_keys = (
+                row["client_name"] or "",
+                row.get("salesperson_name") or "",
+                row.get("previous_last_date") or "",
+                float(row["previous_tonnes"]),
+                float(row["current_tonnes"]),
+                float(row["diff_tonnes"]),
+                float(row["variation_kilos_percent"])
+                if row["variation_kilos_percent"] is not None
+                else 0.0,
+                float(row["current_total"]),
+                STATUS_RANK.get(row["status"], 9),
+            )
+            for j, (value, sort_key) in enumerate(zip(values, sort_keys)):
+                item = _SortableItem(str(value), sort_key, row["client_name"] or "")
                 if j in (3, 4, 5, 6, 7):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if row["status"] == "sin_recompra":
@@ -475,6 +526,36 @@ class ManagerialRepurchaseDialog(QDialog):
                     item.setBackground(alert_bg)
                     item.setForeground(alert_fg)
                 self.table.setItem(i, j, item)
+        self._apply_sort()
+
+    def _on_header_clicked(self, column: int) -> None:
+        """Ordena la tabla por la columna clickeada; segundo clic invierte."""
+        if column == self._sort_column:
+            self._sort_order = (
+                Qt.AscendingOrder
+                if self._sort_order == Qt.DescendingOrder
+                else Qt.DescendingOrder
+            )
+        else:
+            self._sort_column = column
+            self._sort_order = (
+                Qt.DescendingOrder if column in _DESCENDING_BY_DEFAULT else Qt.AscendingOrder
+            )
+        self._apply_sort()
+
+    def _apply_sort(self) -> None:
+        if self._sort_column is None:
+            return
+        header = self.table.horizontalHeader()
+        self.table.sortItems(self._sort_column, self._sort_order)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(self._sort_column, self._sort_order)
+
+    def _on_order_changed(self) -> None:
+        """El combo define un orden nuevo: se descarta el orden manual previo."""
+        self._sort_column = None
+        self.table.horizontalHeader().setSortIndicatorShown(False)
+        self.refresh()
 
     def _alert_colors(self, *, dark: bool | None = None) -> tuple[QColor, QColor]:
         """Fondo y texto de la fila 'sin recompra' con contraste en ambos temas.
