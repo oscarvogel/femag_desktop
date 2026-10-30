@@ -25,6 +25,9 @@ from app.config.schema import (
     ensure_sync_schema,
     validate_sync_schema,
 )
+from app.services.managerial_repurchase_publisher import (
+    ManagerialRepurchasePublisher,
+)
 from app.services.managerial_snapshot_publisher import (
     ManagerialSnapshotPublisher,
 )
@@ -134,12 +137,22 @@ def run_sync(limit: int | None = None) -> int:
                 logger.warning(
                     "No se pudo publicar el snapshot gerencial: %s", exc
                 )
+        repurchase = None
+        repurchase_publisher = ManagerialRepurchasePublisher()
+        if repurchase_publisher.should_publish():
+            try:
+                repurchase = repurchase_publisher.publish(client)
+            except Exception as exc:
+                logger.warning(
+                    "No se pudo publicar el snapshot de recompra: %s", exc
+                )
         print(
             json.dumps(
                 {
                     "inbound": inbound,
                     "snapshot": snapshot,
                     "managerial": managerial,
+                    "repurchase": repurchase,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -157,8 +170,15 @@ def run_managerial() -> int:
     try:
         validate_sync_schema(database)
         client = _client_from_env()
-        result = ManagerialSnapshotPublisher().publish(client)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        managerial = ManagerialSnapshotPublisher().publish(client)
+        repurchase = ManagerialRepurchasePublisher().publish(client)
+        print(
+            json.dumps(
+                {"managerial": managerial, "repurchase": repurchase},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     finally:
         if not database.is_closed():

@@ -170,6 +170,10 @@ def _money_compact(value) -> str:
     return f"$ {_number(amount, 0)}"
 
 
+def _money_full(value) -> str:
+    return f"$ {_number(value, 0)}"
+
+
 def _variation(value) -> tuple[str, str]:
     if value is None:
         return "Sin base", "flat"

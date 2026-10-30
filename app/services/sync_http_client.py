@@ -105,6 +105,11 @@ class SyncHttpClient:
             "/api/sync/v1/snapshots/managerial", snapshot
         )
 
+    def post_managerial_repurchase_snapshot(self, snapshot: dict) -> dict:
+        return self._post_with_retry(
+            "/api/sync/v1/snapshots/managerial-repurchase", snapshot
+        )
+
     def post_event(self, event: dict) -> dict:
         return self._request("POST", "/api/sync/v1/events", event)
 

@@ -30,6 +30,7 @@ implementar. La arquitectura general está en
 | --- | --- | --- |
 | `POST` | `/api/sync/v1/snapshots/orders` | Publicar snapshot inicial o de reconciliación |
 | `POST` | `/api/sync/v1/snapshots/managerial` | Publicar snapshot gerencial agregado (#837) |
+| `POST` | `/api/sync/v1/snapshots/managerial-repurchase` | Publicar snapshot de recompra agregado (#837) |
 | `POST` | `/api/sync/v1/events` | Publicar eventos del outbox de fábrica |
 | `GET` | `/api/sync/v1/events?cursor=<n>&limit=<n>` | Traer eventos originados en la nube |
 | `POST` | `/api/sync/v1/events/{event_id}/ack` | Confirmar aplicación o conflicto |
@@ -121,6 +122,22 @@ costos ni stock. La nube guarda únicamente el último snapshot en
 `syncprojection` con `resource_type=managerial_dashboard` y
 `resource_uid=latest`.
 
+## Snapshot de recompra
+
+`POST /api/sync/v1/snapshots/managerial-repurchase` recibe la comparación de
+clientes contra el mismo tramo del mes anterior, con todos los artículos
+agregados por cliente:
+
+- `summary`: toneladas y valorizado anterior/actual, variación, conciliación y
+  conteos por situación;
+- `rows[]`: cliente, vendedor, última compra, TN anterior/actual, diferencia,
+  variación, valor actual y situación (`sin_recompra`, `compro_menos`,
+  `igual`, `compro_mas`, `nuevo`).
+
+No incluye órdenes crudas ni detalle por producto en esta primera versión. La
+nube guarda solo el último snapshot en `syncprojection` con
+`resource_type=managerial_repurchase` y `resource_uid=latest`.
+
 ## Cursores e idempotencia
 
 - Cada stream (`factory`, `cloud`) tiene un cursor monotónico.
@@ -211,6 +228,7 @@ Reglas:
 
 - [`order-snapshot.schema.json`](order-snapshot.schema.json)
 - [`managerial-snapshot.schema.json`](managerial-snapshot.schema.json)
+- [`managerial-repurchase.schema.json`](managerial-repurchase.schema.json)
 - [`sync-event.schema.json`](sync-event.schema.json)
 - [`sync-error.schema.json`](sync-error.schema.json)
 

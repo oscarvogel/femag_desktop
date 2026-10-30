@@ -211,6 +211,17 @@ pensado para Gerencia y Administrador, desde celular o notebook.
 - Si todavía no llegó un snapshot, la pantalla muestra un estado vacío explícito
   y no inventa datos.
 
+### Recompra de clientes (#837)
+
+`/gerencia/recompra` compara los clientes contra el mismo tramo del mes anterior,
+con todos los artículos agregados por cliente. Incluye resumen de toneladas,
+conciliación, conteos por situación y tabla filtrable por situación, orden y
+cliente.
+
+La fábrica publica este dataset cada 30 minutos. No se sincronizan órdenes
+crudas y la pantalla queda restringida a Administrador/Gerencia. El filtro por
+producto y la exportación quedan para una siguiente versión.
+
 ## Cámara y HTTPS
 
 El acceso a cámara desde JavaScript requiere un contexto seguro en los navegadores modernos. En la misma PC `http://localhost:8000` normalmente funciona, pero desde un celular accediendo a `http://192.168.x.x:8000` el navegador puede bloquear la cámara por no usar HTTPS.

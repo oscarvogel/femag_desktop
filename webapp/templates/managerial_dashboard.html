@@ -20,6 +20,7 @@
       <div class="brand"><strong>FEMAG</strong><span>Gerencia</span></div>
       <nav aria-label="Navegación principal">
         <a href="{{ url_for('managerial_dashboard') }}" aria-current="page">Resumen</a>
+        <a href="{{ url_for('managerial_repurchase') }}">Recompra</a>
         <a href="{{ url_for('production') }}">Producción</a>
         <a href="{{ url_for('home') }}">Órdenes</a>
         {% if is_administrator() %}
@@ -172,7 +173,7 @@
 
     <footer>
       <span>FEMAG · Dashboard Gerencial · acceso solo Gerencia</span>
-      <span>Snapshot de fábrica del {{ dashboard.snapshot_time }} · {{ dashboard.period_label }}</span>
+      <span>Snapshot de fábrica del {{ dashboard.snapshot_time }} · {{ dashboard.period_label }} · <a href="{{ url_for('managerial_repurchase') }}">Análisis de recompra</a></span>
     </footer>
     {% endif %}
   </main>

@@ -418,6 +418,7 @@
     .rank .value .up { color: var(--green); }
     .rank .value .down { color: var(--red); }
 
+    footer a { color: var(--navy); font-weight: 650; text-decoration: none; border-bottom: 1px solid var(--line); }
     footer {
       margin-top: 22px;
       padding-top: 14px;
