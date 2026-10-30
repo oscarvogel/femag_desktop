@@ -8,12 +8,18 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.models.load_orders import LoadOrder, LoadOrderProduct
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderLooseAllocation,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
 from app.models.sync import SyncCursor, SyncEntityMap, SyncInbox
 from app.services.audit_service import AuditService
 from app.services.sync_service import SyncService
 
 LOTE_EVENT = "order_lote_fecha_updated"
+CONTENT_EVENT = "order_content_lote_fecha_updated"
 
 
 def _parse_date(value) -> date | None:
@@ -101,12 +107,14 @@ class SyncEventConsumer:
         return None
 
     def _apply_event(self, event: dict, inbox: SyncInbox) -> tuple[str, str | None]:
-        if event.get("event_type") != LOTE_EVENT:
-            return (
-                "rejected",
-                f"Evento no soportado: {event.get('event_type')}",
-            )
+        event_type = event.get("event_type")
+        if event_type == LOTE_EVENT:
+            return self._apply_line_event(event, inbox)
+        if event_type == CONTENT_EVENT:
+            return self._apply_content_event(event, inbox)
+        return "rejected", f"Evento no soportado: {event_type}"
 
+    def _apply_line_event(self, event: dict, inbox: SyncInbox) -> tuple[str, str | None]:
         payload = event.get("payload") or {}
         order_uid = str(payload.get("order_uid") or "").strip()
         line_uid = str(payload.get("line_uid") or "").strip()
@@ -174,6 +182,111 @@ class SyncEventConsumer:
                     else None
                 ),
                 "event_id": inbox.event_id,
+            },
+        )
+        return "applied", None
+
+    def _apply_content_event(
+        self, event: dict, inbox: SyncInbox
+    ) -> tuple[str, str | None]:
+        payload = event.get("payload") or {}
+        order_uid = str(payload.get("order_uid") or "").strip()
+        content_uid = str(payload.get("content_uid") or "").strip()
+        content_type = str(payload.get("content_type") or "").strip()
+        if not order_uid or not content_uid:
+            return "rejected", "El evento no trae order_uid/content_uid."
+        if content_type not in {"pallet", "loose"}:
+            return "rejected", f"Tipo de contenido no soportado: {content_type}"
+
+        order_map = SyncEntityMap.get_or_none(
+            (SyncEntityMap.entity_type == SyncEntityMap.ENTITY_ORDER)
+            & (SyncEntityMap.global_uid == order_uid)
+        )
+        entity_type = (
+            SyncEntityMap.ENTITY_PALLET_CONTENT
+            if content_type == "pallet"
+            else SyncEntityMap.ENTITY_LOOSE_CONTENT
+        )
+        content_map = SyncEntityMap.get_or_none(
+            (SyncEntityMap.entity_type == entity_type)
+            & (SyncEntityMap.global_uid == content_uid)
+        )
+        if order_map is None or content_map is None:
+            return "rejected", "La orden o el contenido no tienen mapeo local."
+
+        order = LoadOrder.get_or_none(LoadOrder.id == int(order_map.local_id))
+        if order is None:
+            return "rejected", "La orden local ya no existe."
+        if order.status == LoadOrder.STATUS_ANNULLED:
+            return "rejected", f"La orden #{order.order_number} esta anulada."
+
+        expected = int(
+            payload.get("expected_version")
+            or event.get("aggregate_version")
+            or 1
+        )
+        local_version = int(order_map.local_version or 1)
+        if expected != local_version:
+            return (
+                "conflict",
+                f"Version local {local_version} distinta de la esperada {expected}.",
+            )
+
+        lote = (payload.get("lote") or "").strip() or None
+        if lote and len(lote) > 255:
+            return "rejected", "El lote supera los 255 caracteres."
+        try:
+            fecha = _parse_date(payload.get("fecha_elaboracion"))
+        except ValueError as exc:
+            return "rejected", str(exc)
+
+        if content_type == "pallet":
+            allocation = LoadOrderPalletAllocation.get_or_none(
+                LoadOrderPalletAllocation.id == int(content_map.local_id)
+            )
+            if allocation is None or allocation.pallet.order_id != order.id:
+                return "rejected", "El contenido del pallet ya no existe."
+            record_ref = f"LoadOrderPalletAllocation:{allocation.id}"
+            extra = {"pallet": allocation.pallet.sequence}
+        else:
+            allocation = LoadOrderLooseAllocation.get_or_none(
+                (LoadOrderLooseAllocation.id == int(content_map.local_id))
+                & (LoadOrderLooseAllocation.order == order)
+            )
+            if allocation is None:
+                return "rejected", "El contenido suelto ya no existe."
+            record_ref = f"LoadOrderLooseAllocation:{allocation.id}"
+            extra = {}
+
+        allocation.lote = lote
+        allocation.fecha_elaboracion = fecha
+        allocation.save(
+            only=[
+                LoadOrderPalletAllocation.lote
+                if content_type == "pallet"
+                else LoadOrderLooseAllocation.lote,
+                LoadOrderPalletAllocation.fecha_elaboracion
+                if content_type == "pallet"
+                else LoadOrderLooseAllocation.fecha_elaboracion,
+            ]
+        )
+        self.audit.record(
+            user="sync",
+            module="Despachos",
+            action="carga de lote (sync)",
+            record_ref=record_ref,
+            new_value={
+                "orden": order.order_number,
+                "contenido": allocation.id,
+                "tipo": content_type,
+                "lote": allocation.lote,
+                "fecha_elaboracion": (
+                    allocation.fecha_elaboracion.isoformat()
+                    if allocation.fecha_elaboracion
+                    else None
+                ),
+                "event_id": inbox.event_id,
+                **extra,
             },
         )
         return "applied", None

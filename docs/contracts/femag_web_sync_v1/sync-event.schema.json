@@ -32,7 +32,8 @@
         "order_cancelled",
         "order_request_created",
         "order_request_cancelled",
-        "order_request_decided"
+        "order_request_decided",
+        "order_content_lote_fecha_updated"
       ]
     },
     "origin": {
@@ -49,7 +50,9 @@
       "enum": [
         "order",
         "order_line",
-        "order_request"
+        "order_request",
+        "pallet_content",
+        "loose_content"
       ]
     },
     "aggregate_id": {
@@ -222,6 +225,34 @@
           },
           "payload": {
             "$ref": "#/$defs/orderRequestDecided"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_content_lote_fecha_updated"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "origin": {
+            "const": "cloud"
+          },
+          "aggregate_type": {
+            "enum": [
+              "pallet_content",
+              "loose_content"
+            ]
+          },
+          "payload": {
+            "$ref": "#/$defs/contentUpdated"
           }
         }
       }
@@ -471,6 +502,50 @@
         "decided_at": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "contentUpdated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_uid",
+        "content_uid",
+        "content_type",
+        "lote",
+        "fecha_elaboracion",
+        "expected_version"
+      ],
+      "properties": {
+        "order_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "content_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "content_type": {
+          "enum": [
+            "pallet",
+            "loose"
+          ]
+        },
+        "lote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "fecha_elaboracion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

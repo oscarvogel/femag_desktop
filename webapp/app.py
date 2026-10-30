@@ -52,6 +52,7 @@ from webapp.projected_order_service import (
     get_projected_order_by_token,
     projected_line_context,
     projected_order_lines,
+    update_projected_content,
     update_projected_line,
 )
 from webapp.qr_sheet import build_turno_sheet
@@ -314,36 +315,74 @@ self.addEventListener("fetch", event => {
                     )
                 try:
                     changed = False
-                    for line in lines:
-                        if update_projected_line(
-                            order,
-                            line.id,
-                            lote=request.form.get(f"lote_{line.id}"),
-                            fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
-                        ):
-                            changed = True
+                    if order.has_contents:
+                        contents = [
+                            content
+                            for pallet in order.pallets
+                            for content in pallet.contents
+                        ] + list(order.loose_contents)
+                        for content in contents:
+                            lote_key = f"lote_{content.id}"
+                            fecha_key = f"fecha_{content.id}"
+                            if lote_key not in request.form and fecha_key not in request.form:
+                                continue
+                            if update_projected_content(
+                                order,
+                                content.id,
+                                content_type=content.kind,
+                                lote=request.form.get(lote_key),
+                                fecha_elaboracion=request.form.get(fecha_key),
+                            ):
+                                changed = True
+                        audit_value = {
+                            "orden": order.order_number,
+                            "contenidos": [
+                                {
+                                    "contenido": content.id,
+                                    "tipo": content.kind,
+                                    "producto": content.product.name,
+                                    "lote": request.form.get(
+                                        f"lote_{content.id}"
+                                    ),
+                                    "fecha_elaboracion": request.form.get(
+                                        f"fecha_{content.id}"
+                                    ),
+                                }
+                                for content in contents
+                            ],
+                        }
+                    else:
+                        for line in lines:
+                            if update_projected_line(
+                                order,
+                                line.id,
+                                lote=request.form.get(f"lote_{line.id}"),
+                                fecha_elaboracion=request.form.get(
+                                    f"fecha_{line.id}"
+                                ),
+                            ):
+                                changed = True
+                        audit_value = {
+                            "orden": order.order_number,
+                            "renglones": [
+                                {
+                                    "renglon": line.id,
+                                    "producto": line.product.name,
+                                    "lote": request.form.get(f"lote_{line.id}"),
+                                    "fecha_elaboracion": request.form.get(
+                                        f"fecha_{line.id}"
+                                    ),
+                                }
+                                for line in lines
+                            ],
+                        }
                     if changed:
                         audit.record(
                             user=username,
                             module=audit.MODULE_DESPACHOS,
                             action=audit.ACTION_LOTE,
                             record_ref=f"SyncOrder:{order.order_uid}",
-                            new_value={
-                                "orden": order.order_number,
-                                "renglones": [
-                                    {
-                                        "renglon": line.id,
-                                        "producto": line.product.name,
-                                        "lote": request.form.get(
-                                            f"lote_{line.id}"
-                                        ),
-                                        "fecha_elaboracion": request.form.get(
-                                            f"fecha_{line.id}"
-                                        ),
-                                    }
-                                    for line in lines
-                                ],
-                            },
+                            new_value=audit_value,
                         )
                         flash(
                             "Lote y fecha guardados. Pendiente de sincronización "

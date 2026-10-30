@@ -136,6 +136,10 @@ queda en la proyección y se encola como evento cloud → fábrica. La pantalla
 muestra **Pendiente de sincronización** hasta que el agente lo aplica y
 confirma el ACK. Un snapshot posterior no pisa ese valor pendiente.
 
+En órdenes con pallets, la carga es por **contenido de pallet**: cada artículo
+del pallet tiene su propio lote y fecha, y se pueden cargar varios lotes en la
+misma orden. Sigue habiendo **un QR por orden**.
+
 Después de guardar, la webapp muestra una **pantalla de confirmación** con la
 orden, los lotes y las fechas registradas, y los botones para volver a la orden
 o buscar otra. Así el operario sabe que el guardado terminó y no repite el
