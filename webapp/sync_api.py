@@ -25,6 +25,7 @@ from webapp.managerial_dashboard_service import (
     ManagerialDashboardError,
     ManagerialDashboardService,
 )
+from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 
 sync_api = Blueprint("sync_api", __name__, url_prefix="/api/sync/v1")
 
@@ -143,6 +144,29 @@ def receive_managerial_snapshot():
         )
     try:
         result = ManagerialDashboardService.apply_snapshot(snapshot)
+    except ManagerialDashboardError as exc:
+        return (
+            jsonify({"error": "invalid_snapshot", "message": str(exc)}),
+            422,
+        )
+    return jsonify(result)
+
+
+@sync_api.post("/snapshots/managerial-repurchase")
+def receive_managerial_repurchase_snapshot():
+    snapshot = request.get_json(silent=True)
+    if not isinstance(snapshot, dict):
+        return (
+            jsonify(
+                {
+                    "error": "invalid_snapshot",
+                    "message": "Se esperaba un objeto JSON.",
+                }
+            ),
+            400,
+        )
+    try:
+        result = ManagerialRepurchaseService.apply_snapshot(snapshot)
     except ManagerialDashboardError as exc:
         return (
             jsonify({"error": "invalid_snapshot", "message": str(exc)}),

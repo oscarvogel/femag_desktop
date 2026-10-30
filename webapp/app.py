@@ -40,6 +40,7 @@ from webapp.auth import (
     resolve_secret_key,
 )
 from webapp.managerial_dashboard_service import ManagerialDashboardService
+from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 from webapp.order_service import (
     InvalidQrPayloadError,
     OrderNotFoundError,
@@ -594,6 +595,18 @@ self.addEventListener("fetch", event => {
             return redirect(url_for("production"))
         dashboard = ManagerialDashboardService.latest_view()
         return render_template("managerial_dashboard.html", dashboard=dashboard)
+
+    @app.get("/gerencia/recompra")
+    @login_required
+    def managerial_repurchase():
+        if not can_view_managerial_dashboard():
+            flash("Solo Gerencia puede ver el análisis de recompra.", "error")
+            return redirect(url_for("production"))
+        dashboard = ManagerialRepurchaseService.latest_view()
+        return render_template(
+            "managerial_repurchase.html",
+            dashboard=dashboard,
+        )
 
     @app.route("/produccion", methods=["GET", "POST"])
     @login_required

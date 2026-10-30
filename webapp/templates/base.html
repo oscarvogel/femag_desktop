@@ -58,6 +58,7 @@
     <a href="{{ url_for('production') }}">Producción</a>
     {% if can_view_managerial_dashboard() %}
       <a href="{{ url_for('managerial_dashboard') }}">Gerencia</a>
+      <a href="{{ url_for('managerial_repurchase') }}">Recompra</a>
     {% endif %}
     {% if is_administrator() %}
       <a href="{{ url_for('accesos') }}">Accesos</a>

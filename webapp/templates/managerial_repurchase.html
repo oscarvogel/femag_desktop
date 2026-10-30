@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17324d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FEMAG">
+  <link rel="manifest" href="{{ url_for('manifest') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='repurchase.css') }}">
+  <title>FEMAG Gerencia · Recompra</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><strong>FEMAG</strong><span>Gerencia</span></div>
+      <nav aria-label="Navegación principal">
+        <a href="{{ url_for('managerial_dashboard') }}">Resumen</a>
+        <a href="{{ url_for('managerial_repurchase') }}" aria-current="page">Recompra</a>
+        <a href="{{ url_for('production') }}">Producción</a>
+        <a href="{{ url_for('home') }}">Órdenes</a>
+        {% if is_administrator() %}
+        <a href="{{ url_for('accesos') }}">Accesos</a>
+        {% endif %}
+      </nav>
+      <div class="user"><span>{{ current_username() }}</span><a href="{{ url_for('logout') }}">Salir</a></div>
+    </div>
+  </header>
+
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <div class="message {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    {% if dashboard.empty %}
+    <section class="page-head" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Análisis de recompra</p>
+        <h1 id="page-title">Sin datos todavía</h1>
+        <p class="subtitle">La nube espera el primer snapshot de recompra de la fábrica.</p>
+      </div>
+    </section>
+    <section class="empty-state">
+      <h2>El informe se va a completar solo</h2>
+      <p>Cuando el agente de fábrica publique el snapshot de recompra, acá vas a poder comparar clientes contra el mes anterior.</p>
+      {% if dashboard.error %}<p class="muted">Detalle: {{ dashboard.error }}</p>{% endif %}
+    </section>
+    {% else %}
+    <section class="page-head" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Análisis de recompra</p>
+        <h1 id="page-title">Clientes vs. mes anterior</h1>
+        <p class="subtitle">{{ dashboard.previous_range }} vs. {{ dashboard.current_range }} · todos los artículos</p>
+      </div>
+      <div class="snapshot">
+        <span class="status"><i class="dot"></i> Snapshot al {{ dashboard.snapshot_time }}</span>
+        <div>Se actualiza cada 30 minutos</div>
+      </div>
+    </section>
+
+    <section class="brief" aria-label="Lectura rápida">
+      <p>Se despacharon <strong>{{ dashboard.diff_abs }} TN</strong> {{ dashboard.diff_word }} en los mismos días. {{ dashboard.count_sin }} clientes quedaron sin recompra y {{ dashboard.count_nuevos }} se incorporaron al período.</p>
+      <a href="{{ url_for('managerial_dashboard') }}">Volver al resumen</a>
+    </section>
+
+    <section class="rep-summary" aria-label="Resumen de toneladas">
+      <article class="rep-card">
+        <div class="label">{{ dashboard.previous_label }}</div>
+        <div class="big">{{ dashboard.previous_tonnes }} TN</div>
+        <div class="small">{{ dashboard.previous_total }}</div>
+      </article>
+      <article class="rep-card">
+        <div class="label">{{ dashboard.current_label }}</div>
+        <div class="big">{{ dashboard.current_tonnes }} TN</div>
+        <div class="small">{{ dashboard.current_total }}</div>
+      </article>
+      <article class="rep-card rep-variation {{ dashboard.variation_direction }}">
+        <div class="label">Variación en toneladas</div>
+        <div class="big">{{ dashboard.variation }}</div>
+        <div class="small">{{ dashboard.diff_tonnes }} TN contra el período anterior</div>
+      </article>
+    </section>
+
+    <section class="compare" aria-labelledby="compare-title">
+      <div class="compare-head">
+        <h2 id="compare-title">Volumen despachado</h2>
+        <span class="caption">Todos los artículos · toneladas</span>
+      </div>
+      <div class="compare-row">
+        <span>{{ dashboard.previous_label }}</span>
+        <div class="track"><i style="width: {{ 100 if dashboard.previous_tonnes != '0,00' else 0 }}%"></i></div>
+        <span class="value">{{ dashboard.previous_tonnes }} TN</span>
+      </div>
+      <div class="compare-row current {{ 'positive' if dashboard.variation_direction == 'up' else '' }}">
+        <span>{{ dashboard.current_label }}</span>
+        <div class="track"><i style="width: {{ dashboard.compare_percent }}%"></i></div>
+        <span class="value">{{ dashboard.current_tonnes }} TN</span>
+      </div>
+      <p class="compare-caption">Conciliación: {{ dashboard.reconciled }} TN ({{ 'cuadra' if dashboard.reconciliation_ok else 'no cuadra' }}). {{ dashboard.count_sin }} sin recompra · {{ dashboard.count_menos }} compraron menos · {{ dashboard.count_mas }} compraron más · {{ dashboard.count_nuevos }} nuevos.</p>
+    </section>
+
+    <section class="counts" aria-label="Clientes por situación">
+      <div class="count"><div class="n">{{ dashboard.count_sin }}</div><div class="t">Sin recompra</div></div>
+      <div class="count"><div class="n">{{ dashboard.count_menos }}</div><div class="t">Compraron menos</div></div>
+      <div class="count"><div class="n">{{ dashboard.count_mas }}</div><div class="t">Compraron más</div></div>
+      <div class="count"><div class="n">{{ dashboard.count_nuevos }}</div><div class="t">Nuevos</div></div>
+      <div class="count"><div class="n">{{ dashboard.count_igual }}</div><div class="t">Sin cambios</div></div>
+    </section>
+
+    <section class="filters" aria-label="Filtros del informe">
+      <div class="filters-grid">
+        <div>
+          <label for="filtro-situacion">Situación</label>
+          <select id="filtro-situacion">
+            <option value="">Todas</option>
+            {% for option in dashboard.status_options %}
+            <option value="{{ option.value }}">{{ option.label }} ({{ option.count }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="filtro-orden">Orden</label>
+          <select id="filtro-orden">
+            <option value="default">Sin recompra primero</option>
+            <option value="previous">Mayor TN anterior</option>
+            <option value="current">Mayor TN actual</option>
+            <option value="diff">Mayor caída</option>
+            <option value="client">Cliente A-Z</option>
+          </select>
+        </div>
+        <div>
+          <label for="filtro-cliente">Cliente</label>
+          <input id="filtro-cliente" type="search" placeholder="Buscar cliente..." autocomplete="off">
+        </div>
+        <div>
+          <button type="button" id="limpiar-filtros">Limpiar</button>
+        </div>
+      </div>
+      <div class="filters-meta"><span id="filtro-count">{{ dashboard.rows|length }}</span> clientes visibles</div>
+    </section>
+
+    <p class="table-hint">En el celular, deslizá la tabla para ver todas las columnas.</p>
+    <div class="table-wrap">
+      <table class="rep-table" id="tabla-recompra">
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Vendedor</th>
+            <th>Últ. compra</th>
+            <th class="num">TN ant.</th>
+            <th class="num">TN actual</th>
+            <th class="num">Dif. TN</th>
+            <th class="num">Var. %</th>
+            <th class="num">Val. actual</th>
+            <th>Situación</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in dashboard.rows %}
+          <tr class="status-{{ row.status }}" data-status="{{ row.status }}" data-client="{{ row.client|lower }}" data-prev="{{ row.previous_raw }}" data-current="{{ row.current_raw }}" data-diff="{{ row.diff_raw }}" data-variation="{{ row.variation }}">
+            <td class="client">{{ row.client }}</td>
+            <td class="muted-cell">{{ row.salesperson }}</td>
+            <td>{{ row.last_purchase }}</td>
+            <td class="num">{{ row.previous_tonnes }}</td>
+            <td class="num">{{ row.current_tonnes }}</td>
+            <td class="num">{{ row.diff }}</td>
+            <td class="num variation {{ row.direction }}">{{ row.variation }}</td>
+            <td class="num">{{ row.current_total }}</td>
+            <td class="situation">{{ row.status_label }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="muted-cell">Sin clientes en el período.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rep-footer">
+      <span>FEMAG · Recompra · acceso solo Gerencia · {{ dashboard.previous_range }} vs. {{ dashboard.current_range }}</span>
+      <a href="{{ url_for('managerial_dashboard') }}">Volver al resumen</a>
+    </div>
+    {% endif %}
+  </main>
+
+  {% if not dashboard.empty %}
+  <script>
+    (() => {
+      const status = document.getElementById("filtro-situacion");
+      const order = document.getElementById("filtro-orden");
+      const search = document.getElementById("filtro-cliente");
+      const reset = document.getElementById("limpiar-filtros");
+      const count = document.getElementById("filtro-count");
+      const tbody = document.querySelector("#tabla-recompra tbody");
+      const rows = Array.from(tbody.querySelectorAll("tr[data-status]"));
+
+      const statusOrder = {
+        sin_recompra: 0,
+        compro_menos: 1,
+        igual: 2,
+        compro_mas: 3,
+        nuevo: 4
+      };
+
+      const normalize = (value) => (value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      function apply() {
+        const query = normalize(search.value.trim());
+        const selectedStatus = status.value;
+        const selectedOrder = order.value;
+        const visible = rows.filter((row) => {
+          if (selectedStatus && row.dataset.status !== selectedStatus) return false;
+          if (query && !normalize(row.dataset.client).includes(query)) return false;
+          return true;
+        });
+        visible.sort((a, b) => {
+          if (selectedOrder === "previous") return Number(b.dataset.prev) - Number(a.dataset.prev);
+          if (selectedOrder === "current") return Number(b.dataset.current) - Number(a.dataset.current);
+          if (selectedOrder === "diff") return Number(a.dataset.diff) - Number(b.dataset.diff);
+          if (selectedOrder === "client") return a.dataset.client.localeCompare(b.dataset.client, "es");
+          return statusOrder[a.dataset.status] - statusOrder[b.dataset.status]
+            || Number(b.dataset.prev) - Number(a.dataset.prev)
+            || a.dataset.client.localeCompare(b.dataset.client, "es");
+        });
+        tbody.replaceChildren(...visible);
+        count.textContent = String(visible.length);
+      }
+
+      [status, order].forEach((element) => element.addEventListener("change", apply));
+      search.addEventListener("input", apply);
+      reset.addEventListener("click", () => {
+        status.value = "";
+        order.value = "default";
+        search.value = "";
+        apply();
+      });
+      apply();
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

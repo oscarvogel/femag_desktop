@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "managerial-repurchase.schema.json",
+  "title": "Snapshot de recompra FEMAG",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "generated_at",
+    "period",
+    "previous_period",
+    "summary",
+    "rows"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "snapshot_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "period": {
+      "$ref": "#/$defs/period"
+    },
+    "previous_period": {
+      "$ref": "#/$defs/period"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    }
+  },
+  "$defs": {
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end",
+        "label"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date"
+        },
+        "end": {
+          "type": "string",
+          "format": "date"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current_range",
+        "previous_range",
+        "previous_tonnes",
+        "current_tonnes",
+        "diff_tonnes",
+        "variation_percent",
+        "previous_total",
+        "current_total",
+        "buyers_previous",
+        "buyers_current",
+        "count_sin_recompra",
+        "count_redujeron",
+        "count_aumentaron",
+        "count_nuevos",
+        "count_sin_cambios",
+        "lost_tonnes",
+        "reduction_tonnes",
+        "increase_tonnes",
+        "new_tonnes",
+        "reconciled_diff_tonnes",
+        "reconciliation_ok"
+      ],
+      "properties": {
+        "current_range": {
+          "type": "string"
+        },
+        "previous_range": {
+          "type": "string"
+        },
+        "previous_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "current_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "diff_tonnes": {
+          "type": "number"
+        },
+        "variation_percent": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "previous_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "current_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "buyers_previous": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "buyers_current": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_sin_recompra": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_redujeron": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_aumentaron": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_nuevos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_sin_cambios": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lost_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reduction_tonnes": {
+          "type": "number"
+        },
+        "increase_tonnes": {
+          "type": "number"
+        },
+        "new_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reconciled_diff_tonnes": {
+          "type": "number"
+        },
+        "reconciliation_ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_name",
+        "salesperson_name",
+        "previous_last_date",
+        "current_last_date",
+        "previous_tonnes",
+        "current_tonnes",
+        "diff_tonnes",
+        "variation_percent",
+        "previous_total",
+        "current_total",
+        "status"
+      ],
+      "properties": {
+        "client_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "salesperson_name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "previous_last_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "current_last_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "current_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "diff_tonnes": {
+          "type": "number"
+        },
+        "variation_percent": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "previous_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "current_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "status": {
+          "enum": [
+            "sin_recompra",
+            "compro_menos",
+            "igual",
+            "compro_mas",
+            "nuevo"
+          ]
+        }
+      }
+    }
+  }
+}

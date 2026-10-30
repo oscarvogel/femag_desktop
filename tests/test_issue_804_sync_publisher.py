@@ -174,6 +174,22 @@ def test_http_client_posts_managerial_snapshot():
     )
 
 
+def test_http_client_posts_repurchase_snapshot():
+    opener = _FakeOpener(b'{"accepted": true}')
+    client = SyncHttpClient(
+        "https://sync.example",
+        "token",
+        opener=opener,
+    )
+
+    result = client.post_managerial_repurchase_snapshot({"schema_version": "1.0"})
+
+    assert result == {"accepted": True}
+    assert opener.request.full_url == (
+        "https://sync.example/api/sync/v1/snapshots/managerial-repurchase"
+    )
+
+
 def test_http_client_rejects_http_without_explicit_override():
     with pytest.raises(ValueError):
         SyncHttpClient("http://sync.example", "token")
