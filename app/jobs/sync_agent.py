@@ -69,9 +69,14 @@ def _client_from_env() -> SyncHttpClient:
         raise SystemExit("Falta FEMAG_SYNC_BASE_URL.")
     if not token:
         raise SystemExit("Falta FEMAG_SYNC_API_TOKEN.")
+    try:
+        timeout = int(os.getenv("FEMAG_SYNC_TIMEOUT", "90"))
+    except ValueError:
+        timeout = 90
     return SyncHttpClient(
         base_url,
         token,
+        timeout=timeout,
         ca_file=os.getenv("FEMAG_SYNC_CA_FILE", "").strip() or None,
     )
 
