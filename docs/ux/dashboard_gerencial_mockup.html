@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17324d">
+  <title>FEMAG Gerencia · Dashboard</title>
+  <style>
+    :root {
+      --navy: #17324d;
+      --navy-deep: #102638;
+      --ink: #17232d;
+      --muted: #6d756f;
+      --paper: #f4f1e8;
+      --panel: #fffdf8;
+      --line: #d9d3c5;
+      --line-soft: #e8e3d8;
+      --green: #2f6b4f;
+      --green-soft: #e7f0e8;
+      --red: #9b3a32;
+      --red-soft: #f7e8e4;
+      --copper: #a7653c;
+      --blue-soft: #e9eff3;
+      --shadow: 0 12px 32px rgba(23, 50, 77, .07);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(23, 50, 77, .025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 50, 77, .025) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-variant-numeric: tabular-nums;
+    }
+
+    a { color: inherit; }
+    .topbar {
+      background: var(--navy);
+      color: #fff;
+      border-bottom: 3px solid var(--copper);
+    }
+    .topbar-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      white-space: nowrap;
+    }
+    .brand strong {
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: 1.35rem;
+      letter-spacing: .04em;
+    }
+    .brand span {
+      color: #b9cee1;
+      font-size: .78rem;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    nav::-webkit-scrollbar { display: none; }
+    nav a {
+      color: #c9d9e8;
+      text-decoration: none;
+      font-size: .88rem;
+      font-weight: 600;
+      white-space: nowrap;
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+    nav a:hover,
+    nav a:focus-visible {
+      background: rgba(255, 255, 255, .1);
+      color: #fff;
+      outline: none;
+    }
+    nav a[aria-current="page"] {
+      color: #fff;
+      box-shadow: inset 0 -2px 0 var(--copper);
+      border-radius: 0;
+    }
+    .user {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #d8e4ef;
+      font-size: .86rem;
+      white-space: nowrap;
+    }
+    .user a {
+      color: #fff;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255, 255, 255, .35);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 34px 28px 56px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+    .page-head > * { min-width: 0; }
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--copper);
+      font-size: .74rem;
+      font-weight: 750;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: clamp(2.1rem, 4.2vw, 3.35rem);
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: -.025em;
+      color: var(--navy-deep);
+    }
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: .93rem;
+    }
+    .snapshot {
+      min-width: 232px;
+      border-left: 1px solid var(--line);
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.55;
+    }
+    .snapshot .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--ink);
+      font-weight: 650;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px var(--green-soft);
+    }
+    .sample {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      color: var(--copper);
+      font-size: .67rem;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .brief {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: center;
+      background: var(--navy);
+      color: #fff;
+      padding: 18px 22px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .brief > * { min-width: 0; }
+    .brief p {
+      margin: 0;
+      max-width: 780px;
+      font-size: clamp(.98rem, 1.5vw, 1.12rem);
+      line-height: 1.5;
+    }
+    .brief strong { color: #f1c9a8; font-weight: 700; }
+    .brief a {
+      color: #fff;
+      font-size: .82rem;
+      font-weight: 650;
+      white-space: nowrap;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255, 255, 255, .45);
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .kpi {
+      min-width: 0;
+      position: relative;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 18px 18px 16px;
+      overflow: hidden;
+    }
+    .kpi::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: var(--navy);
+    }
+    .kpi:nth-child(2)::before { background: var(--green); }
+    .kpi:nth-child(3)::before { background: var(--copper); }
+    .kpi:nth-child(4)::before { background: #5e7f96; }
+    .kpi-label {
+      color: var(--muted);
+      font-size: .76rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .kpi-value {
+      margin: 12px 0 10px;
+      font-size: clamp(1.75rem, 3vw, 2.5rem);
+      font-weight: 650;
+      line-height: 1;
+      letter-spacing: -.035em;
+      color: var(--navy-deep);
+    }
+    .kpi-foot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 6px;
+      font-size: .76rem;
+      font-weight: 750;
+    }
+    .delta.up { color: var(--green); background: var(--green-soft); }
+    .delta.down { color: var(--red); background: var(--red-soft); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(250px, .82fr);
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .panel h2 {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -.01em;
+      color: var(--navy-deep);
+    }
+    .panel .caption {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: .8rem;
+    }
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--muted);
+      font-size: .76rem;
+      white-space: nowrap;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i {
+      display: inline-block;
+      width: 18px;
+      height: 2px;
+      background: var(--navy);
+    }
+    .legend i.partial {
+      height: 0;
+      border-top: 2px dashed var(--copper);
+      background: transparent;
+    }
+
+    #chart {
+      width: 100%;
+      overflow: hidden;
+    }
+    #chart svg { display: block; width: 100%; height: auto; }
+    .chart-note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: .76rem;
+      border-top: 1px solid var(--line-soft);
+      padding-top: 10px;
+    }
+
+    .reading {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 0;
+    }
+    .reading .panel-head { padding: 20px 20px 16px; margin: 0; }
+    .reading-item {
+      padding: 16px 20px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .reading-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--copper);
+      font-size: .69rem;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .reading-item p {
+      margin: 0;
+      color: var(--ink);
+      font-size: .88rem;
+      line-height: 1.45;
+    }
+    .reading-item strong { color: var(--navy-deep); }
+
+    .lists {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .rank {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .rank li {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 0;
+      border-top: 1px solid var(--line-soft);
+    }
+    .rank li:first-child { border-top: 0; padding-top: 2px; }
+    .rank .pos {
+      color: var(--muted);
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      font-size: 1.02rem;
+    }
+    .rank .name {
+      display: block;
+      margin-bottom: 6px;
+      font-size: .87rem;
+      font-weight: 650;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+    .bar {
+      height: 5px;
+      background: var(--line-soft);
+      overflow: hidden;
+    }
+    .bar i {
+      display: block;
+      height: 100%;
+      background: var(--navy);
+    }
+    .rank li:nth-child(2) .bar i { background: #315a73; }
+    .rank li:nth-child(3) .bar i { background: #4f7487; }
+    .rank li:nth-child(4) .bar i { background: #7590a0; }
+    .rank li:nth-child(5) .bar i { background: #9aaab5; }
+    .rank .value {
+      text-align: right;
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--navy-deep);
+      white-space: nowrap;
+    }
+    .rank .value small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: .7rem;
+      font-weight: 600;
+    }
+    .rank .value .up { color: var(--green); }
+    .rank .value .down { color: var(--red); }
+
+    footer {
+      margin-top: 22px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: .75rem;
+    }
+
+    @media (max-width: 980px) {
+      .topbar-inner { padding: 14px 18px; gap: 16px; }
+      .brand span { display: none; }
+      main { padding: 26px 18px 40px; }
+      .page-head { align-items: flex-start; flex-direction: column; gap: 14px; }
+      .snapshot { border-left: 0; padding-left: 0; }
+      .layout { grid-template-columns: 1fr; }
+      .reading { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .reading .panel-head { grid-column: 1 / -1; }
+      .reading-item { border-top: 0; border-left: 1px solid var(--line-soft); }
+      .reading-item:first-of-type { border-left: 0; }
+    }
+
+    @media (max-width: 720px) {
+      .topbar-inner { flex-wrap: wrap; }
+      nav { order: 3; width: 100%; }
+      .user { margin-left: auto; }
+      .brief { grid-template-columns: 1fr; gap: 12px; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .kpi { padding: 15px 14px 14px; }
+      .kpi-value { font-size: 1.8rem; }
+      .lists { grid-template-columns: 1fr; }
+      .reading { display: block; }
+      .reading-item { border-left: 0; border-top: 1px solid var(--line-soft); }
+      .panel { padding: 16px; }
+      .panel-head { margin-bottom: 14px; }
+      .legend { display: none; }
+      .chart-note { font-size: .72rem; }
+      footer { display: block; }
+      footer span { display: block; margin-top: 5px; }
+    }
+
+    @media (max-width: 420px) {
+      .kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .kpi-value { font-size: 1.58rem; }
+      .kpi-label { font-size: .69rem; }
+      .kpi-foot { font-size: .71rem; }
+      .delta { font-size: .69rem; }
+      h1 { font-size: 2.2rem; }
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    #chart-data {
+      position: fixed;
+      top: 0;
+      left: -10000px;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><strong>FEMAG</strong><span>Gerencia</span></div>
+      <nav aria-label="Navegación principal">
+        <a href="#" aria-current="page">Resumen</a>
+        <a href="#">Producción</a>
+        <a href="#">Órdenes</a>
+        <a href="#">Accesos</a>
+      </nav>
+      <div class="user"><span>Dante</span><a href="#">Salir</a></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-head" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Dashboard gerencial</p>
+        <h1 id="page-title">Octubre 2026</h1>
+        <p class="subtitle">Mes en curso · comparado con el mismo tramo de septiembre</p>
+      </div>
+      <div class="snapshot">
+        <span class="sample">Mockup · datos de ejemplo</span>
+        <span class="status"><i class="dot"></i> Snapshot al 30/10, 10:35</span>
+        <div>Se actualiza cada 30 minutos</div>
+      </div>
+    </section>
+
+    <section class="brief" aria-label="Lectura rápida">
+      <p>El mes va <strong>12,4% arriba</strong> del mismo tramo de septiembre. La venta está traccionada por los principales clientes y por el pack de 1 kg; el top 5 concentra la mitad de la facturación.</p>
+      <a href="#detalle">Ver detalle</a>
+    </section>
+
+    <section class="kpis" aria-label="Indicadores del mes">
+      <article class="kpi">
+        <div class="kpi-label">Ventas del mes</div>
+        <div class="kpi-value">$ 284,6 M</div>
+        <div class="kpi-foot"><span class="delta up">+12,4%</span><span>vs. $ 253,2 M</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Toneladas despachadas</div>
+        <div class="kpi-value">312,4 TN</div>
+        <div class="kpi-foot"><span class="delta up">+8,1%</span><span>vs. 289,0 TN</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Pedidos</div>
+        <div class="kpi-value">186</div>
+        <div class="kpi-foot"><span class="delta up">+4,5%</span><span>vs. 178</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Ticket promedio</div>
+        <div class="kpi-value">$ 1,53 M</div>
+        <div class="kpi-foot"><span class="delta up">+7,6%</span><span>vs. $ 1,42 M</span></div>
+      </article>
+    </section>
+
+    <div class="layout" id="detalle">
+      <section class="panel" aria-labelledby="chart-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="chart-title">Ventas por mes</h2>
+            <p class="caption">Últimos 12 meses · millones de pesos</p>
+          </div>
+          <div class="legend" aria-hidden="true">
+            <span><i></i> Mes cerrado</span>
+            <span><i class="partial"></i> Octubre en curso</span>
+          </div>
+        </div>
+        <div id="chart" role="img" aria-label="Evolución mensual de ventas; octubre está en curso"></div>
+        <p class="chart-note">Octubre es un mes parcial: el último punto no se compara como un mes cerrado.</p>
+      </section>
+
+      <aside class="panel reading" aria-labelledby="reading-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="reading-title">Para mirar</h2>
+            <p class="caption">Tres señales del snapshot</p>
+          </div>
+        </div>
+        <div class="reading-item">
+          <span class="reading-label">Concentración</span>
+          <p>El top 5 de clientes explica el <strong>50%</strong> de la venta del mes.</p>
+        </div>
+        <div class="reading-item">
+          <span class="reading-label">Mezcla</span>
+          <p>Fécula nativa 10 kg aporta el <strong>25%</strong> de las toneladas.</p>
+        </div>
+        <div class="reading-item">
+          <span class="reading-label">A vigilar</span>
+          <p>Alimentos del Sur cae <strong>2,1%</strong> contra el mismo tramo de septiembre.</p>
+        </div>
+      </aside>
+    </div>
+
+    <section class="lists" aria-label="Rankings del mes">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Top 5 clientes</h2>
+            <p class="caption">Venta del mes · millones</p>
+          </div>
+        </div>
+        <ol class="rank">
+          <li>
+            <span class="pos">01</span>
+            <div><span class="name">Molinos del Litoral</span><div class="bar"><i style="width:100%"></i></div></div>
+            <span class="value">$ 42,8 M<small class="up">+18,2%</small></span>
+          </li>
+          <li>
+            <span class="pos">02</span>
+            <div><span class="name">Distribuidora Norte</span><div class="bar"><i style="width:73%"></i></div></div>
+            <span class="value">$ 31,2 M<small class="up">+6,4%</small></span>
+          </li>
+          <li>
+            <span class="pos">03</span>
+            <div><span class="name">Alimentos del Sur</span><div class="bar"><i style="width:64%"></i></div></div>
+            <span class="value">$ 27,6 M<small class="down">−2,1%</small></span>
+          </li>
+          <li>
+            <span class="pos">04</span>
+            <div><span class="name">Feculería Paraná</span><div class="bar"><i style="width:52%"></i></div></div>
+            <span class="value">$ 22,4 M<small class="up">+11,8%</small></span>
+          </li>
+          <li>
+            <span class="pos">05</span>
+            <div><span class="name">Comercial Andina</span><div class="bar"><i style="width:44%"></i></div></div>
+            <span class="value">$ 18,9 M<small class="up">+3,2%</small></span>
+          </li>
+        </ol>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Top 5 productos</h2>
+            <p class="caption">Toneladas despachadas · mes en curso</p>
+          </div>
+        </div>
+        <ol class="rank">
+          <li>
+            <span class="pos">01</span>
+            <div><span class="name">Fécula nativa 10 kg</span><div class="bar"><i style="width:100%"></i></div></div>
+            <span class="value">78,4 TN<small class="up">+9,4%</small></span>
+          </li>
+          <li>
+            <span class="pos">02</span>
+            <div><span class="name">Almidón de maíz 25 kg</span><div class="bar"><i style="width:69%"></i></div></div>
+            <span class="value">54,2 TN<small class="up">+5,1%</small></span>
+          </li>
+          <li>
+            <span class="pos">03</span>
+            <div><span class="name">Pack fécula 1 kg x 10</span><div class="bar"><i style="width:53%"></i></div></div>
+            <span class="value">41,7 TN<small class="down">−3,8%</small></span>
+          </li>
+          <li>
+            <span class="pos">04</span>
+            <div><span class="name">Almidón 1/2 kg x 10</span><div class="bar"><i style="width:43%"></i></div></div>
+            <span class="value">33,5 TN<small class="up">+12,2%</small></span>
+          </li>
+          <li>
+            <span class="pos">05</span>
+            <div><span class="name">Nativa 1/2 kg x 10</span><div class="bar"><i style="width:36%"></i></div></div>
+            <span class="value">28,1 TN<small class="up">+2,6%</small></span>
+          </li>
+        </ol>
+      </article>
+    </section>
+
+    <footer>
+      <span>FEMAG · Dashboard Gerencial · acceso solo Gerencia</span>
+      <span>Datos de ejemplo para revisión de diseño, no son cifras reales.</span>
+    </footer>
+  </main>
+
+  <table class="sr-only" id="chart-data">
+    <caption>Ventas mensuales en millones de pesos</caption>
+    <thead><tr><th>Mes</th><th>Ventas</th></tr></thead>
+    <tbody>
+      <tr><th>Nov 2025</th><td>198,0</td></tr>
+      <tr><th>Dic 2025</th><td>176,0</td></tr>
+      <tr><th>Ene 2026</th><td>241,0</td></tr>
+      <tr><th>Feb 2026</th><td>205,0</td></tr>
+      <tr><th>Mar 2026</th><td>188,0</td></tr>
+      <tr><th>Abr 2026</th><td>230,0</td></tr>
+      <tr><th>May 2026</th><td>262,0</td></tr>
+      <tr><th>Jun 2026</th><td>219,0</td></tr>
+      <tr><th>Jul 2026</th><td>254,0</td></tr>
+      <tr><th>Ago 2026</th><td>271,0</td></tr>
+      <tr><th>Sep 2026</th><td>296,0</td></tr>
+      <tr><th>Oct 2026 (en curso)</th><td>284,6</td></tr>
+    </tbody>
+  </table>
+
+  <script>
+    (() => {
+      const data = [
+        { label: "Nov", value: 198.0 },
+        { label: "Dic", value: 176.0 },
+        { label: "Ene", value: 241.0 },
+        { label: "Feb", value: 205.0 },
+        { label: "Mar", value: 188.0 },
+        { label: "Abr", value: 230.0 },
+        { label: "May", value: 262.0 },
+        { label: "Jun", value: 219.0 },
+        { label: "Jul", value: 254.0 },
+        { label: "Ago", value: 271.0 },
+        { label: "Sep", value: 296.0 },
+        { label: "Oct", value: 284.6, partial: true }
+      ];
+
+      const NS = "http://www.w3.org/2000/svg";
+      const mobile = window.matchMedia("(max-width: 720px)").matches;
+      const width = mobile ? 360 : 760;
+      const height = mobile ? 270 : 292;
+      const plot = mobile
+        ? { left: 36, right: 344, top: 18, bottom: 208 }
+        : { left: 54, right: 728, top: 22, bottom: 238 };
+      const maxValue = 320;
+      const plotWidth = plot.right - plot.left;
+      const plotHeight = plot.bottom - plot.top;
+      const xFor = (index) => plot.left + (plotWidth * index) / (data.length - 1);
+      const yFor = (value) => plot.bottom - (value / maxValue) * plotHeight;
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-labelledby", "chart-svg-title chart-svg-desc");
+
+      const title = document.createElementNS(NS, "title");
+      title.setAttribute("id", "chart-svg-title");
+      title.textContent = "Ventas por mes en millones de pesos";
+      const desc = document.createElementNS(NS, "desc");
+      desc.setAttribute("id", "chart-svg-desc");
+      desc.textContent = "Serie de 12 meses. Octubre de 2026 está en curso y se muestra con línea punteada.";
+      svg.append(title, desc);
+
+      const defs = document.createElementNS(NS, "defs");
+      const gradient = document.createElementNS(NS, "linearGradient");
+      gradient.setAttribute("id", "area-fill");
+      gradient.setAttribute("x1", "0");
+      gradient.setAttribute("y1", "0");
+      gradient.setAttribute("x2", "0");
+      gradient.setAttribute("y2", "1");
+      const stopTop = document.createElementNS(NS, "stop");
+      stopTop.setAttribute("offset", "0%");
+      stopTop.setAttribute("stop-color", "#17324d");
+      stopTop.setAttribute("stop-opacity", ".15");
+      const stopBottom = document.createElementNS(NS, "stop");
+      stopBottom.setAttribute("offset", "100%");
+      stopBottom.setAttribute("stop-color", "#17324d");
+      stopBottom.setAttribute("stop-opacity", "0");
+      gradient.append(stopTop, stopBottom);
+      defs.append(gradient);
+      svg.append(defs);
+
+      [0, 100, 200, 300].forEach((tick) => {
+        const y = yFor(tick);
+        const line = document.createElementNS(NS, "line");
+        line.setAttribute("x1", plot.left);
+        line.setAttribute("x2", plot.right);
+        line.setAttribute("y1", y);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", tick === 0 ? "#bdb6a8" : "#e5e0d5");
+        line.setAttribute("stroke-width", "1");
+        svg.append(line);
+
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", plot.left - 10);
+        label.setAttribute("y", y + 4);
+        label.setAttribute("text-anchor", "end");
+        label.setAttribute("fill", "#7b817b");
+        label.setAttribute("font-size", mobile ? "9" : "11");
+        label.textContent = tick === 0 ? "0" : `${tick}`;
+        svg.append(label);
+      });
+
+      const axis = document.createElementNS(NS, "text");
+      axis.setAttribute("x", plot.left);
+      axis.setAttribute("y", plot.top - 6);
+      axis.setAttribute("text-anchor", "start");
+      axis.setAttribute("fill", "#7b817b");
+      axis.setAttribute("font-size", mobile ? "9" : "10");
+      axis.textContent = "millones $";
+      svg.append(axis);
+
+      const areaPath = document.createElementNS(NS, "path");
+      const firstX = xFor(0);
+      const baseline = yFor(0);
+      let area = `M ${firstX} ${baseline} L ${firstX} ${yFor(data[0].value)}`;
+      data.forEach((item, index) => {
+        area += ` L ${xFor(index)} ${yFor(item.value)}`;
+      });
+      area += ` L ${xFor(data.length - 1)} ${baseline} Z`;
+      areaPath.setAttribute("d", area);
+      areaPath.setAttribute("fill", "url(#area-fill)");
+      svg.append(areaPath);
+
+      const closed = data.filter((item) => !item.partial);
+      const closedPath = document.createElementNS(NS, "path");
+      const closedD = closed.map((item, index) => `${index === 0 ? "M" : "L"} ${xFor(index)} ${yFor(item.value)}`).join(" ");
+      closedPath.setAttribute("d", closedD);
+      closedPath.setAttribute("fill", "none");
+      closedPath.setAttribute("stroke", "#17324d");
+      closedPath.setAttribute("stroke-width", "2.4");
+      closedPath.setAttribute("stroke-linecap", "round");
+      closedPath.setAttribute("stroke-linejoin", "round");
+      svg.append(closedPath);
+
+      const partial = data[data.length - 1];
+      const previousClosed = data[data.length - 2];
+      const partialPath = document.createElementNS(NS, "path");
+      partialPath.setAttribute("d", `M ${xFor(data.length - 2)} ${yFor(previousClosed.value)} L ${xFor(data.length - 1)} ${yFor(partial.value)}`);
+      partialPath.setAttribute("fill", "none");
+      partialPath.setAttribute("stroke", "#a7653c");
+      partialPath.setAttribute("stroke-width", "2.4");
+      partialPath.setAttribute("stroke-dasharray", "5 5");
+      partialPath.setAttribute("stroke-linecap", "round");
+      svg.append(partialPath);
+
+      data.forEach((item, index) => {
+        const dot = document.createElementNS(NS, "circle");
+        dot.setAttribute("cx", xFor(index));
+        dot.setAttribute("cy", yFor(item.value));
+        dot.setAttribute("r", item.partial ? "5" : "3.6");
+        dot.setAttribute("fill", item.partial ? "#fffdf8" : "#17324d");
+        dot.setAttribute("stroke", item.partial ? "#a7653c" : "#17324d");
+        dot.setAttribute("stroke-width", item.partial ? "2.4" : "1");
+        svg.append(dot);
+      });
+
+      data.forEach((item, index) => {
+        const showLabel = index % 2 === 0 || item.partial;
+        if (!showLabel) return;
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", xFor(index));
+        label.setAttribute("y", plot.bottom + (mobile ? 18 : 22));
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", item.partial ? "#a7653c" : "#6d756f");
+        label.setAttribute("font-size", mobile ? "10" : "11");
+        label.setAttribute("font-weight", item.partial ? "700" : "500");
+        label.textContent = item.label;
+        svg.append(label);
+      });
+
+      const lastLabel = document.createElementNS(NS, "text");
+      lastLabel.setAttribute("x", xFor(data.length - 1));
+      lastLabel.setAttribute("y", yFor(partial.value) - 12);
+      lastLabel.setAttribute("text-anchor", "end");
+      lastLabel.setAttribute("fill", "#a7653c");
+      lastLabel.setAttribute("font-size", mobile ? "9" : "10");
+      lastLabel.setAttribute("font-weight", "700");
+      lastLabel.textContent = "en curso";
+      svg.append(lastLabel);
+
+      document.getElementById("chart").append(svg);
+    })();
+  </script>
+</body>
+</html>

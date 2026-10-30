@@ -172,6 +172,23 @@ def csrf_token_is_valid() -> bool:
     )
 
 
+def current_user():
+    username = current_username()
+    if not username:
+        return None
+    return User.get_or_none(
+        (User.username == username) & (User.active == True)  # noqa: E712
+    )
+
+
+def can_view_managerial_dashboard() -> bool:
+    user = current_user()
+    if user is None:
+        return False
+    profile = (user.profile.name or "").strip().lower()
+    return profile in {"administrador", "gerencia"}
+
+
 def is_administrator() -> bool:
     """True si el usuario de la sesion es administrador.
 

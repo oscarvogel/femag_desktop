@@ -27,6 +27,7 @@ from app.utils.datetime_utils import utc_datetime_to_local
 from webapp import audit, production_service
 from webapp.auth import (
     SESSION_LIFETIME,
+    can_view_managerial_dashboard,
     csrf_token,
     csrf_token_is_valid,
     current_username,
@@ -38,6 +39,7 @@ from webapp.auth import (
     redirect_after_login,
     resolve_secret_key,
 )
+from webapp.managerial_dashboard_service import ManagerialDashboardService
 from webapp.order_service import (
     InvalidQrPayloadError,
     OrderNotFoundError,
@@ -129,6 +131,7 @@ def create_app(*, secret_key: str | None = None) -> Flask:
         return {
             "current_username": current_username,
             "is_administrator": is_administrator,
+            "can_view_managerial_dashboard": can_view_managerial_dashboard,
             "csrf_token": csrf_token,
         }
 
@@ -582,6 +585,15 @@ self.addEventListener("fetch", event => {
             "consumption_rows": production_service.CONSUMPTION_ROWS,
             "submitted": submitted if submitted is not None else _blank_submitted(),
         }
+
+    @app.get("/gerencia")
+    @login_required
+    def managerial_dashboard():
+        if not can_view_managerial_dashboard():
+            flash("Solo Gerencia puede ver el dashboard gerencial.", "error")
+            return redirect(url_for("production"))
+        dashboard = ManagerialDashboardService.latest_view()
+        return render_template("managerial_dashboard.html", dashboard=dashboard)
 
     @app.route("/produccion", methods=["GET", "POST"])
     @login_required
