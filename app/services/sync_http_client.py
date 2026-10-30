@@ -83,19 +83,27 @@ class SyncHttpClient:
             reason = getattr(exc, "reason", exc)
             raise SyncHttpError(0, str(reason)) from exc
 
-    def post_snapshot(self, snapshot: dict) -> dict:
+    def _post_with_retry(self, path: str, payload: dict) -> dict:
         last_error = None
         for attempt in range(3):
             try:
-                return self._request(
-                    "POST", "/api/sync/v1/snapshots/orders", snapshot
-                )
+                return self._request("POST", path, payload)
             except SyncHttpError as exc:
                 last_error = exc
                 if exc.status not in {0, 500, 502, 503, 504} or attempt == 2:
                     raise
                 time.sleep(3 * (attempt + 1))
         raise last_error
+
+    def post_snapshot(self, snapshot: dict) -> dict:
+        return self._post_with_retry(
+            "/api/sync/v1/snapshots/orders", snapshot
+        )
+
+    def post_managerial_snapshot(self, snapshot: dict) -> dict:
+        return self._post_with_retry(
+            "/api/sync/v1/snapshots/managerial", snapshot
+        )
 
     def post_event(self, event: dict) -> dict:
         return self._request("POST", "/api/sync/v1/events", event)

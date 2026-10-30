@@ -99,6 +99,7 @@ class SyncCursor(BaseModel):
     STREAM_FACTORY = "factory"
     STREAM_CLOUD = "cloud"
     STREAM_FACTORY_SNAPSHOT = "factory_snapshot"
+    STREAM_FACTORY_MANAGERIAL = "factory_managerial"
 
     stream = CharField(max_length=32, unique=True)
     cursor_value = IntegerField(default=0)
@@ -131,6 +132,7 @@ class SyncProjection(BaseModel):
     """Copia de lectura que la nube guarda de un recurso de fabrica."""
 
     RESOURCE_ORDER = "order"
+    RESOURCE_MANAGERIAL = "managerial_dashboard"
 
     resource_type = CharField()
     resource_uid = CharField(max_length=36)

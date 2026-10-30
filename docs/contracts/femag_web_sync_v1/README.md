@@ -29,6 +29,7 @@ implementar. La arquitectura general está en
 | Método | Ruta | Uso |
 | --- | --- | --- |
 | `POST` | `/api/sync/v1/snapshots/orders` | Publicar snapshot inicial o de reconciliación |
+| `POST` | `/api/sync/v1/snapshots/managerial` | Publicar snapshot gerencial agregado (#837) |
 | `POST` | `/api/sync/v1/events` | Publicar eventos del outbox de fábrica |
 | `GET` | `/api/sync/v1/events?cursor=<n>&limit=<n>` | Traer eventos originados en la nube |
 | `POST` | `/api/sync/v1/events/{event_id}/ack` | Confirmar aplicación o conflicto |
@@ -101,6 +102,24 @@ El snapshot incluye `orders[]` con:
 - `loose_contents[]`: mercadería sin pallet con la misma estructura de contenido.
 
 No incluye precios, costos, saldos, stock, remitos ni contabilidad.
+
+## Snapshot gerencial
+
+`POST /api/sync/v1/snapshots/managerial` recibe solo agregados del mes:
+
+- `period` y `previous_period` (`start`, `end`, `label`);
+- `kpis`: ventas, toneladas, pedidos y ticket promedio, cada uno con
+  `current`, `previous` y `variation_percent`;
+- `monthly_evolution[]`: 12 puntos con `period`, `label`, `total`, `tonnes`,
+  `orders` y `partial`;
+- `top_clients[]` y `top_products[]`, máximo 5 en el MVP, con nombre, total,
+  toneladas y variación de la métrica del ranking (valor para clientes,
+  toneladas para productos).
+
+No incluye órdenes crudas, clientes completos, cuentas corrientes, precios,
+costos ni stock. La nube guarda únicamente el último snapshot en
+`syncprojection` con `resource_type=managerial_dashboard` y
+`resource_uid=latest`.
 
 ## Cursores e idempotencia
 
@@ -191,6 +210,7 @@ Reglas:
 ## Archivos
 
 - [`order-snapshot.schema.json`](order-snapshot.schema.json)
+- [`managerial-snapshot.schema.json`](managerial-snapshot.schema.json)
 - [`sync-event.schema.json`](sync-event.schema.json)
 - [`sync-error.schema.json`](sync-error.schema.json)
 

@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17324d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FEMAG">
+  <link rel="manifest" href="{{ url_for('manifest') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <title>FEMAG Gerencia · Dashboard</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><strong>FEMAG</strong><span>Gerencia</span></div>
+      <nav aria-label="Navegación principal">
+        <a href="{{ url_for('managerial_dashboard') }}" aria-current="page">Resumen</a>
+        <a href="{{ url_for('production') }}">Producción</a>
+        <a href="{{ url_for('home') }}">Órdenes</a>
+        {% if is_administrator() %}
+        <a href="{{ url_for('accesos') }}">Accesos</a>
+        {% endif %}
+      </nav>
+      <div class="user"><span>{{ current_username() }}</span><a href="{{ url_for('logout') }}">Salir</a></div>
+    </div>
+  </header>
+
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <div class="message {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    {% if dashboard.empty %}
+    <section class="page-head" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Dashboard gerencial</p>
+        <h1 id="page-title">Sin datos todavía</h1>
+        <p class="subtitle">La nube espera el primer snapshot agregado de la fábrica.</p>
+      </div>
+    </section>
+    <section class="empty-state">
+      <h2>El tablero se va a completar solo</h2>
+      <p>Cuando el agente de fábrica publique el snapshot gerencial, acá van a aparecer las ventas, toneladas, pedidos, ticket promedio y los rankings del mes. No hay datos inventados ni una copia parcial para mostrar.</p>
+      {% if dashboard.error %}<p class="muted">Detalle: {{ dashboard.error }}</p>{% endif %}
+    </section>
+    {% else %}
+    <section class="page-head" aria-labelledby="page-title">
+      <div>
+        <p class="kicker">Dashboard gerencial</p>
+        <h1 id="page-title">{{ dashboard.period_label }}</h1>
+        <p class="subtitle">{{ dashboard.period_subtitle }}</p>
+      </div>
+      <div class="snapshot">
+        <span class="status"><i class="dot"></i> Snapshot al {{ dashboard.snapshot_time }}</span>
+        <div>Se actualiza cada 30 minutos</div>
+      </div>
+    </section>
+
+    <section class="brief" aria-label="Lectura rápida">
+      <p>{{ dashboard.brief.before }}<strong>{{ dashboard.brief.value }}</strong>{{ dashboard.brief.after }}</p>
+    </section>
+
+    <section class="kpis" aria-label="Indicadores del mes">
+      <article class="kpi">
+        <div class="kpi-label">Ventas del mes</div>
+        <div class="kpi-value">{{ dashboard.kpis.ventas.value }}</div>
+        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.ventas.direction }}">{{ dashboard.kpis.ventas.delta }}</span><span>vs. {{ dashboard.kpis.ventas.previous }}</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Toneladas despachadas</div>
+        <div class="kpi-value">{{ dashboard.kpis.toneladas.value }}</div>
+        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.toneladas.direction }}">{{ dashboard.kpis.toneladas.delta }}</span><span>vs. {{ dashboard.kpis.toneladas.previous }}</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Pedidos</div>
+        <div class="kpi-value">{{ dashboard.kpis.pedidos.value }}</div>
+        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.pedidos.direction }}">{{ dashboard.kpis.pedidos.delta }}</span><span>vs. {{ dashboard.kpis.pedidos.previous }}</span></div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-label">Ticket promedio</div>
+        <div class="kpi-value">{{ dashboard.kpis.ticket.value }}</div>
+        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.ticket.direction }}">{{ dashboard.kpis.ticket.delta }}</span><span>vs. {{ dashboard.kpis.ticket.previous }}</span></div>
+      </article>
+    </section>
+
+    <div class="layout">
+      <section class="panel" aria-labelledby="chart-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="chart-title">Ventas por mes</h2>
+            <p class="caption">Últimos 12 meses · millones de pesos</p>
+          </div>
+          <div class="legend" aria-hidden="true">
+            <span><i></i> Mes cerrado</span>
+            {% if dashboard.chart and dashboard.chart[-1].partial %}
+            <span><i class="partial"></i> Mes en curso</span>
+            {% endif %}
+          </div>
+        </div>
+        <div id="chart" role="img" aria-label="Evolución mensual de ventas"></div>
+        {% if dashboard.chart and dashboard.chart[-1].partial %}
+        <p class="chart-note">El último mes está en curso: no se compara como un mes cerrado.</p>
+        {% endif %}
+      </section>
+
+      <aside class="panel reading" aria-labelledby="reading-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="reading-title">Para mirar</h2>
+            <p class="caption">Señales del snapshot</p>
+          </div>
+        </div>
+        {% for insight in dashboard.insights %}
+        <div class="reading-item">
+          <span class="reading-label">{{ insight.label }}</span>
+          <p>{{ insight.before }}{% if insight.value %}<strong>{{ insight.value }}</strong>{% endif %}{{ insight.after }}</p>
+        </div>
+        {% else %}
+        <div class="reading-item"><p class="muted">Sin señales para mostrar.</p></div>
+        {% endfor %}
+      </aside>
+    </div>
+
+    <section class="lists" aria-label="Rankings del mes">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Top 5 clientes</h2>
+            <p class="caption">Venta del mes · millones</p>
+          </div>
+        </div>
+        <ol class="rank">
+          {% for row in dashboard.top_clients %}
+          <li>
+            <span class="pos">{{ "%02d"|format(loop.index) }}</span>
+            <div><span class="name">{{ row.name }}</span><div class="bar"><i style="width: {{ row.bar_percent }}%"></i></div></div>
+            <span class="value">{{ row.value }}<small class="{{ row.direction }}">{{ row.delta }}</small></span>
+          </li>
+          {% else %}
+          <li><p class="muted">Sin clientes en el período.</p></li>
+          {% endfor %}
+        </ol>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Top 5 productos</h2>
+            <p class="caption">Toneladas despachadas · mes en curso</p>
+          </div>
+        </div>
+        <ol class="rank">
+          {% for row in dashboard.top_products %}
+          <li>
+            <span class="pos">{{ "%02d"|format(loop.index) }}</span>
+            <div><span class="name">{{ row.name }}</span><div class="bar"><i style="width: {{ row.bar_percent }}%"></i></div></div>
+            <span class="value">{{ row.value }}<small class="{{ row.direction }}">{{ row.delta }}</small></span>
+          </li>
+          {% else %}
+          <li><p class="muted">Sin productos en el período.</p></li>
+          {% endfor %}
+        </ol>
+      </article>
+    </section>
+
+    <footer>
+      <span>FEMAG · Dashboard Gerencial · acceso solo Gerencia</span>
+      <span>Snapshot de fábrica del {{ dashboard.snapshot_time }} · {{ dashboard.period_label }}</span>
+    </footer>
+    {% endif %}
+  </main>
+
+  {% if not dashboard.empty %}
+  <table class="sr-only" id="chart-data-table">
+    <caption>Ventas mensuales en millones de pesos</caption>
+    <thead><tr><th>Mes</th><th>Ventas</th></tr></thead>
+    <tbody>
+      {% for point in dashboard.chart %}
+      <tr><th>{{ point.label }}</th><td>{{ point.value }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <script type="application/json" id="chart-data">{{ dashboard.chart|tojson }}</script>
+  <script>
+    (() => {
+      const data = JSON.parse(document.getElementById("chart-data").textContent);
+      if (!data.length) return;
+      const NS = "http://www.w3.org/2000/svg";
+      const mobile = window.matchMedia("(max-width: 720px)").matches;
+      const width = mobile ? 360 : 760;
+      const height = mobile ? 270 : 292;
+      const plot = mobile
+        ? { left: 36, right: 344, top: 18, bottom: 208 }
+        : { left: 54, right: 728, top: 22, bottom: 238 };
+      const maxRaw = Math.max(...data.map((item) => Number(item.value) || 0), 1);
+      const rawStep = maxRaw / 3;
+      const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+      const step = Math.max(magnitude, Math.ceil(rawStep / magnitude) * magnitude);
+      const maxValue = step * 3;
+      const plotWidth = plot.right - plot.left;
+      const plotHeight = plot.bottom - plot.top;
+      const xFor = (index) => plot.left + (plotWidth * index) / Math.max(data.length - 1, 1);
+      const yFor = (value) => plot.bottom - (value / maxValue) * plotHeight;
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-labelledby", "chart-svg-title chart-svg-desc");
+
+      const title = document.createElementNS(NS, "title");
+      title.setAttribute("id", "chart-svg-title");
+      title.textContent = "Ventas por mes en millones de pesos";
+      const desc = document.createElementNS(NS, "desc");
+      desc.setAttribute("id", "chart-svg-desc");
+      desc.textContent = "Serie mensual de ventas. El último punto puede estar en curso.";
+      svg.append(title, desc);
+
+      const defs = document.createElementNS(NS, "defs");
+      const gradient = document.createElementNS(NS, "linearGradient");
+      gradient.setAttribute("id", "area-fill");
+      gradient.setAttribute("x1", "0");
+      gradient.setAttribute("y1", "0");
+      gradient.setAttribute("x2", "0");
+      gradient.setAttribute("y2", "1");
+      const stopTop = document.createElementNS(NS, "stop");
+      stopTop.setAttribute("offset", "0%");
+      stopTop.setAttribute("stop-color", "#17324d");
+      stopTop.setAttribute("stop-opacity", ".15");
+      const stopBottom = document.createElementNS(NS, "stop");
+      stopBottom.setAttribute("offset", "100%");
+      stopBottom.setAttribute("stop-color", "#17324d");
+      stopBottom.setAttribute("stop-opacity", "0");
+      gradient.append(stopTop, stopBottom);
+      defs.append(gradient);
+      svg.append(defs);
+
+      [0, step, step * 2, step * 3].forEach((tick) => {
+        const y = yFor(tick);
+        const line = document.createElementNS(NS, "line");
+        line.setAttribute("x1", plot.left);
+        line.setAttribute("x2", plot.right);
+        line.setAttribute("y1", y);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", tick === 0 ? "#bdb6a8" : "#e5e0d5");
+        line.setAttribute("stroke-width", "1");
+        svg.append(line);
+
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", plot.left - 10);
+        label.setAttribute("y", y + 4);
+        label.setAttribute("text-anchor", "end");
+        label.setAttribute("fill", "#7b817b");
+        label.setAttribute("font-size", mobile ? "9" : "11");
+        label.textContent = tick === 0 ? "0" : new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(tick);
+        svg.append(label);
+      });
+
+      const axis = document.createElementNS(NS, "text");
+      axis.setAttribute("x", plot.left);
+      axis.setAttribute("y", plot.top - 6);
+      axis.setAttribute("text-anchor", "start");
+      axis.setAttribute("fill", "#7b817b");
+      axis.setAttribute("font-size", mobile ? "9" : "10");
+      axis.textContent = "millones $";
+      svg.append(axis);
+
+      const baseline = yFor(0);
+      let area = `M ${xFor(0)} ${baseline} L ${xFor(0)} ${yFor(data[0].value)}`;
+      data.forEach((item, index) => {
+        area += ` L ${xFor(index)} ${yFor(item.value)}`;
+      });
+      area += ` L ${xFor(data.length - 1)} ${baseline} Z`;
+      const areaPath = document.createElementNS(NS, "path");
+      areaPath.setAttribute("d", area);
+      areaPath.setAttribute("fill", "url(#area-fill)");
+      svg.append(areaPath);
+
+      const closed = data.filter((item) => !item.partial);
+      const closedPath = document.createElementNS(NS, "path");
+      closedPath.setAttribute(
+        "d",
+        closed.map((item, index) => `${index === 0 ? "M" : "L"} ${xFor(index)} ${yFor(item.value)}`).join(" ")
+      );
+      closedPath.setAttribute("fill", "none");
+      closedPath.setAttribute("stroke", "#17324d");
+      closedPath.setAttribute("stroke-width", "2.4");
+      closedPath.setAttribute("stroke-linecap", "round");
+      closedPath.setAttribute("stroke-linejoin", "round");
+      svg.append(closedPath);
+
+      const last = data[data.length - 1];
+      if (last.partial && data.length > 1) {
+        const previous = data[data.length - 2];
+        const partialPath = document.createElementNS(NS, "path");
+        partialPath.setAttribute("d", `M ${xFor(data.length - 2)} ${yFor(previous.value)} L ${xFor(data.length - 1)} ${yFor(last.value)}`);
+        partialPath.setAttribute("fill", "none");
+        partialPath.setAttribute("stroke", "#a7653c");
+        partialPath.setAttribute("stroke-width", "2.4");
+        partialPath.setAttribute("stroke-dasharray", "5 5");
+        partialPath.setAttribute("stroke-linecap", "round");
+        svg.append(partialPath);
+      }
+
+      data.forEach((item, index) => {
+        const dot = document.createElementNS(NS, "circle");
+        dot.setAttribute("cx", xFor(index));
+        dot.setAttribute("cy", yFor(item.value));
+        dot.setAttribute("r", item.partial ? "5" : "3.6");
+        dot.setAttribute("fill", item.partial ? "#fffdf8" : "#17324d");
+        dot.setAttribute("stroke", item.partial ? "#a7653c" : "#17324d");
+        dot.setAttribute("stroke-width", item.partial ? "2.4" : "1");
+        svg.append(dot);
+      });
+
+      data.forEach((item, index) => {
+        if (index % 2 !== 0 && !item.partial) return;
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", xFor(index));
+        label.setAttribute("y", plot.bottom + (mobile ? 18 : 22));
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", item.partial ? "#a7653c" : "#6d756f");
+        label.setAttribute("font-size", mobile ? "10" : "11");
+        label.setAttribute("font-weight", item.partial ? "700" : "500");
+        label.textContent = item.label;
+        svg.append(label);
+      });
+
+      if (last.partial) {
+        const lastLabel = document.createElementNS(NS, "text");
+        lastLabel.setAttribute("x", xFor(data.length - 1));
+        lastLabel.setAttribute("y", yFor(last.value) - 12);
+        lastLabel.setAttribute("text-anchor", "end");
+        lastLabel.setAttribute("fill", "#a7653c");
+        lastLabel.setAttribute("font-size", mobile ? "9" : "10");
+        lastLabel.setAttribute("font-weight", "700");
+        lastLabel.textContent = "en curso";
+        svg.append(lastLabel);
+      }
+
+      document.getElementById("chart").append(svg);
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

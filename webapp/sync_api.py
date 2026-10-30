@@ -21,6 +21,10 @@ from app.services.sync_snapshot_service import (
     SyncTokenConflict,
     SyncVersionConflict,
 )
+from webapp.managerial_dashboard_service import (
+    ManagerialDashboardError,
+    ManagerialDashboardService,
+)
 
 sync_api = Blueprint("sync_api", __name__, url_prefix="/api/sync/v1")
 
@@ -117,6 +121,29 @@ def receive_order_snapshot():
             409,
         )
     except SyncSnapshotError as exc:
+        return (
+            jsonify({"error": "invalid_snapshot", "message": str(exc)}),
+            422,
+        )
+    return jsonify(result)
+
+
+@sync_api.post("/snapshots/managerial")
+def receive_managerial_snapshot():
+    snapshot = request.get_json(silent=True)
+    if not isinstance(snapshot, dict):
+        return (
+            jsonify(
+                {
+                    "error": "invalid_snapshot",
+                    "message": "Se esperaba un objeto JSON.",
+                }
+            ),
+            400,
+        )
+    try:
+        result = ManagerialDashboardService.apply_snapshot(snapshot)
+    except ManagerialDashboardError as exc:
         return (
             jsonify({"error": "invalid_snapshot", "message": str(exc)}),
             422,

@@ -158,6 +158,22 @@ def test_http_client_sends_bearer_token_and_parses_json():
     assert client.timeout == 90
 
 
+def test_http_client_posts_managerial_snapshot():
+    opener = _FakeOpener(b'{"accepted": true}')
+    client = SyncHttpClient(
+        "https://sync.example",
+        "token",
+        opener=opener,
+    )
+
+    result = client.post_managerial_snapshot({"schema_version": "1.0"})
+
+    assert result == {"accepted": True}
+    assert opener.request.full_url == (
+        "https://sync.example/api/sync/v1/snapshots/managerial"
+    )
+
+
 def test_http_client_rejects_http_without_explicit_override():
     with pytest.raises(ValueError):
         SyncHttpClient("http://sync.example", "token")

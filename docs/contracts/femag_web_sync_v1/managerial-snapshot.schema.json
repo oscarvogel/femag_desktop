@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "managerial-snapshot.schema.json",
+  "title": "Snapshot gerencial FEMAG",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "generated_at",
+    "period",
+    "previous_period",
+    "currency",
+    "kpis",
+    "monthly_evolution",
+    "top_clients",
+    "top_products"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "snapshot_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "period": {
+      "$ref": "#/$defs/period"
+    },
+    "previous_period": {
+      "$ref": "#/$defs/period"
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3
+    },
+    "kpis": {
+      "$ref": "#/$defs/kpis"
+    },
+    "monthly_evolution": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "$ref": "#/$defs/monthlyPoint"
+      }
+    },
+    "top_clients": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/topRow"
+      }
+    },
+    "top_products": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/topRow"
+      }
+    }
+  },
+  "$defs": {
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "label"],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date"
+        },
+        "end": {
+          "type": "string",
+          "format": "date"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "previous", "variation_percent"],
+      "properties": {
+        "current": {
+          "type": "number",
+          "minimum": 0
+        },
+        "previous": {
+          "type": "number",
+          "minimum": 0
+        },
+        "variation_percent": {
+          "type": ["number", "null"]
+        }
+      }
+    },
+    "kpis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valued_dispatches",
+        "tonnes",
+        "orders",
+        "average_ticket"
+      ],
+      "properties": {
+        "valued_dispatches": {
+          "$ref": "#/$defs/metric"
+        },
+        "tonnes": {
+          "$ref": "#/$defs/metric"
+        },
+        "orders": {
+          "$ref": "#/$defs/metric"
+        },
+        "average_ticket": {
+          "$ref": "#/$defs/metric"
+        }
+      }
+    },
+    "monthlyPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "label", "total", "tonnes", "orders", "partial"],
+      "properties": {
+        "period": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "orders": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial": {
+          "type": "boolean"
+        }
+      }
+    },
+    "topRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "total",
+        "tonnes",
+        "previous_total",
+        "previous_tonnes",
+        "variation_percent"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "previous_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "previous_tonnes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "variation_percent": {
+          "type": ["number", "null"]
+        }
+      }
+    }
+  }
+}

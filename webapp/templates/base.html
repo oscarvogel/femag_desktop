@@ -56,6 +56,9 @@
   <nav>
     <a href="{{ url_for('home') }}">Órdenes</a>
     <a href="{{ url_for('production') }}">Producción</a>
+    {% if can_view_managerial_dashboard() %}
+      <a href="{{ url_for('managerial_dashboard') }}">Gerencia</a>
+    {% endif %}
     {% if is_administrator() %}
       <a href="{{ url_for('accesos') }}">Accesos</a>
     {% endif %}

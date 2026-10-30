@@ -25,12 +25,16 @@ from app.config.schema import (
     ensure_sync_schema,
     validate_sync_schema,
 )
+from app.services.managerial_snapshot_publisher import (
+    ManagerialSnapshotPublisher,
+)
 from app.services.sync_event_consumer import SyncEventConsumer
 from app.services.sync_http_client import SyncHttpClient
 from app.services.sync_order_publisher import SyncOrderPublisher
 from app.services.sync_service import SyncService
 
 DEFAULT_SYNC_ENV = Path(r"C:\ProgramData\FEMAG\sync.env")
+logger = logging.getLogger(__name__)
 
 
 def _load_config() -> Path | None:
@@ -121,14 +125,41 @@ def run_sync(limit: int | None = None) -> int:
         inbound = SyncEventConsumer(client).pull_and_apply()
         publisher = SyncOrderPublisher(limit=limit)
         snapshot = publisher.publish_snapshot(client)
+        managerial = None
+        managerial_publisher = ManagerialSnapshotPublisher()
+        if managerial_publisher.should_publish():
+            try:
+                managerial = managerial_publisher.publish(client)
+            except Exception as exc:
+                logger.warning(
+                    "No se pudo publicar el snapshot gerencial: %s", exc
+                )
         print(
             json.dumps(
-                {"inbound": inbound, "snapshot": snapshot},
+                {
+                    "inbound": inbound,
+                    "snapshot": snapshot,
+                    "managerial": managerial,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return 0 if not snapshot["skipped"] else 1
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
+def run_managerial() -> int:
+    database = initialize_runtime_database()
+    database.connect(reuse_if_open=True)
+    try:
+        validate_sync_schema(database)
+        client = _client_from_env()
+        result = ManagerialSnapshotPublisher().publish(client)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     finally:
         if not database.is_closed():
             database.close()
@@ -153,6 +184,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agente de sincronizacion FEMAG.")
     parser.add_argument("--sync", action="store_true", help="Aplicar eventos y publicar snapshot")
     parser.add_argument("--snapshot", action="store_true", help="Publicar snapshot completo")
+    parser.add_argument(
+        "--managerial",
+        action="store_true",
+        help="Publicar solo el snapshot gerencial",
+    )
     parser.add_argument("--status", action="store_true", help="Mostrar estado local de sync")
     parser.add_argument(
         "--init-schema",
@@ -167,6 +203,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_init_schema()
         if args.status:
             return run_status()
+        if args.managerial:
+            return run_managerial()
         if args.sync:
             return run_sync(limit=args.limit)
         return run_snapshot(limit=args.limit)

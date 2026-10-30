@@ -197,6 +197,20 @@ Si no hay ninguno, el parte se puede guardar pero **no se puede confirmar**: el
 servicio lo bloquea a propósito, porque sin salida de materia prima las bolsas
 entrarían al stock y el mismo kilo quedaría en los dos stocks.
 
+## Dashboard gerencial (#837)
+
+`/gerencia` muestra el último snapshot agregado que publica la fábrica. Está
+pensado para Gerencia y Administrador, desde celular o notebook.
+
+- La fábrica publica solo agregados del mes cada 30 minutos: ventas, toneladas,
+  pedidos, ticket promedio, evolución de 12 meses, top 5 clientes y top 5
+  productos.
+- La nube guarda el último snapshot en `syncprojection` con
+  `resource_type=managerial_dashboard` y `resource_uid=latest`.
+- No viajan órdenes crudas, cuentas corrientes, precios ni stock.
+- Si todavía no llegó un snapshot, la pantalla muestra un estado vacío explícito
+  y no inventa datos.
+
 ## Cámara y HTTPS
 
 El acceso a cámara desde JavaScript requiere un contexto seguro en los navegadores modernos. En la misma PC `http://localhost:8000` normalmente funciona, pero desde un celular accediendo a `http://192.168.x.x:8000` el navegador puede bloquear la cámara por no usar HTTPS.
