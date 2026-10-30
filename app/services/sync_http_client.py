@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,7 +29,7 @@ class SyncHttpClient:
         base_url: str,
         token: str,
         *,
-        timeout: int = 30,
+        timeout: int = 90,
         opener=None,
         allow_http: bool | None = None,
         ca_file: str | None = None,
@@ -78,11 +79,23 @@ class SyncHttpClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")
             raise SyncHttpError(exc.code, body) from exc
-        except urllib.error.URLError as exc:
-            raise SyncHttpError(0, str(exc.reason)) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise SyncHttpError(0, str(reason)) from exc
 
     def post_snapshot(self, snapshot: dict) -> dict:
-        return self._request("POST", "/api/sync/v1/snapshots/orders", snapshot)
+        last_error = None
+        for attempt in range(3):
+            try:
+                return self._request(
+                    "POST", "/api/sync/v1/snapshots/orders", snapshot
+                )
+            except SyncHttpError as exc:
+                last_error = exc
+                if exc.status not in {0, 500, 502, 503, 504} or attempt == 2:
+                    raise
+                time.sleep(3 * (attempt + 1))
+        raise last_error
 
     def post_event(self, event: dict) -> dict:
         return self._request("POST", "/api/sync/v1/events", event)

@@ -155,6 +155,7 @@ def test_http_client_sends_bearer_token_and_parses_json():
     assert opener.request.full_url == "https://sync.example/api/sync/v1/snapshots/orders"
     assert opener.request.get_method() == "POST"
     assert opener.request.get_header("Authorization") == "Bearer token-secreto"
+    assert client.timeout == 90
 
 
 def test_http_client_rejects_http_without_explicit_override():
@@ -192,6 +193,31 @@ def test_http_client_maps_http_errors():
 
     assert exc.value.status == 409
     assert "version_conflict" in exc.value.body
+
+
+def test_http_client_retries_transient_snapshot_errors(monkeypatch):
+    class _FlakyOpener:
+        calls = 0
+
+        def open(self, request, timeout=None, **kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                raise ConnectionResetError("remote closed")
+            return _FakeResponse(b'{"accepted": 1}')
+
+    monkeypatch.setattr(
+        "app.services.sync_http_client.time.sleep", lambda _seconds: None
+    )
+    opener = _FlakyOpener()
+    client = SyncHttpClient(
+        "https://sync.example",
+        "token",
+        opener=opener,
+    )
+
+    assert client.post_snapshot({"orders": []}) == {"accepted": 1}
+    assert opener.calls == 3
+
 
 def test_snapshot_includes_pallet_and_loose_contents(db):
     data = _master_data()
