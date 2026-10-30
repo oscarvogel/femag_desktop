@@ -4,8 +4,15 @@ from datetime import date
 
 from conftest import _master_data
 
-from app.models.load_orders import LoadOrder, LoadOrderProduct
-from app.models.sync import SyncConflict, SyncCursor, SyncInbox
+from app.models.load_orders import (
+    LoadOrder,
+    LoadOrderDestination,
+    LoadOrderLooseAllocation,
+    LoadOrderPallet,
+    LoadOrderPalletAllocation,
+    LoadOrderProduct,
+)
+from app.models.sync import SyncConflict, SyncCursor, SyncEntityMap, SyncInbox
 from app.services.sync_event_consumer import SyncEventConsumer
 from app.services.sync_service import SyncService
 
@@ -134,3 +141,84 @@ def test_consumer_rejects_unsupported_event(db):
 
     assert result["rejected"] == 1
     assert client.acks[0][1] == "rejected"
+
+def _content_event(order_map, content_map, *, content_type="pallet", lote="LOTE-CONTENIDO"):
+    return {
+        "event_id": f"evento-contenido-{content_type}",
+        "event_type": "order_content_lote_fecha_updated",
+        "origin": "cloud",
+        "aggregate_type": "pallet_content" if content_type == "pallet" else "loose_content",
+        "aggregate_id": content_map.global_uid,
+        "aggregate_version": 1,
+        "cursor": 1,
+        "occurred_at": "2026-10-29T12:00:00Z",
+        "payload": {
+            "order_uid": order_map.global_uid,
+            "content_uid": content_map.global_uid,
+            "content_type": content_type,
+            "lote": lote,
+            "fecha_elaboracion": "2026-10-29",
+            "expected_version": 1,
+        },
+    }
+
+
+def test_consumer_applies_pallet_content_event(db):
+    order, line, order_map, _ = _factory_order()
+    destination = LoadOrderDestination.create(
+        order=order,
+        client=order.client,
+        delivery_address=order.delivery_address,
+        sequence=1,
+    )
+    pallet = LoadOrderPallet.create(order=order, sequence=1)
+    allocation = LoadOrderPalletAllocation.create(
+        pallet=pallet,
+        destination=destination,
+        product=line.product,
+        quantity=60,
+        peso_unitario_kg=25,
+    )
+    content_map = SyncService.ensure_entity_uid(
+        SyncEntityMap.ENTITY_PALLET_CONTENT, allocation.id
+    )
+    client = _FakeClient([_content_event(order_map, content_map)])
+
+    result = SyncEventConsumer(client).pull_and_apply()
+
+    assert result["applied"] == 1
+    allocation = LoadOrderPalletAllocation.get_by_id(allocation.id)
+    assert allocation.lote == "LOTE-CONTENIDO"
+    assert allocation.fecha_elaboracion == date(2026, 10, 29)
+    assert client.acks[0][1] == "applied"
+
+
+def test_consumer_applies_loose_content_event(db):
+    order, line, order_map, _ = _factory_order()
+    destination = LoadOrderDestination.create(
+        order=order,
+        client=order.client,
+        delivery_address=order.delivery_address,
+        sequence=1,
+    )
+    allocation = LoadOrderLooseAllocation.create(
+        order=order,
+        destination=destination,
+        product=line.product,
+        quantity=20,
+        peso_unitario_kg=25,
+    )
+    content_map = SyncService.ensure_entity_uid(
+        SyncEntityMap.ENTITY_LOOSE_CONTENT, allocation.id
+    )
+    client = _FakeClient(
+        [_content_event(order_map, content_map, content_type="loose")]
+    )
+
+    result = SyncEventConsumer(client).pull_and_apply()
+
+    assert result["applied"] == 1
+    allocation = LoadOrderLooseAllocation.get_by_id(allocation.id)
+    assert allocation.lote == "LOTE-CONTENIDO"
+    assert allocation.fecha_elaboracion == date(2026, 10, 29)
+    assert client.acks[0][1] == "applied"

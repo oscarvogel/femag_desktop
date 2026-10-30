@@ -25,6 +25,52 @@
     <p class="muted">Para guardar lote y fecha tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
   </div>
   {% endif %}
+  {% if order.has_contents %}
+    {% for pallet in order.pallets %}
+    <div class="card">
+      <h2>Pallet {{ pallet.sequence }}</h2>
+      {% for content in pallet.contents %}
+      <div class="line">
+        <strong>{{ content.product.name }}</strong>
+        <p class="muted">Cantidad: {{ content.quantity }} {{ content.unit }}</p>
+        <div class="dispatch-context">
+          <div><span>Cliente</span><strong>{{ content.client_name }}</strong></div>
+          <div><span>Lugar de entrega</span><strong>{{ content.destination }}</strong></div>
+        </div>
+        <label for="lote_{{ content.id }}">Lote</label>
+        <div class="lot-row">
+          <input id="lote_{{ content.id }}" name="lote_{{ content.id }}" value="{{ content.lote or '' }}" placeholder="Ingresar lote">
+          <button class="scan-lot-button" type="button" data-target="lote_{{ content.id }}" aria-label="Escanear lote de {{ content.product.name }}">Escanear</button>
+        </div>
+        <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
+        <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% if order.loose_contents %}
+    <div class="card">
+      <h2>Mercadería suelta</h2>
+      {% for content in order.loose_contents %}
+      <div class="line">
+        <strong>{{ content.product.name }}</strong>
+        <p class="muted">Cantidad: {{ content.quantity }} {{ content.unit }}</p>
+        <div class="dispatch-context">
+          <div><span>Cliente</span><strong>{{ content.client_name }}</strong></div>
+          <div><span>Lugar de entrega</span><strong>{{ content.destination }}</strong></div>
+        </div>
+        <label for="lote_{{ content.id }}">Lote</label>
+        <div class="lot-row">
+          <input id="lote_{{ content.id }}" name="lote_{{ content.id }}" value="{{ content.lote or '' }}" placeholder="Ingresar lote">
+          <button class="scan-lot-button" type="button" data-target="lote_{{ content.id }}" aria-label="Escanear lote de {{ content.product.name }}">Escanear</button>
+        </div>
+        <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
+        <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% else %}
   <div class="card">
     <h2>Productos</h2>
     {% if lines %}
@@ -59,7 +105,8 @@
       <p>La orden no tiene productos cargados.</p>
     {% endif %}
   </div>
-  {% if lines %}<button type="submit">Guardar lote y fecha</button>{% endif %}
+  {% endif %}
+  {% if lines or order.has_contents %}<button type="submit">Guardar lote y fecha</button>{% endif %}
 </form>
 <div style="height:12px"></div>
 <a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>

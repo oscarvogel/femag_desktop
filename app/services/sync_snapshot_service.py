@@ -59,25 +59,56 @@ def _merge_pending_lotes(order: dict) -> dict:
     ]
     line_ids = [str(line.get("line_uid") or "") for line in lines]
     line_ids = [line_id for line_id in line_ids if line_id]
-    if not line_ids:
-        return merged
 
     pending = {}
-    for event in SyncOutbox.select().where(
-        (SyncOutbox.event_type == "order_lote_fecha_updated")
-        & (SyncOutbox.aggregate_type == "order_line")
-        & (SyncOutbox.aggregate_id.in_(line_ids))
-        & (SyncOutbox.status == SyncOutbox.STATUS_PENDING)
-    ):
-        if isinstance(event.payload, dict):
-            pending[event.aggregate_id] = (
-                event.payload.get("lote"),
-                event.payload.get("fecha_elaboracion"),
-            )
+    if line_ids:
+        for event in SyncOutbox.select().where(
+            (SyncOutbox.event_type == "order_lote_fecha_updated")
+            & (SyncOutbox.aggregate_type == "order_line")
+            & (SyncOutbox.aggregate_id.in_(line_ids))
+            & (SyncOutbox.status == SyncOutbox.STATUS_PENDING)
+        ):
+            if isinstance(event.payload, dict):
+                pending[event.aggregate_id] = (
+                    event.payload.get("lote"),
+                    event.payload.get("fecha_elaboracion"),
+                )
     for line in lines:
         values = pending.get(str(line.get("line_uid") or ""))
         if values is not None:
             line["lote"], line["fecha_elaboracion"] = values
+
+    pallets = [item for item in (merged.get("pallets") or []) if isinstance(item, dict)]
+    contents = [
+        content
+        for pallet in pallets
+        for content in (pallet.get("contents") or [])
+        if isinstance(content, dict)
+    ]
+    contents.extend(
+        content
+        for content in (merged.get("loose_contents") or [])
+        if isinstance(content, dict)
+    )
+    content_ids = [str(item.get("content_uid") or "") for item in contents]
+    content_ids = [content_id for content_id in content_ids if content_id]
+
+    pending_content = {}
+    if content_ids:
+        for event in SyncOutbox.select().where(
+            (SyncOutbox.event_type == "order_content_lote_fecha_updated")
+            & (SyncOutbox.aggregate_id.in_(content_ids))
+            & (SyncOutbox.status == SyncOutbox.STATUS_PENDING)
+        ):
+            if isinstance(event.payload, dict):
+                pending_content[event.aggregate_id] = (
+                    event.payload.get("lote"),
+                    event.payload.get("fecha_elaboracion"),
+                )
+    for content in contents:
+        values = pending_content.get(str(content.get("content_uid") or ""))
+        if values is not None:
+            content["lote"], content["fecha_elaboracion"] = values
     return merged
 
 

@@ -19,7 +19,28 @@
 
 <div class="card">
   <h2>Lote y fecha registrados</h2>
-  {% if lines %}
+  {% if order.has_contents %}
+    {% for pallet in order.pallets %}
+    <h3>Pallet {{ pallet.sequence }}</h3>
+    {% for content in pallet.contents %}
+    <div class="line">
+      <strong>{{ content.product.name }}</strong>
+      <p class="muted">Lote: {{ content.lote or 'Sin lote' }}</p>
+      <p class="muted">Fecha de elaboración: {{ content.fecha_elaboracion.strftime('%d/%m/%Y') if content.fecha_elaboracion else 'Sin fecha' }}</p>
+    </div>
+    {% endfor %}
+    {% endfor %}
+    {% if order.loose_contents %}
+    <h3>Mercadería suelta</h3>
+    {% for content in order.loose_contents %}
+    <div class="line">
+      <strong>{{ content.product.name }}</strong>
+      <p class="muted">Lote: {{ content.lote or 'Sin lote' }}</p>
+      <p class="muted">Fecha de elaboración: {{ content.fecha_elaboracion.strftime('%d/%m/%Y') if content.fecha_elaboracion else 'Sin fecha' }}</p>
+    </div>
+    {% endfor %}
+    {% endif %}
+  {% elif lines %}
     {% for line in lines %}
     <div class="line">
       <strong>{{ line.product.name }}</strong>

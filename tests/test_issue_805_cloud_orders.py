@@ -221,3 +221,105 @@ def test_closed_projected_order_opens_for_reprint(db):
 
     assert response.status_code == 200
     assert b"Orden #500" in response.data
+
+def _order_with_contents(status="Emitida", version=1, lote="LOTE-FABRICA-1"):
+    order = _order(status=status, version=version)
+    content_uid = str(uuid4())
+    loose_uid = str(uuid4())
+    order["pallets"][0]["contents"] = [
+        {
+            "content_uid": content_uid,
+            "product_name": "Fecula Fabrica",
+            "quantity": 60,
+            "unit": "bolsa",
+            "lote": lote,
+            "fecha_elaboracion": "2026-10-28",
+            "client_name": "Cliente Fabrica",
+            "destination": "Ruta Fabrica - Posadas",
+        }
+    ]
+    order["loose_contents"] = [
+        {
+            "content_uid": loose_uid,
+            "product_name": "Fecula Fabrica",
+            "quantity": 40,
+            "unit": "bolsa",
+            "lote": "LOTE-SUELTO",
+            "fecha_elaboracion": "2026-10-28",
+            "client_name": "Cliente Fabrica",
+            "destination": "Ruta Fabrica - Posadas",
+        }
+    ]
+    return order, content_uid, loose_uid
+
+def test_projected_order_shows_pallet_contents(db):
+    order, content_uid, loose_uid = _order_with_contents()
+    SyncSnapshotService.apply_snapshot(_snapshot(order))
+
+    response = _app().test_client().get("/orden/token-real-fabrica")
+
+    assert response.status_code == 200
+    assert b"Pallet 1" in response.data
+    assert b"Mercader" in response.data
+    assert f'name="lote_{content_uid}"'.encode() in response.data
+    assert f'name="lote_{loose_uid}"'.encode() in response.data
+    assert b"LOTE-FABRICA-1" in response.data
+    assert b"LOTE-SUELTO" in response.data
+
+
+def test_content_edit_queues_content_event(db):
+    order, content_uid, _ = _order_with_contents(lote="LOTE-VIEJO")
+    SyncSnapshotService.apply_snapshot(_snapshot(order))
+    client = _app().test_client()
+    _login(client)
+    csrf = _csrf(client, "token-real-fabrica")
+
+    response = client.post(
+        "/orden/token-real-fabrica",
+        data={
+            "csrf_token": csrf,
+            f"lote_{content_uid}": "LOTE-NUEVO",
+            f"fecha_{content_uid}": "2026-10-29",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "pendiente de sincronización".encode() in response.data
+    projection = SyncProjection.get(
+        SyncProjection.resource_uid == order["order_uid"]
+    )
+    assert projection.payload["pallets"][0]["contents"][0]["lote"] == "LOTE-NUEVO"
+    pending = list(
+        SyncOutbox.select().where(
+            (SyncOutbox.event_type == "order_content_lote_fecha_updated")
+            & (SyncOutbox.status == SyncOutbox.STATUS_PENDING)
+        )
+    )
+    assert len(pending) == 1
+    assert pending[0].payload["content_uid"] == content_uid
+    assert pending[0].payload["lote"] == "LOTE-NUEVO"
+
+
+def test_pending_content_survives_next_snapshot(db):
+    order, content_uid, _ = _order_with_contents(lote="LOTE-VIEJO")
+    SyncSnapshotService.apply_snapshot(_snapshot(order))
+    client = _app().test_client()
+    _login(client)
+    csrf = _csrf(client, "token-real-fabrica")
+    client.post(
+        "/orden/token-real-fabrica",
+        data={
+            "csrf_token": csrf,
+            f"lote_{content_uid}": "LOTE-NUBE",
+            f"fecha_{content_uid}": "2026-10-29",
+        },
+    )
+
+    order["pallets"][0]["contents"][0]["lote"] = "LOTE-FABRICA-NUEVO"
+    SyncSnapshotService.apply_snapshot(_snapshot(order, cursor=2))
+
+    projection = SyncProjection.get(
+        SyncProjection.resource_uid == order["order_uid"]
+    )
+    assert projection.payload["pallets"][0]["contents"][0]["lote"] == "LOTE-NUBE"
