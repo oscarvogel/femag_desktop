@@ -293,6 +293,8 @@ def test_managerial_view_formats_and_derives_insights(db):
     assert view["kpis"]["ventas"]["value"] == "$ 284,6 M"
     assert view["kpis"]["ventas"]["delta"] == "+12,4%"
     assert view["kpis"]["ventas"]["direction"] == "up"
+    assert view["chart"][0]["value"] == 296.0
+    assert view["chart"][-1]["value"] == 284.6
     assert view["top_clients"][0]["bar_percent"] == 100.0
     assert view["top_products"][0]["value"] == "78,4 TN"
     assert view["insights"][0]["value"] == "25%"

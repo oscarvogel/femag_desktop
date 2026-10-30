@@ -246,7 +246,9 @@ class _ViewBuilder:
             chart.append(
                 {
                     "label": str(point.get("label") or ""),
-                    "value": round(float(point.get("total") or 0), 2),
+                    "value": round(
+                        float(point.get("total") or 0) / 1_000_000, 1
+                    ),
                     "partial": bool(point.get("partial")),
                 }
             )
