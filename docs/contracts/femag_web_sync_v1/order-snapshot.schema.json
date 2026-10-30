@@ -120,6 +120,12 @@
           "minLength": 1,
           "maxLength": 64,
           "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "loose_contents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/content"
+          }
         }
       }
     },
@@ -236,6 +242,65 @@
             "null"
           ],
           "minimum": 0
+        },
+        "contents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/content"
+          }
+        }
+      }
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_uid",
+        "product_name",
+        "quantity",
+        "unit",
+        "lote",
+        "fecha_elaboracion"
+      ],
+      "properties": {
+        "content_uid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "product_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "quantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "lote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "fecha_elaboracion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "client_name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "destination": {
+          "type": "string",
+          "maxLength": 255
         }
       }
     }

@@ -96,7 +96,9 @@ El snapshot incluye `orders[]` con:
 - `destination`: `destination_uid`, `city`, `address`;
 - `lines[]`: `line_uid`, `product_name`, `quantity`, `unit`, `lote`,
   `fecha_elaboracion`;
-- `pallets[]`: `pallet_uid`, `sequence`, `type`, `weight_kg`.
+- `pallets[]`: `pallet_uid`, `sequence`, `type`, `weight_kg`, y `contents[]` con
+  `content_uid`, producto, cantidad, unidad, lote, fecha y cliente/destino.
+- `loose_contents[]`: mercadería sin pallet con la misma estructura de contenido.
 
 No incluye precios, costos, saldos, stock, remitos ni contabilidad.
 
