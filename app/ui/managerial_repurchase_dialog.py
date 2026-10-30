@@ -617,8 +617,20 @@ class ManagerialRepurchaseDialog(QDialog):
             )
 
     def _current_user(self):
-        parent = self.parent()
-        return getattr(parent, "user", None) if parent is not None else None
+        """Usuario logueado, aunque el padre directo no lo exponga.
+
+        El dashboard gerencial se arma como página dentro de la ventana
+        principal; la página no guarda ``user``. Para que WhatsApp resuelva la
+        instancia configurada hay que subir por la cadena de padres hasta la
+        ventana que sí tiene el usuario de la sesión.
+        """
+        widget = self.parent()
+        while widget is not None:
+            user = getattr(widget, "user", None)
+            if user is not None:
+                return user
+            widget = widget.parent()
+        return None
 
     @staticmethod
     def _row_unit(row: dict) -> str:
@@ -820,7 +832,7 @@ class ManagerialRepurchaseDialog(QDialog):
         if not path:
             return
         try:
-            user = getattr(self.parent(), "user", None) if self.parent() is not None else None
+            user = self._current_user()
             if user is not None and not PermissionService().can_view_managerial_dashboard(user):
                 raise PermissionError("No tiene permiso gerencial para exportar.")
             chart_png = self._chart_temp_png()

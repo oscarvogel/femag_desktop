@@ -443,7 +443,7 @@ def test_repurchase_mensaje_seguimiento_usa_la_ultima_compra():
 def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
     from types import SimpleNamespace
 
-    from PyQt5.QtWidgets import QApplication, QDialog
+    from PyQt5.QtWidgets import QApplication, QDialog, QWidget
 
     import app.ui.managerial_repurchase_dialog as dialog_module
     from app.models.masters import Product
@@ -504,10 +504,18 @@ def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
     monkeypatch.setattr(dialog_module, "WhatsAppTextWorker", FakeWorker)
     monkeypatch.setattr(dialog_module, "QThreadPool", FakeQThreadPool)
 
+    # El dashboard es una página sin `user`; la ventana principal (abuelo) sí
+    # tiene el usuario de la sesión, que es el que resuelve la instancia.
+    fake_user = SimpleNamespace(username="admin")
+    window = QWidget()
+    window.user = fake_user
+    page = QWidget(window)
+
     dialog = ManagerialRepurchaseDialog(
-        current=current, initial_product_id=prod.id
+        current=current, initial_product_id=prod.id, parent=page
     )
     try:
+        assert dialog._current_user() is fake_user
         assert not dialog.whatsapp_button.isEnabled()
         dialog.table.selectRow(0)
         assert dialog.whatsapp_button.isEnabled()
@@ -522,6 +530,7 @@ def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
             "Quisiera saber si necesita reponer su stock."
         )
         attempt = captured["attempt"]
+        assert attempt["usuario"] is fake_user
         assert attempt["tipo_documento"] == "seguimiento_recompra"
         assert attempt["destinatario"] == "+5493743123456"
         assert attempt["message"] == "Mensaje editado por el operador."
