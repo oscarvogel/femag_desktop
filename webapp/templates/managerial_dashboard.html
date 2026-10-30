@@ -1,352 +1,159 @@
-<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#17324d">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FEMAG">
-  <link rel="manifest" href="{{ url_for('manifest') }}">
-  <link rel="icon" type="image/png" href="{{ url_for('pwa_icon_192') }}">
-  <link rel="apple-touch-icon" href="{{ url_for('pwa_icon_192') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
-  <title>FEMAG Gerencia · Dashboard</title>
-</head>
-<body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand"><strong>FEMAG</strong><span>Gerencia</span></div>
-      <nav aria-label="Navegación principal">
-        <a href="{{ url_for('managerial_dashboard') }}" aria-current="page">Resumen</a>
-        <a href="{{ url_for('managerial_repurchase') }}">Recompra</a>
-        <a href="{{ url_for('production') }}">Producción</a>
-        <a href="{{ url_for('home') }}">Órdenes</a>
-        {% if is_administrator() %}
-        <a href="{{ url_for('accesos') }}">Accesos</a>
-        {% endif %}
-      </nav>
-      <div class="user"><span>{{ current_username() }}</span><a href="{{ url_for('logout') }}">Salir</a></div>
+{% extends "gerencia_base.html" %}
+{% block title %}FEMAG · BI Ejecutivo{% endblock %}
+{% block page_title %}Monitor de Dirección Comercial{% endblock %}
+{% block topbar_actions %}
+<a class="btn" href="{{ url_for('managerial_repurchase') }}">Explorar Recompra ({{ recompra_count }})</a>
+<button class="btn btn-primary" type="button" onclick="window.print()">Exportar Informe</button>
+{% endblock %}
+{% block content %}
+{% if dashboard.empty %}
+<section class="exec-banner">
+  <div class="exec-banner-text">
+    <span class="exec-tag">Sin datos</span>
+    <span>La nube todavía no recibió el snapshot gerencial. Cuando el agente de fábrica publique el corte, este tablero se completa solo.</span>
+  </div>
+</section>
+{% else %}
+<section class="exec-banner" aria-label="Diagnóstico ejecutivo">
+  <div class="exec-banner-text">
+    <span class="exec-tag">Diagnóstico mes</span>
+    <span>{{ dashboard.diagnosis|safe }}</span>
+  </div>
+  <a class="exec-banner-link" href="{{ url_for('managerial_repurchase') }}">Ver matriz de clientes →</a>
+</section>
+
+<section class="kpi-grid" aria-label="Indicadores principales">
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Facturación Despachada</span><span class="kpi-pill {{ dashboard.kpis.sales.direction }}">{{ dashboard.kpis.sales.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.sales.value }}</div>
+    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.sales.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.sales.diff }}</strong></span></div>
+    <div class="kpi-meter"><span style="width:{{ dashboard.kpis.sales.meter if dashboard.kpis.sales.meter <= 100 else 100 }}%;background:var(--navy-800)"></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Volumen Despachado</span><span class="kpi-pill {{ dashboard.kpis.tonnes.direction }}">{{ dashboard.kpis.tonnes.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.tonnes.value }}</div>
+    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.tonnes.diff }}</strong></span></div>
+    <div class="kpi-meter"><span style="width:{{ dashboard.kpis.tonnes.meter if dashboard.kpis.tonnes.meter <= 100 else 100 }}%;background:var(--blue-600)"></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Clientes Compradores</span><span class="kpi-pill {{ dashboard.kpis.buyers.direction }}">{{ dashboard.kpis.buyers.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.buyers.value }}</div>
+    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.buyers.previous }}</strong></span><span>Retención: <strong>{{ dashboard.kpis.buyers.retention }}%</strong></span></div>
+    <div class="kpi-meter"><span style="width:{{ dashboard.kpis.buyers.meter if dashboard.kpis.buyers.meter <= 100 else 100 }}%;background:var(--amber-500)"></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Órdenes Emitidas / Cerr.</span><span class="kpi-pill {{ dashboard.kpis.orders.direction }}">{{ dashboard.kpis.orders.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.orders.value }}</div>
+    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.orders.previous }}</strong></span><span>Promedio: <strong>{{ dashboard.kpis.orders.average }} TN/carga</strong></span></div>
+    <div class="kpi-meter"><span style="width:{{ dashboard.kpis.orders.meter if dashboard.kpis.orders.meter <= 100 else 100 }}%;background:var(--emerald-600)"></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Precio Promedio / TN</span><span class="kpi-pill {{ dashboard.kpis.price.direction }}">{{ dashboard.kpis.price.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.price.value }}</div>
+    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.price.previous }}</strong></span><span>Ticket: <strong>{{ dashboard.kpis.price.ticket }}</strong></span></div>
+    <div class="kpi-meter"><span style="width:{{ dashboard.kpis.price.meter if dashboard.kpis.price.meter <= 100 else 100 }}%;background:var(--navy-700)"></span></div>
+  </article>
+</section>
+
+<section class="charts-row">
+  <article class="card">
+    <div class="card-header">
+      <div><h2 class="card-title">Puente de Variación de Volumen (Septiembre → Octubre)</h2><p class="card-subtitle">Descomposición exacta de las {{ dashboard.kpis.tonnes.diff|replace('−','') }} de diferencia según comportamiento de cartera</p></div>
+      <div class="legend-inline"><span><i class="swatch" style="background:var(--navy-800)"></i> Base / Cierre</span><span><i class="swatch" style="background:var(--emerald-600)"></i> Expansión</span><span><i class="swatch" style="background:var(--red-600)"></i> Contracción</span></div>
     </div>
-  </header>
-
-  <main>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-      <div class="message {{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-
-    {% if dashboard.empty %}
-    <section class="page-head" aria-labelledby="page-title">
-      <div>
-        <p class="kicker">Dashboard gerencial</p>
-        <h1 id="page-title">Sin datos todavía</h1>
-        <p class="subtitle">La nube espera el primer snapshot agregado de la fábrica.</p>
-      </div>
-    </section>
-    <section class="empty-state">
-      <h2>El tablero se va a completar solo</h2>
-      <p>Cuando el agente de fábrica publique el snapshot gerencial, acá van a aparecer las ventas, toneladas, pedidos, ticket promedio y los rankings del mes. No hay datos inventados ni una copia parcial para mostrar.</p>
-      {% if dashboard.error %}<p class="muted">Detalle: {{ dashboard.error }}</p>{% endif %}
-    </section>
-    {% else %}
-    <section class="page-head" aria-labelledby="page-title">
-      <div>
-        <p class="kicker">Dashboard gerencial</p>
-        <h1 id="page-title">{{ dashboard.period_label }}</h1>
-        <p class="subtitle">{{ dashboard.period_subtitle }}</p>
-      </div>
-      <div class="snapshot">
-        <span class="status"><i class="dot"></i> Snapshot al {{ dashboard.snapshot_time }}</span>
-        <div>Se actualiza cada 30 minutos</div>
-      </div>
-    </section>
-
-    <section class="brief" aria-label="Lectura rápida">
-      <p>{{ dashboard.brief.before }}<strong>{{ dashboard.brief.value }}</strong>{{ dashboard.brief.after }}</p>
-    </section>
-
-    <section class="kpis" aria-label="Indicadores del mes">
-      <article class="kpi">
-        <div class="kpi-label">Ventas del mes</div>
-        <div class="kpi-value">{{ dashboard.kpis.ventas.value }}</div>
-        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.ventas.direction }}">{{ dashboard.kpis.ventas.delta }}</span><span>vs. {{ dashboard.kpis.ventas.previous }}</span></div>
-      </article>
-      <article class="kpi">
-        <div class="kpi-label">Toneladas despachadas</div>
-        <div class="kpi-value">{{ dashboard.kpis.toneladas.value }}</div>
-        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.toneladas.direction }}">{{ dashboard.kpis.toneladas.delta }}</span><span>vs. {{ dashboard.kpis.toneladas.previous }}</span></div>
-      </article>
-      <article class="kpi">
-        <div class="kpi-label">Pedidos</div>
-        <div class="kpi-value">{{ dashboard.kpis.pedidos.value }}</div>
-        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.pedidos.direction }}">{{ dashboard.kpis.pedidos.delta }}</span><span>vs. {{ dashboard.kpis.pedidos.previous }}</span></div>
-      </article>
-      <article class="kpi">
-        <div class="kpi-label">Ticket promedio</div>
-        <div class="kpi-value">{{ dashboard.kpis.ticket.value }}</div>
-        <div class="kpi-foot"><span class="delta {{ dashboard.kpis.ticket.direction }}">{{ dashboard.kpis.ticket.delta }}</span><span>vs. {{ dashboard.kpis.ticket.previous }}</span></div>
-      </article>
-    </section>
-
-    <div class="layout">
-      <section class="panel" aria-labelledby="chart-title">
-        <div class="panel-head">
-          <div>
-            <h2 id="chart-title">Ventas por mes</h2>
-            <p class="caption">Últimos 12 meses · millones de pesos</p>
-          </div>
-          <div class="legend" aria-hidden="true">
-            <span><i></i> Mes cerrado</span>
-            {% if dashboard.chart and dashboard.chart[-1].partial %}
-            <span><i class="partial"></i> Mes en curso</span>
-            {% endif %}
-          </div>
-        </div>
-        <div id="chart" role="img" aria-label="Evolución mensual de ventas"></div>
-        {% if dashboard.chart and dashboard.chart[-1].partial %}
-        <p class="chart-note">El último mes está en curso: no se compara como un mes cerrado.</p>
-        {% endif %}
-      </section>
-
-      <aside class="panel reading" aria-labelledby="reading-title">
-        <div class="panel-head">
-          <div>
-            <h2 id="reading-title">Para mirar</h2>
-            <p class="caption">Señales del snapshot</p>
-          </div>
-        </div>
-        {% for insight in dashboard.insights %}
-        <div class="reading-item">
-          <span class="reading-label">{{ insight.label }}</span>
-          <p>{{ insight.before }}{% if insight.value %}<strong>{{ insight.value }}</strong>{% endif %}{{ insight.after }}</p>
-        </div>
-        {% else %}
-        <div class="reading-item"><p class="muted">Sin señales para mostrar.</p></div>
+    <div class="card-body">
+      {% if dashboard.has_repurchase %}
+      <div class="svg-wrap waterfall-desktop">{{ dashboard.waterfall.svg|safe }}</div>
+      <div class="waterfall-mobile">
+        {% for item in dashboard.waterfall["items"] %}
+        <div class="wm-row"><div><strong>{{ item.label }}</strong><span>{{ item.sub }}</span></div><b class="{{ 'neg' if item.value < 0 else 'pos' if item.value > 0 and item.kind not in ['base','end'] else '' }}">{{ item.value_text }}</b></div>
         {% endfor %}
-      </aside>
+      </div>
+      <div class="bridge-summary">
+        <div class="bridge-stat"><span>Pérdida bruta</span><strong class="down">−{{ dashboard.waterfall.gross_loss }} TN ({{ dashboard.waterfall.count_loss }} ctas)</strong></div>
+        <div class="bridge-stat"><span>Ganancia bruta</span><strong class="up">+{{ dashboard.waterfall.gross_gain }} TN ({{ dashboard.waterfall.count_gain }} ctas)</strong></div>
+        <div class="bridge-stat"><span>Saldo neto volumen</span><strong class="down">{{ dashboard.kpis.tonnes.diff }} ({{ dashboard.kpis.tonnes.delta }})</strong></div>
+        <div class="bridge-stat"><span>Reposición de cartera</span><strong>{{ dashboard.waterfall.recovery }}% cubierto</strong></div>
+      </div>
+      {% else %}
+      <p class="card-subtitle">El snapshot de recompra todavía no llegó. Cuando esté disponible, acá aparece el puente de variación.</p>
+      {% endif %}
     </div>
+  </article>
 
-    <section class="lists" aria-label="Rankings del mes">
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Top 5 clientes</h2>
-            <p class="caption">Venta del mes · millones</p>
+  <article class="card" id="productos">
+    <div class="card-header">
+      <div><h2 class="card-title">Desempeño por Línea de Producto (Octubre vs. Septiembre)</h2><p class="card-subtitle">Comparativa en toneladas despachadas, facturación y precio medio por línea</p></div>
+      <div class="legend-inline"><span><i class="swatch" style="background:#cbd5e1"></i> Sep 2026</span><span><i class="swatch" style="background:var(--navy-800)"></i> Oct 2026</span></div>
+    </div>
+    <div class="card-body">
+      <div class="product-bars">
+        {% for row in dashboard.products %}
+        <div class="product-line">
+          <div class="product-line-head"><span>{{ row.name }}</span><span class="{{ row.direction }}">{{ row.delta }} ({{ row.current_tn }} TN)</span></div>
+          <div class="product-bars-pair">
+            <div class="product-bar previous"><i style="width:{{ row.previous_bar }}%"></i></div>
+            <div class="product-bar current"><i style="width:{{ row.bar }}%"></i></div>
           </div>
+          <div class="product-line-meta"><span>{{ row.current_tn }} TN · {{ row.current_total }}</span><span>{{ row.price_tn }}/TN · {{ row.share }}% del vol.</span></div>
         </div>
-        <ol class="rank">
-          {% for row in dashboard.top_clients %}
-          <li>
-            <span class="pos">{{ "%02d"|format(loop.index) }}</span>
-            <div><span class="name">{{ row.name }}</span><div class="bar"><i style="width: {{ row.bar_percent }}%"></i></div></div>
-            <span class="value">{{ row.value }}<small class="{{ row.direction }}">{{ row.delta }}</small></span>
-          </li>
-          {% else %}
-          <li><p class="muted">Sin clientes en el período.</p></li>
-          {% endfor %}
-        </ol>
-      </article>
+        {% endfor %}
+      </div>
+      <div class="bridge-summary">
+        <div class="bridge-stat"><span>Dependencia principal</span><strong>{{ dashboard.products[0].share if dashboard.products else 0 }}% del volumen</strong></div>
+        <div class="bridge-stat"><span>Mayor crecimiento</span><strong class="up">{{ dashboard.best_product.name ~ " (" ~ dashboard.best_product.delta ~ ")" if dashboard.best_product else 'Sin datos' }}</strong></div>
+        <div class="bridge-stat"><span>Mayor caída</span><strong class="down">{{ dashboard.worst_product.name ~ " (" ~ dashboard.worst_product.delta ~ ")" if dashboard.worst_product else 'Sin datos' }}</strong></div>
+      </div>
+    </div>
+  </article>
+</section>
 
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>Top 5 productos</h2>
-            <p class="caption">Toneladas despachadas · mes en curso</p>
-          </div>
-        </div>
-        <ol class="rank">
-          {% for row in dashboard.top_products %}
-          <li>
-            <span class="pos">{{ "%02d"|format(loop.index) }}</span>
-            <div><span class="name">{{ row.name }}</span><div class="bar"><i style="width: {{ row.bar_percent }}%"></i></div></div>
-            <span class="value">{{ row.value }}<small class="{{ row.direction }}">{{ row.delta }}</small></span>
-          </li>
-          {% else %}
-          <li><p class="muted">Sin productos en el período.</p></li>
-          {% endfor %}
-        </ol>
-      </article>
-    </section>
+<section class="cohort-strip" aria-label="Distribución de cartera">
+  <div class="cohort-head">
+    <div><h2 class="card-title">Radiografía de Cartera ({{ dashboard.cohort_total }} clientes con actividad Sep–Oct)</h2><p class="card-subtitle">Distribución de cuentas según comportamiento de recompra en el mismo tramo calendario</p></div>
+    <a class="btn" href="{{ url_for('managerial_repurchase') }}">Abrir matriz completa →</a>
+  </div>
+  <div class="cohort-bar">
+    {% for item in dashboard.cohort %}
+    <div style="width:{{ item.percent }}%;background:{% if item.color == 'red' %}var(--red-600){% elif item.color == 'amber' %}var(--amber-500){% elif item.color == 'navy' %}var(--navy-700){% elif item.color == 'green' %}var(--emerald-600){% else %}#10b981{% endif %}"></div>
+    {% endfor %}
+  </div>
+  <div class="cohort-segments">
+    {% for item in dashboard.cohort %}
+    <div class="cohort-item"><span class="cohort-dot" style="background:{% if item.color == 'red' %}var(--red-600){% elif item.color == 'amber' %}var(--amber-500){% elif item.color == 'navy' %}var(--navy-700){% elif item.color == 'green' %}var(--emerald-600){% else %}#10b981{% endif %}"></span><div><div class="c-label">{{ item.label }}</div><div class="c-val">{{ item.count }} clientes ({{ item.percent }}%)</div><div class="c-sub">{{ item.detail }}</div></div></div>
+    {% endfor %}
+  </div>
+</section>
 
-    <footer>
-      <span>FEMAG · Dashboard Gerencial · acceso solo Gerencia</span>
-      <span>Snapshot de fábrica del {{ dashboard.snapshot_time }} · {{ dashboard.period_label }} · <a href="{{ url_for('managerial_repurchase') }}">Análisis de recompra</a></span>
-    </footer>
-    {% endif %}
-  </main>
+<section class="tables-row">
+  <article class="card">
+    <div class="card-header"><div><h2 class="card-title">Top Clientes del Mes (Octubre)</h2><p class="card-subtitle">El Top 5 concentra el {{ dashboard.top_clients_share }}% de la facturación</p></div></div>
+    <div class="data-table-wrap">
+      <table class="data-table"><thead><tr><th>Cliente</th><th class="num">Octubre</th><th class="num">Septiembre</th><th class="num">Var. %</th><th class="bar-cell">Share</th></tr></thead><tbody>
+        {% for row in dashboard.top_clients %}<tr><td><span class="primary-cell">{{ row.name }}</span><span class="cell-sub">{{ row.current_tn }} TN</span></td><td class="num"><strong>{{ row.current_total }}</strong></td><td class="num">{{ row.previous_total }}</td><td class="num"><span class="badge-var {{ row.direction }}">{{ row.delta }}</span></td><td class="bar-cell"><div class="num" style="font-size:10.5px">{{ row.share }}%</div><div class="mini-bar"><i style="width:{{ row.bar }}%"></i></div></td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </article>
 
-  {% if not dashboard.empty %}
-  <table class="sr-only" id="chart-data-table">
-    <caption>Ventas mensuales en millones de pesos</caption>
-    <thead><tr><th>Mes</th><th>Ventas</th></tr></thead>
-    <tbody>
-      {% for point in dashboard.chart %}
-      <tr><th>{{ point.label }}</th><td>{{ point.value }}</td></tr>
+  <article class="card">
+    <div class="card-header"><div><h2 class="card-title">Matriz de Productos Despachados</h2><p class="card-subtitle">Volumen físico, facturación y precio implícito por tonelada</p></div></div>
+    <div class="data-table-wrap">
+      <table class="data-table"><thead><tr><th>Producto</th><th class="num">TN Oct</th><th class="num">TN Sep</th><th class="num">Facturación</th><th class="num">Var. TN</th></tr></thead><tbody>
+        {% for row in dashboard.products %}<tr><td><span class="primary-cell">{{ row.name }}</span><span class="cell-sub">{{ row.price_tn }}/TN · {{ row.share }}% del vol.</span></td><td class="num"><strong>{{ row.current_tn }}</strong></td><td class="num">{{ row.previous_tn }}</td><td class="num">{{ row.current_total }}</td><td class="num"><span class="badge-var {{ row.direction }}">{{ row.delta }}</span></td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-header"><div><h2 class="card-title">Mayores Cuentas Sin Recompra</h2><p class="card-subtitle">Clientes con compra en sep y 0,0 TN en oct</p></div><a href="{{ url_for('managerial_repurchase') }}" style="font-size:11.5px;font-weight:700;color:var(--red-700)">Ver todas →</a></div>
+    <div class="risk-list">
+      {% for row in dashboard.risks %}
+      <div class="risk-item"><div><div class="risk-name">{{ row.name }}</div><div class="risk-meta">{{ row.salesperson }} · Últ: {{ row.last }}</div></div><div class="risk-val"><strong>−{{ row.previous_tn }} TN</strong><span>{{ row.previous_total }} en sep</span></div></div>
+      {% else %}
+      <div class="risk-item"><div class="risk-meta">Sin datos de recompra.</div></div>
       {% endfor %}
-    </tbody>
-  </table>
-  <script type="application/json" id="chart-data">{{ dashboard.chart|tojson }}</script>
-  <script>
-    (() => {
-      const data = JSON.parse(document.getElementById("chart-data").textContent);
-      if (!data.length) return;
-      const NS = "http://www.w3.org/2000/svg";
-      const mobile = window.matchMedia("(max-width: 720px)").matches;
-      const width = mobile ? 360 : 760;
-      const height = mobile ? 270 : 292;
-      const plot = mobile
-        ? { left: 36, right: 344, top: 18, bottom: 208 }
-        : { left: 54, right: 728, top: 22, bottom: 238 };
-      const maxRaw = Math.max(...data.map((item) => Number(item.value) || 0), 1);
-      const rawStep = maxRaw / 3;
-      const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
-      const step = Math.max(magnitude, Math.ceil(rawStep / magnitude) * magnitude);
-      const maxValue = step * 3;
-      const plotWidth = plot.right - plot.left;
-      const plotHeight = plot.bottom - plot.top;
-      const xFor = (index) => plot.left + (plotWidth * index) / Math.max(data.length - 1, 1);
-      const yFor = (value) => plot.bottom - (value / maxValue) * plotHeight;
-      const svg = document.createElementNS(NS, "svg");
-      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-      svg.setAttribute("role", "img");
-      svg.setAttribute("aria-labelledby", "chart-svg-title chart-svg-desc");
-
-      const title = document.createElementNS(NS, "title");
-      title.setAttribute("id", "chart-svg-title");
-      title.textContent = "Ventas por mes en millones de pesos";
-      const desc = document.createElementNS(NS, "desc");
-      desc.setAttribute("id", "chart-svg-desc");
-      desc.textContent = "Serie mensual de ventas. El último punto puede estar en curso.";
-      svg.append(title, desc);
-
-      const defs = document.createElementNS(NS, "defs");
-      const gradient = document.createElementNS(NS, "linearGradient");
-      gradient.setAttribute("id", "area-fill");
-      gradient.setAttribute("x1", "0");
-      gradient.setAttribute("y1", "0");
-      gradient.setAttribute("x2", "0");
-      gradient.setAttribute("y2", "1");
-      const stopTop = document.createElementNS(NS, "stop");
-      stopTop.setAttribute("offset", "0%");
-      stopTop.setAttribute("stop-color", "#17324d");
-      stopTop.setAttribute("stop-opacity", ".15");
-      const stopBottom = document.createElementNS(NS, "stop");
-      stopBottom.setAttribute("offset", "100%");
-      stopBottom.setAttribute("stop-color", "#17324d");
-      stopBottom.setAttribute("stop-opacity", "0");
-      gradient.append(stopTop, stopBottom);
-      defs.append(gradient);
-      svg.append(defs);
-
-      [0, step, step * 2, step * 3].forEach((tick) => {
-        const y = yFor(tick);
-        const line = document.createElementNS(NS, "line");
-        line.setAttribute("x1", plot.left);
-        line.setAttribute("x2", plot.right);
-        line.setAttribute("y1", y);
-        line.setAttribute("y2", y);
-        line.setAttribute("stroke", tick === 0 ? "#bdb6a8" : "#e5e0d5");
-        line.setAttribute("stroke-width", "1");
-        svg.append(line);
-
-        const label = document.createElementNS(NS, "text");
-        label.setAttribute("x", plot.left - 10);
-        label.setAttribute("y", y + 4);
-        label.setAttribute("text-anchor", "end");
-        label.setAttribute("fill", "#7b817b");
-        label.setAttribute("font-size", mobile ? "9" : "11");
-        label.textContent = tick === 0 ? "0" : new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(tick);
-        svg.append(label);
-      });
-
-      const axis = document.createElementNS(NS, "text");
-      axis.setAttribute("x", plot.left);
-      axis.setAttribute("y", plot.top - 6);
-      axis.setAttribute("text-anchor", "start");
-      axis.setAttribute("fill", "#7b817b");
-      axis.setAttribute("font-size", mobile ? "9" : "10");
-      axis.textContent = "millones $";
-      svg.append(axis);
-
-      const baseline = yFor(0);
-      let area = `M ${xFor(0)} ${baseline} L ${xFor(0)} ${yFor(data[0].value)}`;
-      data.forEach((item, index) => {
-        area += ` L ${xFor(index)} ${yFor(item.value)}`;
-      });
-      area += ` L ${xFor(data.length - 1)} ${baseline} Z`;
-      const areaPath = document.createElementNS(NS, "path");
-      areaPath.setAttribute("d", area);
-      areaPath.setAttribute("fill", "url(#area-fill)");
-      svg.append(areaPath);
-
-      const closed = data.filter((item) => !item.partial);
-      const closedPath = document.createElementNS(NS, "path");
-      closedPath.setAttribute(
-        "d",
-        closed.map((item, index) => `${index === 0 ? "M" : "L"} ${xFor(index)} ${yFor(item.value)}`).join(" ")
-      );
-      closedPath.setAttribute("fill", "none");
-      closedPath.setAttribute("stroke", "#17324d");
-      closedPath.setAttribute("stroke-width", "2.4");
-      closedPath.setAttribute("stroke-linecap", "round");
-      closedPath.setAttribute("stroke-linejoin", "round");
-      svg.append(closedPath);
-
-      const last = data[data.length - 1];
-      if (last.partial && data.length > 1) {
-        const previous = data[data.length - 2];
-        const partialPath = document.createElementNS(NS, "path");
-        partialPath.setAttribute("d", `M ${xFor(data.length - 2)} ${yFor(previous.value)} L ${xFor(data.length - 1)} ${yFor(last.value)}`);
-        partialPath.setAttribute("fill", "none");
-        partialPath.setAttribute("stroke", "#a7653c");
-        partialPath.setAttribute("stroke-width", "2.4");
-        partialPath.setAttribute("stroke-dasharray", "5 5");
-        partialPath.setAttribute("stroke-linecap", "round");
-        svg.append(partialPath);
-      }
-
-      data.forEach((item, index) => {
-        const dot = document.createElementNS(NS, "circle");
-        dot.setAttribute("cx", xFor(index));
-        dot.setAttribute("cy", yFor(item.value));
-        dot.setAttribute("r", item.partial ? "5" : "3.6");
-        dot.setAttribute("fill", item.partial ? "#fffdf8" : "#17324d");
-        dot.setAttribute("stroke", item.partial ? "#a7653c" : "#17324d");
-        dot.setAttribute("stroke-width", item.partial ? "2.4" : "1");
-        svg.append(dot);
-      });
-
-      data.forEach((item, index) => {
-        if (index % 2 !== 0 && !item.partial) return;
-        const label = document.createElementNS(NS, "text");
-        label.setAttribute("x", xFor(index));
-        label.setAttribute("y", plot.bottom + (mobile ? 18 : 22));
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("fill", item.partial ? "#a7653c" : "#6d756f");
-        label.setAttribute("font-size", mobile ? "10" : "11");
-        label.setAttribute("font-weight", item.partial ? "700" : "500");
-        label.textContent = item.label;
-        svg.append(label);
-      });
-
-      if (last.partial) {
-        const lastLabel = document.createElementNS(NS, "text");
-        lastLabel.setAttribute("x", xFor(data.length - 1));
-        lastLabel.setAttribute("y", yFor(last.value) - 12);
-        lastLabel.setAttribute("text-anchor", "end");
-        lastLabel.setAttribute("fill", "#a7653c");
-        lastLabel.setAttribute("font-size", mobile ? "9" : "10");
-        lastLabel.setAttribute("font-weight", "700");
-        lastLabel.textContent = "en curso";
-        svg.append(lastLabel);
-      }
-
-      document.getElementById("chart").append(svg);
-    })();
-  </script>
-  {% endif %}
-</body>
-</html>
+    </div>
+  </article>
+</section>
+{% endif %}
+{% endblock %}

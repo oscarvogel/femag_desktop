@@ -12,6 +12,7 @@ from app.services.managerial_snapshot_publisher import (
 )
 from webapp import create_app
 from webapp.managerial_dashboard_service import ManagerialDashboardService
+from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 
 PASSWORD = "clave-de-prueba-123"
 TOKEN = "token-de-prueba-sync"
@@ -301,6 +302,69 @@ def test_managerial_view_formats_and_derives_insights(db):
     assert view["insights"][-1]["label"] == "A vigilar"
 
 
+
+
+def _repurchase_snapshot():
+    return {
+        "schema_version": "1.0",
+        "snapshot_id": str(uuid4()),
+        "generated_at": "2026-10-30T12:00:00Z",
+        "period": {"start": "2026-10-01", "end": "2026-10-30", "label": "Este mes"},
+        "previous_period": {"start": "2026-09-01", "end": "2026-09-30", "label": "Anterior"},
+        "summary": {
+            "previous_tonnes": 312.4,
+            "current_tonnes": 270.8,
+            "diff_tonnes": -41.6,
+            "variation_percent": -3.1,
+            "previous_total": 284_600_000,
+            "current_total": 270_800_000,
+            "buyers_previous": 4,
+            "buyers_current": 3,
+            "count_sin_recompra": 1,
+            "count_redujeron": 1,
+            "count_aumentaron": 1,
+            "count_nuevos": 1,
+            "count_sin_cambios": 0,
+            "lost_tonnes": 20.0,
+            "reduction_tonnes": -5.0,
+            "increase_tonnes": 3.0,
+            "new_tonnes": 10.0,
+            "reconciled_diff_tonnes": -41.6,
+            "reconciliation_ok": True,
+        },
+        "rows": [
+            {
+                "client_name": "CLIENTE PERDIDO",
+                "salesperson_name": "Vendedor Uno",
+                "previous_last_date": "2026-09-10",
+                "current_last_date": None,
+                "previous_tonnes": 20.0,
+                "current_tonnes": 0.0,
+                "diff_tonnes": -20.0,
+                "variation_percent": -100.0,
+                "previous_total": 20_000_000,
+                "current_total": 0,
+                "status": "sin_recompra",
+            }
+        ],
+    }
+
+
+def test_dashboard_v3_renders_waterfall_and_cohort(db):
+    ManagerialDashboardService.apply_snapshot(_snapshot())
+    ManagerialRepurchaseService.apply_snapshot(_repurchase_snapshot())
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia")
+
+    assert response.status_code == 200
+    assert "Puente de Variación de Volumen".encode() in response.data
+    assert "Radiografía de Cartera".encode() in response.data
+    assert b"CLIENTE PERDIDO" in response.data
+    assert "Facturación Despachada".encode() in response.data
+
+
 def test_dashboard_route_renders_for_administrator(db):
     ManagerialDashboardService.apply_snapshot(_snapshot())
     client = _app().test_client()
@@ -310,10 +374,10 @@ def test_dashboard_route_renders_for_administrator(db):
 
     assert response.status_code == 200
     assert b"Octubre 2026" in response.data
-    assert b"Ventas del mes" in response.data
+    assert "Facturación Despachada".encode() in response.data
     assert b"Molinos del Litoral" in response.data
-    assert b"Top 5 productos" in response.data
-    assert b"chart-data-table" in response.data
+    assert b"Matriz de Productos Despachados" in response.data
+    assert "Puente de Variación de Volumen".encode() in response.data
 
 
 def test_dashboard_route_is_available_to_gerencia(db):
@@ -324,7 +388,7 @@ def test_dashboard_route_is_available_to_gerencia(db):
     response = client.get("/gerencia")
 
     assert response.status_code == 200
-    assert b"Dashboard gerencial" in response.data
+    assert "Monitor de Dirección Comercial".encode() in response.data
 
 
 def test_dashboard_route_redirects_non_manager(db):
@@ -345,4 +409,4 @@ def test_dashboard_route_shows_empty_state_without_snapshot(db):
 
     assert response.status_code == 200
     assert b"Sin datos" in response.data
-    assert b"El tablero se va a completar solo" in response.data
+    assert b"este tablero se completa solo" in response.data

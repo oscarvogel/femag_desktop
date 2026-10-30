@@ -39,6 +39,7 @@ from webapp.auth import (
     redirect_after_login,
     resolve_secret_key,
 )
+from webapp.gerencia_service import GerenciaService
 from webapp.managerial_dashboard_service import ManagerialDashboardService
 from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 from webapp.order_service import (
@@ -593,8 +594,12 @@ self.addEventListener("fetch", event => {
         if not can_view_managerial_dashboard():
             flash("Solo Gerencia puede ver el dashboard gerencial.", "error")
             return redirect(url_for("production"))
-        dashboard = ManagerialDashboardService.latest_view()
-        return render_template("managerial_dashboard.html", dashboard=dashboard)
+        dashboard = GerenciaService.dashboard_view()
+        return render_template(
+            "managerial_dashboard.html",
+            dashboard=dashboard,
+            **GerenciaService.shell_context("dashboard"),
+        )
 
     @app.get("/gerencia/recompra")
     @login_required
@@ -606,6 +611,7 @@ self.addEventListener("fetch", event => {
         return render_template(
             "managerial_repurchase.html",
             dashboard=dashboard,
+            **GerenciaService.shell_context("recompra"),
         )
 
     @app.route("/produccion", methods=["GET", "POST"])

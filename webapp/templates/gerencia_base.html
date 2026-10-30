@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1433">
+  <title>{% block title %}FEMAG · BI Ejecutivo{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='gerencia.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-box">
+        <img src="{{ url_for('static', filename='femag-logo.svg') }}" alt="FEMAG">
+        <div class="brand-meta">
+          <strong>FEMAG S.A.</strong>
+          <span>BI &amp; Dirección</span>
+        </div>
+      </div>
+
+      <div class="nav-group-label">Dirección General</div>
+      <nav class="side-nav">
+        <a href="{{ url_for('managerial_dashboard') }}" class="{{ 'active' if active == 'dashboard' else '' }}"><span>Resumen Ejecutivo</span></a>
+        <a href="{{ url_for('managerial_repurchase') }}" class="{{ 'active' if active == 'recompra' else '' }}"><span>Retención y Recompra</span>{% if recompra_count %}<span class="badge">{{ recompra_count }}</span>{% endif %}</a>
+        <a href="{{ url_for('managerial_dashboard') }}#productos"><span>Mix de Productos</span></a>
+      </nav>
+
+      <div class="nav-group-label" style="margin-top:12px">Operación Planta</div>
+      <nav class="side-nav">
+        <a href="{{ url_for('production') }}"><span>Partes de Producción</span></a>
+        <a href="{{ url_for('home') }}"><span>Trazabilidad QR</span></a>
+        {% if is_administrator() %}
+        <a href="{{ url_for('accesos') }}"><span>Auditoría de Accesos</span></a>
+        {% endif %}
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sync-box">
+          <div class="sync-row"><i class="dot-live"></i> Sync Planta Capioví</div>
+          <div>Último corte: {{ snapshot_time or 's/d' }}</div>
+          <div>{{ synced_orders }} órdenes sincronizadas</div>
+        </div>
+        <div class="user-bar">
+          <span>{{ current_username() }}</span>
+          <a href="{{ url_for('logout') }}">Salir</a>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1>{% block page_title %}Monitor de Dirección Comercial{% endblock %}</h1>
+          {% if period_range %}
+          <span class="period-pill">{{ period_label }} · {{ period_range }}{% if comparison_range %} vs. {{ comparison_range }}{% endif %}</span>
+          {% endif %}
+        </div>
+        <div class="topbar-controls">
+          {% block topbar_actions %}{% endblock %}
+        </div>
+      </header>
+
+      <main class="content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+          <div class="flash-stack">
+            {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
