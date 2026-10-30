@@ -355,3 +355,55 @@ def test_repurchase_permiso_denegado():
     from app.services.permission_service import PermissionService
 
     assert not PermissionService().can_view_managerial_dashboard(None)
+
+
+def test_repurchase_tabla_se_ordena_por_clic_en_columnas(db):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Product
+    from app.reports.managerial_dashboard import ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+
+    app = QApplication.instance() or QApplication([])
+    prod = Product.create(name="OrdenProd", unit="bolsa", peso_unitario_kg=10)
+    sube = _mkclient("Cli Sube", "30700001081")
+    baja = _mkclient("Cli Baja", "30700001082")
+    estable = _mkclient("Cli Estable", "30700001083")
+    _mkorder(1081, date(2026, 9, 3), sube, prod, 50, 5000)
+    _mkorder(1082, date(2026, 10, 3), sube, prod, 150, 15000)
+    _mkorder(1083, date(2026, 9, 3), baja, prod, 150, 15000)
+    _mkorder(1084, date(2026, 10, 3), baja, prod, 50, 5000)
+    _mkorder(1085, date(2026, 9, 3), estable, prod, 100, 10000)
+    _mkorder(1086, date(2026, 10, 3), estable, prod, 100, 10000)
+    current = ReportPeriod(date(2026, 10, 1), date(2026, 10, 12), "Actual")
+    dialog = ManagerialRepurchaseDialog(current=current)
+    try:
+        def names():
+            return [dialog.table.item(i, 0).text() for i in range(dialog.table.rowCount())]
+
+        # Dif. TN, primer clic (desc): primero el que más compró.
+        dialog._on_header_clicked(5)
+        assert names()[0] == "Cli Sube"
+        assert names()[-1] == "Cli Baja"
+        # Segundo clic (asc): primero el que más dejó de comprar.
+        dialog._on_header_clicked(5)
+        assert names()[0] == "Cli Baja"
+        assert names()[-1] == "Cli Sube"
+        # TN actual (desc por defecto).
+        dialog._on_header_clicked(4)
+        assert names()[0] == "Cli Sube"
+        # Var. % (desc por defecto).
+        dialog._on_header_clicked(6)
+        assert names()[0] == "Cli Sube"
+        assert dialog.table.horizontalHeader().sortIndicatorSection() == 6
+        # El orden manual sobrevive un refresh con los mismos filtros.
+        dialog.refresh()
+        assert names()[0] == "Cli Sube"
+        # Columna de texto: ascendente.
+        dialog._on_header_clicked(0)
+        assert names() == sorted(names())
+        # El combo de orden define un orden nuevo y descarta el clic previo.
+        dialog.order_combo.setCurrentIndex(dialog.order_combo.findData("client"))
+        assert names() == sorted(names())
+    finally:
+        dialog.close()
