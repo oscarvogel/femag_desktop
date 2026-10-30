@@ -140,12 +140,33 @@
   background: var(--navy);
   color: #fff;
   text-align: left;
-  padding: 10px 9px;
+  padding: 0;
   font-size: .68rem;
   letter-spacing: .06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
+.rep-table th.num { text-align: right; }
+.sort-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 10px 9px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.rep-table th.num .sort-button { justify-content: flex-end; }
+.sort-button:hover, .sort-button:focus-visible { background: rgba(255, 255, 255, .12); outline: none; }
+.sort-indicator { min-width: .8em; color: #f1c9a8; font-size: .8em; }
+.sort-indicator:empty::before { content: "↕"; opacity: .45; }
 .rep-table td {
   padding: 9px;
   border-bottom: 1px solid var(--line-soft);

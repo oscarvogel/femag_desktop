@@ -216,6 +216,9 @@ def test_repurchase_route_renders_for_admin(db):
     assert b"Sin recompra" in response.data
     assert b"filtro-cliente" in response.data
     assert b"tabla-recompra" in response.data
+    assert b'data-sort="client"' in response.data
+    assert b'data-sort="total"' in response.data
+    assert b'data-last="2026-09-12"' in response.data
 
 
 def test_repurchase_route_is_available_to_gerencia(db):
