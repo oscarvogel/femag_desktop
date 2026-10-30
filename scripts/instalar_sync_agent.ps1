@@ -181,9 +181,10 @@ if ($RunSync) {
     Write-Host "Ejecutando primera sincronizacion..." -ForegroundColor Cyan
     $syncOutput = & $exe --sync 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "La primera sincronizacion fallo. Revise $($values['FEMAG_SYNC_LOG_FILE']). Detalle: $syncOutput"
+        Write-Warning "La primera sincronizacion fallo; la tarea reintentara. Revise $($values['FEMAG_SYNC_LOG_FILE']). Detalle: $syncOutput"
+    } else {
+        Write-Host $syncOutput
     }
-    Write-Host $syncOutput
 }
 
 if (-not $SkipTask) {
