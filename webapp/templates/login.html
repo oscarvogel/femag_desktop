@@ -1,16 +1,93 @@
-{% extends "base.html" %}
-{% block title %}Iniciar sesión · FEMAG{% endblock %}
-{% block content %}
-<div class="card">
-  <h1>Iniciar sesión</h1>
-  <p class="muted">Usá tu usuario de FEMAG. El parte de producción queda a nombre de quien lo carga.</p>
-  <form method="post">
-    <label for="username">Usuario</label>
-    <input id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus>
-    <label for="password">Contraseña</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <div style="height:16px"></div>
-    <button type="submit">Entrar</button>
-  </form>
-</div>
-{% endblock %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1433">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FEMAG">
+  <link rel="icon" type="image/png" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+  <title>Ingresar · FEMAG</title>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-brand" aria-label="FEMAG">
+      <div class="brand-lockup">
+        <img src="{{ url_for('static', filename='femag-logo.svg') }}" alt="FEMAG">
+        <div class="brand-name"><strong>FEMAG S.A.</strong><span>Plataforma de gestión</span></div>
+      </div>
+      <div class="brand-copy">
+        <p class="brand-kicker">Ingredientes que unen</p>
+        <h1>Datos que ordenan la gestión.</h1>
+        <p>Despachos, producción y dirección en un solo lugar. Información de planta para decidir con contexto.</p>
+      </div>
+      <div class="brand-foot">
+        <span>Capioví, Misiones · Argentina</span>
+        <span class="live"><i></i> Entorno seguro</span>
+      </div>
+    </section>
+
+    <section class="login-workspace">
+      <div class="login-panel">
+        <p class="login-eyebrow">Acceso seguro</p>
+        <h2>Ingresá a FEMAG</h2>
+        <p class="login-sub">Usá tu usuario de FEMAG. El parte de producción queda a nombre de quien lo carga.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        <form method="post" id="login-form">
+          <div class="field">
+            <label for="username">Usuario</label>
+            <input id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Tu usuario" value="{{ request.form.get('username', '') }}" required autofocus>
+          </div>
+          <div class="field">
+            <label for="password">Contraseña</label>
+            <div class="password-wrap">
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Tu contraseña" required>
+              <button class="password-toggle" type="button" id="password-toggle" aria-pressed="false">Mostrar</button>
+            </div>
+          </div>
+          <button class="login-submit" type="submit">Ingresar</button>
+        </form>
+
+        <p class="login-help">Si no tenés acceso, pedíselo al administrador de FEMAG. <strong>No compartas tu contraseña.</strong></p>
+        <div class="login-links"><a href="{{ url_for('home') }}">Volver al inicio</a><span>FEMAG · Plataforma interna</span></div>
+        <p class="login-foot">Conexión protegida · FEMAG S.A. · Capioví, Misiones</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const password = document.getElementById("password");
+      const toggle = document.getElementById("password-toggle");
+      const form = document.getElementById("login-form");
+      toggle.addEventListener("click", () => {
+        const show = password.type === "password";
+        password.type = show ? "text" : "password";
+        toggle.textContent = show ? "Ocultar" : "Mostrar";
+        toggle.setAttribute("aria-pressed", show ? "true" : "false");
+        password.focus();
+      });
+      form.addEventListener("submit", () => {
+        const button = form.querySelector("button[type=submit]");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Ingresando...";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
