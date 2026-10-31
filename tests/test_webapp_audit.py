@@ -127,8 +127,10 @@ def test_la_salida_queda_registrada(db):
     client = app.test_client()
     _login(client)
 
-    client.get("/logout")
+    response = client.get("/logout")
 
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
     salidas = [row for row in _filas_de_auditoria() if row.action == "salida"]
     assert len(salidas) == 1
     assert salidas[0].user == "operador"
