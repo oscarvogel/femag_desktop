@@ -51,3 +51,20 @@ td.nowrap{white-space:nowrap}
   .filtros{grid-template-columns:1fr}
 }
 @media(min-width:861px){.mobile-nav{display:none}}
+@media(max-width:640px){
+  .sidebar{padding:8px 14px}
+  .brand-box{gap:9px}
+  .brand-box img{height:28px}
+  .brand-meta strong{font-size:11px}
+  .brand-meta span{font-size:9.5px}
+  .topbar{display:flex;flex-flow:row nowrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px}
+  .topbar-left{display:flex;align-items:center;gap:8px;min-width:0}
+  .topbar-left h1{font-size:15px;line-height:1.2;max-width:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .period-pill{display:none}
+  .topbar-controls{margin:0;flex-wrap:nowrap;gap:6px}
+  .topbar-controls .btn{height:30px;font-size:11px;padding:0 9px}
+  .mobile-nav{padding:6px 10px}
+  .mobile-nav a{font-size:11px;padding:5px 8px}
+  .content{padding:12px 12px 26px}
+  .content .card{padding:15px}
+}
