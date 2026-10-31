@@ -69,6 +69,19 @@ def unit_label(unit: object, quantity: float) -> str:
     return UNIT_PLURALS.get(key, key if key.endswith("s") else f"{key}s")
 
 
+def message_unit_label(unit: object, quantity: float) -> str:
+    """En el mensaje, bolsas/unidades se dicen genéricamente 'unidades'.
+
+    Es el lenguaje que pidió Dante: "3.000 unidades de F. de mandioca". Para
+    kg, litros u otras unidades se mantiene la unidad real para no deformar la
+    información.
+    """
+    key = str(unit or "unidad").strip().lower()
+    if key in {"bolsa", "bolsón", "bolson", "unidad", "unidades"}:
+        return "unidad" if abs(float(quantity) - 1) < 0.0005 else "unidades"
+    return unit_label(unit, quantity)
+
+
 def period_phrase(start: date, end: date) -> str:
     """Período en lenguaje natural: 'octubre de 2026' o 'del 1 al 12 de octubre'."""
     if start.year == end.year and start.month == end.month:
@@ -83,7 +96,10 @@ def _variation_text(value: object) -> str:
     if value is None:
         return ""
     number = f"{abs(float(value)):,.1f}"
-    return f"{number.replace(',', 'X').replace('.', ',').replace('X', '.')}%"
+    if number.endswith(".0"):
+        number = number[:-2]
+    number = number.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{number}%"
 
 
 def build_followup_message_for_row(
@@ -94,89 +110,94 @@ def build_followup_message_for_row(
     current_period: str = "",
     previous_period: str = "",
 ) -> str:
-    """Mensaje personalizado según la situación comercial del cliente."""
+    """Mensaje personalizado, con el lenguaje comercial que pidió Dante."""
     status = str(row.get("status") or "").strip()
     product = str(row.get("product_name") or "").strip()
     product_ref = f" de {product}" if product else ""
     current_quantity = float(row.get("current_quantity") or 0)
     previous_quantity = float(row.get("previous_quantity") or 0)
     current_text = (
-        f"{format_quantity(current_quantity)} {unit_label(unit, current_quantity)}"
+        f"{format_quantity(current_quantity)} "
+        f"{message_unit_label(unit, current_quantity)}"
     )
     previous_text = (
-        f"{format_quantity(previous_quantity)} {unit_label(unit, previous_quantity)}"
+        f"{format_quantity(previous_quantity)} "
+        f"{message_unit_label(unit, previous_quantity)}"
     )
     variation = _variation_text(row.get("variation_kilos_percent"))
-
     greeting = f", {client_name.strip()}" if client_name and client_name.strip() else ""
-    when = f" en {current_period}" if current_period else ""
-    previous_when = (
+    current_when = f" en {current_period}" if current_period else ""
+    comparison_when = (
         f" en el mismo período de {previous_period}"
         if previous_period
         else " en el período anterior"
     )
+    current_last_date = format_date(row.get("current_last_date"))
+    previous_last_date = format_date(row.get("previous_last_date"))
 
     if status == "sin_recompra":
-        last_date = format_date(row.get("previous_last_date"))
-        previous_phrase = (
-            f"el mismo período de {previous_period}"
-            if previous_period
-            else "el período anterior"
-        )
-        if last_date:
-            previous_clause = (
-                f" Su última compra fue el {last_date}; en {previous_phrase} "
-                f"había comprado {previous_text}."
+        if previous_last_date:
+            opening = (
+                f"Buen día{greeting}. Vi que su última compra{product_ref} "
+                f"fue el {previous_last_date}; "
             )
-        else:
-            previous_clause = (
-                f" En {previous_phrase} había comprado {previous_text}."
+            return (
+                f"{opening}en el mismo período de {previous_period or 'el período anterior'} "
+                f"había comprado {previous_text}, y{current_when or ' en el período actual'} "
+                "no registramos compras. "
+                "¿Quería saber si necesita reponer stock?"
             )
         return (
-            f"Buen día{greeting}. No registramos compras{product_ref}{when}."
-            f"{previous_clause} "
-            "¿Quiere que le acerquemos una propuesta para reponer stock?"
+            f"Buen día{greeting}. En el mismo período de "
+            f"{previous_period or 'el período anterior'} había comprado {previous_text}, "
+            f"y{current_when or ' en el período actual'} no registramos compras. "
+            "¿Quería saber si necesita reponer stock?"
+        )
+
+    if current_last_date:
+        opening = (
+            f"Buen día{greeting}. Vi que su última compra{product_ref} "
+            f"fue el {current_last_date}; "
+        )
+        bought = (
+            f"en {current_period} compró {current_text}."
+            if current_period
+            else f"compró {current_text}."
+        )
+    else:
+        opening = f"Buen día{greeting}. "
+        bought = (
+            f"En {current_period} compró {current_text}."
+            if current_period
+            else f"Compró {current_text}."
         )
 
     if status == "compro_menos":
         if variation:
             comparison = (
-                f", un {variation} menos que{previous_when} ({previous_text})"
+                f" Fue un {variation} menos que{comparison_when} "
+                f"({previous_text})."
             )
         else:
-            comparison = f", menos que{previous_when} ({previous_text})"
-        return (
-            f"Buen día{greeting}. Notamos que{when} compró {current_text}"
-            f"{product_ref}{comparison}. "
-            "¿Quiere que le acerquemos una propuesta para reponer stock?"
-        )
-
-    if status == "compro_mas":
+            comparison = f" Fue menos que{comparison_when} ({previous_text})."
+        question = " ¿Quería saber si necesita reponer stock?"
+    elif status == "compro_mas":
         if variation:
-            comparison = f", un {variation} más que{previous_when} ({previous_text})"
+            comparison = (
+                f" Fue un {variation} más que{comparison_when} "
+                f"({previous_text})."
+            )
         else:
-            comparison = f", más que{previous_when} ({previous_text})"
-        return (
-            f"Buen día{greeting}. Gracias por su confianza:{when} compró "
-            f"{current_text}{product_ref}{comparison}. "
-            "¿Quiere que le reservemos stock para el próximo período?"
-        )
+            comparison = f" Fue más que{comparison_when} ({previous_text})."
+        question = " ¿Quiere que le reservemos stock para el próximo período?"
+    elif status == "nuevo":
+        comparison = " Gracias por su primera compra."
+        question = " ¿Quería saber si necesita reponer stock?"
+    elif status == "igual":
+        comparison = " Se mantuvo en el mismo volumen."
+        question = " ¿Quería saber si necesita reponer stock?"
+    else:
+        comparison = ""
+        question = " ¿Quería saber si necesita reponer stock?"
 
-    if status == "nuevo":
-        return (
-            f"Buen día{greeting}. Gracias por su primera compra{product_ref}{when} "
-            f"({current_text}). ¿Quiere que le armemos un plan de reposición?"
-        )
-
-    if status == "igual":
-        return (
-            f"Buen día{greeting}. Vemos que{when} mantuvo su compra{product_ref} "
-            f"en {current_text}. ¿Necesita reponer stock?"
-        )
-
-    if current_quantity > 0:
-        return (
-            f"Buen día{greeting}. Registramos su compra{product_ref}{when} "
-            f"({current_text}). ¿Quisiera saber si necesita reponer su stock?"
-        )
-    return f"Buen día{greeting}. Quisiera saber si necesita reponer su stock."
+    return f"{opening}{bought}{comparison}{question}"

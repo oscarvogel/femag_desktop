@@ -424,6 +424,7 @@ def test_repurchase_mensaje_seguimiento_segun_situacion():
             "status": status,
             "product_name": product,
             "current_quantity": 750,
+            "current_last_date": "2026-10-20",
             "previous_quantity": 1305,
             "variation_kilos_percent": -42.5,
             **overrides,
@@ -439,25 +440,29 @@ def test_repurchase_mensaje_seguimiento_segun_situacion():
     # Bajó la compra: nombre, producto, cantidades y variación real.
     compro_menos = message("compro_menos")
     assert compro_menos.startswith("Buen día, Dante.")
-    assert "750 bolsas" in compro_menos
-    assert "1.305 bolsas" in compro_menos
+    assert "Vi que su última compra" in compro_menos
+    assert "fue el 20/10/2026" in compro_menos
+    assert "750 unidades" in compro_menos
+    assert "1.305 unidades" in compro_menos
     assert "42,5% menos" in compro_menos
     assert product in compro_menos
     assert "octubre de 2026" in compro_menos
     assert "septiembre de 2026" in compro_menos
-    assert "propuesta para reponer stock" in compro_menos
+    assert "Quería saber si necesita reponer stock" in compro_menos
 
     # No recompró: última compra y volumen anterior, sin inventar cantidades.
     sin_recompra = message(
         "sin_recompra",
         current_quantity=0,
+        current_last_date=None,
         variation_kilos_percent=-100.0,
         previous_last_date="2026-09-28",
     )
-    assert "No registramos compras" in sin_recompra
+    assert "Vi que su última compra" in sin_recompra
     assert "28/09/2026" in sin_recompra
-    assert "1.305 bolsas" in sin_recompra
-    assert "propuesta para reponer stock" in sin_recompra
+    assert "1.305 unidades" in sin_recompra
+    assert "no registramos compras" in sin_recompra
+    assert "Quería saber si necesita reponer stock" in sin_recompra
 
     # Subió la compra: agradecimiento y variación positiva.
     compro_mas = message(
@@ -466,26 +471,23 @@ def test_repurchase_mensaje_seguimiento_segun_situacion():
         previous_quantity=1443,
         variation_kilos_percent=33.1,
     )
-    assert "Gracias por su confianza" in compro_mas
-    assert "1.920 bolsas" in compro_mas
+    assert "1.920 unidades" in compro_mas
     assert "33,1% más" in compro_mas
     assert "reservemos stock" in compro_mas
 
     # Se mantuvo y cliente nuevo tienen mensajes distintos.
     igual = message("igual", current_quantity=100, previous_quantity=100,
                     variation_kilos_percent=0.0)
-    assert "mantuvo su compra" in igual
-    assert "100 bolsas" in igual
-    assert "¿Necesita reponer stock?" in igual
+    assert "Se mantuvo en el mismo volumen" in igual
+    assert "100 unidades" in igual
 
     nuevo = message("nuevo", current_quantity=50, previous_quantity=0,
                     variation_kilos_percent=None)
-    assert "primera compra" in nuevo
-    assert "50 bolsas" in nuevo
-    assert "plan de reposición" in nuevo
+    assert "Gracias por su primera compra" in nuevo
+    assert "50 unidades" in nuevo
 
     # Singular y período en lenguaje natural.
-    assert "1 bolsa" in message("igual", current_quantity=1, previous_quantity=1)
+    assert "1 unidad" in message("igual", current_quantity=1, previous_quantity=1)
     assert period_phrase(_date(2026, 10, 1), _date(2026, 10, 31)) == "octubre de 2026"
     assert period_phrase(_date(2026, 10, 1), _date(2026, 10, 12)) == "octubre de 2026"
     assert period_phrase(_date(2026, 10, 5), _date(2026, 10, 12)) == "del 5 al 12 de octubre"
@@ -495,7 +497,7 @@ def test_repurchase_mensaje_seguimiento_segun_situacion():
     )
 
     # Sin datos no inventa una compra.
-    assert "Quisiera saber" in build_followup_message_for_row({}, "bolsa")
+    assert "Quería saber" in build_followup_message_for_row({}, "bolsa")
 
 
 
@@ -587,12 +589,13 @@ def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
         assert captured["dialog"]["phone"] == "3743 123456"
         default_message = captured["dialog"]["default_message"]
         assert default_message.startswith("Buen día, Dante.")
-        assert "150 bolsas" in default_message
-        assert "10 bolsas" in default_message
-        assert "1.400,0% más" in default_message
+        assert "Vi que su última compra de WaProd" in default_message
+        assert "fue el 03/10/2026" in default_message
+        assert "150 unidades" in default_message
+        assert "10 unidades" in default_message
+        assert "1.400% más" in default_message
         assert "octubre de 2026" in default_message
         assert "septiembre de 2026" in default_message
-        assert "WaProd" in default_message
         assert "reservemos stock" in default_message
         attempt = captured["attempt"]
         assert attempt["usuario"] is fake_user
