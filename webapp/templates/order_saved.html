@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% block page_title %}Órdenes{% endblock %}
+{% block page_context %}Confirmación{% endblock %}
 {% block title %}Orden {{ order.order_number }} {{ 'pendiente de sincronización' if is_projected else 'guardada' }} · FEMAG{% endblock %}
 {% block content %}
 <div class="card">
