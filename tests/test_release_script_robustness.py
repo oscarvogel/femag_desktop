@@ -216,6 +216,72 @@ def test_venv_guard_finds_a_base_python_on_this_machine(tmp_path):
     assert result["json"] is not None, result["stderr"]
 
 
+def _run_qt_offscreen(action: str, initial: str | None):
+    if initial is None:
+        setup = "Remove-Item Env:\\QT_QPA_PLATFORM -ErrorAction SilentlyContinue"
+    else:
+        setup = f"$env:QT_QPA_PLATFORM = '{initial}'"
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    '{RELEASE}', [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {{
+    'FEMAG_TEST_JSON:{{"parse_errors": ' + $errors.Count + '}}'
+    exit 0
+}}
+$fn = $ast.Find({{ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-WithQtOffscreen' }}, $true)
+if ($null -eq $fn) {{
+    'FEMAG_TEST_JSON:{{"found": false}}'
+    exit 0
+}}
+Invoke-Expression $fn.Extent.Text
+{setup}
+$result = @{{ 'found' = $true; 'before' = $env:QT_QPA_PLATFORM }}
+try {{
+    Invoke-WithQtOffscreen {{ {action} }}
+    $result['threw'] = $false
+}}
+catch {{
+    $result['threw'] = $true
+    $result['message'] = $_.Exception.Message
+}}
+$result['after'] = $env:QT_QPA_PLATFORM
+if ($null -ne $global:inside) {{ $result['inside'] = $global:inside }}
+'FEMAG_TEST_JSON:' + ($result | ConvertTo-Json -Compress -Depth 4)
+"""
+    return _run_powershell(script)
+
+
+@requires_powershell
+def test_qt_offscreen_is_set_for_tests_and_restored(tmp_path):
+    result = _run_qt_offscreen("$global:inside = $env:QT_QPA_PLATFORM", None)
+
+    assert result["json"] is not None, result["stderr"]
+    assert result["json"]["found"] is True
+    assert result["json"]["inside"] == "offscreen"
+    assert result["json"]["after"] is None
+
+
+@requires_powershell
+def test_qt_offscreen_respects_operator_value(tmp_path):
+    result = _run_qt_offscreen("$global:inside = $env:QT_QPA_PLATFORM", "windows")
+
+    assert result["json"] is not None, result["stderr"]
+    assert result["json"]["inside"] == "windows"
+    assert result["json"]["after"] == "windows"
+
+
+@requires_powershell
+def test_qt_offscreen_is_restored_when_tests_fail(tmp_path):
+    result = _run_qt_offscreen("throw 'tests fallaron'", None)
+
+    assert result["json"] is not None, result["stderr"]
+    assert result["json"]["threw"] is True
+    assert result["json"]["after"] is None
+
+
 @requires_powershell
 def test_ensure_venv_does_nothing_when_the_python_already_exists(tmp_path, monkeypatch):
     """Con el `.venv` ya hecho no debe intentar crearlo de nuevo."""

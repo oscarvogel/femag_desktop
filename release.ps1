@@ -48,6 +48,24 @@ function Require-Command([string]$Name) {
     }
 }
 
+# Los tests del release corren igual que en CI (ver #604): si el operador no
+# definio QT_QPA_PLATFORM, se usa offscreen para no abrir ventanas reales.
+# Si ya lo definio (p. ej. para depurar), se respeta y se restaura al salir.
+function Invoke-WithQtOffscreen([scriptblock]$Action) {
+    $previous = $env:QT_QPA_PLATFORM
+    $override = [string]::IsNullOrWhiteSpace($previous)
+    if ($override) {
+        $env:QT_QPA_PLATFORM = "offscreen"
+    }
+    try {
+        & $Action
+    } finally {
+        if ($override) {
+            $env:QT_QPA_PLATFORM = $previous
+        }
+    }
+}
+
 function Assert-GhAuth {
     $previousEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -253,9 +271,11 @@ function Invoke-CandidateLocal {
         Write-Host "ISCC preflight OK: $preflightIscc" -ForegroundColor Green
 
         Write-Host ""
-        Write-Host "[2/7] Tests (no se omiten, el fallo se muestra tal cual)..." -ForegroundColor Yellow
-        Invoke-Native -Command $Python -Arguments @("-m", "pytest", "-q") `
-            -FailureMessage "Los tests fallaron. No se publica nada. Ver el detalle arriba."
+        Write-Host "[2/7] Tests (offscreen, no se omiten, el fallo se muestra tal cual)..." -ForegroundColor Yellow
+        Invoke-WithQtOffscreen {
+            Invoke-Native -Command $Python -Arguments @("-m", "pytest", "-q") `
+                -FailureMessage "Los tests fallaron. No se publica nada. Ver el detalle arriba."
+        }
 
         Write-Host ""
         Write-Host "[3/7] Compile..." -ForegroundColor Yellow

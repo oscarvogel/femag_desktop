@@ -90,6 +90,8 @@ python -m app.main --smoke
 git diff --check
 ```
 
+El release local (`.\release.ps1 candidate`) ejecuta la suite con `QT_QPA_PLATFORM=offscreen`, igual que CI, para no abrir ventanas reales durante los tests. Si el operador ya definio `QT_QPA_PLATFORM` en su shell (por ejemplo, para depurar), el script respeta ese valor y lo restaura al terminar.
+
 Ademas se debe validar en una base descartable:
 
 - resolucion de `almanet-server` por IPv4;
