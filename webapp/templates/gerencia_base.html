@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f1433">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FEMAG Gerencia">
+  <link rel="manifest" href="{{ url_for('gerencia_manifest') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('pwa_icon_192') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('pwa_icon_192') }}">
   <title>{% block title %}FEMAG · BI Ejecutivo{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -59,6 +66,7 @@
           {% endif %}
         </div>
         <div class="topbar-controls">
+          <button class="btn pwa-install-button" type="button" id="pwa-install-button" hidden>Instalar app</button>
           {% block topbar_actions %}{% endblock %}
         </div>
       </header>
@@ -77,6 +85,57 @@
       </main>
     </div>
   </div>
+
+  <dialog class="pwa-dialog" id="pwa-install-help">
+    <h2>Instalar FEMAG Gerencia</h2>
+    <p>Instalá el tablero como aplicación para abrirlo desde el celular o la computadora, sin pasar por el navegador.</p>
+    <ul>
+      <li><strong>iPhone / iPad:</strong> tocá Compartir y elegí “Agregar a pantalla de inicio”.</li>
+      <li><strong>Android:</strong> abrí el menú del navegador y elegí “Instalar aplicación”.</li>
+      <li><strong>Chrome / Edge en computadora:</strong> usá el ícono de instalar de la barra de direcciones.</li>
+    </ul>
+    <form method="dialog"><button class="btn btn-primary" type="submit">Cerrar</button></form>
+  </dialog>
+
+  <script>
+    (() => {
+      const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      const installButton = document.getElementById("pwa-install-button");
+      const help = document.getElementById("pwa-install-help");
+      let deferredPrompt = null;
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+      }
+      if (!standalone && installButton) {
+        installButton.hidden = false;
+      }
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredPrompt = event;
+        if (installButton && !standalone) installButton.hidden = false;
+      });
+      window.addEventListener("appinstalled", () => {
+        deferredPrompt = null;
+        if (installButton) installButton.hidden = true;
+      });
+      if (installButton) {
+        installButton.addEventListener("click", async () => {
+          if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const choice = await deferredPrompt.userChoice;
+            if (choice && choice.outcome === "accepted") installButton.hidden = true;
+            deferredPrompt = null;
+            return;
+          }
+          if (help) {
+            if (typeof help.showModal === "function") help.showModal();
+            else help.setAttribute("open", "open");
+          }
+        });
+      }
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

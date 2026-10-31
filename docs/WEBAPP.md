@@ -226,6 +226,19 @@ La fábrica publica este dataset cada 30 minutos. No se sincronizan órdenes
 crudas y la pantalla queda restringida a Administrador/Gerencia. El filtro por
 producto y la exportación quedan para una siguiente versión.
 
+### Instalación PWA
+
+`/gerencia` se puede instalar como aplicación en celulares y computadoras.
+Tiene manifest propio (`/gerencia/manifest.webmanifest`), service worker y un
+botón **Instalar app**.
+
+- En iPhone/iPad: Compartir → “Agregar a pantalla de inicio”.
+- En Android: menú del navegador → “Instalar aplicación”.
+- En Chrome/Edge de escritorio: ícono de instalar de la barra de direcciones.
+
+La PWA es online-first: no guarda órdenes ni datos operativos para evitar
+trabajar con información vieja.
+
 ## Cámara y HTTPS
 
 El acceso a cámara desde JavaScript requiere un contexto seguro en los navegadores modernos. En la misma PC `http://localhost:8000` normalmente funciona, pero desde un celular accediendo a `http://192.168.x.x:8000` el navegador puede bloquear la cámara por no usar HTTPS.

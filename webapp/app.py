@@ -178,6 +178,57 @@ def create_app(*, secret_key: str | None = None) -> Flask:
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+    @app.get("/gerencia/manifest.webmanifest")
+    def gerencia_manifest():
+        response = jsonify(
+            {
+                "id": "/gerencia",
+                "name": "FEMAG Gerencia",
+                "short_name": "FEMAG Gerencia",
+                "description": "Tablero ejecutivo FEMAG: ventas, volumen, clientes y recompra.",
+                "lang": "es-AR",
+                "dir": "ltr",
+                "start_url": "/gerencia",
+                "scope": "/",
+                "display": "standalone",
+                "display_override": ["window-controls-overlay", "standalone"],
+                "orientation": "any",
+                "background_color": "#0f1433",
+                "theme_color": "#0f1433",
+                "categories": ["business", "productivity"],
+                "prefer_related_applications": False,
+                "icons": [
+                    {
+                        "src": "/pwa/icon-192.png",
+                        "sizes": "192x192",
+                        "type": "image/png",
+                        "purpose": "any",
+                    },
+                    {
+                        "src": "/pwa/icon-512.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                ],
+                "shortcuts": [
+                    {
+                        "name": "Retención y Recompra",
+                        "short_name": "Recompra",
+                        "url": "/gerencia/recompra",
+                    },
+                    {
+                        "name": "Partes de Producción",
+                        "short_name": "Producción",
+                        "url": "/produccion",
+                    },
+                ],
+            }
+        )
+        response.mimetype = "application/manifest+json"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
     def _pwa_icon_response(size: int):
         icon_path = (
             Path(__file__).resolve().parents[1]

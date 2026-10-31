@@ -350,6 +350,32 @@ def _repurchase_snapshot():
     }
 
 
+
+
+def test_gerencia_manifest_is_installable(db):
+    response = _app().test_client().get("/gerencia/manifest.webmanifest")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["name"] == "FEMAG Gerencia"
+    assert payload["start_url"] == "/gerencia"
+    assert payload["scope"] == "/"
+    assert payload["display"] == "standalone"
+    assert {icon["sizes"] for icon in payload["icons"]} >= {"192x192", "512x512"}
+
+
+def test_gerencia_page_includes_pwa_registration(db):
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia")
+
+    assert response.status_code == 200
+    assert b"gerencia/manifest.webmanifest" in response.data
+    assert b'id="pwa-install-button"' in response.data
+    assert b"service-worker.js" in response.data
+
+
 def test_dashboard_v3_renders_waterfall_and_cohort(db):
     ManagerialDashboardService.apply_snapshot(_snapshot())
     ManagerialRepurchaseService.apply_snapshot(_repurchase_snapshot())
