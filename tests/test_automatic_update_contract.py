@@ -31,7 +31,7 @@ def test_production_build_injects_femag_identity_without_changing_historical_ins
     build = BUILD_SCRIPT.read_text(encoding="utf-8")
     iss = ISS.read_text(encoding="utf-8")
     assert 'APP_ID = `"femag`"' in build
-    assert 'Get-Date -Format "yyyy.MM.dd.HH.mm.ss"' in build
+    assert '(Get-Date).ToUniversalTime().ToString("yyyy.MM.dd.HH.mm.ss")' in build
     assert '[string]$BuildVersion' in build
     assert 'FEMAG_Desktop_Produccion_Setup.exe' in build
     assert 'AppId={{10F03F3B-BA11-4F61-88DA-14DD2AA30EF4}' in iss
