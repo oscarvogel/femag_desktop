@@ -194,6 +194,77 @@ def test_repurchase_vendedor_filtros_orden_y_limite(db):
     assert {r["client_name"] for r in searched} == {"Cli B"}
 
 
+def test_repurchase_resumen_y_dialogo_filtran_por_vendedor(db, tmp_path):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.models.masters import Product, Salesperson
+    from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
+    from app.ui.managerial_repurchase_dialog import ManagerialRepurchaseDialog
+
+    ven = Salesperson.create(name="Vendedora Filtro")
+    prod = Product.create(name="FiltroProd", unit="bolsa", peso_unitario_kg=10)
+    con_vendedor = _mkclient("Cli Con Vendedor", "30700001111", salesperson=ven)
+    sin_vendedor = _mkclient("Cli Sin Vendedor", "30700001112")
+    _mkorder(1111, date(2026, 9, 3), con_vendedor, prod, 100, 10000)
+    _mkorder(1112, date(2026, 9, 4), sin_vendedor, prod, 50, 5000)
+
+    service = ManagerialDashboardService()
+    current = ReportPeriod(date(2026, 10, 1), date(2026, 10, 12), "Actual")
+    summary = service.product_repurchase_summary(
+        current, current.previous_equivalent(), salesperson_id=ven.id
+    )
+    assert summary["previous_tonnes"] == 1.0
+    assert summary["count_sin_recompra"] == 1
+
+    app = QApplication.instance() or QApplication([])
+    dialog = ManagerialRepurchaseDialog(current=current, initial_product_id=prod.id)
+    try:
+        assert dialog.table.rowCount() == 2
+        dialog.salesperson_combo.setCurrentIndex(
+            dialog.salesperson_combo.findData(ven.id)
+        )
+        names = [dialog.table.item(i, 0).text() for i in range(dialog.table.rowCount())]
+        assert names == ["Cli Con Vendedor"]
+        assert "Vendedor: Vendedora Filtro" in dialog._filters_note()
+
+        out = dialog.export_report_pdf(tmp_path / "recompra_vendedor.pdf")
+        from pypdf import PdfReader
+
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(str(out)).pages)
+        assert "Cli Con Vendedor" in text
+        assert "Cli Sin Vendedor" not in text
+        assert "Vendedor: Vendedora Filtro" in text
+
+        from app.reports.managerial_repurchase_export import (
+            export_repurchase_html,
+            export_repurchase_xlsx,
+        )
+
+        html = export_repurchase_html(
+            service,
+            current,
+            tmp_path / "recompra_vendedor.html",
+            product_id=prod.id,
+            salesperson_id=ven.id,
+        ).read_text(encoding="utf-8")
+        assert "Cli Con Vendedor" in html
+        assert "Cli Sin Vendedor" not in html
+
+        from openpyxl import load_workbook
+
+        xlsx = export_repurchase_xlsx(
+            service,
+            current,
+            tmp_path / "recompra_vendedor.xlsx",
+            product_id=prod.id,
+            salesperson_id=ven.id,
+        )
+        wb = load_workbook(xlsx)
+        assert wb["Sin_recompra"].max_row == 2
+    finally:
+        dialog.close()
+
+
 def test_repurchase_export_excel_html_y_dialogo(db, tmp_path):
     from PyQt5.QtWidgets import QApplication
 

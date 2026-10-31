@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from app.models.masters import Client, Product
+from app.models.masters import Client, Product, Salesperson
 from app.config.database import database_proxy
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 
@@ -33,10 +33,15 @@ def build_repurchase_datasets(
     previous: ReportPeriod | None = None,
     *,
     product_id: int | None = None,
+    salesperson_id: int | None = None,
 ) -> dict[str, tuple[tuple[str, ...], list[tuple]]]:
     previous = previous or current.previous_equivalent()
-    rows = service.product_client_repurchase(current, previous, product_id=product_id)
-    summary = service.product_repurchase_summary(current, previous, product_id=product_id)
+    rows = service.product_client_repurchase(
+        current, previous, product_id=product_id, salesperson_id=salesperson_id
+    )
+    summary = service.product_repurchase_summary(
+        current, previous, product_id=product_id, salesperson_id=salesperson_id
+    )
     product_ids = {int(r["product_id"]) for r in rows}
     client_ids = {int(r["client_id"]) for r in rows}
     meta = _product_meta(product_ids)
@@ -45,9 +50,15 @@ def build_repurchase_datasets(
     if product_id is not None and product_id in meta:
         code = meta[product_id].get("codigo") or ""
         product_label = f"{code} · {meta[product_id]['name']}" if code else meta[product_id]["name"]
+    salesperson_label = "Todos los vendedores"
+    if salesperson_id is not None and database_proxy.obj is not None:
+        salesperson = Salesperson.get_or_none(Salesperson.id == salesperson_id)
+        if salesperson is not None:
+            salesperson_label = salesperson.name
 
     summary_rows = [
         ("producto", product_label or ("Todos los artículos" if product_id is None else str(product_id))),
+        ("vendedor", salesperson_label),
         ("periodo_anterior", previous.describe_range()),
         ("periodo_actual", current.describe_range()),
         ("criterio", "Órdenes efectivas Emitida/Cerrada. Kilos físicos pallet+suelto con fallback. Sin duplicar por destino. Vendedor = asignación actual del cliente (proxy)."),
@@ -101,6 +112,8 @@ def build_repurchase_datasets(
     for period, tag in ((previous, "anterior"), (current, "actual")):
         for line in service._dispatch_breakdown(period):
             if product_id is not None and int(line["product_id"]) != product_id:
+                continue
+            if salesperson_id is not None and int(line.get("salesperson_id") or 0) != salesperson_id:
                 continue
             pid = int(line["product_id"])
             m = meta.get(pid, {})
@@ -168,10 +181,13 @@ def export_repurchase_xlsx(
     *,
     previous: ReportPeriod | None = None,
     product_id: int | None = None,
+    salesperson_id: int | None = None,
     chart_image: str | Path | None = None,
 ) -> Path:
     path = Path(path)
-    datasets = build_repurchase_datasets(service, current, previous, product_id=product_id)
+    datasets = build_repurchase_datasets(
+        service, current, previous, product_id=product_id, salesperson_id=salesperson_id
+    )
     wb = Workbook()
     first = True
     for sheet_name in REPURCHASE_SHEETS:
@@ -269,10 +285,20 @@ def export_repurchase_html(
     *,
     previous: ReportPeriod | None = None,
     product_id: int | None = None,
+    salesperson_id: int | None = None,
     product_label: str = "",
+    salesperson_label: str = "",
 ) -> Path:
     previous = previous or current.previous_equivalent()
-    doc = _render_repurchase_html(service, current, previous, product_id, product_label)
+    doc = _render_repurchase_html(
+        service,
+        current,
+        previous,
+        product_id,
+        product_label,
+        salesperson_id=salesperson_id,
+        salesperson_label=salesperson_label,
+    )
     out = Path(path)
     if out.suffix.lower() != ".html":
         out = out.with_suffix(".html")
@@ -295,7 +321,9 @@ class ManagerialRepurchaseHtmlReport:
         current: ReportPeriod,
         previous: ReportPeriod | None = None,
         product_id: int | None = None,
+        salesperson_id: int | None = None,
         product_label: str = "",
+        salesperson_label: str = "",
         root_dir: Path | None = None,
         browser_open=None,
     ) -> None:
@@ -305,7 +333,9 @@ class ManagerialRepurchaseHtmlReport:
         self.current = current
         self.previous = previous or current.previous_equivalent()
         self.product_id = product_id
+        self.salesperson_id = salesperson_id
         self.product_label = product_label
+        self.salesperson_label = salesperson_label
         self.root_dir = root_dir or self._default_root_dir()
         self.browser_open = browser_open or webbrowser.open
 
@@ -323,7 +353,13 @@ class ManagerialRepurchaseHtmlReport:
     def generate(self) -> Path:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         doc = _render_repurchase_html(
-            self.service, self.current, self.previous, self.product_id, self.product_label
+            self.service,
+            self.current,
+            self.previous,
+            self.product_id,
+            self.product_label,
+            salesperson_id=self.salesperson_id,
+            salesperson_label=self.salesperson_label,
         )
         self.html_path.write_text(doc, encoding="utf-8")
         return self.html_path
@@ -340,13 +376,20 @@ def _render_repurchase_html(
     previous: ReportPeriod,
     product_id: int | None,
     product_label: str,
+    *,
+    salesperson_id: int | None = None,
+    salesperson_label: str = "",
 ) -> str:
     import html as _html
 
     previous = previous or current.previous_equivalent()
-    datasets = build_repurchase_datasets(service, current, previous, product_id=product_id)
+    datasets = build_repurchase_datasets(
+        service, current, previous, product_id=product_id, salesperson_id=salesperson_id
+    )
     summary = dict(datasets["Resumen"][1])
-    rows = service.product_client_repurchase(current, previous, product_id=product_id)
+    rows = service.product_client_repurchase(
+        current, previous, product_id=product_id, salesperson_id=salesperson_id
+    )
     prev_tn = float(summary.get("tn_anterior") or 0)
     cur_tn = float(summary.get("tn_actual") or 0)
     var = summary.get("variacion_pct")
@@ -397,7 +440,7 @@ table{{width:100%;border-collapse:collapse}}th,td{{padding:8px;border-bottom:1px
 </style></head><body><div class="shell">
 <p class="muted">FEMAG · Análisis de recompra por producto</p>
 <h1>{_html.escape(product_label or 'Todos los artículos')}</h1>
-<p class="muted">{_html.escape(previous.describe_range())} → {_html.escape(current.describe_range())}</p>
+<p class="muted">{_html.escape(previous.describe_range())} → {_html.escape(current.describe_range())}{f" · Vendedor: {_html.escape(salesperson_label)}" if salesperson_label else ""}</p>
 <div class="kpis">
 <div class="kpi"><div class="muted">{_html.escape(prev_short)}</div>
 <div class="big">{prev_tn:,.2f} tn</div><div class="muted">{money(summary.get('valorizado_anterior'))}</div></div>

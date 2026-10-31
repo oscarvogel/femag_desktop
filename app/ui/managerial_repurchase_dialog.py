@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.config.database import database_proxy
-from app.models.masters import Client, Product
+from app.models.masters import Client, Product, Salesperson
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 from app.reports.managerial_repurchase_pdf import export_repurchase_pdf
 from app.services.permission_service import PermissionService
@@ -295,6 +295,13 @@ class ManagerialRepurchaseDialog(QDialog):
         self.product_combo = QComboBox()
         self.product_combo.setObjectName("repurchaseProductCombo")
         self._load_products()
+        self.salesperson_combo = QComboBox()
+        self.salesperson_combo.setObjectName("repurchaseSalespersonCombo")
+        self.salesperson_combo.setToolTip(
+            "Filtra por el vendedor asignado actualmente al cliente (proxy operativo)."
+        )
+        self._load_salespersons()
+        self.salesperson_combo.currentIndexChanged.connect(self.refresh)
         filters.addWidget(QLabel("Actual:"))
         filters.addWidget(self.current_from)
         filters.addWidget(self.current_to)
@@ -303,6 +310,8 @@ class ManagerialRepurchaseDialog(QDialog):
         filters.addWidget(self.previous_to)
         filters.addWidget(QLabel("Producto:"))
         filters.addWidget(self.product_combo, 1)
+        filters.addWidget(QLabel("Vendedor:"))
+        filters.addWidget(self.salesperson_combo, 1)
         root.addLayout(filters)
 
         second = QHBoxLayout()
@@ -468,6 +477,13 @@ class ManagerialRepurchaseDialog(QDialog):
                 label = f"{row['codigo']} · {label}"
             self.product_combo.addItem(label, int(row["id"]))
 
+    def _load_salespersons(self) -> None:
+        self.salesperson_combo.addItem("Todos los vendedores", None)
+        if database_proxy.obj is None:
+            return
+        for row in Salesperson.select(Salesperson.id, Salesperson.name).order_by(Salesperson.name).dicts():
+            self.salesperson_combo.addItem(row["name"], int(row["id"]))
+
     @staticmethod
     def _qdate(widget: QDateEdit) -> date:
         value = widget.date()
@@ -481,17 +497,21 @@ class ManagerialRepurchaseDialog(QDialog):
     def refresh(self) -> None:
         current, previous = self._current_periods()
         product_id = self.product_combo.currentData()
+        salesperson_id = self.salesperson_combo.currentData()
         status_filter = self.status_combo.currentData()
         rows = self.service.product_client_repurchase(
             current,
             previous,
             product_id=product_id,
+            salesperson_id=salesperson_id,
             client_query=self.search_input.text(),
             order_by=self.order_combo.currentData() or "default",
         )
         if status_filter:
             rows = [r for r in rows if r["status"] == status_filter]
-        summary = self.service.product_repurchase_summary(current, previous, product_id=product_id)
+        summary = self.service.product_repurchase_summary(
+            current, previous, product_id=product_id, salesperson_id=salesperson_id
+        )
         prev_short = f"{previous.start.day}–{previous.end.day} {previous.start:%b}".replace(" 0", " ")
         cur_short = f"{current.start.day}–{current.end.day} {current.start:%b}".replace(" 0", " ")
         var_pct = summary["variation_percent"]
@@ -742,6 +762,8 @@ class ManagerialRepurchaseDialog(QDialog):
 
     def _filters_note(self) -> str:
         parts: list[str] = []
+        if self.salesperson_combo.currentData() is not None:
+            parts.append(f"Vendedor: {self.salesperson_combo.currentText()}")
         if self.status_combo.currentData():
             parts.append(f"Situación: {self.status_combo.currentText()}")
         client_query = self.search_input.text().strip()
@@ -839,6 +861,7 @@ class ManagerialRepurchaseDialog(QDialog):
 
         current, previous = self._current_periods()
         product_id = self.product_combo.currentData()
+        salesperson_id = self.salesperson_combo.currentData()
         path, _ = QFileDialog.getSaveFileName(
             self, "Exportar recompra", "recompra_por_producto.xlsx", "Excel (*.xlsx)"
         )
@@ -851,7 +874,7 @@ class ManagerialRepurchaseDialog(QDialog):
             chart_png = self._chart_temp_png()
             out = export_repurchase_xlsx(
                 self.service, current, path, previous=previous, product_id=product_id,
-                chart_image=chart_png,
+                salesperson_id=salesperson_id, chart_image=chart_png,
             )
         except PermissionError as exc:
             QMessageBox.warning(self, "Exportar recompra", str(exc))
@@ -866,13 +889,20 @@ class ManagerialRepurchaseDialog(QDialog):
 
         current, previous = self._current_periods()
         product_id = self.product_combo.currentData()
+        salesperson_id = self.salesperson_combo.currentData()
         try:
             report = ManagerialRepurchaseHtmlReport(
                 service=self.service,
                 current=current,
                 previous=previous,
                 product_id=product_id,
+                salesperson_id=salesperson_id,
                 product_label=self.product_combo.currentText(),
+                salesperson_label=(
+                    self.salesperson_combo.currentText()
+                    if salesperson_id is not None
+                    else ""
+                ),
             )
             out = report.open()
         except Exception as exc:  # noqa: BLE001 - mostrar error amable en UI
