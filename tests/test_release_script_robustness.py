@@ -121,6 +121,19 @@ def test_env_file_is_no_longer_checked_at_the_end_of_the_build():
     assert "Move-EnvFileAside" in content
 
 
+def test_release_verifies_remote_asset_before_writing_manifest():
+    """#839: el flujo local tambien valida el SHA remoto antes de candidate.json."""
+    content = RELEASE.read_text(encoding="utf-8")
+
+    assert "function Assert-RemoteAssetMatches" in content
+    assert "Assert-RemoteAssetMatches $ReleaseTag $InstallerName $sha256" in content
+    assert content.index("Assert-RemoteAssetMatches $ReleaseTag") < content.index(
+        "[System.IO.File]::WriteAllText($manifestPath, $json"
+    )
+    assert "$uploadOk" in content
+    assert "No se pudo subir el instalador candidate despues de 3 intentos" in content
+
+
 @requires_powershell
 def test_release_script_parses(tmp_path):
     result = _extract_functions(["Ensure-Venv"], f"'{tmp_path}'")
