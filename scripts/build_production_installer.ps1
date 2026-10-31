@@ -19,7 +19,7 @@ if ((-not (Test-Path -LiteralPath $Python)) -and (Get-Command python -ErrorActio
     $Python = (Get-Command python).Source
 }
 if (-not $BuildVersion) {
-    $BuildVersion = Get-Date -Format "yyyy.MM.dd.HH.mm.ss"
+    $BuildVersion = (Get-Date).ToUniversalTime().ToString("yyyy.MM.dd.HH.mm.ss")
 }
 $BuildVersionFile = Join-Path $RepoRoot "app\build_version.py"
 $BuildInfoFile = Join-Path $RepoRoot "app\build_info.py"

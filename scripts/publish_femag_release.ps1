@@ -375,7 +375,7 @@ function Publish-LegacyBootstrap {
 
 function Publish-Candidate {
     Assert-CleanWorkspace
-    $candidateVersion = Get-Date -Format 'yyyy.MM.dd.HH.mm.ss'
+    $candidateVersion = (Get-Date).ToUniversalTime().ToString('yyyy.MM.dd.HH.mm.ss')
     Set-CandidateBuildIdentity -BuildVersion $candidateVersion
     Sync-LocalDependencies
     Invoke-LocalValidation

@@ -27,7 +27,7 @@ Regla de release: nunca copiar, empaquetar, reemplazar, borrar ni modificar INI,
 
 ## Build
 
-`scripts/build_production_installer.ps1` genera versión UTC/local de build con formato:
+`scripts/build_production_installer.ps1` genera la versión de build en UTC con formato:
 
 `yyyy.MM.dd.HH.mm.ss`
 
