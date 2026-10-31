@@ -374,6 +374,7 @@ def test_gerencia_page_includes_pwa_registration(db):
     assert b"gerencia/manifest.webmanifest" in response.data
     assert b'id="pwa-install-button"' in response.data
     assert b"service-worker.js" in response.data
+    assert b'href="/logout"' in response.data
 
 
 def test_dashboard_v3_renders_waterfall_and_cohort(db):
