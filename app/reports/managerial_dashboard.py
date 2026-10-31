@@ -608,15 +608,22 @@ class ManagerialDashboardService:
         previous: ReportPeriod | None = None,
         *,
         product_id: int | None = None,
+        salesperson_id: int | None = None,
     ) -> dict:
         """Resumen gerencial por producto con conciliación exacta en TN.
 
         Variación neta = pérdidas por sin recompra + reducciones recurrentes
         + aumentos recurrentes + incorporaciones del período. Los ``igual``
         aportan 0 por definición (dentro de tolerancia) y se informan aparte.
+
+        ``salesperson_id`` filtra por la asignación actual del cliente, la
+        misma regla que :meth:`product_client_repurchase`, para que los KPIs
+        concuerden con la tabla cuando se analiza un vendedor.
         """
         previous = previous or current.previous_equivalent()
-        rows = self.product_client_repurchase(current, previous, product_id=product_id)
+        rows = self.product_client_repurchase(
+            current, previous, product_id=product_id, salesperson_id=salesperson_id
+        )
         by_status: dict[str, list[dict]] = {}
         for row in rows:
             by_status.setdefault(row["status"], []).append(row)
