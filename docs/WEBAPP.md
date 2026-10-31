@@ -199,12 +199,16 @@ entrarían al stock y el mismo kilo quedaría en los dos stocks.
 
 ## Dashboard gerencial (#837)
 
-`/gerencia` muestra el último snapshot agregado que publica la fábrica. Está
-pensado para Gerencia y Administrador, desde celular o notebook.
+`/gerencia` es el tablero BI ejecutivo para Gerencia y Administrador, desde
+celular o notebook. Usa el shell de dirección con navegación lateral, período
+actual vs. anterior y acciones de impresión/exportación.
 
 - La fábrica publica solo agregados del mes cada 30 minutos: ventas, toneladas,
-  pedidos, ticket promedio, evolución de 12 meses, top 5 clientes y top 5
-  productos.
+  pedidos, ticket promedio, clientes compradores, precio por tonelada, top 5
+  clientes, top 5 productos y el snapshot de recompra.
+- El tablero muestra 5 KPIs, el puente de variación de volumen, la comparativa
+  por producto y la radiografía de cartera; el detalle cliente por cliente está
+  en `/gerencia/recompra`.
 - La nube guarda el último snapshot en `syncprojection` con
   `resource_type=managerial_dashboard` y `resource_uid=latest`.
 - No viajan órdenes crudas, cuentas corrientes, precios ni stock.

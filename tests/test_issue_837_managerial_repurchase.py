@@ -211,7 +211,7 @@ def test_repurchase_route_renders_for_admin(db):
     response = client.get("/gerencia/recompra")
 
     assert response.status_code == 200
-    assert b"Clientes vs. mes anterior" in response.data
+    assert "Retención y Recompra".encode() in response.data
     assert b"CLIENTE ALFA" in response.data
     assert b"Sin recompra" in response.data
     assert b"filtro-cliente" in response.data
@@ -229,7 +229,7 @@ def test_repurchase_route_is_available_to_gerencia(db):
     response = client.get("/gerencia/recompra")
 
     assert response.status_code == 200
-    assert "Análisis de recompra".encode() in response.data
+    assert "Retención y Recompra".encode() in response.data
 
 
 def test_repurchase_route_redirects_non_manager(db):
@@ -250,4 +250,4 @@ def test_repurchase_route_shows_empty_state(db):
 
     assert response.status_code == 200
     assert b"Sin datos" in response.data
-    assert b"El informe se va a completar solo" in response.data
+    assert b"esta pantalla se completa sola" in response.data
