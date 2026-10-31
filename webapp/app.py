@@ -309,11 +309,11 @@ self.addEventListener("fetch", event => {
             flash("Usuario o contraseña incorrectos.", "error")
         return render_template("login.html")
 
-    @app.get("/logout")
+    @app.route("/logout", methods=["GET", "POST"])
     def logout():
         logout_user()
         flash("Sesión cerrada.", "success")
-        return redirect(url_for("home"))
+        return redirect(url_for("login"))
 
     @app.route("/", methods=["GET", "POST"])
     def home():
