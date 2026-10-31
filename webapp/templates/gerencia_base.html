@@ -68,6 +68,7 @@
         <div class="topbar-controls">
           <button class="btn pwa-install-button" type="button" id="pwa-install-button" hidden>Instalar app</button>
           {% block topbar_actions %}{% endblock %}
+          <a class="btn btn-logout" href="{{ url_for('logout') }}">Salir</a>
         </div>
       </header>
 

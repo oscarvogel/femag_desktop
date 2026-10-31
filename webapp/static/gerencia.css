@@ -821,3 +821,6 @@
 @media(max-width:640px){
   .pwa-install-button{font-size:11px;height:30px;padding:0 8px}
 }
+
+.btn-logout{color:var(--red-700);border-color:#fecaca;background:var(--white)}
+.btn-logout:hover,.btn-logout:focus-visible{background:var(--red-050);border-color:var(--red-600)}
