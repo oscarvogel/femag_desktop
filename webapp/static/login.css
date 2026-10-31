@@ -1,0 +1,76 @@
+:root{
+  --navy-950:#0f1433; --navy-900:#171b49; --navy-800:#20265f; --navy-700:#293e86;
+  --red-700:#c1121f; --red-600:#dc2626; --red-100:#fee2e2;
+  --slate-950:#090d16; --slate-900:#0f172a; --slate-700:#334155; --slate-600:#475569;
+  --slate-500:#64748b; --slate-400:#94a3b8; --slate-300:#cbd5e1; --slate-200:#e2e8f0;
+  --slate-100:#f1f5f9; --slate-050:#f8fafc; --white:#fff;
+  --font:"Figtree",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--slate-100);color:var(--slate-900);font-family:var(--font);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.login-shell{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(420px,.92fr)}
+.login-brand{position:relative;overflow:hidden;background:var(--navy-950);color:#fff;padding:46px 52px;display:flex;flex-direction:column;isolation:isolate}
+.login-brand::before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(100deg,rgba(15,20,51,.98) 0%,rgba(15,20,51,.88) 52%,rgba(15,20,51,.58) 100%),url("/static/login-fecula.webp") center/cover no-repeat}
+.login-brand::after{content:"";position:absolute;inset:auto 0 0 0;height:5px;background:linear-gradient(90deg,var(--red-700) 0 28%,#f2c62f 28% 32%,transparent 32%);z-index:-1}
+.brand-lockup{display:flex;align-items:center;gap:14px}
+.brand-lockup img{height:42px;width:auto;display:block}
+.brand-lockup .brand-name{display:flex;flex-direction:column;gap:1px}
+.brand-lockup strong{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.brand-lockup span{font-size:10.5px;color:#c7d2e5;letter-spacing:.08em;text-transform:uppercase}
+.brand-copy{margin-top:auto;max-width:540px}
+.brand-kicker{margin:0 0 14px;font-size:10px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:#c7d2e5}
+.brand-copy h1{margin:0;font-family:var(--serif);font-size:clamp(2.4rem,4.2vw,4.4rem);line-height:1.02;letter-spacing:-.03em;font-weight:500}
+.brand-copy p{margin:18px 0 0;max-width:42ch;font-size:14px;line-height:1.55;color:#d5deeb}
+.brand-foot{margin-top:34px;display:flex;justify-content:space-between;align-items:center;gap:16px;border-top:1px solid rgba(255,255,255,.18);padding-top:14px;font-size:11px;color:#b9c6d9}
+.brand-foot .live{display:inline-flex;align-items:center;gap:7px}
+.brand-foot .live i{width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.18);display:inline-block}
+
+.login-workspace{display:flex;align-items:center;justify-content:center;padding:42px 28px;background:var(--slate-050)}
+.login-panel{width:100%;max-width:400px}
+.login-eyebrow{margin:0 0 8px;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--navy-700)}
+.login-panel h2{margin:0;font-size:27px;line-height:1.15;letter-spacing:-.03em;font-weight:800;color:var(--slate-950)}
+.login-sub{margin:10px 0 22px;font-size:13px;line-height:1.55;color:var(--slate-500)}
+.flash{border:1px solid var(--slate-200);background:#fff;color:var(--slate-700);padding:10px 12px;border-radius:6px;font-size:12px;line-height:1.45;margin-bottom:14px}
+.flash.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.flash.success{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+.field{margin-bottom:14px}
+.field label{display:block;margin-bottom:6px;font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--slate-500)}
+.field input{width:100%;height:46px;border:1px solid var(--slate-300);border-radius:6px;background:#fff;color:var(--slate-900);padding:0 12px;font:inherit;font-size:14px;outline:none;transition:border-color 140ms ease,box-shadow 140ms ease}
+.field input:focus{border-color:var(--navy-700);box-shadow:0 0 0 3px rgba(41,62,134,.12)}
+.field input::placeholder{color:var(--slate-400)}
+.password-wrap{position:relative}
+.password-wrap input{padding-right:72px}
+.password-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--navy-700);font:inherit;font-size:11px;font-weight:800;padding:8px;cursor:pointer;border-radius:4px}
+.password-toggle:hover,.password-toggle:focus-visible{background:var(--slate-100);outline:none}
+.login-submit{width:100%;height:46px;border:0;border-radius:6px;background:var(--red-700);color:#fff;font:inherit;font-size:13px;font-weight:800;cursor:pointer;letter-spacing:.01em;transition:background 140ms ease,transform 140ms ease}
+.login-submit:hover{background:#9d0710}
+.login-submit:active{transform:translateY(1px)}
+.login-submit:focus-visible{outline:2px solid var(--navy-700);outline-offset:2px}
+.login-help{margin:18px 0 0;font-size:11.5px;line-height:1.55;color:var(--slate-500)}
+.login-help strong{color:var(--slate-700)}
+.login-links{display:flex;justify-content:space-between;gap:12px;margin-top:22px;padding-top:14px;border-top:1px solid var(--slate-200);font-size:11px;color:var(--slate-500)}
+.login-links a{font-weight:700;color:var(--navy-700);text-decoration:none;border-bottom:1px solid var(--slate-300)}
+.login-links a:hover{border-bottom-color:var(--navy-700)}
+.login-foot{margin-top:30px;font-size:10px;letter-spacing:.02em;color:var(--slate-400)}
+
+@media(max-width:980px){
+  .login-shell{grid-template-columns:minmax(0,1fr) minmax(380px,.95fr)}
+  .login-brand{padding:34px 32px}
+  .brand-copy h1{font-size:clamp(2.2rem,4vw,3.4rem)}
+}
+@media(max-width:760px){
+  .login-shell{display:block;min-height:100vh}
+  .login-brand{min-height:245px;padding:24px 22px 26px}
+  .login-brand::before{background:linear-gradient(180deg,rgba(15,20,51,.98) 0%,rgba(15,20,51,.94) 60%,rgba(15,20,51,.82) 100%),url("/static/login-fecula.webp") center/cover no-repeat}
+  .brand-copy{margin-top:34px;max-width:none}
+  .brand-copy h1{font-size:2rem;line-height:1.02}
+  .brand-copy p{font-size:12.5px;margin-top:10px;max-width:34ch}
+  .brand-foot{margin-top:20px;padding-top:10px;font-size:10px}
+  .brand-foot .live{display:none}
+  .login-workspace{padding:28px 20px 34px;align-items:flex-start}
+  .login-panel{max-width:440px;margin:0 auto}
+  .login-panel h2{font-size:24px}
+}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto;transition:none!important}}
