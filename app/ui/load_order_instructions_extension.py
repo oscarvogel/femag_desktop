@@ -61,11 +61,5 @@ def install_load_order_instructions_extension() -> None:
         )
         return block
 
-    def budget_observations_without_load_instructions(self, order, *, client=None, destination=None):
-        # The legacy budget renderer must not leak operational destination notes.
-        # Numbered budgets use BudgetPrintService and persist their own observations.
-        return []
-
     service_class._destination_detail_block = destination_detail_block_with_observation
-    service_class._budget_observations = budget_observations_without_load_instructions
     service_class._client_observation_on_load_order_installed = True

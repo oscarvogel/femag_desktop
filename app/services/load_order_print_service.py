@@ -503,7 +503,6 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client),
             Spacer(1, 8 * mm),
-            *self._budget_observations(order, client=client),
             self._budget_totals(order, client),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
@@ -574,34 +573,10 @@ class LoadOrderPrintService:
             Spacer(1, 3 * mm),
             self._budget_detail_table(order, client, destination),
             Spacer(1, 8 * mm),
-            *self._budget_observations(order, destination=destination),
             self._budget_totals(order, client, destination),
             Spacer(1, 15 * mm),
             Paragraph("Firma del cliente: __________________________", self.styles["normal"]),
         ]
-
-    def _budget_observations(
-        self,
-        order: LoadOrder,
-        *,
-        client: Client | None = None,
-        destination: LoadOrderDestination | None = None,
-    ) -> list:
-        if destination is not None:
-            descriptions = [(destination.observations or "").strip()]
-        elif client is not None:
-            descriptions = [
-                (item.observations or "").strip()
-                for item in order.destinations.order_by(LoadOrderDestination.sequence)
-                if item.client_id == client.id
-            ]
-        else:
-            descriptions = []
-        descriptions = list(dict.fromkeys(value for value in descriptions if value))
-        if not descriptions:
-            return []
-        value = " / ".join(descriptions)
-        return [self._observations_paragraph(value), Spacer(1, 4 * mm)]
 
     def _budget_header(
         self,
