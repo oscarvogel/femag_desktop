@@ -30,7 +30,10 @@ from app.models.masters import Client, Product
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 from app.reports.managerial_repurchase_pdf import export_repurchase_pdf
 from app.services.permission_service import PermissionService
-from app.services.repurchase_followup_service import build_followup_message_for_row
+from app.services.repurchase_followup_service import (
+    build_followup_message_for_row,
+    period_phrase,
+)
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.ui.whatsapp_send import WhatsAppTextDialog, WhatsAppTextWorker
 
@@ -639,8 +642,15 @@ class ManagerialRepurchaseDialog(QDialog):
         except Exception:
             return "unidad"
 
-    def _followup_message_for_row(self, row: dict) -> str:
-        return build_followup_message_for_row(row, self._row_unit(row))
+    def _followup_message_for_row(self, row: dict, *, client_name: str = "") -> str:
+        current, previous = self._current_periods()
+        return build_followup_message_for_row(
+            row,
+            self._row_unit(row),
+            client_name=client_name,
+            current_period=period_phrase(current.start, current.end),
+            previous_period=period_phrase(previous.start, previous.end),
+        )
 
     @staticmethod
     def _whatsapp_document_id(client_id: int, row: dict, period: ReportPeriod) -> str:
@@ -665,10 +675,14 @@ class ManagerialRepurchaseDialog(QDialog):
             )
             return
 
+        greeting_name = (client.contact or client.name or "").strip()
+        current, _ = self._current_periods()
         dialog = WhatsAppTextDialog(
             recipient_name=client.name,
             phone=client.phone or "",
-            default_message=self._followup_message_for_row(row),
+            default_message=self._followup_message_for_row(
+                row, client_name=greeting_name
+            ),
             window_title="Enviar WhatsApp de seguimiento",
             parent=self,
         )
@@ -678,7 +692,6 @@ class ManagerialRepurchaseDialog(QDialog):
         message = dialog.message()
         try:
             service = WhatsAppEnvioService()
-            current, _ = self._current_periods()
             envio = service.create_text_attempt(
                 tipo_documento="seguimiento_recompra",
                 documento_id=self._whatsapp_document_id(client.id, row, current),

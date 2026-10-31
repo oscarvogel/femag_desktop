@@ -409,35 +409,94 @@ def test_repurchase_tabla_se_ordena_por_clic_en_columnas(db):
         dialog.close()
 
 
-def test_repurchase_mensaje_seguimiento_usa_la_ultima_compra():
+def test_repurchase_mensaje_seguimiento_segun_situacion():
+    from datetime import date as _date
+
     from app.services.repurchase_followup_service import (
         build_followup_message_for_row,
-        last_purchase,
+        period_phrase,
     )
 
-    row = {
-        "current_quantity": 1500,
-        "current_last_date": "2026-10-20",
-        "previous_quantity": 100,
-        "previous_last_date": "2026-09-20",
-    }
-    quantity, purchase_date = last_purchase(row)
-    assert (quantity, purchase_date) == (1500, "2026-10-20")
-    message = build_followup_message_for_row(row, "bolsa")
-    assert "1.500 bolsas" in message
-    assert "20/10/2026" in message
-    assert "reponer su stock" in message
+    product = "BOLSAS DE FECULA NATIVA"
 
-    # Si no compró en el actual, usa la compra del anterior y singular.
-    previous_only = {
-        "previous_quantity": 1,
-        "previous_last_date": "2026-09-20",
-    }
-    assert "1 bolsa" in build_followup_message_for_row(previous_only, "bolsa")
+    def message(status, **overrides):
+        row = {
+            "status": status,
+            "product_name": product,
+            "current_quantity": 750,
+            "previous_quantity": 1305,
+            "variation_kilos_percent": -42.5,
+            **overrides,
+        }
+        return build_followup_message_for_row(
+            row,
+            "bolsa",
+            client_name="Dante",
+            current_period="octubre de 2026",
+            previous_period="septiembre de 2026",
+        )
 
-    # Sin compras no inventa una fecha ni una cantidad.
+    # Bajó la compra: nombre, producto, cantidades y variación real.
+    compro_menos = message("compro_menos")
+    assert compro_menos.startswith("Buen día, Dante.")
+    assert "750 bolsas" in compro_menos
+    assert "1.305 bolsas" in compro_menos
+    assert "42,5% menos" in compro_menos
+    assert product in compro_menos
+    assert "octubre de 2026" in compro_menos
+    assert "septiembre de 2026" in compro_menos
+    assert "propuesta para reponer stock" in compro_menos
+
+    # No recompró: última compra y volumen anterior, sin inventar cantidades.
+    sin_recompra = message(
+        "sin_recompra",
+        current_quantity=0,
+        variation_kilos_percent=-100.0,
+        previous_last_date="2026-09-28",
+    )
+    assert "No registramos compras" in sin_recompra
+    assert "28/09/2026" in sin_recompra
+    assert "1.305 bolsas" in sin_recompra
+    assert "propuesta para reponer stock" in sin_recompra
+
+    # Subió la compra: agradecimiento y variación positiva.
+    compro_mas = message(
+        "compro_mas",
+        current_quantity=1920,
+        previous_quantity=1443,
+        variation_kilos_percent=33.1,
+    )
+    assert "Gracias por su confianza" in compro_mas
+    assert "1.920 bolsas" in compro_mas
+    assert "33,1% más" in compro_mas
+    assert "reservemos stock" in compro_mas
+
+    # Se mantuvo y cliente nuevo tienen mensajes distintos.
+    igual = message("igual", current_quantity=100, previous_quantity=100,
+                    variation_kilos_percent=0.0)
+    assert "mantuvo su compra" in igual
+    assert "100 bolsas" in igual
+    assert "¿Necesita reponer stock?" in igual
+
+    nuevo = message("nuevo", current_quantity=50, previous_quantity=0,
+                    variation_kilos_percent=None)
+    assert "primera compra" in nuevo
+    assert "50 bolsas" in nuevo
+    assert "plan de reposición" in nuevo
+
+    # Singular y período en lenguaje natural.
+    assert "1 bolsa" in message("igual", current_quantity=1, previous_quantity=1)
+    assert period_phrase(_date(2026, 10, 1), _date(2026, 10, 31)) == "octubre de 2026"
+    assert period_phrase(_date(2026, 10, 1), _date(2026, 10, 12)) == "octubre de 2026"
+    assert period_phrase(_date(2026, 10, 5), _date(2026, 10, 12)) == "del 5 al 12 de octubre"
+    assert (
+        period_phrase(_date(2026, 9, 28), _date(2026, 10, 5))
+        == "del 28/09/2026 al 05/10/2026"
+    )
+
+    # Sin datos no inventa una compra.
     assert "Quisiera saber" in build_followup_message_for_row({}, "bolsa")
-    assert "bolsas" not in build_followup_message_for_row({}, "bolsa")
+
 
 
 def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
@@ -454,6 +513,7 @@ def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
     prod = Product.create(name="WaProd", unit="bolsa", peso_unitario_kg=10)
     cli = _mkclient("Cli WhatsApp", "30700001091")
     cli.phone = "3743 123456"
+    cli.contact = "Dante"
     cli.save()
     _mkorder(1091, date(2026, 9, 3), cli, prod, 10, 1000)
     _mkorder(1092, date(2026, 10, 3), cli, prod, 150, 15000)
@@ -525,10 +585,15 @@ def test_repurchase_whatsapp_precarga_telefono_y_crea_envio(db, monkeypatch):
         dialog.send_whatsapp()
 
         assert captured["dialog"]["phone"] == "3743 123456"
-        assert "150 bolsas" in captured["dialog"]["default_message"]
-        assert captured["dialog"]["default_message"].endswith(
-            "Quisiera saber si necesita reponer su stock."
-        )
+        default_message = captured["dialog"]["default_message"]
+        assert default_message.startswith("Buen día, Dante.")
+        assert "150 bolsas" in default_message
+        assert "10 bolsas" in default_message
+        assert "1.400,0% más" in default_message
+        assert "octubre de 2026" in default_message
+        assert "septiembre de 2026" in default_message
+        assert "WaProd" in default_message
+        assert "reservemos stock" in default_message
         attempt = captured["attempt"]
         assert attempt["usuario"] is fake_user
         assert attempt["tipo_documento"] == "seguimiento_recompra"
