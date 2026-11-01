@@ -68,6 +68,22 @@ def test_candidate_workflow_is_manual_and_validates_before_publish():
     assert "Download-And-Verify $candidateTag" in local_release
 
 
+def test_candidate_workflow_verifies_uploaded_asset_before_manifest():
+    """#839: un fallo de clobber no debe publicar un manifest con SHA inexistente."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "gh release upload" in workflow
+    assert "$uploadOk" in workflow
+    assert "for ($attempt = 1; $attempt -le 3; $attempt++)" in workflow
+    assert "No se pudo subir el instalador candidate despues de 3 intentos" in workflow
+    assert "gh release download" in workflow
+    assert "Get-FileHash" in workflow
+    assert "El asset remoto no coincide" in workflow
+    assert workflow.index("El asset remoto no coincide") < workflow.index(
+        "$json = $payload | ConvertTo-Json"
+    )
+
+
 def test_promotion_is_manual_idempotent_and_promotes_same_bytes_with_previous():
     workflow = PROMOTION_WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow

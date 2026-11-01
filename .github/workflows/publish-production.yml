@@ -167,8 +167,42 @@ jobs:
           gh release view $env:RELEASE_TAG --repo $env:RELEASE_REPO *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:RELEASE_TAG --repo $env:RELEASE_REPO --title 'FEMAG candidate' --notes 'Validated FEMAG candidate. Do not distribute as production.'
+            if ($LASTEXITCODE -ne 0) { throw 'No se pudo crear el release candidate.' }
           }
-          gh release upload $env:RELEASE_TAG "installer\output\$env:INSTALLER_NAME" --repo $env:RELEASE_REPO --clobber
+
+          # Un error transitorio de GitHub (por ejemplo HTTP 500 al reemplazar el
+          # asset con --clobber) no debe dejar el manifest apuntando a bytes que
+          # no existen. Reintentamos y si sigue fallando, abortamos antes de
+          # escribir candidate.json. Ver #839.
+          $uploadOk = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            gh release upload $env:RELEASE_TAG "installer\output\$env:INSTALLER_NAME" --repo $env:RELEASE_REPO --clobber
+            if ($LASTEXITCODE -eq 0) { $uploadOk = $true; break }
+            Write-Host "Subida del asset fallo (intento $attempt/3, exit=$LASTEXITCODE)."
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+          }
+          if (-not $uploadOk) { throw 'No se pudo subir el instalador candidate despues de 3 intentos. No se publica el manifest.' }
+
+          # Verificar los bytes realmente publicados antes de commitear el manifest.
+          $verifyDir = Join-Path $env:RUNNER_TEMP ("femag-asset-verify-" + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force $verifyDir | Out-Null
+          $remoteSha = ''
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            gh release download $env:RELEASE_TAG --repo $env:RELEASE_REPO --pattern $env:INSTALLER_NAME --dir $verifyDir --clobber
+            $downloaded = Join-Path $verifyDir $env:INSTALLER_NAME
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $downloaded)) {
+              $remoteSha = (Get-FileHash $downloaded -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($remoteSha -eq $env:SHA256) { break }
+              Write-Host "El SHA remoto no coincide (intento $attempt/3): remoto=$remoteSha esperado=$env:SHA256"
+            }
+            else {
+              Write-Host "La descarga de verificacion fallo (intento $attempt/3, exit=$LASTEXITCODE)."
+            }
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+          }
+          if ($remoteSha -ne $env:SHA256) {
+            throw "El asset remoto no coincide con el SHA256 calculado. remoto=$remoteSha esperado=$env:SHA256. No se publica el manifest."
+          }
 
           $manifestDir = 'vogel-releases\apps\femag'
           New-Item -ItemType Directory -Force $manifestDir | Out-Null

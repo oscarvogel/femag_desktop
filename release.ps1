@@ -66,6 +66,22 @@ function Invoke-WithQtOffscreen([scriptblock]$Action) {
     }
 }
 
+# Verifica que el asset publicado en el release tenga exactamente el SHA256
+# calculado del build local, antes de escribir candidate.json. Ver #839.
+function Assert-RemoteAssetMatches([string]$Tag, [string]$AssetName, [string]$ExpectedSha, [string]$Folder) {
+    New-Item -ItemType Directory -Force $Folder | Out-Null
+    Invoke-Native -Command "gh" -Arguments @("release", "download", $Tag, "--repo", $ReleaseRepo, "--pattern", $AssetName, "--dir", $Folder, "--clobber") `
+        -FailureMessage "No se pudo descargar el asset candidate para verificar su SHA256."
+    $path = Join-Path $Folder $AssetName
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "No se descargo el asset $Tag/$AssetName."
+    }
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $ExpectedSha.ToLowerInvariant()) {
+        throw "El asset publicado no coincide con el SHA256 calculado. remoto=$actual esperado=$ExpectedSha"
+    }
+}
+
 function Assert-GhAuth {
     $previousEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -373,8 +389,30 @@ function Invoke-CandidateLocal {
                 -FailureMessage "No se pudo crear el release candidate."
         }
 
-        Invoke-Native -Command "gh" -Arguments @("release", "upload", $ReleaseTag, $Installer, "--repo", $ReleaseRepo, "--clobber") `
-            -FailureMessage "No se pudo subir el instalador candidate."
+        # Reintentar errores transitorios y abortar si el asset no queda publicado.
+        $uploadOk = $false
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+                & gh release upload $ReleaseTag $Installer --repo $ReleaseRepo --clobber 2>&1 | ForEach-Object { Write-Host "$_" }
+            } finally {
+                $ErrorActionPreference = $prevEAP
+            }
+            if ($LASTEXITCODE -eq 0) { $uploadOk = $true; break }
+            Write-Host "Subida del asset fallo (intento $attempt/3, exit=$LASTEXITCODE)." -ForegroundColor Yellow
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+        }
+        if (-not $uploadOk) {
+            throw "No se pudo subir el instalador candidate despues de 3 intentos. No se publica el manifest."
+        }
+
+        $verifyDir = Join-Path $env:TEMP ("femag-candidate-verify-" + [guid]::NewGuid().ToString("N"))
+        try {
+            Assert-RemoteAssetMatches $ReleaseTag $InstallerName $sha256 $verifyDir
+        } finally {
+            Remove-Item -Recurse -Force $verifyDir -ErrorAction SilentlyContinue
+        }
 
         $downloadUrl = "https://github.com/$ReleaseRepo/releases/download/$ReleaseTag/$InstallerName"
         $temp = Join-Path $env:TEMP ("vogel-releases-femag-" + [guid]::NewGuid().ToString("N"))
