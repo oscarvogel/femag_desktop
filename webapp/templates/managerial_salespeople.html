@@ -34,7 +34,7 @@
   <a class="exec-banner-link" href="{{ url_for('managerial_repurchase', period=selected_period or None) }}">Ver detalle por cliente →</a>
 </section>
 
-<section class="kpi-grid" aria-label="Indicadores de vendedores">
+<section class="kpi-grid salespeople-kpis" aria-label="Indicadores de vendedores">
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Facturación Total</span><span class="kpi-pill {{ dashboard.kpis.sales.direction }}">{{ dashboard.kpis.sales.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.sales.value }}</div>
@@ -63,7 +63,7 @@
 </section>
 
 <section class="tables-row">
-  <article class="card" style="grid-column:1/-1">
+  <article class="card salespeople-card" style="grid-column:1/-1">
     <div class="card-header">
       <div>
         <h2 class="card-title">Ranking de Vendedores · {{ dashboard.current_label }}</h2>
@@ -75,7 +75,7 @@
         <span><i class="swatch" style="background:var(--red-600)"></i> Caída</span>
       </div>
     </div>
-    <div class="data-table-wrap">
+    <div class="data-table-wrap salespeople-desktop">
       <table class="data-table" style="min-width:1040px">
         <thead>
           <tr>
@@ -98,7 +98,7 @@
             <td class="num">{{ loop.index }}</td>
             <td>
               <span class="primary-cell">{{ row.name }}</span>
-              <span class="cell-sub">{{ row.clients }} activos · {{ row.clients_previous }} en {{ dashboard.previous_short }}</span>
+              <span class="cell-sub">{{ row.clients }} activo{% if row.clients != 1 %}s{% endif %} · {{ row.clients_previous }} en {{ dashboard.previous_short }}</span>
             </td>
             <td class="num"><strong>{{ row.sales_value }}</strong><span class="cell-sub">{{ row.sales_previous }} ant.</span></td>
             <td class="num"><span class="badge-var {{ row.sales_direction }}">{{ row.sales_delta }}</span><span class="cell-sub">{{ row.sales_diff }}</span></td>
@@ -115,6 +115,42 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+    <div class="salespeople-cards">
+      {% for row in dashboard.sellers %}
+      <article class="seller-card">
+        <div class="seller-card-head">
+          <span class="seller-rank">{{ loop.index }}</span>
+          <div class="seller-identity">
+            <strong>{{ row.name }}</strong>
+            <span>{{ row.clients }} activo{% if row.clients != 1 %}s{% endif %} · {{ row.clients_previous }} en {{ dashboard.previous_short }}</span>
+          </div>
+          <span class="seller-share">{{ row.share }}%</span>
+        </div>
+        <div class="seller-main">
+          <div>
+            <span>Facturación</span>
+            <strong>{{ row.sales_value }}</strong>
+            <small>{{ row.sales_previous }} ant. · {{ row.sales_diff }}</small>
+          </div>
+          <span class="badge-var {{ row.sales_direction }}">{{ row.sales_delta }}</span>
+        </div>
+        <div class="seller-metrics">
+          <div>
+            <span>Volumen</span>
+            <strong>{{ row.tonnes_value }}</strong>
+            <span class="badge-var {{ row.tonnes_direction }}">{{ row.tonnes_delta }}</span>
+          </div>
+          <div><span>Clientes</span><strong>{{ row.clients }}</strong></div>
+          <div><span>Sin recompra</span><strong>{{ row.lost_clients }}</strong></div>
+          <div><span>Nuevos</span><strong>{{ row.new_clients }}</strong></div>
+          <div><span>Ticket / cliente</span><strong>{{ row.ticket }}</strong></div>
+        </div>
+        <div class="seller-bar"><i style="width:{{ row.bar }}%"></i></div>
+      </article>
+      {% else %}
+      <p class="card-subtitle">Sin vendedores con actividad en el período.</p>
+      {% endfor %}
     </div>
   </article>
 </section>

@@ -664,7 +664,10 @@ class GerenciaService:
                     "delta": clients_delta,
                     "direction": clients_direction,
                 },
-                "sellers": {"value": f"{len(sellers)} vendedores"},
+                "sellers": {
+                    "value": f"{len(sellers)} vendedor"
+                    + ("" if len(sellers) == 1 else "es")
+                },
                 "ticket": {
                     "value": _money_compact(
                         total_current / total_clients if total_clients else 0

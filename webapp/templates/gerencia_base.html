@@ -84,6 +84,12 @@
         </div>
       </header>
 
+      <nav class="gerencia-mobile-nav" aria-label="Navegación gerencial">
+        <a href="{{ url_for('managerial_dashboard', period=selected_period or None) }}" class="{{ 'active' if active == 'dashboard' else '' }}">Resumen</a>
+        <a href="{{ url_for('managerial_repurchase', period=selected_period or None) }}" class="{{ 'active' if active == 'recompra' else '' }}">Recompra</a>
+        <a href="{{ url_for('managerial_salespeople', period=selected_period or None) }}" class="{{ 'active' if active == 'vendedores' else '' }}">Vendedores</a>
+      </nav>
+
       <main class="content">
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
