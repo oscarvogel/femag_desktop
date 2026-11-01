@@ -32,6 +32,7 @@
       <nav class="side-nav">
         <a href="{{ url_for('managerial_dashboard', period=selected_period or None) }}" class="{{ 'active' if active == 'dashboard' else '' }}"><span>Resumen Ejecutivo</span></a>
         <a href="{{ url_for('managerial_repurchase', period=selected_period or None) }}" class="{{ 'active' if active == 'recompra' else '' }}"><span>Retención y Recompra</span>{% if recompra_count %}<span class="badge">{{ recompra_count }}</span>{% endif %}</a>
+        <a href="{{ url_for('managerial_salespeople', period=selected_period or None) }}" class="{{ 'active' if active == 'vendedores' else '' }}"><span>Resumen por Vendedor</span></a>
         <a href="{{ url_for('managerial_dashboard', period=selected_period or None) }}#productos"><span>Mix de Productos</span></a>
       </nav>
 

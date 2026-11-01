@@ -671,6 +671,20 @@ self.addEventListener("fetch", event => {
             **GerenciaService.shell_context("recompra", selected_period),
         )
 
+    @app.get("/gerencia/vendedores")
+    @login_required
+    def managerial_salespeople():
+        if not can_view_managerial_dashboard():
+            flash("Solo Gerencia puede ver el resumen por vendedor.", "error")
+            return redirect(url_for("production"))
+        selected_period = (request.args.get("period") or "").strip() or None
+        dashboard = GerenciaService.salespeople_view(selected_period)
+        return render_template(
+            "managerial_salespeople.html",
+            dashboard=dashboard,
+            **GerenciaService.shell_context("vendedores", selected_period),
+        )
+
     @app.route("/produccion", methods=["GET", "POST"])
     @login_required
     def production():
