@@ -3,7 +3,7 @@
 {% block page_title %}Retención y Recompra{% endblock %}
 {% block topbar_actions %}
 <button class="btn" type="button" onclick="window.print()">Exportar Informe</button>
-<a class="btn btn-primary" href="{{ url_for('managerial_dashboard') }}">Volver al resumen</a>
+<a class="btn btn-primary" href="{{ url_for('managerial_dashboard', period=selected_period) }}">Volver al resumen</a>
 {% endblock %}
 {% block content %}
 {% if dashboard.empty %}
@@ -14,7 +14,7 @@
     <span class="exec-tag">Lectura del período</span>
     <span>Se despacharon <strong>{{ dashboard.diff_abs }} TN {{ dashboard.diff_word }}</strong> en los mismos días. {{ dashboard.count_sin }} clientes quedaron sin recompra y {{ dashboard.count_nuevos }} se incorporaron al período.</span>
   </div>
-  <a class="exec-banner-link" href="{{ url_for('managerial_dashboard') }}">Volver al resumen →</a>
+  <a class="exec-banner-link" href="{{ url_for('managerial_dashboard', period=selected_period) }}">Volver al resumen →</a>
 </section>
 
 <section class="rep-summary" aria-label="Resumen de recompra">
@@ -55,7 +55,7 @@
     </tbody>
   </table>
 </div>
-<div class="rep-footer"><span>FEMAG · Recompra · {{ dashboard.previous_range }} vs. {{ dashboard.current_range }}</span><a href="{{ url_for('managerial_dashboard') }}">Volver al resumen</a></div>
+<div class="rep-footer"><span>FEMAG · Recompra · {{ dashboard.previous_range }} vs. {{ dashboard.current_range }}</span><a href="{{ url_for('managerial_dashboard', period=selected_period) }}">Volver al resumen</a></div>
 {% endif %}
 {% endblock %}
 {% block scripts %}

@@ -14,6 +14,7 @@ from webapp.managerial_dashboard_service import (
     _money_full,
     _month_name,
     _number,
+    _short_month_name,
     _time_label,
     _variation,
 )
@@ -138,21 +139,48 @@ def _waterfall_svg(items: list[dict]) -> str:
     return "".join(parts)
 
 
+def _period_labels(period: dict, previous: dict) -> dict:
+    start = date.fromisoformat(period["start"])
+    end = date.fromisoformat(period["end"])
+    previous_start = date.fromisoformat(previous["start"])
+    previous_end = date.fromisoformat(previous["end"])
+    return {
+        "current_label": f"{_month_name(end.isoformat()).capitalize()} {end.year}",
+        "previous_label": f"{_month_name(previous_end.isoformat()).capitalize()} {previous_end.year}",
+        "current_short": _short_month_name(end),
+        "previous_short": _short_month_name(previous_end),
+        "current_year": end.year,
+        "previous_year": previous_end.year,
+        "period_range": f"{start:%d/%m/%Y} – {end:%d/%m/%Y}",
+        "previous_range": f"{previous_start:%d/%m/%Y} – {previous_end:%d/%m/%Y}",
+        "period_start": start.isoformat(),
+        "previous_start": previous_start.isoformat(),
+        "previous_month_name": _month_name(previous_end.isoformat()),
+    }
+
+
 class GerenciaService:
     @staticmethod
-    def _projections():
-        manager = ManagerialDashboardService.get_latest()
-        repurchase = ManagerialRepurchaseService.get_latest()
-        return manager, repurchase
+    def _projections(period_start: str | None = None):
+        if period_start:
+            manager = ManagerialDashboardService.get_for_period(period_start)
+            repurchase = ManagerialRepurchaseService.get_for_period(period_start)
+            return manager, repurchase
+        return ManagerialDashboardService.get_latest(), ManagerialRepurchaseService.get_latest()
 
     @classmethod
-    def shell_context(cls, active: str) -> dict:
-        manager, repurchase = cls._projections()
+    def periods(cls) -> list[dict]:
+        return ManagerialDashboardService.available_periods()
+
+    @classmethod
+    def shell_context(cls, active: str, period_start: str | None = None) -> dict:
+        manager, repurchase = cls._projections(period_start)
         manager_payload = manager.payload if manager else {}
         repurchase_payload = repurchase.payload if repurchase else {}
         summary = repurchase_payload.get("summary") or {}
         period = manager_payload.get("period") or {}
         previous = manager_payload.get("previous_period") or {}
+        labels = _period_labels(period, previous) if period and previous else {}
         synced_orders = 0
         if database_proxy.obj is not None:
             synced_orders = (
@@ -168,21 +196,30 @@ class GerenciaService:
             "snapshot_time": _time_label(manager_payload.get("generated_at"))
             if manager_payload
             else "",
-            "period_label": _month_label(period) if period else "Sin datos",
-            "period_range": _range_label(period) if period else "",
-            "comparison_range": _range_label(previous) if previous else "",
+            "period_label": labels.get("current_label") or "Sin datos",
+            "period_range": labels.get("period_range") or "",
+            "comparison_range": labels.get("previous_range") or "",
+            "periods": cls.periods(),
+            "selected_period": labels.get("period_start") or (period_start or ""),
             "synced_orders": synced_orders,
             "recompra_count": int(summary.get("count_sin_recompra") or 0),
         }
 
     @classmethod
-    def dashboard_view(cls) -> dict:
-        manager, repurchase = cls._projections()
+    def dashboard_view(cls, period_start: str | None = None) -> dict:
+        manager, repurchase = cls._projections(period_start)
         if manager is None:
-            return {"empty": True}
+            error = (
+                "No hay un corte gerencial para el período seleccionado. "
+                "Elegí otro período del selector."
+                if period_start
+                else None
+            )
+            return {"empty": True, "error": error}
         payload = manager.payload
         summary = (repurchase.payload.get("summary") if repurchase else {}) or {}
         rows = (repurchase.payload.get("rows") if repurchase else []) or []
+        labels = _period_labels(payload["period"], payload["previous_period"])
         sales = float(payload["kpis"]["valued_dispatches"].get("current") or 0)
         previous_sales = float(
             payload["kpis"]["valued_dispatches"].get("previous") or 0
@@ -329,7 +366,7 @@ class GerenciaService:
             move = "por debajo" if tonnes < previous_tonnes else "por encima"
             diagnosis = (
                 f"El volumen físico está <strong>{abs(tonnes - previous_tonnes):.1f} TN {move}</strong> "
-                f"de septiembre ({_number(abs(tonnes - previous_tonnes) / previous_tonnes * 100 if previous_tonnes else 0, 1)}%). "
+                f"de {labels['previous_month_name']} ({_number(abs(tonnes - previous_tonnes) / previous_tonnes * 100 if previous_tonnes else 0, 1)}%). "
                 f"La entrada de <strong>{int(summary.get('count_nuevos') or 0)} clientes nuevos "
                 f"(+{_number(new, 1)} TN)</strong> y el crecimiento de "
                 f"<strong>{int(summary.get('count_aumentaron') or 0)} cuentas activas "
@@ -339,12 +376,12 @@ class GerenciaService:
                 f"(−{_number(lost, 1)} TN)</strong>."
             )
         waterfall_items = [
-            {"label": "Sep 2026", "value": previous_tonnes, "kind": "base", "sub": f"{previous_buyers} clientes"},
+            {"label": f"{labels['previous_short']} {labels['previous_year']}", "value": previous_tonnes, "kind": "base", "sub": f"{previous_buyers} clientes"},
             {"label": "Sin recompra", "value": -lost, "kind": "neg", "sub": f"{int(summary.get('count_sin_recompra') or 0)} clientes"},
             {"label": "Compraron −", "value": less, "kind": "neg", "sub": f"{int(summary.get('count_redujeron') or 0)} clientes"},
             {"label": "Compraron +", "value": more, "kind": "pos", "sub": f"{int(summary.get('count_aumentaron') or 0)} clientes"},
             {"label": "Nuevos / Rec.", "value": new, "kind": "pos", "sub": f"{int(summary.get('count_nuevos') or 0)} clientes"},
-            {"label": "Oct 2026", "value": tonnes, "kind": "end", "sub": f"{buyers} clientes"},
+            {"label": f"{labels['current_short']} {labels['current_year']}", "value": tonnes, "kind": "end", "sub": f"{buyers} clientes"},
         ]
         for item in waterfall_items:
             item["value_text"] = (
@@ -356,6 +393,16 @@ class GerenciaService:
             "empty": False,
             "has_repurchase": has_repurchase,
             "diagnosis": diagnosis,
+            "current_label": labels["current_label"],
+            "previous_label": labels["previous_label"],
+            "current_short": labels["current_short"],
+            "previous_short": labels["previous_short"],
+            "current_year": labels["current_year"],
+            "previous_year": labels["previous_year"],
+            "period_range": labels["period_range"],
+            "previous_range": labels["previous_range"],
+            "period_start": labels["period_start"],
+            "previous_month_name": labels["previous_month_name"],
             "kpis": {
                 "sales": {
                     "value": _money_compact(sales),

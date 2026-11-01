@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timezone
 
-from app.config.database import database_proxy
 from app.models.sync import SyncProjection
 from app.utils.datetime_utils import as_datetime
 from webapp.managerial_dashboard_service import (
@@ -14,6 +13,8 @@ from webapp.managerial_dashboard_service import (
     _number,
     _time_label,
     _variation,
+    period_uid,
+    save_snapshot_projection,
 )
 
 STATUS_LABELS = {
@@ -107,47 +108,14 @@ class ManagerialRepurchaseService:
                     f"Falta {required} en el resumen de recompra."
                 )
 
-        with database_proxy.atomic():
-            projection = SyncProjection.get_or_none(
-                (SyncProjection.resource_type == SyncProjection.RESOURCE_REPURCHASE)
-                & (SyncProjection.resource_uid == "latest")
-            )
-            if projection is None:
-                SyncProjection.create(
-                    resource_type=SyncProjection.RESOURCE_REPURCHASE,
-                    resource_uid="latest",
-                    qr_token=None,
-                    order_number=None,
-                    status=None,
-                    version=1,
-                    payload=snapshot,
-                    source_updated_at=generated_at.astimezone(
-                        timezone.utc
-                    ).replace(tzinfo=None),
-                    published_at=generated_at.astimezone(
-                        timezone.utc
-                    ).replace(tzinfo=None),
-                    cancelled_at=None,
-                )
-            else:
-                projection.payload = snapshot
-                projection.source_updated_at = generated_at.astimezone(
-                    timezone.utc
-                ).replace(tzinfo=None)
-                projection.published_at = projection.source_updated_at
-                projection.version = 1
-                projection.save(
-                    only=[
-                        SyncProjection.payload,
-                        SyncProjection.source_updated_at,
-                        SyncProjection.published_at,
-                        SyncProjection.version,
-                    ]
-                )
+        saved = save_snapshot_projection(
+            SyncProjection.RESOURCE_REPURCHASE, snapshot, generated_at
+        )
         return {
             "snapshot_id": snapshot_id,
             "generated_at": generated_at.isoformat(),
             "accepted": True,
+            **saved,
         }
 
     @staticmethod
@@ -157,9 +125,30 @@ class ManagerialRepurchaseService:
             & (SyncProjection.resource_uid == "latest")
         )
 
+    @staticmethod
+    def get_for_period(start: str):
+        try:
+            normalized = date.fromisoformat(str(start)).isoformat()
+        except (TypeError, ValueError):
+            return None
+        return SyncProjection.get_or_none(
+            (SyncProjection.resource_type == SyncProjection.RESOURCE_REPURCHASE)
+            & (SyncProjection.resource_uid == period_uid(normalized))
+        )
+
     @classmethod
     def latest_view(cls) -> dict:
         projection = cls.get_latest()
+        if projection is None:
+            return {"empty": True}
+        try:
+            return _build_view(projection.payload)
+        except (ManagerialDashboardError, TypeError, ValueError, KeyError) as exc:
+            return {"empty": True, "error": str(exc)}
+
+    @classmethod
+    def view_for_period(cls, start: str) -> dict:
+        projection = cls.get_for_period(start)
         if projection is None:
             return {"empty": True}
         try:

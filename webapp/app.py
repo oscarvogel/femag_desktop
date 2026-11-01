@@ -645,11 +645,12 @@ self.addEventListener("fetch", event => {
         if not can_view_managerial_dashboard():
             flash("Solo Gerencia puede ver el dashboard gerencial.", "error")
             return redirect(url_for("production"))
-        dashboard = GerenciaService.dashboard_view()
+        selected_period = (request.args.get("period") or "").strip() or None
+        dashboard = GerenciaService.dashboard_view(selected_period)
         return render_template(
             "managerial_dashboard.html",
             dashboard=dashboard,
-            **GerenciaService.shell_context("dashboard"),
+            **GerenciaService.shell_context("dashboard", selected_period),
         )
 
     @app.get("/gerencia/recompra")
@@ -658,11 +659,16 @@ self.addEventListener("fetch", event => {
         if not can_view_managerial_dashboard():
             flash("Solo Gerencia puede ver el análisis de recompra.", "error")
             return redirect(url_for("production"))
-        dashboard = ManagerialRepurchaseService.latest_view()
+        selected_period = (request.args.get("period") or "").strip() or None
+        dashboard = (
+            ManagerialRepurchaseService.view_for_period(selected_period)
+            if selected_period
+            else ManagerialRepurchaseService.latest_view()
+        )
         return render_template(
             "managerial_repurchase.html",
             dashboard=dashboard,
-            **GerenciaService.shell_context("recompra"),
+            **GerenciaService.shell_context("recompra", selected_period),
         )
 
     @app.route("/produccion", methods=["GET", "POST"])
