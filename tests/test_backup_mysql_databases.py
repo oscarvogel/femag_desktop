@@ -106,6 +106,32 @@ def test_create_backup_uses_python_exporter_when_mysqldump_is_not_available(monk
     assert results[0].status == "success"
 
 
+def test_create_backup_overwrite_replaces_flat_dumps(monkeypatch, tmp_path):
+    def fake_dump(connection, database, destination, *, mysqldump_path):
+        destination.write_text(f"dump {database}", encoding="utf-8")
+        return backup_mysql_databases.DatabaseDump(database, str(destination), "success")
+
+    monkeypatch.setattr(backup_mysql_databases.shutil, "which", lambda _path: "mysqldump.exe")
+    monkeypatch.setattr(backup_mysql_databases, "dump_database", fake_dump)
+    (tmp_path / "femag.sql").write_text("viejo", encoding="utf-8")
+    (tmp_path / "otra.sql").write_text("viejo", encoding="utf-8")
+
+    run_dir, results = backup_mysql_databases.create_backup(
+        backup_mysql_databases.RuntimeConnection("server", 3306, "femag", "user", "secret"),
+        tmp_path,
+        databases=["femag", "otra", "excluida"],
+        excludes=["excluida"],
+        overwrite=True,
+    )
+
+    assert run_dir == tmp_path
+    assert (tmp_path / "femag.sql").read_text(encoding="utf-8") == "dump femag"
+    assert (tmp_path / "otra.sql").read_text(encoding="utf-8") == "dump otra"
+    assert not (tmp_path / "excluida.sql").exists()
+    assert [result.database for result in results] == ["femag", "otra"]
+    assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+
+
 def test_dump_database_keeps_failed_dump_out_of_backup_directory(monkeypatch, tmp_path):
     class Completed:
         returncode = 1
