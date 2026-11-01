@@ -471,3 +471,211 @@ class GerenciaService:
             "cohort_total": cohort_total,
             "risks": risks,
         }
+
+    @classmethod
+    def salespeople_view(cls, period_start: str | None = None) -> dict:
+        manager, repurchase = cls._projections(period_start)
+        if manager is None:
+            error = (
+                "No hay un corte gerencial para el período seleccionado. "
+                "Elegí otro período del selector."
+                if period_start
+                else None
+            )
+            return {"empty": True, "error": error}
+        if repurchase is None:
+            return {
+                "empty": True,
+                "error": (
+                    "Todavía no hay detalle de recompra por cliente para este "
+                    "período. Cuando la fábrica lo publique, esta pantalla se "
+                    "completa sola."
+                ),
+            }
+        payload = manager.payload
+        rows = (repurchase.payload.get("rows") or []) or []
+        labels = _period_labels(payload["period"], payload["previous_period"])
+        grouped: dict[str, dict] = {}
+        for row in rows:
+            name = str(row.get("salesperson_name") or "").strip() or "Directo"
+            target = grouped.setdefault(
+                name,
+                {
+                    "name": name,
+                    "current_total": 0.0,
+                    "previous_total": 0.0,
+                    "current_tonnes": 0.0,
+                    "previous_tonnes": 0.0,
+                    "clients_current": 0,
+                    "clients_previous": 0,
+                    "lost_clients": 0,
+                    "lost_tonnes": 0.0,
+                    "new_clients": 0,
+                    "new_tonnes": 0.0,
+                    "down_clients": 0,
+                    "up_clients": 0,
+                },
+            )
+            current_tonnes = float(row.get("current_tonnes") or 0)
+            previous_tonnes = float(row.get("previous_tonnes") or 0)
+            target["current_total"] += float(row.get("current_total") or 0)
+            target["previous_total"] += float(row.get("previous_total") or 0)
+            target["current_tonnes"] += current_tonnes
+            target["previous_tonnes"] += previous_tonnes
+            if current_tonnes > 0.0005:
+                target["clients_current"] += 1
+            if previous_tonnes > 0.0005:
+                target["clients_previous"] += 1
+            status = str(row.get("status") or "")
+            if status == "sin_recompra":
+                target["lost_clients"] += 1
+                target["lost_tonnes"] += previous_tonnes
+            elif status == "nuevo":
+                target["new_clients"] += 1
+                target["new_tonnes"] += current_tonnes
+            elif status == "compro_menos":
+                target["down_clients"] += 1
+            elif status == "compro_mas":
+                target["up_clients"] += 1
+
+        total_current = sum(item["current_total"] for item in grouped.values())
+        total_previous = sum(item["previous_total"] for item in grouped.values())
+        total_tonnes = sum(item["current_tonnes"] for item in grouped.values())
+        previous_tonnes = sum(item["previous_tonnes"] for item in grouped.values())
+        total_clients = sum(item["clients_current"] for item in grouped.values())
+        previous_clients = sum(item["clients_previous"] for item in grouped.values())
+        max_sales = max(
+            [item["current_total"] for item in grouped.values()] or [0]
+        )
+        sellers = []
+        for item in grouped.values():
+            sales_variation = (
+                round(
+                    (item["current_total"] - item["previous_total"])
+                    / item["previous_total"]
+                    * 100,
+                    1,
+                )
+                if item["previous_total"]
+                else None
+            )
+            tonnes_variation = (
+                round(
+                    (item["current_tonnes"] - item["previous_tonnes"])
+                    / item["previous_tonnes"]
+                    * 100,
+                    1,
+                )
+                if item["previous_tonnes"]
+                else None
+            )
+            sales_delta, sales_direction = _variation(sales_variation)
+            tonnes_delta, tonnes_direction = _variation(tonnes_variation)
+            sellers.append(
+                {
+                    "name": item["name"],
+                    "sales_value": _money_compact(item["current_total"]),
+                    "sales_previous": _money_compact(item["previous_total"]),
+                    "sales_delta": sales_delta,
+                    "sales_direction": sales_direction,
+                    "sales_variation": sales_variation,
+                    "sales_diff": _signed(
+                        item["current_total"] - item["previous_total"],
+                        _money_compact,
+                    ),
+                    "tonnes_value": f"{_number(item['current_tonnes'], 1)} TN",
+                    "tonnes_previous": f"{_number(item['previous_tonnes'], 1)} TN",
+                    "tonnes_delta": tonnes_delta,
+                    "tonnes_direction": tonnes_direction,
+                    "tonnes_variation": tonnes_variation,
+                    "clients": item["clients_current"],
+                    "clients_previous": item["clients_previous"],
+                    "lost_clients": item["lost_clients"],
+                    "lost_tonnes": _number(item["lost_tonnes"], 1),
+                    "new_clients": item["new_clients"],
+                    "new_tonnes": _number(item["new_tonnes"], 1),
+                    "down_clients": item["down_clients"],
+                    "up_clients": item["up_clients"],
+                    "ticket": _money_compact(
+                        item["current_total"] / item["clients_current"]
+                    )
+                    if item["clients_current"]
+                    else _money_compact(0),
+                    "share": round(item["current_total"] / total_current * 100, 1)
+                    if total_current
+                    else 0,
+                    "bar": round(item["current_total"] / max_sales * 100, 1)
+                    if max_sales
+                    else 0,
+                }
+            )
+        sellers.sort(key=lambda row: row["share"], reverse=True)
+        best = sellers[0] if sellers else None
+        lowest = sellers[-1] if len(sellers) > 1 else None
+        comparable = [
+            row for row in sellers if row["sales_variation"] is not None
+        ]
+        best_growth = max(
+            comparable, key=lambda row: row["sales_variation"], default=None
+        )
+        worst_drop = min(
+            comparable, key=lambda row: row["sales_variation"], default=None
+        )
+        sales_delta, sales_direction = _variation(
+            round((total_current - total_previous) / total_previous * 100, 1)
+            if total_previous
+            else None
+        )
+        tonnes_delta, tonnes_direction = _variation(
+            round((total_tonnes - previous_tonnes) / previous_tonnes * 100, 1)
+            if previous_tonnes
+            else None
+        )
+        clients_delta, clients_direction = _variation(
+            round((total_clients - previous_clients) / previous_clients * 100, 1)
+            if previous_clients
+            else None
+        )
+        return {
+            "empty": False,
+            "current_label": labels["current_label"],
+            "previous_label": labels["previous_label"],
+            "current_short": labels["current_short"],
+            "previous_short": labels["previous_short"],
+            "period_range": labels["period_range"],
+            "previous_range": labels["previous_range"],
+            "period_start": labels["period_start"],
+            "kpis": {
+                "sales": {
+                    "value": _money_compact(total_current),
+                    "previous": _money_compact(total_previous),
+                    "delta": sales_delta,
+                    "direction": sales_direction,
+                },
+                "tonnes": {
+                    "value": f"{_number(total_tonnes, 1)} TN",
+                    "previous": f"{_number(previous_tonnes, 1)} TN",
+                    "delta": tonnes_delta,
+                    "direction": tonnes_direction,
+                },
+                "clients": {
+                    "value": f"{total_clients} cuentas",
+                    "previous": f"{previous_clients} cuentas",
+                    "delta": clients_delta,
+                    "direction": clients_direction,
+                },
+                "sellers": {"value": f"{len(sellers)} vendedores"},
+                "ticket": {
+                    "value": _money_compact(
+                        total_current / total_clients if total_clients else 0
+                    ),
+                    "label": "Ticket promedio por cliente",
+                },
+            },
+            "best_salesperson": best,
+            "lowest_salesperson": lowest,
+            "best_growth": best_growth,
+            "worst_drop": worst_drop,
+            "sellers": sellers,
+            "count": len(sellers),
+        }

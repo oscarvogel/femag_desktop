@@ -214,6 +214,9 @@ actual vs. anterior y acciones de impresión/exportación.
 - El tablero muestra 5 KPIs, el puente de variación de volumen, la comparativa
   por producto y la radiografía de cartera; el detalle cliente por cliente está
   en `/gerencia/recompra`.
+- `/gerencia/vendedores` resume facturación, toneladas, clientes, recompra y
+  participación por vendedor, usando el mismo selector de período. Se alimenta
+  del snapshot de recompra y no publica datos nuevos desde la fábrica.
 - La nube guarda cada corte en `syncprojection` con
   `resource_type=managerial_dashboard` y `resource_uid=period:AAAA-MM-DD`.
   El corte más nuevo se mantiene además en `resource_uid=latest`.

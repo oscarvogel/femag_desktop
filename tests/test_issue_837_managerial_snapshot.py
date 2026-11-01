@@ -12,6 +12,7 @@ from app.services.managerial_snapshot_publisher import (
     ManagerialSnapshotPublisher,
 )
 from webapp import create_app
+from webapp.gerencia_service import GerenciaService
 from webapp.managerial_dashboard_service import ManagerialDashboardService
 from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 
@@ -451,6 +452,121 @@ def test_dashboard_route_shows_empty_state_without_snapshot(db):
     assert response.status_code == 200
     assert b"Sin datos" in response.data
     assert b"este tablero se completa solo" in response.data
+
+
+def _salespeople_repurchase_snapshot():
+    snapshot = _repurchase_snapshot()
+    snapshot["rows"] = [
+        {
+            "client_name": "CLIENTE A",
+            "salesperson_name": "Vendedor Uno",
+            "previous_last_date": "2026-09-10",
+            "current_last_date": "2026-10-12",
+            "previous_tonnes": 20.0,
+            "current_tonnes": 10.0,
+            "diff_tonnes": -10.0,
+            "variation_percent": -50.0,
+            "previous_total": 20_000_000,
+            "current_total": 12_000_000,
+            "status": "compro_menos",
+        },
+        {
+            "client_name": "CLIENTE B",
+            "salesperson_name": "Vendedor Uno",
+            "previous_last_date": None,
+            "current_last_date": "2026-10-20",
+            "previous_tonnes": 0.0,
+            "current_tonnes": 5.0,
+            "diff_tonnes": 5.0,
+            "variation_percent": None,
+            "previous_total": 0,
+            "current_total": 6_000_000,
+            "status": "nuevo",
+        },
+        {
+            "client_name": "CLIENTE C",
+            "salesperson_name": "Vendedor Dos",
+            "previous_last_date": "2026-09-15",
+            "current_last_date": "2026-10-18",
+            "previous_tonnes": 10.0,
+            "current_tonnes": 25.0,
+            "diff_tonnes": 15.0,
+            "variation_percent": 150.0,
+            "previous_total": 9_000_000,
+            "current_total": 30_000_000,
+            "status": "compro_mas",
+        },
+        {
+            "client_name": "CLIENTE D",
+            "salesperson_name": "",
+            "previous_last_date": "2026-09-01",
+            "current_last_date": None,
+            "previous_tonnes": 8.0,
+            "current_tonnes": 0.0,
+            "diff_tonnes": -8.0,
+            "variation_percent": -100.0,
+            "previous_total": 7_000_000,
+            "current_total": 0,
+            "status": "sin_recompra",
+        },
+    ]
+    return snapshot
+
+
+def test_salespeople_view_groups_and_ranks_by_salesperson(db):
+    ManagerialDashboardService.apply_snapshot(_snapshot())
+    ManagerialRepurchaseService.apply_snapshot(_salespeople_repurchase_snapshot())
+
+    view = GerenciaService.salespeople_view()
+
+    assert view["empty"] is False
+    assert view["count"] == 3
+    assert [row["name"] for row in view["sellers"]] == [
+        "Vendedor Dos",
+        "Vendedor Uno",
+        "Directo",
+    ]
+    assert view["best_salesperson"]["name"] == "Vendedor Dos"
+    assert view["best_salesperson"]["sales_value"] == "$ 30,0 M"
+    assert view["lowest_salesperson"]["name"] == "Directo"
+    assert view["worst_drop"]["name"] == "Directo"
+    assert view["best_growth"]["name"] == "Vendedor Dos"
+
+
+def test_salespeople_route_renders_for_gerencia(db):
+    ManagerialDashboardService.apply_snapshot(_snapshot())
+    ManagerialRepurchaseService.apply_snapshot(_salespeople_repurchase_snapshot())
+    client = _app().test_client()
+    _login(client, profile="Gerencia")
+
+    response = client.get("/gerencia/vendedores")
+
+    assert response.status_code == 200
+    assert "Resumen por Vendedor".encode() in response.data
+    assert b"Vendedor Uno" in response.data
+    assert b"Vendedor Dos" in response.data
+    assert b"Directo" in response.data
+    assert b"Ranking de Vendedores" in response.data
+
+
+def test_salespeople_route_redirects_non_manager(db):
+    client = _app().test_client()
+    _login(client, profile="Secretaría")
+
+    response = client.get("/gerencia/vendedores", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Solo Gerencia puede ver el resumen por vendedor" in response.data
+
+
+def test_gerencia_menu_includes_salespeople_link(db):
+    ManagerialDashboardService.apply_snapshot(_snapshot())
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia")
+
+    assert b"/gerencia/vendedores" in response.data
 
 
 class _HistoryClient:

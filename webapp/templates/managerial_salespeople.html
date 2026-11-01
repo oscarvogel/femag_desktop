@@ -1,0 +1,149 @@
+{% extends "gerencia_base.html" %}
+{% block title %}FEMAG · Resumen por Vendedor{% endblock %}
+{% block page_title %}Resumen por Vendedor{% endblock %}
+{% block topbar_actions %}
+<a class="btn" href="{{ url_for('managerial_repurchase', period=selected_period or None) }}">Ver recompra</a>
+<button class="btn btn-primary" type="button" onclick="window.print()">Exportar Informe</button>
+{% endblock %}
+{% block content %}
+{% if dashboard.empty %}
+<section class="exec-banner">
+  <div class="exec-banner-text">
+    <span class="exec-tag">Sin datos</span>
+    <span>{% if dashboard.error %}{{ dashboard.error }}{% else %}La nube todavía no recibió el detalle de recompra por cliente. Cuando el agente de fábrica publique el corte, este resumen se completa solo.{% endif %}</span>
+  </div>
+</section>
+{% else %}
+<section class="exec-banner" aria-label="Resumen por vendedor">
+  <div class="exec-banner-text">
+    <span class="exec-tag">{{ dashboard.current_label }}</span>
+    <span>
+      {% if dashboard.best_salesperson %}
+      <strong>{{ dashboard.best_salesperson.name }}</strong> lidera la facturación con
+      <strong>{{ dashboard.best_salesperson.sales_value }}</strong>
+      ({{ dashboard.best_salesperson.share }}% del total).
+      {% else %}
+      No hay ventas registradas en el período.
+      {% endif %}
+      {% if dashboard.worst_drop %}
+      La mayor caída es <strong>{{ dashboard.worst_drop.name }}</strong>
+      ({{ dashboard.worst_drop.sales_delta }}).
+      {% endif %}
+    </span>
+  </div>
+  <a class="exec-banner-link" href="{{ url_for('managerial_repurchase', period=selected_period or None) }}">Ver detalle por cliente →</a>
+</section>
+
+<section class="kpi-grid" aria-label="Indicadores de vendedores">
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Facturación Total</span><span class="kpi-pill {{ dashboard.kpis.sales.direction }}">{{ dashboard.kpis.sales.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.sales.value }}</div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.sales.previous }}</strong></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Volumen Total</span><span class="kpi-pill {{ dashboard.kpis.tonnes.direction }}">{{ dashboard.kpis.tonnes.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.tonnes.value }}</div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Clientes Activos</span><span class="kpi-pill {{ dashboard.kpis.clients.direction }}">{{ dashboard.kpis.clients.delta }}</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.clients.value }}</div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.clients.previous }}</strong></span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Vendedores</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.sellers.value }}</div>
+    <div class="kpi-sub"><span>Con actividad en el período</span></div>
+  </article>
+  <article class="kpi-card">
+    <div class="kpi-top"><span class="kpi-title">Ticket por Cliente</span></div>
+    <div class="kpi-main">{{ dashboard.kpis.ticket.value }}</div>
+    <div class="kpi-sub"><span>{{ dashboard.kpis.ticket.label }}</span></div>
+  </article>
+</section>
+
+<section class="tables-row">
+  <article class="card" style="grid-column:1/-1">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Ranking de Vendedores · {{ dashboard.current_label }}</h2>
+        <p class="card-subtitle">Facturación y volumen contra {{ dashboard.previous_label }}. Ordenado por participación sobre la venta total.</p>
+      </div>
+      <div class="legend-inline">
+        <span><i class="swatch" style="background:var(--navy-800)"></i> Facturación</span>
+        <span><i class="swatch" style="background:var(--emerald-600)"></i> Crecimiento</span>
+        <span><i class="swatch" style="background:var(--red-600)"></i> Caída</span>
+      </div>
+    </div>
+    <div class="data-table-wrap">
+      <table class="data-table" style="min-width:1040px">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Vendedor</th>
+            <th class="num">Facturación</th>
+            <th class="num">Var. $</th>
+            <th class="num">TN</th>
+            <th class="num">Var. TN</th>
+            <th class="num">Clientes</th>
+            <th class="num">Sin recompra</th>
+            <th class="num">Nuevos</th>
+            <th class="num">Ticket / cliente</th>
+            <th class="bar-cell">Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in dashboard.sellers %}
+          <tr>
+            <td class="num">{{ loop.index }}</td>
+            <td>
+              <span class="primary-cell">{{ row.name }}</span>
+              <span class="cell-sub">{{ row.clients }} activos · {{ row.clients_previous }} en {{ dashboard.previous_short }}</span>
+            </td>
+            <td class="num"><strong>{{ row.sales_value }}</strong><span class="cell-sub">{{ row.sales_previous }} ant.</span></td>
+            <td class="num"><span class="badge-var {{ row.sales_direction }}">{{ row.sales_delta }}</span><span class="cell-sub">{{ row.sales_diff }}</span></td>
+            <td class="num"><strong>{{ row.tonnes_value }}</strong><span class="cell-sub">{{ row.tonnes_previous }} ant.</span></td>
+            <td class="num"><span class="badge-var {{ row.tonnes_direction }}">{{ row.tonnes_delta }}</span></td>
+            <td class="num">{{ row.clients }}<span class="cell-sub">{{ row.up_clients }} subieron · {{ row.down_clients }} bajaron</span></td>
+            <td class="num">{{ row.lost_clients }}<span class="cell-sub">−{{ row.lost_tonnes }} TN</span></td>
+            <td class="num">{{ row.new_clients }}<span class="cell-sub">+{{ row.new_tonnes }} TN</span></td>
+            <td class="num">{{ row.ticket }}</td>
+            <td class="bar-cell"><div class="num" style="font-size:10.5px">{{ row.share }}%</div><div class="mini-bar"><i style="width:{{ row.bar }}%"></i></div></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="muted-cell">Sin vendedores con actividad en el período.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="cohort-strip" aria-label="Extremos del período">
+  <div class="cohort-head">
+    <div>
+      <h2 class="card-title">Lectura Rápida de la Cartera Comercial</h2>
+      <p class="card-subtitle">Quién concentra la venta, quién crece y dónde está la caída más fuerte.</p>
+    </div>
+  </div>
+  <div class="bridge-summary">
+    <div class="bridge-stat">
+      <span>Mayor facturación</span>
+      <strong class="up">{{ dashboard.best_salesperson.name ~ " · " ~ dashboard.best_salesperson.sales_value if dashboard.best_salesperson else 'Sin datos' }}</strong>
+    </div>
+    <div class="bridge-stat">
+      <span>Menor facturación</span>
+      <strong>{{ dashboard.lowest_salesperson.name ~ " · " ~ dashboard.lowest_salesperson.sales_value if dashboard.lowest_salesperson else 'Sin datos' }}</strong>
+    </div>
+    <div class="bridge-stat">
+      <span>Mayor crecimiento</span>
+      <strong class="up">{{ dashboard.best_growth.name ~ " · " ~ dashboard.best_growth.sales_delta if dashboard.best_growth else 'Sin datos' }}</strong>
+    </div>
+    <div class="bridge-stat">
+      <span>Mayor caída</span>
+      <strong class="down">{{ dashboard.worst_drop.name ~ " · " ~ dashboard.worst_drop.sales_delta if dashboard.worst_drop else 'Sin datos' }}</strong>
+    </div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

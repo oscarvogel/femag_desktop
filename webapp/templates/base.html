@@ -35,8 +35,9 @@
       {% if can_view_managerial_dashboard() %}
       <div class="nav-group-label" style="margin-top:12px">Dirección</div>
       <nav class="side-nav">
-        <a href="{{ url_for('managerial_dashboard') }}" class="{{ 'active' if request.path.startswith('/gerencia') and request.path != '/gerencia/recompra' else '' }}"><span>Resumen ejecutivo</span></a>
+        <a href="{{ url_for('managerial_dashboard') }}" class="{{ 'active' if request.path == '/gerencia' else '' }}"><span>Resumen ejecutivo</span></a>
         <a href="{{ url_for('managerial_repurchase') }}" class="{{ 'active' if request.path == '/gerencia/recompra' else '' }}"><span>Retención y recompra</span></a>
+        <a href="{{ url_for('managerial_salespeople') }}" class="{{ 'active' if request.path == '/gerencia/vendedores' else '' }}"><span>Resumen por vendedor</span></a>
       </nav>
       {% endif %}
 
@@ -87,6 +88,7 @@
         {% if can_view_managerial_dashboard() %}
         <a href="{{ url_for('managerial_dashboard') }}">Resumen</a>
         <a href="{{ url_for('managerial_repurchase') }}">Recompra</a>
+        <a href="{{ url_for('managerial_salespeople') }}">Vendedores</a>
         {% endif %}
         {% if is_administrator() %}
         <a href="{{ url_for('accesos') }}">Accesos</a>
