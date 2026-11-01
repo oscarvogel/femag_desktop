@@ -38,6 +38,11 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
+    index = year * 12 + (month - 1) + offset
+    return index // 12, index % 12 + 1
+
+
 def _metric(metric) -> dict:
     return {
         "current": round(float(metric.current or 0), 2),
@@ -82,23 +87,42 @@ class ManagerialSnapshotPublisher:
         *,
         dashboard_service: ManagerialDashboardService | None = None,
         min_interval_minutes: int = 30,
+        history_months: int = 24,
+        history_interval_minutes: int = 24 * 60,
     ) -> None:
         self.dashboard_service = dashboard_service or ManagerialDashboardService()
         self.min_interval_minutes = int(min_interval_minutes)
+        self.history_months = max(1, int(history_months))
+        self.history_interval_minutes = int(history_interval_minutes)
 
-    def should_publish(self, *, now: datetime | None = None) -> bool:
-        if self.min_interval_minutes <= 0:
+    @staticmethod
+    def _should_publish_stream(
+        stream: str, minutes: int, *, now: datetime | None = None
+    ) -> bool:
+        if minutes <= 0:
             return True
-        cursor = SyncCursor.get_or_none(
-            SyncCursor.stream == SyncCursor.STREAM_FACTORY_MANAGERIAL
-        )
+        cursor = SyncCursor.get_or_none(SyncCursor.stream == stream)
         if cursor is None or cursor.last_synced_at is None:
             return True
         current = now or datetime.now(timezone.utc).replace(tzinfo=None)
         last = cursor.last_synced_at
         if last.tzinfo is not None:
             last = last.astimezone(timezone.utc).replace(tzinfo=None)
-        return (current - last).total_seconds() >= self.min_interval_minutes * 60
+        return (current - last).total_seconds() >= minutes * 60
+
+    def should_publish(self, *, now: datetime | None = None) -> bool:
+        return self._should_publish_stream(
+            SyncCursor.STREAM_FACTORY_MANAGERIAL,
+            self.min_interval_minutes,
+            now=now,
+        )
+
+    def should_publish_history(self, *, now: datetime | None = None) -> bool:
+        return self._should_publish_stream(
+            SyncCursor.STREAM_FACTORY_MANAGERIAL_HISTORY,
+            self.history_interval_minutes,
+            now=now,
+        )
 
     def build(self, *, as_of: date | None = None) -> dict:
         today = as_of or date.today()
@@ -147,6 +171,20 @@ class ManagerialSnapshotPublisher:
             ],
         }
 
+    def build_history(
+        self, *, months: int | None = None, as_of: date | None = None
+    ) -> list[dict]:
+        """Cortes mensuales cerrados, del más viejo al mes en curso."""
+        total = max(1, int(months or self.history_months))
+        today = as_of or date.today()
+        snapshots = []
+        for offset in range(total - 1, 0, -1):
+            year, month = _shift_month(today.year, today.month, -offset)
+            end = date(year, month, calendar.monthrange(year, month)[1])
+            snapshots.append(self.build(as_of=end))
+        snapshots.append(self.build(as_of=today))
+        return snapshots
+
     def publish(self, client, *, as_of: date | None = None) -> dict:
         snapshot = self.build(as_of=as_of)
         response = client.post_managerial_snapshot(snapshot)
@@ -159,4 +197,25 @@ class ManagerialSnapshotPublisher:
             "snapshot": response,
             "snapshot_id": snapshot["snapshot_id"],
             "generated_at": snapshot["generated_at"],
+        }
+
+    def publish_history(
+        self,
+        client,
+        *,
+        months: int | None = None,
+        as_of: date | None = None,
+    ) -> dict:
+        snapshots = self.build_history(months=months, as_of=as_of)
+        for snapshot in snapshots:
+            client.post_managerial_snapshot(snapshot)
+        SyncService.set_cursor(
+            SyncCursor.STREAM_FACTORY_MANAGERIAL_HISTORY,
+            int(time()),
+            synced_at=datetime.now(timezone.utc),
+        )
+        return {
+            "months": len(snapshots),
+            "first": snapshots[0]["period"]["start"],
+            "last": snapshots[-1]["period"]["start"],
         }

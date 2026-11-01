@@ -24,6 +24,21 @@ MONTHS = (
     "noviembre",
     "diciembre",
 )
+MONTHS_SHORT = (
+    "",
+    "Ene",
+    "Feb",
+    "Mar",
+    "Abr",
+    "May",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dic",
+)
 
 
 class ManagerialDashboardError(ValueError):
@@ -41,6 +56,107 @@ def _parse_datetime(value) -> datetime:
 
 def _to_naive_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+PERIOD_UID_PREFIX = "period:"
+LATEST_UID = "latest"
+
+
+def period_uid(start: str) -> str:
+    return f"{PERIOD_UID_PREFIX}{start}"
+
+
+def _projection_generated_at(projection) -> datetime | None:
+    try:
+        return _parse_datetime((projection.payload or {}).get("generated_at"))
+    except ManagerialDashboardError:
+        return None
+
+
+def _upsert_projection(
+    resource_type: str,
+    resource_uid: str,
+    snapshot: dict,
+    generated_at: datetime,
+) -> bool:
+    values = {
+        "payload": snapshot,
+        "source_updated_at": _to_naive_utc(generated_at),
+        "published_at": _to_naive_utc(generated_at),
+        "version": 1,
+    }
+    projection = SyncProjection.get_or_none(
+        (SyncProjection.resource_type == resource_type)
+        & (SyncProjection.resource_uid == resource_uid)
+    )
+    if projection is None:
+        SyncProjection.create(
+            resource_type=resource_type,
+            resource_uid=resource_uid,
+            qr_token=None,
+            order_number=None,
+            status=None,
+            cancelled_at=None,
+            **values,
+        )
+        return True
+    existing_generated = _projection_generated_at(projection)
+    if existing_generated is not None and existing_generated > generated_at:
+        return False
+    projection.payload = snapshot
+    projection.source_updated_at = values["source_updated_at"]
+    projection.published_at = values["published_at"]
+    projection.version = 1
+    projection.save(
+        only=[
+            SyncProjection.payload,
+            SyncProjection.source_updated_at,
+            SyncProjection.published_at,
+            SyncProjection.version,
+        ]
+    )
+    return True
+
+
+def _latest_projection(resource_type: str):
+    return SyncProjection.get_or_none(
+        (SyncProjection.resource_type == resource_type)
+        & (SyncProjection.resource_uid == LATEST_UID)
+    )
+
+
+def _should_replace_latest(latest, snapshot: dict, generated_at: datetime) -> bool:
+    if latest is None:
+        return True
+    existing = latest.payload if isinstance(latest.payload, dict) else {}
+    existing_period = existing.get("period") or {}
+    incoming_period = snapshot.get("period") or {}
+    existing_start = str(existing_period.get("start") or "")
+    incoming_start = str(incoming_period.get("start") or "")
+    if incoming_start != existing_start:
+        return incoming_start > existing_start
+    existing_generated = _projection_generated_at(latest)
+    return existing_generated is None or generated_at >= existing_generated
+
+
+def save_snapshot_projection(
+    resource_type: str, snapshot: dict, generated_at: datetime
+) -> dict:
+    """Guarda el corte por período y mantiene ``latest`` con el más nuevo."""
+    start = str((snapshot.get("period") or {}).get("start") or "")
+    stored_period = False
+    stored_latest = False
+    with database_proxy.atomic():
+        if start:
+            stored_period = _upsert_projection(
+                resource_type, period_uid(start), snapshot, generated_at
+            )
+        latest = _latest_projection(resource_type)
+        if _should_replace_latest(latest, snapshot, generated_at):
+            stored_latest = _upsert_projection(
+                resource_type, LATEST_UID, snapshot, generated_at
+            )
+    return {"stored_period": stored_period, "stored_latest": stored_latest}
 
 
 def _require_mapping(value, name: str) -> dict:
@@ -94,52 +210,80 @@ class ManagerialDashboardService:
         _require_list(snapshot.get("top_clients"), "top_clients")
         _require_list(snapshot.get("top_products"), "top_products")
 
-        values = {
-            "qr_token": None,
-            "order_number": None,
-            "status": None,
-            "version": 1,
-            "payload": snapshot,
-            "source_updated_at": _to_naive_utc(generated_at),
-            "published_at": _to_naive_utc(generated_at),
-            "cancelled_at": None,
-        }
-        with database_proxy.atomic():
-            projection = SyncProjection.get_or_none(
-                (SyncProjection.resource_type == SyncProjection.RESOURCE_MANAGERIAL)
-                & (SyncProjection.resource_uid == "latest")
-            )
-            if projection is None:
-                SyncProjection.create(
-                    resource_type=SyncProjection.RESOURCE_MANAGERIAL,
-                    resource_uid="latest",
-                    **values,
-                )
-            else:
-                projection.payload = snapshot
-                projection.source_updated_at = values["source_updated_at"]
-                projection.published_at = values["published_at"]
-                projection.version = 1
-                projection.save(
-                    only=[
-                        SyncProjection.payload,
-                        SyncProjection.source_updated_at,
-                        SyncProjection.published_at,
-                        SyncProjection.version,
-                    ]
-                )
+        saved = save_snapshot_projection(
+            SyncProjection.RESOURCE_MANAGERIAL, snapshot, generated_at
+        )
         return {
             "snapshot_id": snapshot_id,
             "generated_at": generated_at.isoformat(),
             "accepted": True,
+            **saved,
         }
 
     @staticmethod
     def get_latest():
+        return _latest_projection(SyncProjection.RESOURCE_MANAGERIAL)
+
+    @staticmethod
+    def get_for_period(start: str):
+        try:
+            normalized = date.fromisoformat(str(start)).isoformat()
+        except (TypeError, ValueError):
+            return None
         return SyncProjection.get_or_none(
             (SyncProjection.resource_type == SyncProjection.RESOURCE_MANAGERIAL)
-            & (SyncProjection.resource_uid == "latest")
+            & (SyncProjection.resource_uid == period_uid(normalized))
         )
+
+    @staticmethod
+    def available_periods() -> list[dict]:
+        if database_proxy.obj is None:
+            return []
+        periods = {}
+        rows = SyncProjection.select().where(
+            (SyncProjection.resource_type == SyncProjection.RESOURCE_MANAGERIAL)
+            & (SyncProjection.resource_uid.startswith(PERIOD_UID_PREFIX))
+        )
+        for projection in rows:
+            payload = projection.payload if isinstance(projection.payload, dict) else {}
+            period = payload.get("period") or {}
+            try:
+                start = date.fromisoformat(str(period["start"]))
+                end = date.fromisoformat(str(period["end"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+            periods[start.isoformat()] = {
+                "value": start.isoformat(),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "label": f"{_month_name(end.isoformat()).capitalize()} {end.year}",
+                "range": f"{start:%d/%m/%Y} – {end:%d/%m/%Y}",
+                "is_latest": False,
+                "partial": end.day < _days_in_month(end),
+            }
+        latest = ManagerialDashboardService.get_latest()
+        if latest is not None and isinstance(latest.payload, dict):
+            period = latest.payload.get("period") or {}
+            try:
+                start = date.fromisoformat(str(period["start"]))
+                end = date.fromisoformat(str(period["end"]))
+            except (TypeError, ValueError, KeyError):
+                start = end = None
+            if start is not None and end is not None:
+                key = start.isoformat()
+                if key not in periods:
+                    periods[key] = {
+                        "value": key,
+                        "start": key,
+                        "end": end.isoformat(),
+                        "label": f"{_month_name(end.isoformat()).capitalize()} {end.year}",
+                        "range": f"{start:%d/%m/%Y} – {end:%d/%m/%Y}",
+                        "is_latest": False,
+                        "partial": end.day < _days_in_month(end),
+                    }
+                periods[key]["is_latest"] = True
+        ordered = sorted(periods.values(), key=lambda item: item["start"], reverse=True)
+        return ordered
 
     @classmethod
     def latest_view(cls) -> dict:
@@ -191,6 +335,19 @@ def _month_name(value: str) -> str:
     except (TypeError, ValueError):
         return ""
     return MONTHS[parsed.month]
+
+
+def _short_month_name(value) -> str:
+    try:
+        parsed = value if isinstance(value, date) else date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return ""
+    return MONTHS_SHORT[parsed.month]
+
+
+def _days_in_month(value: date) -> int:
+    next_month = date(value.year + (value.month // 12), value.month % 12 + 1, 1)
+    return (next_month - timedelta(days=1)).day
 
 
 def _time_label(value) -> str:
@@ -333,8 +490,7 @@ class _ViewBuilder:
             )
         return output
 
-    @staticmethod
-    def _insights(sales, tonnes, clients, products) -> list[dict]:
+    def _insights(self, sales, tonnes, clients, products) -> list[dict]:
         insights = []
         if sales > 0 and clients:
             top5 = sum(float(row.get("total") or 0) for row in clients)
@@ -363,12 +519,15 @@ class _ViewBuilder:
             None,
         )
         if negative:
+            previous_month = _month_name(
+                (self.payload.get("previous_period") or {}).get("start", "")
+            )
             insights.append(
                 {
                     "label": "A vigilar",
                     "before": f"{negative['name']} cae ",
                     "value": f"{_number(abs(float(negative['variation'])), 1)}%",
-                    "after": " contra el mismo tramo de septiembre.",
+                    "after": f" contra el mismo tramo de {previous_month or 'el mes anterior'}.",
                 }
             )
         return insights

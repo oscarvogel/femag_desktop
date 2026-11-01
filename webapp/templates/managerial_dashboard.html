@@ -2,7 +2,7 @@
 {% block title %}FEMAG · BI Ejecutivo{% endblock %}
 {% block page_title %}Monitor de Dirección Comercial{% endblock %}
 {% block topbar_actions %}
-<a class="btn" href="{{ url_for('managerial_repurchase') }}">Explorar Recompra ({{ recompra_count }})</a>
+<a class="btn" href="{{ url_for('managerial_repurchase', period=dashboard.period_start) }}">Explorar Recompra ({{ recompra_count }})</a>
 <button class="btn btn-primary" type="button" onclick="window.print()">Exportar Informe</button>
 {% endblock %}
 {% block content %}
@@ -10,7 +10,7 @@
 <section class="exec-banner">
   <div class="exec-banner-text">
     <span class="exec-tag">Sin datos</span>
-    <span>La nube todavía no recibió el snapshot gerencial. Cuando el agente de fábrica publique el corte, este tablero se completa solo.</span>
+    <span>{% if dashboard.error %}{{ dashboard.error }}{% else %}La nube todavía no recibió el snapshot gerencial. Cuando el agente de fábrica publique el corte, este tablero se completa solo.{% endif %}</span>
   </div>
 </section>
 {% else %}
@@ -19,38 +19,38 @@
     <span class="exec-tag">Diagnóstico mes</span>
     <span>{{ dashboard.diagnosis|safe }}</span>
   </div>
-  <a class="exec-banner-link" href="{{ url_for('managerial_repurchase') }}">Ver matriz de clientes →</a>
+  <a class="exec-banner-link" href="{{ url_for('managerial_repurchase', period=dashboard.period_start) }}">Ver matriz de clientes →</a>
 </section>
 
 <section class="kpi-grid" aria-label="Indicadores principales">
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Facturación Despachada</span><span class="kpi-pill {{ dashboard.kpis.sales.direction }}">{{ dashboard.kpis.sales.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.sales.value }}</div>
-    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.sales.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.sales.diff }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.sales.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.sales.diff }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.sales.meter if dashboard.kpis.sales.meter <= 100 else 100 }}%;background:var(--navy-800)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Volumen Despachado</span><span class="kpi-pill {{ dashboard.kpis.tonnes.direction }}">{{ dashboard.kpis.tonnes.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.tonnes.value }}</div>
-    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.tonnes.diff }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.tonnes.diff }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.tonnes.meter if dashboard.kpis.tonnes.meter <= 100 else 100 }}%;background:var(--blue-600)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Clientes Compradores</span><span class="kpi-pill {{ dashboard.kpis.buyers.direction }}">{{ dashboard.kpis.buyers.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.buyers.value }}</div>
-    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.buyers.previous }}</strong></span><span>Retención: <strong>{{ dashboard.kpis.buyers.retention }}%</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.buyers.previous }}</strong></span><span>Retención: <strong>{{ dashboard.kpis.buyers.retention }}%</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.buyers.meter if dashboard.kpis.buyers.meter <= 100 else 100 }}%;background:var(--amber-500)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Órdenes Emitidas / Cerr.</span><span class="kpi-pill {{ dashboard.kpis.orders.direction }}">{{ dashboard.kpis.orders.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.orders.value }}</div>
-    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.orders.previous }}</strong></span><span>Promedio: <strong>{{ dashboard.kpis.orders.average }} TN/carga</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.orders.previous }}</strong></span><span>Promedio: <strong>{{ dashboard.kpis.orders.average }} TN/carga</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.orders.meter if dashboard.kpis.orders.meter <= 100 else 100 }}%;background:var(--emerald-600)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Precio Promedio / TN</span><span class="kpi-pill {{ dashboard.kpis.price.direction }}">{{ dashboard.kpis.price.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.price.value }}</div>
-    <div class="kpi-sub"><span>Sep: <strong>{{ dashboard.kpis.price.previous }}</strong></span><span>Ticket: <strong>{{ dashboard.kpis.price.ticket }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.price.previous }}</strong></span><span>Ticket: <strong>{{ dashboard.kpis.price.ticket }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.price.meter if dashboard.kpis.price.meter <= 100 else 100 }}%;background:var(--navy-700)"></span></div>
   </article>
 </section>
@@ -58,7 +58,7 @@
 <section class="charts-row">
   <article class="card">
     <div class="card-header">
-      <div><h2 class="card-title">Puente de Variación de Volumen (Septiembre → Octubre)</h2><p class="card-subtitle">Descomposición exacta de las {{ dashboard.kpis.tonnes.diff|replace('−','') }} de diferencia según comportamiento de cartera</p></div>
+      <div><h2 class="card-title">Puente de Variación de Volumen ({{ dashboard.previous_label }} → {{ dashboard.current_label }})</h2><p class="card-subtitle">Descomposición exacta de las {{ dashboard.kpis.tonnes.diff|replace('−','') }} de diferencia según comportamiento de cartera</p></div>
       <div class="legend-inline"><span><i class="swatch" style="background:var(--navy-800)"></i> Base / Cierre</span><span><i class="swatch" style="background:var(--emerald-600)"></i> Expansión</span><span><i class="swatch" style="background:var(--red-600)"></i> Contracción</span></div>
     </div>
     <div class="card-body">
@@ -83,8 +83,8 @@
 
   <article class="card" id="productos">
     <div class="card-header">
-      <div><h2 class="card-title">Desempeño por Línea de Producto (Octubre vs. Septiembre)</h2><p class="card-subtitle">Comparativa en toneladas despachadas, facturación y precio medio por línea</p></div>
-      <div class="legend-inline"><span><i class="swatch" style="background:#cbd5e1"></i> Sep 2026</span><span><i class="swatch" style="background:var(--navy-800)"></i> Oct 2026</span></div>
+      <div><h2 class="card-title">Desempeño por Línea de Producto ({{ dashboard.current_label }} vs. {{ dashboard.previous_label }})</h2><p class="card-subtitle">Comparativa en toneladas despachadas, facturación y precio medio por línea</p></div>
+      <div class="legend-inline"><span><i class="swatch" style="background:#cbd5e1"></i> {{ dashboard.previous_short }} {{ dashboard.previous_year }}</span><span><i class="swatch" style="background:var(--navy-800)"></i> {{ dashboard.current_short }} {{ dashboard.current_year }}</span></div>
     </div>
     <div class="card-body">
       <div class="product-bars">
@@ -110,8 +110,8 @@
 
 <section class="cohort-strip" aria-label="Distribución de cartera">
   <div class="cohort-head">
-    <div><h2 class="card-title">Radiografía de Cartera ({{ dashboard.cohort_total }} clientes con actividad Sep–Oct)</h2><p class="card-subtitle">Distribución de cuentas según comportamiento de recompra en el mismo tramo calendario</p></div>
-    <a class="btn" href="{{ url_for('managerial_repurchase') }}">Abrir matriz completa →</a>
+    <div><h2 class="card-title">Radiografía de Cartera ({{ dashboard.cohort_total }} clientes con actividad {{ dashboard.previous_short }}–{{ dashboard.current_short }})</h2><p class="card-subtitle">Distribución de cuentas según comportamiento de recompra en el mismo tramo calendario</p></div>
+    <a class="btn" href="{{ url_for('managerial_repurchase', period=dashboard.period_start) }}">Abrir matriz completa →</a>
   </div>
   <div class="cohort-bar">
     {% for item in dashboard.cohort %}
@@ -127,9 +127,9 @@
 
 <section class="tables-row">
   <article class="card">
-    <div class="card-header"><div><h2 class="card-title">Top Clientes del Mes (Octubre)</h2><p class="card-subtitle">El Top 5 concentra el {{ dashboard.top_clients_share }}% de la facturación</p></div></div>
+    <div class="card-header"><div><h2 class="card-title">Top Clientes del Mes ({{ dashboard.current_label }})</h2><p class="card-subtitle">El Top 5 concentra el {{ dashboard.top_clients_share }}% de la facturación</p></div></div>
     <div class="data-table-wrap">
-      <table class="data-table"><thead><tr><th>Cliente</th><th class="num">Octubre</th><th class="num">Septiembre</th><th class="num">Var. %</th><th class="bar-cell">Share</th></tr></thead><tbody>
+      <table class="data-table"><thead><tr><th>Cliente</th><th class="num">{{ dashboard.current_label }}</th><th class="num">{{ dashboard.previous_label }}</th><th class="num">Var. %</th><th class="bar-cell">Share</th></tr></thead><tbody>
         {% for row in dashboard.top_clients %}<tr><td><span class="primary-cell">{{ row.name }}</span><span class="cell-sub">{{ row.current_tn }} TN</span></td><td class="num"><strong>{{ row.current_total }}</strong></td><td class="num">{{ row.previous_total }}</td><td class="num"><span class="badge-var {{ row.direction }}">{{ row.delta }}</span></td><td class="bar-cell"><div class="num" style="font-size:10.5px">{{ row.share }}%</div><div class="mini-bar"><i style="width:{{ row.bar }}%"></i></div></td></tr>{% endfor %}
       </tbody></table>
     </div>
@@ -138,17 +138,17 @@
   <article class="card">
     <div class="card-header"><div><h2 class="card-title">Matriz de Productos Despachados</h2><p class="card-subtitle">Volumen físico, facturación y precio implícito por tonelada</p></div></div>
     <div class="data-table-wrap">
-      <table class="data-table"><thead><tr><th>Producto</th><th class="num">TN Oct</th><th class="num">TN Sep</th><th class="num">Facturación</th><th class="num">Var. TN</th></tr></thead><tbody>
+      <table class="data-table"><thead><tr><th>Producto</th><th class="num">TN {{ dashboard.current_short }}</th><th class="num">TN {{ dashboard.previous_short }}</th><th class="num">Facturación</th><th class="num">Var. TN</th></tr></thead><tbody>
         {% for row in dashboard.products %}<tr><td><span class="primary-cell">{{ row.name }}</span><span class="cell-sub">{{ row.price_tn }}/TN · {{ row.share }}% del vol.</span></td><td class="num"><strong>{{ row.current_tn }}</strong></td><td class="num">{{ row.previous_tn }}</td><td class="num">{{ row.current_total }}</td><td class="num"><span class="badge-var {{ row.direction }}">{{ row.delta }}</span></td></tr>{% endfor %}
       </tbody></table>
     </div>
   </article>
 
   <article class="card">
-    <div class="card-header"><div><h2 class="card-title">Mayores Cuentas Sin Recompra</h2><p class="card-subtitle">Clientes con compra en sep y 0,0 TN en oct</p></div><a href="{{ url_for('managerial_repurchase') }}" style="font-size:11.5px;font-weight:700;color:var(--red-700)">Ver todas →</a></div>
+    <div class="card-header"><div><h2 class="card-title">Mayores Cuentas Sin Recompra</h2><p class="card-subtitle">Clientes con compra en {{ dashboard.previous_short|lower }} y 0,0 TN en {{ dashboard.current_short|lower }}</p></div><a href="{{ url_for('managerial_repurchase', period=dashboard.period_start) }}" style="font-size:11.5px;font-weight:700;color:var(--red-700)">Ver todas →</a></div>
     <div class="risk-list">
       {% for row in dashboard.risks %}
-      <div class="risk-item"><div><div class="risk-name">{{ row.name }}</div><div class="risk-meta">{{ row.salesperson }} · Últ: {{ row.last }}</div></div><div class="risk-val"><strong>−{{ row.previous_tn }} TN</strong><span>{{ row.previous_total }} en sep</span></div></div>
+      <div class="risk-item"><div><div class="risk-name">{{ row.name }}</div><div class="risk-meta">{{ row.salesperson }} · Últ: {{ row.last }}</div></div><div class="risk-val"><strong>−{{ row.previous_tn }} TN</strong><span>{{ row.previous_total }} en {{ dashboard.previous_short|lower }}</span></div></div>
       {% else %}
       <div class="risk-item"><div class="risk-meta">Sin datos de recompra.</div></div>
       {% endfor %}

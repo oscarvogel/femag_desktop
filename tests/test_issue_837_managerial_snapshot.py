@@ -1,5 +1,6 @@
 """Snapshot gerencial: publicacion, API, lectura y permisos (#837)."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
 from uuid import uuid4
@@ -189,6 +190,19 @@ def _snapshot():
             }
         ],
     }
+
+
+def _period_snapshot(start: str, end: str, previous_start: str, previous_end: str, generated_at: str):
+    snapshot = deepcopy(_snapshot())
+    snapshot["snapshot_id"] = str(uuid4())
+    snapshot["generated_at"] = generated_at
+    snapshot["period"] = {"start": start, "end": end, "label": "Cerrado"}
+    snapshot["previous_period"] = {
+        "start": previous_start,
+        "end": previous_end,
+        "label": "Anterior",
+    }
+    return snapshot
 
 
 def _app(monkeypatch=None):
@@ -437,3 +451,128 @@ def test_dashboard_route_shows_empty_state_without_snapshot(db):
     assert response.status_code == 200
     assert b"Sin datos" in response.data
     assert b"este tablero se completa solo" in response.data
+
+
+class _HistoryClient:
+    def __init__(self):
+        self.snapshots = []
+
+    def post_managerial_snapshot(self, snapshot):
+        self.snapshots.append(snapshot)
+        return {"accepted": True}
+
+    def post_managerial_repurchase_snapshot(self, snapshot):
+        self.snapshots.append(snapshot)
+        return {"accepted": True}
+
+
+def test_publisher_builds_closed_months_plus_current():
+    publisher = ManagerialSnapshotPublisher(
+        dashboard_service=_Dashboard(), min_interval_minutes=0
+    )
+
+    snapshots = publisher.build_history(months=3, as_of=date(2026, 10, 31))
+
+    assert [item["period"]["start"] for item in snapshots] == [
+        "2026-08-01",
+        "2026-09-01",
+        "2026-10-01",
+    ]
+    assert [item["period"]["end"] for item in snapshots] == [
+        "2026-08-31",
+        "2026-09-30",
+        "2026-10-31",
+    ]
+
+
+def test_publish_history_posts_every_month(db):
+    client = _HistoryClient()
+    publisher = ManagerialSnapshotPublisher(
+        dashboard_service=_Dashboard(), min_interval_minutes=0
+    )
+
+    result = publisher.publish_history(
+        client, months=3, as_of=date(2026, 10, 31)
+    )
+
+    assert result["months"] == 3
+    assert len(client.snapshots) == 3
+    cursor = SyncCursor.get(
+        SyncCursor.stream == SyncCursor.STREAM_FACTORY_MANAGERIAL_HISTORY
+    )
+    assert cursor.cursor_value > 0
+
+
+def test_managerial_api_stores_period_without_regressing_latest(db, monkeypatch):
+    client = _app(monkeypatch).test_client()
+    october = _period_snapshot(
+        "2026-10-01", "2026-10-31", "2026-09-01", "2026-09-30", "2026-11-01T12:00:00Z"
+    )
+    september = _period_snapshot(
+        "2026-09-01", "2026-09-30", "2026-08-01", "2026-08-31", "2026-11-02T12:00:00Z"
+    )
+
+    assert (
+        client.post(
+            "/api/sync/v1/snapshots/managerial", json=october, headers=HEADERS
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/sync/v1/snapshots/managerial", json=september, headers=HEADERS
+        ).status_code
+        == 200
+    )
+
+    latest = SyncProjection.get(
+        (SyncProjection.resource_type == SyncProjection.RESOURCE_MANAGERIAL)
+        & (SyncProjection.resource_uid == "latest")
+    )
+    assert latest.payload["period"]["start"] == "2026-10-01"
+    periods = ManagerialDashboardService.available_periods()
+    assert [period["start"] for period in periods] == ["2026-10-01", "2026-09-01"]
+    assert periods[0]["is_latest"] is True
+
+
+def test_dashboard_route_filters_by_period(db):
+    ManagerialDashboardService.apply_snapshot(
+        _period_snapshot(
+            "2026-10-01", "2026-10-31", "2026-09-01", "2026-09-30", "2026-11-01T12:00:00Z"
+        )
+    )
+    ManagerialDashboardService.apply_snapshot(
+        _period_snapshot(
+            "2026-09-01", "2026-09-30", "2026-08-01", "2026-08-31", "2026-11-01T12:00:00Z"
+        )
+    )
+    ManagerialRepurchaseService.apply_snapshot(_repurchase_snapshot())
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia?period=2026-09-01")
+
+    assert response.status_code == 200
+    assert b"Septiembre 2026" in response.data
+    assert b'value="2026-10-01"' in response.data
+    assert b'value="2026-09-01"' in response.data
+    assert b'value="2026-09-01" selected' in response.data
+
+
+def test_repurchase_route_filters_by_period(db):
+    ManagerialDashboardService.apply_snapshot(
+        _period_snapshot(
+            "2026-10-01", "2026-10-31", "2026-09-01", "2026-09-30", "2026-11-01T12:00:00Z"
+        )
+    )
+    snapshot = _repurchase_snapshot()
+    snapshot["snapshot_id"] = str(uuid4())
+    ManagerialRepurchaseService.apply_snapshot(snapshot)
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia/recompra?period=2026-10-01")
+
+    assert response.status_code == 200
+    assert b"01/10/2026" in response.data
+    assert b'value="2026-10-01" selected' in response.data

@@ -146,6 +146,22 @@ def run_sync(limit: int | None = None) -> int:
                 logger.warning(
                     "No se pudo publicar el snapshot de recompra: %s", exc
                 )
+        managerial_history = None
+        if managerial_publisher.should_publish_history():
+            try:
+                managerial_history = managerial_publisher.publish_history(client)
+            except Exception as exc:
+                logger.warning(
+                    "No se pudo publicar la historia gerencial: %s", exc
+                )
+        repurchase_history = None
+        if repurchase_publisher.should_publish_history():
+            try:
+                repurchase_history = repurchase_publisher.publish_history(client)
+            except Exception as exc:
+                logger.warning(
+                    "No se pudo publicar la historia de recompra: %s", exc
+                )
         print(
             json.dumps(
                 {
@@ -153,6 +169,8 @@ def run_sync(limit: int | None = None) -> int:
                     "snapshot": snapshot,
                     "managerial": managerial,
                     "repurchase": repurchase,
+                    "managerial_history": managerial_history,
+                    "repurchase_history": repurchase_history,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -170,11 +188,20 @@ def run_managerial() -> int:
     try:
         validate_sync_schema(database)
         client = _client_from_env()
-        managerial = ManagerialSnapshotPublisher().publish(client)
-        repurchase = ManagerialRepurchasePublisher().publish(client)
+        managerial_publisher = ManagerialSnapshotPublisher()
+        repurchase_publisher = ManagerialRepurchasePublisher()
+        managerial = managerial_publisher.publish(client)
+        repurchase = repurchase_publisher.publish(client)
+        managerial_history = managerial_publisher.publish_history(client)
+        repurchase_history = repurchase_publisher.publish_history(client)
         print(
             json.dumps(
-                {"managerial": managerial, "repurchase": repurchase},
+                {
+                    "managerial": managerial,
+                    "repurchase": repurchase,
+                    "managerial_history": managerial_history,
+                    "repurchase_history": repurchase_history,
+                },
                 ensure_ascii=False,
                 indent=2,
             )

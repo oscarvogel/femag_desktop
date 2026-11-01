@@ -30,9 +30,9 @@
 
       <div class="nav-group-label">Dirección General</div>
       <nav class="side-nav">
-        <a href="{{ url_for('managerial_dashboard') }}" class="{{ 'active' if active == 'dashboard' else '' }}"><span>Resumen Ejecutivo</span></a>
-        <a href="{{ url_for('managerial_repurchase') }}" class="{{ 'active' if active == 'recompra' else '' }}"><span>Retención y Recompra</span>{% if recompra_count %}<span class="badge">{{ recompra_count }}</span>{% endif %}</a>
-        <a href="{{ url_for('managerial_dashboard') }}#productos"><span>Mix de Productos</span></a>
+        <a href="{{ url_for('managerial_dashboard', period=selected_period or None) }}" class="{{ 'active' if active == 'dashboard' else '' }}"><span>Resumen Ejecutivo</span></a>
+        <a href="{{ url_for('managerial_repurchase', period=selected_period or None) }}" class="{{ 'active' if active == 'recompra' else '' }}"><span>Retención y Recompra</span>{% if recompra_count %}<span class="badge">{{ recompra_count }}</span>{% endif %}</a>
+        <a href="{{ url_for('managerial_dashboard', period=selected_period or None) }}#productos"><span>Mix de Productos</span></a>
       </nav>
 
       <div class="nav-group-label" style="margin-top:12px">Operación Planta</div>
@@ -66,6 +66,17 @@
           {% endif %}
         </div>
         <div class="topbar-controls">
+          {% if periods %}
+          <form class="period-form" method="get">
+            <label for="period-select">Período</label>
+            <select id="period-select" name="period" onchange="this.form.submit()">
+              {% for option in periods %}
+              <option value="{{ option.value }}" {{ 'selected' if option.value == selected_period else '' }}>{{ option.label }}{% if option.is_latest %} · en curso{% endif %}</option>
+              {% endfor %}
+            </select>
+            <noscript><button class="btn" type="submit">Ver</button></noscript>
+          </form>
+          {% endif %}
           <button class="btn pwa-install-button" type="button" id="pwa-install-button" hidden>Instalar app</button>
           {% block topbar_actions %}{% endblock %}
           <a class="btn btn-logout" href="{{ url_for('logout') }}">Salir</a>

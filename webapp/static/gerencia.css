@@ -233,6 +233,29 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .period-form {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .period-form label {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--slate-500);
+    }
+    .period-form select {
+      height: 34px;
+      border: 1px solid var(--slate-300);
+      border-radius: var(--radius-sm);
+      padding: 0 9px;
+      background: var(--white);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--slate-900);
+    }
     .segmented {
       display: inline-flex;
       background: var(--slate-100);
@@ -779,6 +802,8 @@
   .period-pill{display:inline-block;margin-top:6px;font-size:9.5px;white-space:normal;line-height:1.35}
   .topbar-controls{margin-top:10px;gap:6px}
   .topbar-controls .btn{font-size:11px;height:30px;padding:0 9px}
+  .period-form{width:100%}
+  .period-form select{flex:1;height:30px;font-size:11px}
   .exec-banner{display:block;padding:12px}
   .exec-banner-text{display:block}
   .exec-tag{display:inline-block;margin-bottom:8px}

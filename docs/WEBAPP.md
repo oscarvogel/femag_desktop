@@ -203,17 +203,23 @@ entrarían al stock y el mismo kilo quedaría en los dos stocks.
 celular o notebook. Usa el shell de dirección con navegación lateral, período
 actual vs. anterior y acciones de impresión/exportación.
 
-- La fábrica publica solo agregados del mes cada 30 minutos: ventas, toneladas,
+- La fábrica publica los agregados del mes cada 30 minutos: ventas, toneladas,
   pedidos, ticket promedio, clientes compradores, precio por tonelada, top 5
   clientes, top 5 productos y el snapshot de recompra.
+- Además publica una vez por día la historia de los últimos 24 meses cerrados
+  (más el mes en curso), para que el tablero conserve los cierres anteriores.
+- El selector de período del encabezado permite elegir cualquier mes publicado
+  y compara contra el mes calendario anterior. Aplica a `/gerencia` y
+  `/gerencia/recompra`.
 - El tablero muestra 5 KPIs, el puente de variación de volumen, la comparativa
   por producto y la radiografía de cartera; el detalle cliente por cliente está
   en `/gerencia/recompra`.
-- La nube guarda el último snapshot en `syncprojection` con
-  `resource_type=managerial_dashboard` y `resource_uid=latest`.
+- La nube guarda cada corte en `syncprojection` con
+  `resource_type=managerial_dashboard` y `resource_uid=period:AAAA-MM-DD`.
+  El corte más nuevo se mantiene además en `resource_uid=latest`.
 - No viajan órdenes crudas, cuentas corrientes, precios ni stock.
-- Si todavía no llegó un snapshot, la pantalla muestra un estado vacío explícito
-  y no inventa datos.
+- Si todavía no llegó un snapshot o falta el período pedido, la pantalla muestra
+  un estado vacío explícito y no inventa datos.
 
 ### Recompra de clientes (#837)
 
