@@ -88,7 +88,9 @@ class ClientManualCreditDialog(QDialog):
         form.addRow("Observaciones", self.observations_input)
         layout.addLayout(form)
 
+        self._saving = False
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self._save_button = buttons.button(QDialogButtonBox.Save)
         buttons.button(QDialogButtonBox.Save).setObjectName(
             "clientManualCreditSaveButton"
         )
@@ -105,10 +107,14 @@ class ClientManualCreditDialog(QDialog):
         return self._registered_credit
 
     def _on_accept(self) -> None:
+        if self._saving or self._registered_credit is not None:
+            return
         client_id = self.client_combo.currentData()
         if client_id is None:
             QMessageBox.warning(self, "Crédito manual", "Debe seleccionar un cliente.")
             return
+        self._saving = True
+        self._save_button.setEnabled(False)
         try:
             movement = self.service.register_manual_credit(
                 client=Client.get_by_id(client_id),
@@ -121,5 +127,8 @@ class ClientManualCreditDialog(QDialog):
         except ClientManualCreditError as exc:
             QMessageBox.warning(self, "Crédito manual", str(exc))
             return
+        finally:
+            self._saving = False
+            self._save_button.setEnabled(True)
         self._registered_credit = movement
         self.accept()

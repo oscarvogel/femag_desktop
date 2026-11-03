@@ -152,33 +152,33 @@ class ClientPaymentService:
                         sequence=item["sequence"],
                     )
                 self._register_ledger_movement(payment)
+                self.audit_service.record(
+                    user=self.current_user,
+                    module="Cuenta corriente",
+                    action="registrar_pago",
+                    record_ref=f"ClientPayment:{payment.id}",
+                    new_value={
+                        "client_id": client.id,
+                        "receipt_number": payment.receipt_number,
+                        "amount": payment.amount,
+                        "method": payment.method,
+                        "payment_date": payment.payment_date.isoformat(),
+                        "reference": payment.reference,
+                        "closure_id": payment.closure_id,
+                        "load_order_id": payment.closure.order_id if payment.closure_id else None,
+                        "details": [
+                            {
+                                "method": item["method"].code,
+                                "amount": item["amount"],
+                                "reference": item["reference"],
+                            }
+                            for item in normalized
+                        ],
+                    },
+                )
         except IntegrityError as exc:
             raise ClientPaymentError(f"No se pudo registrar el pago: {exc}") from exc
 
-        self.audit_service.record(
-            user=self.current_user,
-            module="Cuenta corriente",
-            action="registrar_pago",
-            record_ref=f"ClientPayment:{payment.id}",
-            new_value={
-                "client_id": client.id,
-                "receipt_number": payment.receipt_number,
-                "amount": payment.amount,
-                "method": payment.method,
-                "payment_date": payment.payment_date.isoformat(),
-                "reference": payment.reference,
-                "closure_id": payment.closure_id,
-                "load_order_id": payment.closure.order_id if payment.closure_id else None,
-                "details": [
-                    {
-                        "method": item["method"].code,
-                        "amount": item["amount"],
-                        "reference": item["reference"],
-                    }
-                    for item in normalized
-                ],
-            },
-        )
         return payment
 
     def _validate_closure(

@@ -113,7 +113,9 @@ class ClientPaymentDialog(QDialog):
         self.reference_input = self.details_table.cellWidget(0, 1)
         self.amount_input = self.details_table.cellWidget(0, 2)
 
+        self._saving = False
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self._save_button = buttons.button(QDialogButtonBox.Save)
         buttons.button(QDialogButtonBox.Save).setObjectName("clientPaymentSaveButton")
         buttons.button(QDialogButtonBox.Cancel).setObjectName("clientPaymentCancelButton")
         buttons.accepted.connect(self._on_accept)
@@ -184,6 +186,8 @@ class ClientPaymentDialog(QDialog):
         return self._registered_payment
 
     def _on_accept(self) -> None:
+        if self._saving or self._registered_payment is not None:
+            return
         client_id = self.client_combo.currentData()
         if client_id is None:
             QMessageBox.warning(self, "Pago", "Debe seleccionar un cliente.")
@@ -196,6 +200,8 @@ class ClientPaymentDialog(QDialog):
                 "Todas las líneas deben tener un importe mayor a cero.",
             )
             return
+        self._saving = True
+        self._save_button.setEnabled(False)
         try:
             payment = self.service.register_compound_payment(
                 client=Client.get_by_id(client_id),
@@ -205,5 +211,8 @@ class ClientPaymentDialog(QDialog):
         except ClientPaymentError as exc:
             QMessageBox.warning(self, "Pago", str(exc))
             return
+        finally:
+            self._saving = False
+            self._save_button.setEnabled(True)
         self._registered_payment = payment
         self.accept()
