@@ -90,6 +90,82 @@ class AccountLedgerService:
             self._record("generar", movement)
         return movement
 
+    def generate_for_budget(
+        self, order: LoadOrder, budget: Budget
+    ) -> tuple[ClientAccountMovement, bool]:
+        """Registra el movimiento de un presupuesto concreto de la orden.
+
+        La emisión normal recorre los destinos actuales de la orden. Cuando un
+        presupuesto quedó huérfano (por ejemplo, porque se editó la orden y se
+        quitó ese cliente después de imprimirlo), volver a emitir desde los
+        destinos no lo registra nunca. La reparación tiene que escribir
+        exactamente el documento que detectó, no otro: por eso este método usa
+        el presupuesto persistido como fuente de verdad.
+
+        Devuelve ``(movimiento, creado)``. Es idempotente: si el movimiento ya
+        existe no lo duplica.
+        """
+        order = LoadOrder.get_by_id(order.id)
+        budget = Budget.get_by_id(budget.id)
+        if budget.load_order_id != order.id:
+            raise ValueError(
+                f"El presupuesto {budget.display_number} no pertenece a la "
+                f"OC-{order.order_number:06d}."
+            )
+        if budget.origin != Budget.ORIGIN_LOAD_ORDER:
+            raise ValueError(
+                f"El presupuesto {budget.display_number} no fue emitido desde una orden de carga."
+            )
+        client = budget.client
+        timing = budget.timing
+        items = list(budget.items)
+        totals = totals_from_persisted_items(items)
+        totales = {
+            "neto_subtotal": money_to_float(totals.net_amount),
+            "descuento_importe": money_to_float(totals.discount_amount),
+            "iva_importe": money_to_float(totals.vat_amount),
+            "total": money_to_float(totals.total_amount),
+        }
+        movement_date = order.date
+        immediate = timing == Budget.TIMING_IMMEDIATE
+        plazo = max(int(client.dias_plazo_pago or 0), 0)
+        if immediate and not self.budget_service.has_deferred_portion(order, client):
+            due_date = movement_date + timedelta(days=plazo)
+        elif immediate:
+            due_date = movement_date
+        else:
+            due_date = movement_date + timedelta(days=plazo)
+        movement_type = (
+            ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE
+            if immediate
+            else ClientAccountMovement.TYPE_LOAD_ORDER_DEFERRED
+        )
+        movement, created = ClientAccountMovement.get_or_create(
+            load_order=order,
+            client=client,
+            movement_type=movement_type,
+            is_reversal=False,
+            defaults={
+                "budget": budget,
+                "amount": self.DOCUMENTAL_AMOUNT,
+                "net_amount": totales["neto_subtotal"],
+                "discount_amount": totales["descuento_importe"],
+                "vat_amount": totales["iva_importe"],
+                "total_amount": totales["total"],
+                "currency": self.CURRENCY,
+                "movement_date": movement_date,
+                "due_date": due_date,
+                "description": self._description(order, budget, totales),
+                "source_ref": f"Budget:{budget.id}",
+                "reference": budget.display_number,
+                "created_by": self.current_user,
+            },
+        )
+        if created:
+            self._update_budget_status(order, client, timing)
+            self._record("generar", movement)
+        return movement, created
+
     def reverse_for_load_order(self, order: LoadOrder) -> list[ClientAccountMovement]:
         order = LoadOrder.get_by_id(order.id)
         reversals = []

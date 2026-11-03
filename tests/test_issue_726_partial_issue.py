@@ -380,6 +380,126 @@ def test_la_reparacion_no_toca_una_orden_sana(db):
     assert finding.missing_stock is False
 
 
+def test_la_reparacion_registra_un_presupuesto_huerfano(db):
+    """Repara el documento exacto aunque su cliente ya no esté en los destinos.
+
+    Es el caso de una orden a la que se le imprimió el presupuesto, después se
+    le quitó un destino y recién entonces se emitió. La emisión recorre los
+    destinos actuales, así que el presupuesto del cliente quitado queda
+    huérfano. La reparación no puede volver a emitir desde los destinos: tiene
+    que registrar el presupuesto que detectó.
+    """
+    from app.services.load_order_ledger_repair_service import (
+        LoadOrderLedgerRepairService,
+    )
+
+    data = _maestros()
+    huerfano = Client.create(name="Cliente quitado", cuit="30799999999", iva_condition="RI")
+    direccion_huerfano = ClientAddress.create(
+        client=huerfano,
+        address_type="entrega",
+        province="Misiones",
+        city="Posadas",
+        address="Ruta 14",
+    )
+    order = LoadOrderService(current_user="admin").create_order(
+        carrier=data["carrier"],
+        driver=data["driver"],
+        truck=data["truck"],
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["product"], "quantity": CANTIDAD}],
+            },
+            {
+                "client": huerfano,
+                "delivery_address": direccion_huerfano,
+                "products": [{"product": data["product"], "quantity": CANTIDAD}],
+            },
+        ],
+        pallets=[
+            {
+                "sequence": 1,
+                "pallet_type": None,
+                "allocations": [
+                    {
+                        "client": data["client"],
+                        "delivery_address": data["address"],
+                        "product": data["product"],
+                        "quantity": CANTIDAD,
+                    }
+                ],
+            },
+            {
+                "sequence": 2,
+                "pallet_type": None,
+                "allocations": [
+                    {
+                        "client": huerfano,
+                        "delivery_address": direccion_huerfano,
+                        "product": data["product"],
+                        "quantity": CANTIDAD,
+                    }
+                ],
+            },
+        ],
+    )
+    presupuestos = BudgetService(current_user="admin").ensure_for_load_order(order)
+    assert len(presupuestos) == 2
+    presupuesto_huerfano = next(b for b in presupuestos if b.client_id == huerfano.id)
+
+    # Se quita el destino después de imprimir: el presupuesto queda huérfano.
+    LoadOrderService(current_user="admin").update_order(
+        order,
+        destinations=[
+            {
+                "client": data["client"],
+                "delivery_address": data["address"],
+                "products": [{"product": data["product"], "quantity": CANTIDAD}],
+            }
+        ],
+        pallets=[
+            {
+                "sequence": 1,
+                "pallet_type": None,
+                "allocations": [
+                    {
+                        "client": data["client"],
+                        "delivery_address": data["address"],
+                        "product": data["product"],
+                        "quantity": CANTIDAD,
+                    }
+                ],
+            }
+        ],
+    )
+    order = LoadOrderOperationService(current_user="admin").issue(order)
+    service = LoadOrderLedgerRepairService(current_user="admin")
+
+    finding = service.find_gap(order)
+    assert [gap.budget_id for gap in finding.ledger_gaps] == [presupuesto_huerfano.id]
+
+    resultado = service.repair(order)
+
+    assert resultado.created_movement_ids != ()
+    movimiento = ClientAccountMovement.get(
+        ClientAccountMovement.source_ref == f"Budget:{presupuesto_huerfano.id}"
+    )
+    assert movimiento.client == huerfano
+    assert movimiento.total_amount == approx(presupuesto_huerfano.total_amount, abs=0.01)
+    assert service.find_gap(LoadOrder.get_by_id(order.id)).is_repairable is False
+
+    # Repetir la reparación no duplica el movimiento.
+    service.repair(LoadOrder.get_by_id(order.id))
+    assert (
+        ClientAccountMovement.select()
+        .where(ClientAccountMovement.source_ref == f"Budget:{presupuesto_huerfano.id}")
+        .count()
+        == 1
+    )
+
+
 def test_el_script_de_consola_lista_las_ordenes_rotas(db, capsys):
     """El script de consola y la pantalla usan la misma lógica."""
     from scripts.repair_missing_ledger_movements import run

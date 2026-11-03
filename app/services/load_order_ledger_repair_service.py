@@ -315,9 +315,12 @@ class LoadOrderLedgerRepairService:
     def repair(self, order: LoadOrder) -> RepairResult:
         """Repara UNA orden en una sola transacción.
 
-        Usa los mismos servicios que la emisión, que son idempotentes: si el
-        movimiento o el descuento ya estaban, no se duplican. Cualquier
-        excepción revierte todo, incluida la auditoría.
+        Registra exactamente los presupuestos que ``find_gap`` detectó, aunque
+        su cliente ya no esté entre los destinos actuales de la orden: reemitir
+        desde los destinos dejaría huérfano justamente el documento que hay que
+        reparar. Los servicios son idempotentes, así que repetir la reparación
+        no duplica movimientos. Cualquier excepción revierte todo, incluida la
+        auditoría.
         """
         order = LoadOrder.get_by_id(order.id)
         if order.status not in REPAIRABLE_STATUSES:
@@ -329,9 +332,14 @@ class LoadOrderLedgerRepairService:
         with database_proxy.atomic():
             gap = self.find_gap(order)
             movimientos = []
+            creados = []
             despachos = []
-            if gap.ledger_gaps:
-                movimientos = self.ledger.generate_for_load_order(order)
+            for ledger_gap in gap.ledger_gaps:
+                budget = Budget.get_by_id(ledger_gap.budget_id)
+                movimiento, creado = self.ledger.generate_for_budget(order, budget)
+                movimientos.append(movimiento)
+                if creado:
+                    creados.append(movimiento.id)
             if gap.missing_stock:
                 despachos = self.stock.register_dispatch(order)
             self.audit_service.record(
@@ -342,6 +350,7 @@ class LoadOrderLedgerRepairService:
                 new_value={
                     "order_number": int(order.order_number),
                     "movement_ids": [m.id for m in movimientos],
+                    "created_movement_ids": creados,
                     "stock_movement_ids": [m.id for m in despachos],
                 },
                 observation="Reparacion de emision parcial de cuenta corriente y stock (#726)",
@@ -352,6 +361,7 @@ class LoadOrderLedgerRepairService:
             order_number=int(order.order_number),
             movement_ids=tuple(m.id for m in movimientos),
             stock_movement_ids=tuple(m.id for m in despachos),
+            created_movement_ids=tuple(creados),
         )
 
     # -- Internos ----------------------------------------------------------
