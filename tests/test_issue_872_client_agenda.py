@@ -122,6 +122,50 @@ def test_order_list_chooses_the_correct_client(db, monkeypatch):
     assert app is not None
 
 
+def test_client_list_agenda_button_enabled_on_selection(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QPushButton, QTableWidget
+    from app.models.masters import Client
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.master_abm import build_client_abm_page
+    import app.ui.client_agenda_dialog as agenda
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    user = User.create(
+        username="agenda_abm",
+        password_hash="x",
+        profile=UserProfile.get(UserProfile.name == "Administrador"),
+    )
+    page = build_client_abm_page(user=user, current_user=user.username)
+    table = page.findChild(QTableWidget, "clientTable")
+    button = page.findChild(QPushButton, "clientAgendaButton")
+    assert button is not None
+    assert not button.isEnabled()
+
+    client = Client.create(
+        name="Cliente agenda ABM", cuit="30700000872", iva_condition="RI"
+    )
+    page.refresh()
+    table.setCurrentCell(0, 0)
+    app.processEvents()
+    assert button.isEnabled()
+
+    opened = []
+
+    class FakeAgenda:
+        def __init__(self, client_id, current_user, parent):
+            opened.append(client_id)
+
+        def exec_(self):
+            return 0
+
+    monkeypatch.setattr(agenda, "ClientAgendaDialog", FakeAgenda)
+    button.click()
+    assert opened == [client.id]
+    assert app is not None
+
+
 def test_access_from_ledger_and_client_detail(db, monkeypatch):
     from PyQt5.QtWidgets import QApplication
     from app.ui.customer_ledger import CustomerLedgerPage
