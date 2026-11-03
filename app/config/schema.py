@@ -255,8 +255,11 @@ def _backfill_allocation_lote(database) -> None:
 
     null_lote = LoadOrderPalletAllocation.lote.is_null(True)
     null_date = LoadOrderPalletAllocation.fecha_elaboracion.is_null(True)
+    null_packaging = LoadOrderPalletAllocation.fecha_envasado.is_null(True)
     with database.atomic():
-        for allocation in LoadOrderPalletAllocation.select().where(null_lote | null_date):
+        for allocation in LoadOrderPalletAllocation.select().where(
+            null_lote | null_date | null_packaging
+        ):
             line = _line_for_content(
                 allocation.pallet.order_id,
                 allocation.destination_id,
@@ -271,18 +274,23 @@ def _backfill_allocation_lote(database) -> None:
             if allocation.fecha_elaboracion is None and line.fecha_elaboracion:
                 allocation.fecha_elaboracion = line.fecha_elaboracion
                 changed = True
+            if allocation.fecha_envasado is None and line.fecha_envasado:
+                allocation.fecha_envasado = line.fecha_envasado
+                changed = True
             if changed:
                 allocation.save(
                     only=[
                         LoadOrderPalletAllocation.lote,
                         LoadOrderPalletAllocation.fecha_elaboracion,
+                        LoadOrderPalletAllocation.fecha_envasado,
                     ]
                 )
 
         loose_null_lote = LoadOrderLooseAllocation.lote.is_null(True)
         loose_null_date = LoadOrderLooseAllocation.fecha_elaboracion.is_null(True)
+        loose_null_packaging = LoadOrderLooseAllocation.fecha_envasado.is_null(True)
         for allocation in LoadOrderLooseAllocation.select().where(
-            loose_null_lote | loose_null_date
+            loose_null_lote | loose_null_date | loose_null_packaging
         ):
             line = _line_for_content(
                 allocation.order_id,
@@ -298,11 +306,15 @@ def _backfill_allocation_lote(database) -> None:
             if allocation.fecha_elaboracion is None and line.fecha_elaboracion:
                 allocation.fecha_elaboracion = line.fecha_elaboracion
                 changed = True
+            if allocation.fecha_envasado is None and line.fecha_envasado:
+                allocation.fecha_envasado = line.fecha_envasado
+                changed = True
             if changed:
                 allocation.save(
                     only=[
                         LoadOrderLooseAllocation.lote,
                         LoadOrderLooseAllocation.fecha_elaboracion,
+                        LoadOrderLooseAllocation.fecha_envasado,
                     ]
                 )
 

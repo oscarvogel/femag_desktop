@@ -127,6 +127,11 @@ class SyncOrderPublisher:
                 if allocation.fecha_elaboracion
                 else None
             ),
+            "fecha_envasado": (
+                allocation.fecha_envasado.isoformat()
+                if allocation.fecha_envasado
+                else None
+            ),
             "client_name": client.name if client is not None else "",
             "destination": destination_label,
         }
@@ -232,6 +237,11 @@ class SyncOrderPublisher:
                     "fecha_elaboracion": (
                         line.fecha_elaboracion.isoformat()
                         if line.fecha_elaboracion
+                        else None
+                    ),
+                    "fecha_envasado": (
+                        line.fecha_envasado.isoformat()
+                        if line.fecha_envasado
                         else None
                     ),
                 }

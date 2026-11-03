@@ -14,7 +14,7 @@
 </div>
 {% if is_projected %}
 <div class="card">
-  <p class="muted">Orden sincronizada desde la fábrica. Los cambios de lote y fecha quedan pendientes hasta que el agente los aplique en fábrica.</p>
+  <p class="muted">Orden sincronizada desde la fábrica. Los cambios de lote y fechas quedan pendientes hasta que el agente los aplique en fábrica.</p>
   {% if order.pending_sync %}
   <p class="message error">Hay cambios pendientes de sincronización con fábrica.</p>
   {% endif %}
@@ -24,7 +24,7 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if not current_username() %}
   <div class="card">
-    <p class="muted">Para guardar lote y fecha tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
+    <p class="muted">Para guardar lote y fechas tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
   </div>
   {% endif %}
   {% if order.has_contents %}
@@ -46,6 +46,8 @@
         </div>
         <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
         <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
+        <label for="fecha_envasado_{{ content.id }}">Fecha de envasado</label>
+        <input id="fecha_envasado_{{ content.id }}" name="fecha_envasado_{{ content.id }}" type="date" value="{{ content.fecha_envasado.isoformat() if content.fecha_envasado else '' }}">
       </div>
       {% endfor %}
     </div>
@@ -68,6 +70,8 @@
         </div>
         <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
         <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
+        <label for="fecha_envasado_{{ content.id }}">Fecha de envasado</label>
+        <input id="fecha_envasado_{{ content.id }}" name="fecha_envasado_{{ content.id }}" type="date" value="{{ content.fecha_envasado.isoformat() if content.fecha_envasado else '' }}">
       </div>
       {% endfor %}
     </div>
@@ -101,6 +105,8 @@
         </div>
         <label for="fecha_{{ line.id }}">Fecha de elaboración</label>
         <input id="fecha_{{ line.id }}" name="fecha_{{ line.id }}" type="date" value="{{ line.fecha_elaboracion.isoformat() if line.fecha_elaboracion else '' }}">
+        <label for="fecha_envasado_{{ line.id }}">Fecha de envasado</label>
+        <input id="fecha_envasado_{{ line.id }}" name="fecha_envasado_{{ line.id }}" type="date" value="{{ line.fecha_envasado.isoformat() if line.fecha_envasado else '' }}">
       </div>
       {% endfor %}
     {% else %}
@@ -108,7 +114,7 @@
     {% endif %}
   </div>
   {% endif %}
-  {% if lines or order.has_contents %}<button type="submit">Guardar lote y fecha</button>{% endif %}
+  {% if lines or order.has_contents %}<button type="submit">Guardar lote y fechas</button>{% endif %}
 </form>
 <div style="height:12px"></div>
 <a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>

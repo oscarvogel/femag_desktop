@@ -41,6 +41,7 @@ def _scenario():
         unit="bolsa",
         lote="LOTE-LEGACY",
         fecha_elaboracion=date(2026, 10, 20),
+        fecha_envasado=date(2026, 10, 19),
     )
     pallet_a = LoadOrderPallet.create(order=order, sequence=1)
     pallet_b = LoadOrderPallet.create(order=order, sequence=2)
@@ -66,6 +67,7 @@ def _scenario():
         peso_unitario_kg=Decimal("1"),
         lote="LOTE-PROPIO",
         fecha_elaboracion=date(2026, 10, 21),
+        fecha_envasado=date(2026, 10, 18),
     )
     loose = LoadOrderLooseAllocation.create(
         order=order,
@@ -89,12 +91,16 @@ def test_backfill_copies_line_lote_to_pallet_contents(db):
 
     assert allocation_a.lote == line.lote
     assert allocation_a.fecha_elaboracion == line.fecha_elaboracion
+    assert allocation_a.fecha_envasado == line.fecha_envasado
     assert allocation_b.lote == line.lote
     assert allocation_b.fecha_elaboracion == line.fecha_elaboracion
+    assert allocation_b.fecha_envasado == line.fecha_envasado
     assert existing.lote == "LOTE-PROPIO"
     assert existing.fecha_elaboracion == date(2026, 10, 21)
+    assert existing.fecha_envasado == date(2026, 10, 18)
     assert loose.lote == line.lote
     assert loose.fecha_elaboracion == line.fecha_elaboracion
+    assert loose.fecha_envasado == line.fecha_envasado
 
 
 def test_contents_keep_independent_lote_and_date(db):
@@ -102,19 +108,43 @@ def test_contents_keep_independent_lote_and_date(db):
 
     allocation_a.lote = "LOTE-A"
     allocation_a.fecha_elaboracion = date(2026, 10, 22)
-    allocation_a.save(only=[LoadOrderPalletAllocation.lote, LoadOrderPalletAllocation.fecha_elaboracion])
+    allocation_a.fecha_envasado = date(2026, 10, 21)
+    allocation_a.save(
+        only=[
+            LoadOrderPalletAllocation.lote,
+            LoadOrderPalletAllocation.fecha_elaboracion,
+            LoadOrderPalletAllocation.fecha_envasado,
+        ]
+    )
     allocation_b.lote = "LOTE-B"
     allocation_b.fecha_elaboracion = date(2026, 10, 23)
-    allocation_b.save(only=[LoadOrderPalletAllocation.lote, LoadOrderPalletAllocation.fecha_elaboracion])
+    allocation_b.fecha_envasado = date(2026, 10, 22)
+    allocation_b.save(
+        only=[
+            LoadOrderPalletAllocation.lote,
+            LoadOrderPalletAllocation.fecha_elaboracion,
+            LoadOrderPalletAllocation.fecha_envasado,
+        ]
+    )
 
     allocation_a = LoadOrderPalletAllocation.get_by_id(allocation_a.id)
     allocation_b = LoadOrderPalletAllocation.get_by_id(allocation_b.id)
 
-    assert (allocation_a.lote, allocation_a.fecha_elaboracion) == (
+    assert (
+        allocation_a.lote,
+        allocation_a.fecha_elaboracion,
+        allocation_a.fecha_envasado,
+    ) == (
         "LOTE-A",
         date(2026, 10, 22),
+        date(2026, 10, 21),
     )
-    assert (allocation_b.lote, allocation_b.fecha_elaboracion) == (
+    assert (
+        allocation_b.lote,
+        allocation_b.fecha_elaboracion,
+        allocation_b.fecha_envasado,
+    ) == (
         "LOTE-B",
         date(2026, 10, 23),
+        date(2026, 10, 22),
     )

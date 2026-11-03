@@ -347,7 +347,7 @@ self.addEventListener("fetch", event => {
                 username = current_username()
                 if not username:
                     flash(
-                        "Iniciá sesión para modificar el lote y la fecha de la orden.",
+                        "Iniciá sesión para modificar el lote y las fechas de la orden.",
                         "error",
                     )
                     return redirect(
@@ -380,7 +380,12 @@ self.addEventListener("fetch", event => {
                         for content in contents:
                             lote_key = f"lote_{content.id}"
                             fecha_key = f"fecha_{content.id}"
-                            if lote_key not in request.form and fecha_key not in request.form:
+                            fecha_envasado_key = f"fecha_envasado_{content.id}"
+                            if (
+                                lote_key not in request.form
+                                and fecha_key not in request.form
+                                and fecha_envasado_key not in request.form
+                            ):
                                 continue
                             if update_projected_content(
                                 order,
@@ -388,6 +393,9 @@ self.addEventListener("fetch", event => {
                                 content_type=content.kind,
                                 lote=request.form.get(lote_key),
                                 fecha_elaboracion=request.form.get(fecha_key),
+                                fecha_envasado=request.form.get(
+                                    fecha_envasado_key
+                                ),
                             ):
                                 changed = True
                         audit_value = {
@@ -403,6 +411,9 @@ self.addEventListener("fetch", event => {
                                     "fecha_elaboracion": request.form.get(
                                         f"fecha_{content.id}"
                                     ),
+                                    "fecha_envasado": request.form.get(
+                                        f"fecha_envasado_{content.id}"
+                                    ),
                                 }
                                 for content in contents
                             ],
@@ -416,6 +427,9 @@ self.addEventListener("fetch", event => {
                                 fecha_elaboracion=request.form.get(
                                     f"fecha_{line.id}"
                                 ),
+                                fecha_envasado=request.form.get(
+                                    f"fecha_envasado_{line.id}"
+                                ),
                             ):
                                 changed = True
                         audit_value = {
@@ -427,6 +441,9 @@ self.addEventListener("fetch", event => {
                                     "lote": request.form.get(f"lote_{line.id}"),
                                     "fecha_elaboracion": request.form.get(
                                         f"fecha_{line.id}"
+                                    ),
+                                    "fecha_envasado": request.form.get(
+                                        f"fecha_envasado_{line.id}"
                                     ),
                                 }
                                 for line in lines
@@ -441,7 +458,7 @@ self.addEventListener("fetch", event => {
                             new_value=audit_value,
                         )
                         flash(
-                            "Lote y fecha guardados. Pendiente de sincronización "
+                            "Lote y fechas guardados. Pendiente de sincronización "
                             "con fábrica.",
                             "success",
                         )
@@ -466,7 +483,7 @@ self.addEventListener("fetch", event => {
         if request.method == "POST":
             username = current_username()
             if not username:
-                flash("Iniciá sesión para modificar el lote y la fecha de la orden.", "error")
+                flash("Iniciá sesión para modificar el lote y las fechas de la orden.", "error")
                 return redirect(
                     url_for(
                         "login",
@@ -486,7 +503,12 @@ self.addEventListener("fetch", event => {
                 )
             try:
                 before = {
-                    line.id: (line.lote, line.fecha_elaboracion) for line in lines
+                    line.id: (
+                        line.lote,
+                        line.fecha_elaboracion,
+                        line.fecha_envasado,
+                    )
+                    for line in lines
                 }
                 with database_proxy.atomic():
                     for line in lines:
@@ -495,10 +517,18 @@ self.addEventListener("fetch", event => {
                             line.id,
                             lote=request.form.get(f"lote_{line.id}"),
                             fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
+                            fecha_envasado=request.form.get(
+                                f"fecha_envasado_{line.id}"
+                            ),
                         )
                 lines = order_lines(order)
                 changed = any(
-                    (line.lote, line.fecha_elaboracion) != before.get(line.id)
+                    (
+                        line.lote,
+                        line.fecha_elaboracion,
+                        line.fecha_envasado,
+                    )
+                    != before.get(line.id)
                     for line in lines
                 )
                 if changed:
@@ -519,12 +549,17 @@ self.addEventListener("fetch", event => {
                                         if line.fecha_elaboracion
                                         else None
                                     ),
+                                    "fecha_envasado": (
+                                        line.fecha_envasado.isoformat()
+                                        if line.fecha_envasado
+                                        else None
+                                    ),
                                 }
                                 for line in lines
                             ],
                         },
                     )
-                    flash("Lote y fecha de elaboración guardados.", "success")
+                    flash("Lote y fechas guardados.", "success")
                 else:
                     flash("No había cambios para guardar.", "success")
                 return redirect(

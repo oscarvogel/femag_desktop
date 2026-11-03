@@ -71,6 +71,7 @@ def _event(order_map, line_map, *, expected=1, lote="LOTE-NUBE"):
             "line_uid": line_map.global_uid,
             "lote": lote,
             "fecha_elaboracion": "2026-10-29",
+            "fecha_envasado": "2026-10-30",
             "expected_version": expected,
         },
     }
@@ -86,9 +87,26 @@ def test_consumer_applies_lote_and_fecha(db):
     line = LoadOrderProduct.get_by_id(line.id)
     assert line.lote == "LOTE-NUBE"
     assert line.fecha_elaboracion == date(2026, 10, 29)
+    assert line.fecha_envasado == date(2026, 10, 30)
     assert SyncInbox.get(SyncInbox.event_id == "evento-lote-1").status == "applied"
     assert client.acks == [("evento-lote-1", "applied", None)]
     assert SyncCursor.get(SyncCursor.stream == SyncCursor.STREAM_CLOUD).cursor_value == 1
+
+
+def test_consumer_keeps_packaging_date_when_event_omits_it(db):
+    order, line, order_map, line_map = _factory_order()
+    line.fecha_envasado = date(2026, 10, 25)
+    line.save(only=[LoadOrderProduct.fecha_envasado])
+    event = _event(order_map, line_map)
+    event["payload"].pop("fecha_envasado")
+    client = _FakeClient([event])
+
+    result = SyncEventConsumer(client).pull_and_apply()
+
+    assert result["applied"] == 1
+    line = LoadOrderProduct.get_by_id(line.id)
+    assert line.fecha_envasado == date(2026, 10, 25)
+    assert line.fecha_elaboracion == date(2026, 10, 29)
 
 
 def test_consumer_rejects_annulled_order(db):
@@ -158,6 +176,7 @@ def _content_event(order_map, content_map, *, content_type="pallet", lote="LOTE-
             "content_type": content_type,
             "lote": lote,
             "fecha_elaboracion": "2026-10-29",
+            "fecha_envasado": "2026-10-30",
             "expected_version": 1,
         },
     }
@@ -190,6 +209,7 @@ def test_consumer_applies_pallet_content_event(db):
     allocation = LoadOrderPalletAllocation.get_by_id(allocation.id)
     assert allocation.lote == "LOTE-CONTENIDO"
     assert allocation.fecha_elaboracion == date(2026, 10, 29)
+    assert allocation.fecha_envasado == date(2026, 10, 30)
     assert client.acks[0][1] == "applied"
 
 
@@ -221,4 +241,5 @@ def test_consumer_applies_loose_content_event(db):
     allocation = LoadOrderLooseAllocation.get_by_id(allocation.id)
     assert allocation.lote == "LOTE-CONTENIDO"
     assert allocation.fecha_elaboracion == date(2026, 10, 29)
+    assert allocation.fecha_envasado == date(2026, 10, 30)
     assert client.acks[0][1] == "applied"
