@@ -158,6 +158,7 @@ class LoadOrderLedgerRepairService:
         y en el botón de la pantalla sin abrir el diálogo.
         """
         from app.models.accounting import ClientAccountMovement
+        from app.models.load_orders import LoadOrderDestination
 
         orders = {
             o.id: o
@@ -174,6 +175,18 @@ class LoadOrderLedgerRepairService:
         )
         if not budgets:
             return {}
+
+        # Un presupuesto de un cliente que ya no está en la orden no es un
+        # faltante: quedó huérfano de una edición y no se le puede cobrar. Si no
+        # se filtrara, la alarma pediría reparar una deuda inexistente.
+        clientes_por_orden: dict[int, set[int]] = {order_id: set() for order_id in order_ids}
+        for destination in LoadOrderDestination.select().where(
+            LoadOrderDestination.order << order_ids
+        ):
+            clientes_por_orden[destination.order_id].add(destination.client_id)
+        for order_id, order in orders.items():
+            if not clientes_por_orden[order_id] and order.client_id is not None:
+                clientes_por_orden[order_id].add(order.client_id)
 
         budget_ids = [b.id for b in budgets]
         vinculados = {
@@ -193,6 +206,8 @@ class LoadOrderLedgerRepairService:
 
         agrupado: dict[int, list[LedgerGap]] = {}
         for budget in budgets:
+            if budget.client_id not in clientes_por_orden.get(budget.load_order_id, set()):
+                continue
             if f"Budget:{budget.id}" in vinculados:
                 continue
             tipo = (
@@ -265,8 +280,15 @@ class LoadOrderLedgerRepairService:
     def find_gap(self, order: LoadOrder) -> OrderLedgerGap:
         """Qué le falta registrar a una orden. No escribe nada."""
         order = LoadOrder.get_by_id(order.id)
+        clientes = {destination.client_id for destination in order.destinations}
+        if not clientes and order.client_id is not None:
+            clientes = {order.client_id}
         gaps: list[LedgerGap] = []
         for budget in self._budgets_of(order):
+            if budget.client_id not in clientes:
+                # Presupuesto huérfano: su cliente ya no está en la orden, así
+                # que no hay mercadería que cobrarle. No es un faltante.
+                continue
             if (
                 self._movement_of_budget(budget.id) is not None
                 or self._legacy_movement_of(order, budget) is not None

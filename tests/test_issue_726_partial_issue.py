@@ -380,14 +380,13 @@ def test_la_reparacion_no_toca_una_orden_sana(db):
     assert finding.missing_stock is False
 
 
-def test_la_reparacion_registra_un_presupuesto_huerfano(db):
-    """Repara el documento exacto aunque su cliente ya no esté en los destinos.
+def test_la_reparacion_ignora_un_presupuesto_huerfano(db):
+    """No cobra el presupuesto de un cliente que ya no está en la orden.
 
     Es el caso de una orden a la que se le imprimió el presupuesto, después se
-    le quitó un destino y recién entonces se emitió. La emisión recorre los
-    destinos actuales, así que el presupuesto del cliente quitado queda
-    huérfano. La reparación no puede volver a emitir desde los destinos: tiene
-    que registrar el presupuesto que detectó.
+    le quitó un destino y recién entonces se emitió. Ese presupuesto queda
+    huérfano: no hay mercadería que cobrarle, así que no puede aparecer como
+    faltante ni la reparación puede registrarle un movimiento.
     """
     from app.services.load_order_ledger_repair_service import (
         LoadOrderLedgerRepairService,
@@ -478,25 +477,19 @@ def test_la_reparacion_registra_un_presupuesto_huerfano(db):
     service = LoadOrderLedgerRepairService(current_user="admin")
 
     finding = service.find_gap(order)
-    assert [gap.budget_id for gap in finding.ledger_gaps] == [presupuesto_huerfano.id]
+    assert finding.is_repairable is False
+    assert finding.ledger_gaps == ()
+    assert service.find_broken_orders() == []
+    assert service.count_broken_orders() == 0
 
     resultado = service.repair(order)
 
-    assert resultado.created_movement_ids != ()
-    movimiento = ClientAccountMovement.get(
-        ClientAccountMovement.source_ref == f"Budget:{presupuesto_huerfano.id}"
-    )
-    assert movimiento.client == huerfano
-    assert movimiento.total_amount == approx(presupuesto_huerfano.total_amount, abs=0.01)
-    assert service.find_gap(LoadOrder.get_by_id(order.id)).is_repairable is False
-
-    # Repetir la reparación no duplica el movimiento.
-    service.repair(LoadOrder.get_by_id(order.id))
+    assert resultado.created_movement_ids == ()
     assert (
         ClientAccountMovement.select()
         .where(ClientAccountMovement.source_ref == f"Budget:{presupuesto_huerfano.id}")
         .count()
-        == 1
+        == 0
     )
 
 
