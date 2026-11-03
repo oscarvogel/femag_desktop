@@ -2149,6 +2149,12 @@ def build_client_abm_page(
     view_ledger_btn = _action_button(
         "viewClientLedgerButton", "Ver cuenta corriente", secondary=True
     )
+    agenda_client_btn = _action_button(
+        "clientAgendaButton", "Agenda", secondary=True
+    )
+    agenda_client_btn.setToolTip(
+        "Anotaciones y consultas del cliente seleccionado."
+    )
     opening_balance_btn = _action_button(
         "addClientOpeningBalanceButton", "Agregar saldo inicial", secondary=True
     )
@@ -2174,6 +2180,7 @@ def build_client_abm_page(
     client_actions.addWidget(phone_client_btn)
     client_actions.addWidget(emails_btn)
     client_actions.addWidget(view_ledger_btn)
+    client_actions.addWidget(agenda_client_btn)
     client_actions.addWidget(opening_balance_btn)
     client_actions.addWidget(export_clients_btn)
     client_actions.addWidget(import_price_list_btn)
@@ -2243,6 +2250,7 @@ def build_client_abm_page(
         cid = selected_client_id()
         emails_btn.setEnabled(can_modify and cid is not None)
         view_ledger_btn.setEnabled(view_ledger_callback is not None and cid is not None)
+        agenda_client_btn.setEnabled(cid is not None)
         opening_balance_btn.setEnabled(
             can_modify
             and cid is not None
@@ -2391,6 +2399,17 @@ def build_client_abm_page(
             return
         view_ledger_callback(Client.get_by_id(cid))
 
+    def open_client_agenda() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.show_warning(
+                "Seleccione un cliente para abrir su agenda.", focus_widget=client_table
+            )
+            return
+        from app.ui.client_agenda_dialog import ClientAgendaDialog
+
+        ClientAgendaDialog(cid, current_user, parent).exec_()
+
     def open_opening_balance() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2505,6 +2524,7 @@ def build_client_abm_page(
     phone_client_btn.clicked.connect(edit_client_phone)
     emails_btn.clicked.connect(open_client_emails)
     view_ledger_btn.clicked.connect(open_client_ledger)
+    agenda_client_btn.clicked.connect(open_client_agenda)
     opening_balance_btn.clicked.connect(open_opening_balance)
     export_clients_btn.clicked.connect(export_clients_to_excel)
     import_price_list_btn.clicked.connect(import_price_list_from_excel)
