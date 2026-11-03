@@ -78,7 +78,9 @@ class ClientManualDebitDialog(QDialog):
         form.addRow("Referencia", self.reference_input)
         layout.addLayout(form)
 
+        self._saving = False
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self._save_button = buttons.button(QDialogButtonBox.Save)
         buttons.button(QDialogButtonBox.Save).setObjectName("clientManualDebitSaveButton")
         buttons.button(QDialogButtonBox.Cancel).setObjectName("clientManualDebitCancelButton")
         buttons.button(QDialogButtonBox.Save).setText("Guardar")
@@ -91,10 +93,14 @@ class ClientManualDebitDialog(QDialog):
         return self._registered_debit
 
     def _on_accept(self) -> None:
+        if self._saving or self._registered_debit is not None:
+            return
         client_id = self.client_combo.currentData()
         if client_id is None:
             QMessageBox.warning(self, "Débito manual", "Debe seleccionar un cliente.")
             return
+        self._saving = True
+        self._save_button.setEnabled(False)
         try:
             movement = self.service.register_manual_debit(
                 client=Client.get_by_id(client_id),
@@ -106,5 +112,8 @@ class ClientManualDebitDialog(QDialog):
         except ClientManualDebitError as exc:
             QMessageBox.warning(self, "Débito manual", str(exc))
             return
+        finally:
+            self._saving = False
+            self._save_button.setEnabled(True)
         self._registered_debit = movement
         self.accept()
