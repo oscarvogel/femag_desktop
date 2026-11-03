@@ -5,6 +5,7 @@ from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import simpleSplit
 
 from app.models.remittances import Remittance
 from app.services.audit_service import AuditService
@@ -56,6 +57,11 @@ class RemittancePrintTemplate:
     first_detail_y: float = 196
     detail_step: float = 7.2
     max_detail_rows: int = 16
+    observations_x: float = 24
+    observations_y: float = 80
+    observations_width: float = 166
+    observations_step: float = 5
+    observations_max_lines: int = 3
     carrier_x: float = 57
     carrier_y: float = 58
     carrier_cuit_x: float = 128
@@ -166,7 +172,18 @@ class RemittancePrintService:
                 f"El remito tiene {len(items)} renglones y el formulario admite "
                 f"hasta {self.template.max_detail_rows}."
             )
+        self._observation_lines(remittance)
         return items
+
+    def _observation_lines(self, remittance: Remittance) -> list[str]:
+        value = (remittance.observations or "").strip()
+        if not value:
+            return []
+        lines = simpleSplit("Observaciones: " + value, "Helvetica", 9,
+                            self.template.observations_width * MM)
+        if len(lines) > self.template.observations_max_lines:
+            raise ValueError("La observación es demasiado larga para imprimir en el remito; reduzca su longitud.")
+        return lines
 
     def _draw_preview_summary(self, pdf, remittance: Remittance) -> None:
         """Bloque etiquetado solo para la vista previa.
@@ -241,6 +258,10 @@ class RemittancePrintService:
             self._text(pdf, self.template.quantity_x, y, self._quantity_text(item.quantity))
             self._text(pdf, self.template.detail_x, y, item.printed_description)
             y -= self.template.detail_step
+
+        for index, line in enumerate(self._observation_lines(remittance)):
+            self._text(pdf, self.template.observations_x,
+                       self.template.observations_y - index * self.template.observations_step, line)
 
         self._text(pdf, self.template.carrier_x, self.template.carrier_y, remittance.carrier_name or "")
         self._text(pdf, self.template.carrier_cuit_x, self.template.carrier_cuit_y, remittance.carrier_cuit or "")
