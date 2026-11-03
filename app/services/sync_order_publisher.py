@@ -100,7 +100,40 @@ class SyncOrderPublisher:
         )
 
     @staticmethod
-    def _content_payload(allocation, *, entity_type: str, line_units: dict) -> dict:
+    def _line_uids_by_key(lines: list[LoadOrderProduct]) -> dict:
+        """Mapea el contenido de un pallet a la linea de despacho que lo pedia.
+
+        La nube agrupa la carga por linea de despacho (#873), asi que cada
+        contenido publica el ``line_uid`` de su linea. Se resuelve con la
+        misma regla que usa la impresion: primero la linea con el mismo
+        destino y producto y, si no hay, la linea del mismo producto sin
+        destino. Si hay lineas repetidas gana la primera.
+        """
+
+        by_key: dict[tuple, str] = {}
+        by_product: dict[int, str] = {}
+        for line in lines:
+            uid = SyncService.ensure_entity_uid(
+                SyncEntityMap.ENTITY_ORDER_LINE, line.id
+            ).global_uid
+            if line.destination_id is None:
+                by_product.setdefault(line.product_id, uid)
+            else:
+                by_key.setdefault((line.destination_id, line.product_id), uid)
+        return {"by_key": by_key, "by_product": by_product}
+
+    @staticmethod
+    def _line_uid_for(allocation, line_uids: dict) -> str | None:
+        by_key = line_uids.get("by_key") or {}
+        by_product = line_uids.get("by_product") or {}
+        return by_key.get((allocation.destination_id, allocation.product_id)) or (
+            by_product.get(allocation.product_id)
+        )
+
+    @staticmethod
+    def _content_payload(
+        allocation, *, entity_type: str, line_units: dict, line_uids: dict
+    ) -> dict:
         destination = allocation.destination
         client = destination.client if destination is not None else None
         address = (
@@ -118,6 +151,10 @@ class SyncOrderPublisher:
             "content_uid": SyncService.ensure_entity_uid(
                 entity_type, allocation.id
             ).global_uid,
+            # La nube agrupa la carga por linea de despacho (#873). Con esto
+            # sabe que linea tiene que completar cuando el operador carga el
+            # lote de un grupo de pallets.
+            "line_uid": SyncOrderPublisher._line_uid_for(allocation, line_uids),
             "product_name": allocation.product.name,
             "quantity": float(allocation.quantity or 0),
             "unit": SyncOrderPublisher._unit_for_allocation(allocation, line_units),
@@ -158,6 +195,7 @@ class SyncOrderPublisher:
         for line in lines:
             line_units[(line.destination_id, line.product_id)] = line.unit
             line_units.setdefault((None, line.product_id), line.unit)
+        line_uids = self._line_uids_by_key(lines)
         pallets = list(
             LoadOrderPallet.select()
             .where(LoadOrderPallet.order == order)
@@ -185,6 +223,7 @@ class SyncOrderPublisher:
                             allocation,
                             entity_type=SyncEntityMap.ENTITY_PALLET_CONTENT,
                             line_units=line_units,
+                            line_uids=line_uids,
                         )
                         for allocation in allocations
                     ],
@@ -200,6 +239,7 @@ class SyncOrderPublisher:
                 allocation,
                 entity_type=SyncEntityMap.ENTITY_LOOSE_CONTENT,
                 line_units=line_units,
+                line_uids=line_uids,
             )
             for allocation in loose_allocations
         ]

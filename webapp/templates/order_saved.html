@@ -21,29 +21,23 @@
 
 <div class="card">
   <h2>Lote y fechas registrados</h2>
-  {% if order.has_contents %}
-    {% for pallet in order.pallets %}
-    <h3>Pallet {{ pallet.sequence }}</h3>
-    {% for content in pallet.contents %}
+  {% if load_lines %}
+    {% for line in load_lines %}
     <div class="line">
-      <strong>{{ content.product.name }}</strong>
-      <p class="muted">Lote: {{ content.lote or 'Sin lote' }}</p>
-      <p class="muted">Fecha de elaboración: {{ content.fecha_elaboracion.strftime('%d/%m/%Y') if content.fecha_elaboracion else 'Sin fecha' }}</p>
-      <p class="muted">Fecha de envasado: {{ content.fecha_envasado.strftime('%d/%m/%Y') if content.fecha_envasado else 'Sin fecha' }}</p>
+      <strong>{{ line.product }}</strong>
+      <p class="muted">{{ line.client }} · {{ line.destination }}</p>
+      {% for group in line.groups %}
+        {% if group.lote %}
+        <p class="muted">
+          Lote {{ group.lote }} ·
+          Elaboración: {{ group.fecha_elaboracion|fecha }} ·
+          Envasado: {{ group.fecha_envasado|fecha }} ·
+          {{ group.slots|length }} pallet(s)
+        </p>
+        {% endif %}
+      {% endfor %}
     </div>
     {% endfor %}
-    {% endfor %}
-    {% if order.loose_contents %}
-    <h3>Mercadería suelta</h3>
-    {% for content in order.loose_contents %}
-    <div class="line">
-      <strong>{{ content.product.name }}</strong>
-      <p class="muted">Lote: {{ content.lote or 'Sin lote' }}</p>
-      <p class="muted">Fecha de elaboración: {{ content.fecha_elaboracion.strftime('%d/%m/%Y') if content.fecha_elaboracion else 'Sin fecha' }}</p>
-      <p class="muted">Fecha de envasado: {{ content.fecha_envasado.strftime('%d/%m/%Y') if content.fecha_envasado else 'Sin fecha' }}</p>
-    </div>
-    {% endfor %}
-    {% endif %}
   {% elif lines %}
     {% for line in lines %}
     <div class="line">

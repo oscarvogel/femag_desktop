@@ -167,9 +167,9 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
         f"/orden/{order.qr_token}",
         data={
             "csrf_token": csrf,
-            f"lote_{line.id}": "LOTE-2026-08",
-            f"fecha_{line.id}": "2026-08-27",
-            f"fecha_envasado_{line.id}": "2026-08-28",
+            f"lote_n{line.id}_0": "LOTE-2026-08",
+            f"fecha_n{line.id}_0": "2026-08-27",
+            f"fecha_envasado_n{line.id}_0": "2026-08-28",
         },
         follow_redirects=True,
     )
@@ -187,8 +187,8 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
     assert rows[0].module == "Despachos"
     assert rows[0].workstation == "127.0.0.1"
     assert rows[0].new_value["orden"] == 80101
-    assert rows[0].new_value["renglones"][0]["lote"] == "LOTE-2026-08"
-    assert rows[0].new_value["renglones"][0]["fecha_envasado"] == "2026-08-28"
+    assert rows[0].new_value["lineas"][0]["lote_linea"] == "LOTE-2026-08"
+    assert rows[0].new_value["lineas"][0]["grupos"][0]["fecha_envasado"] == "2026-08-28"
 
 def test_post_redirects_to_confirmation_with_saved_values(db):
     order, line = _order_with_line()
@@ -201,9 +201,9 @@ def test_post_redirects_to_confirmation_with_saved_values(db):
         f"/orden/{order.qr_token}",
         data={
             "csrf_token": csrf,
-            f"lote_{line.id}": "LOTE-2026-09",
-            f"fecha_{line.id}": "2026-09-01",
-            f"fecha_envasado_{line.id}": "2026-09-02",
+            f"lote_n{line.id}_0": "LOTE-2026-09",
+            f"fecha_n{line.id}_0": "2026-09-01",
+            f"fecha_envasado_n{line.id}_0": "2026-09-02",
         },
     )
 
@@ -230,8 +230,8 @@ def test_saving_same_values_twice_only_audits_once(db):
     csrf = _csrf_after_get(client, order.qr_token)
     payload = {
         "csrf_token": csrf,
-        f"lote_{line.id}": "LOTE-2026-10",
-        f"fecha_{line.id}": "2026-10-02",
+        f"lote_n{line.id}_0": "LOTE-2026-10",
+        f"fecha_n{line.id}_0": "2026-10-02",
     }
 
     first = client.post(f"/orden/{order.qr_token}", data=payload)

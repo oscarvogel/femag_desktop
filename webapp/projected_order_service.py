@@ -14,6 +14,14 @@ from datetime import date, datetime
 from app.models.sync import SyncOutbox, SyncProjection, utc_now_naive
 from app.services.sync_service import SyncService
 from app.services.sync_snapshot_service import SyncSnapshotService
+from webapp.load_groups import (
+    LOOSE_SLOT,
+    LoadContent,
+    LoadLine,
+    build_groups,
+    fallback_key,
+    unique_slots,
+)
 from webapp.order_service import OrderUnavailableError, parse_optional_date
 
 LINE_EVENT = "order_lote_fecha_updated"
@@ -50,6 +58,10 @@ class ProjectedContent:
     fecha_envasado: date | None
     client_name: str
     destination: str
+    # Linea de despacho a la que pertenece el contenido (#873). La fabrica la
+    # publica para que la nube pueda agrupar la carga por linea. Si no viene
+    # (fabrica sin actualizar) la nube agrupa por producto, cliente y destino.
+    line_uid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +135,9 @@ def _content_from_dict(
         fecha_envasado=_parse_date(item.get("fecha_envasado")),
         client_name=str(item.get("client_name") or fallback_client or "-"),
         destination=str(item.get("destination") or fallback_destination or "-"),
+        line_uid=(str(item.get("line_uid")).strip() or None)
+        if item.get("line_uid")
+        else None,
     )
 
 
@@ -294,6 +309,133 @@ def projected_line_context(order: ProjectedOrder, lines: list[ProjectedLine]) ->
         "is_loose": False,
     }
     return {line.id: dict(context) for line in lines}
+
+
+def projected_load_lines(order: ProjectedOrder) -> list[LoadLine]:
+    """Agrupa la carga de una orden proyectada por linea de despacho (#873).
+
+    La ficha pide una linea (producto + cliente + destino) y no un pallet. Los
+    contenidos se agrupan por el ``line_uid`` que publica la fabrica y, si no
+    viene, por producto + cliente + destino.
+    """
+
+    buckets: dict[str, dict] = {}
+
+    def bucket_for(
+        line_uid: str | None, product: str, client: str, destination: str
+    ) -> dict:
+        key = f"p{line_uid}" if line_uid else fallback_key(product, client, destination)
+        bucket = buckets.get(key)
+        if bucket is None:
+            bucket = {
+                "key": key,
+                "line_uid": line_uid,
+                "product": product,
+                "client": client,
+                "destination": destination,
+                "contents": [],
+            }
+            buckets[key] = bucket
+        return bucket
+
+    def add_content(bucket: dict, content: ProjectedContent, slot: str, label: str) -> None:
+        bucket["contents"].append(
+            LoadContent(
+                id=content.id,
+                kind=content.kind,
+                slot=slot,
+                slot_label=label,
+                pallet_sequence=None if slot == LOOSE_SLOT else int(slot),
+                product=content.product.name,
+                quantity=float(content.quantity or 0),
+                unit=content.unit or "",
+                lote=content.lote,
+                fecha_elaboracion=content.fecha_elaboracion,
+                fecha_envasado=content.fecha_envasado,
+            )
+        )
+
+    for pallet in order.pallets:
+        for content in pallet.contents:
+            bucket = bucket_for(
+                content.line_uid,
+                content.product.name,
+                content.client_name,
+                content.destination,
+            )
+            add_content(bucket, content, str(pallet.sequence), f"P{pallet.sequence}")
+
+    for content in order.loose_contents:
+        bucket = bucket_for(
+            content.line_uid,
+            content.product.name,
+            content.client_name,
+            content.destination,
+        )
+        add_content(bucket, content, LOOSE_SLOT, "SUELTO")
+
+    # Lineas publicadas que todavia no tienen ningun contenido asignado: se
+    # muestran igual para poder completarles el lote a nivel de linea.
+    published_lines = {line.id: line for line in projected_order_lines(order)}
+    for line in projected_order_lines(order):
+        if not line.id:
+            continue
+        key = f"p{line.id}"
+        if key in buckets:
+            continue
+        payload = order.payload or {}
+        client = str((payload.get("client") or {}).get("name") or "-")
+        buckets[key] = {
+            "key": key,
+            "line_uid": line.id,
+            "product": line.product.name,
+            "client": client,
+            "destination": _fallback_destination(payload),
+            "contents": [],
+            "quantity": float(line.quantity or 0),
+            "unit": line.unit or "",
+            "line_values": (
+                (line.lote or "").strip(),
+                line.fecha_elaboracion.isoformat()
+                if line.fecha_elaboracion
+                else "",
+                line.fecha_envasado.isoformat() if line.fecha_envasado else "",
+            ),
+        }
+
+    result: list[LoadLine] = []
+    for bucket in buckets.values():
+        contents = unique_slots(tuple(bucket["contents"]))
+        quantity = bucket.get("quantity")
+        if quantity is None:
+            quantity = sum(content.quantity for content in contents)
+        unit = bucket.get("unit") or (contents[0].unit if contents else "")
+        line_values = bucket.get("line_values")
+        if line_values is None:
+            published = published_lines.get(bucket["line_uid"] or "")
+            line_values = (
+                (published.lote or "").strip() if published is not None else "",
+                published.fecha_elaboracion.isoformat()
+                if published is not None and published.fecha_elaboracion
+                else "",
+                published.fecha_envasado.isoformat()
+                if published is not None and published.fecha_envasado
+                else "",
+            )
+        result.append(
+            LoadLine(
+                key=bucket["key"],
+                product=bucket["product"],
+                client=bucket["client"],
+                destination=bucket["destination"],
+                quantity=float(quantity or 0),
+                unit=unit,
+                contents=contents,
+                groups=build_groups(contents, line_values),
+                line_uid=bucket["line_uid"],
+            )
+        )
+    return result
 
 
 def _update_content_in_payload(
