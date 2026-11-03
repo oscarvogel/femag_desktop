@@ -270,6 +270,11 @@ class CustomerLedgerPage(QWidget):
         self.register_payment_button.clicked.connect(self._on_register_payment)
         primary_actions.addWidget(self.register_payment_button)
 
+        self.agenda_button = QPushButton("Agenda")
+        self.agenda_button.setObjectName("customerLedgerAgendaButton")
+        self.agenda_button.clicked.connect(self._open_agenda)
+        primary_actions.addWidget(self.agenda_button)
+
         self.create_manual_budget_button = QPushButton("Nuevo presupuesto")
         self.create_manual_budget_button.setObjectName("customerLedgerCreateManualBudgetButton")
         self.create_manual_budget_button.setEnabled(False)
@@ -1019,6 +1024,14 @@ class CustomerLedgerPage(QWidget):
         self.reverse_manual_credit_action.setEnabled(
             self.reverse_manual_credit_button.isEnabled()
         )
+
+    def _open_agenda(self):
+        client = self._selected_client()
+        if client is None:
+            QMessageBox.information(self, "Agenda", "Seleccione un cliente.")
+            return
+        from app.ui.client_agenda_dialog import ClientAgendaDialog
+        ClientAgendaDialog(client.id, self.current_user, self).exec_()
 
     def _on_register_payment(self) -> None:
         if self.register_payment_callback is None:
