@@ -476,6 +476,14 @@ def test_la_reparacion_ignora_un_presupuesto_huerfano(db):
     order = LoadOrderOperationService(current_user="admin").issue(order)
     service = LoadOrderLedgerRepairService(current_user="admin")
 
+    presupuesto_huerfano = Budget.get_by_id(presupuesto_huerfano.id)
+    assert presupuesto_huerfano.status == Budget.STATUS_ANNULLED
+    assert float(presupuesto_huerfano.total_amount) == 0.0
+    assert (
+        BudgetItem.select().where(BudgetItem.budget == presupuesto_huerfano).count()
+        == 0
+    )
+
     finding = service.find_gap(order)
     assert finding.is_repairable is False
     assert finding.ledger_gaps == ()

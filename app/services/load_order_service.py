@@ -197,6 +197,7 @@ class LoadOrderService:
             order.save()
             if normalized_destinations is not None:
                 self._replace_destinations(order, normalized_destinations)
+                self._annul_budgets_for_removed_clients(order, normalized_destinations)
             if normalized_pallets is not None:
                 self._replace_pallets(order, normalized_pallets)
             if normalized_loose is not None:
@@ -1287,6 +1288,54 @@ class LoadOrderService:
                 order=order,
                 client=client,
                 defaults={"status": LoadOrderBudgetStatus.STATUS_PENDING},
+            )
+
+    def _annul_budgets_for_removed_clients(
+        self, order: LoadOrder, destinations: list[dict]
+    ) -> None:
+        """Anula los presupuestos de los clientes que se quitaron de la orden.
+
+        Editar una orden reemplaza destinos y renglones, pero los presupuestos
+        ya impresos son documentos: no se borran. Si su cliente ya no está en
+        la orden, el documento no puede quedar activo ni cobrarse. Se anula con
+        trazabilidad, igual que una parte que se quedó sin mercadería.
+        """
+        from app.models.budgets import Budget, BudgetItem
+
+        client_ids = {item["client"].id for item in destinations}
+        presupuestos = list(
+            Budget.select().where(
+                (Budget.load_order == order)
+                & (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+                & (Budget.status != Budget.STATUS_ANNULLED)
+            )
+        )
+        for budget in presupuestos:
+            if budget.client_id in client_ids:
+                continue
+            BudgetItem.delete().where(BudgetItem.budget == budget).execute()
+            budget.status = Budget.STATUS_ANNULLED
+            budget.net_amount = 0.0
+            budget.discount_amount = 0.0
+            budget.vat_amount = 0.0
+            budget.total_amount = 0.0
+            budget.save()
+            self.audit_service.record(
+                user=self.current_user,
+                module="Presupuestos",
+                action="anular_cliente_quitado",
+                record_ref=f"Budget:{budget.id}",
+                new_value={
+                    "budget_number": budget.budget_number,
+                    "client_id": budget.client_id,
+                    "load_order_id": order.id,
+                    "status": budget.status,
+                    "total_amount": budget.total_amount,
+                },
+                observation=(
+                    f"El cliente se quitó de la OC-{order.order_number:06d}: "
+                    "el presupuesto queda anulado."
+                ),
             )
 
     def _replace_pallets(self, order: LoadOrder, pallets: list[dict]) -> None:
