@@ -2224,6 +2224,8 @@ class FemagDesktopWindow(QMainWindow):
         search_row.setSpacing(8)
         search_row.addWidget(search_input, 1)
         search_row.addWidget(search_button)
+        agenda_button = _action_button("ordersClientAgendaButton", "Agenda del cliente", secondary=True)
+        search_row.addWidget(agenda_button)
 
         pagination_row = QHBoxLayout()
         pagination_row.setContentsMargins(10, 0, 10, 10)
@@ -2376,6 +2378,28 @@ class FemagDesktopWindow(QMainWindow):
             if selected_order_id["value"] is None:
                 return None
             return LoadOrder.get_by_id(selected_order_id["value"])
+
+        def open_order_agenda():
+            order = selected_order()
+            if order is None:
+                feedback.show_warning("Seleccione una orden para consultar la agenda.")
+                return
+            clients = {destination.client_id: destination.client for destination in order.destinations}
+            if not clients:
+                feedback.show_info("La orden no tiene clientes.")
+                return
+            options = {f"{client.name} (ID {client.id})": client.id for client in clients.values()}
+            if len(options) == 1:
+                client_id = next(iter(options.values()))
+            else:
+                label, accepted = QInputDialog.getItem(self, "Agenda", "Seleccione el cliente:", list(options), 0, False)
+                if not accepted:
+                    return
+                client_id = options[label]
+            from app.ui.client_agenda_dialog import ClientAgendaDialog
+            ClientAgendaDialog(client_id, self.user.username, self).exec_()
+
+        agenda_button.clicked.connect(open_order_agenda)
 
         def load_selected(row: int, *, rebuild_detail: bool = True) -> None:
             if refreshing_selection["value"]:
@@ -3808,6 +3832,9 @@ class LoadOrderEntryDialog(QDialog):
         destination_inputs.addWidget(self.address_combo, 1, 1)
         destination_inputs.addWidget(self.add_destination_button, 2, 0)
         destination_inputs.addWidget(remove_destination_button, 2, 1)
+        agenda_button = _action_button("loadOrderClientAgendaButton", "Agenda del cliente", secondary=True)
+        agenda_button.clicked.connect(self._open_client_agenda)
+        destination_inputs.addWidget(agenda_button, 0, 2)
         destination_layout.addLayout(destination_inputs)
         self.destination_table = QTableWidget(0, 5)
         self.destination_table.setObjectName("loadOrderDestinationDraftTable")
@@ -4218,6 +4245,14 @@ class LoadOrderEntryDialog(QDialog):
                 "El cliente seleccionado no tiene lugares de entrega activos.",
                 focus_widget=self.client_combo,
             )
+
+    def _open_client_agenda(self):
+        client_id = self.client_combo.currentData()
+        if client_id is None:
+            QMessageBox.information(self, "Agenda", "Seleccione un cliente en el buscador.")
+            return
+        from app.ui.client_agenda_dialog import ClientAgendaDialog
+        ClientAgendaDialog(client_id, self.current_user, self).exec_()
 
     def _offer_new_delivery_address(self, client_id: int, typed: str) -> int | None:
         """Pregunta siempre si el destino escrito se da de alta, y lo crea si dice que si.

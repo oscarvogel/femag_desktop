@@ -1,4 +1,5 @@
 from app.models.audit import AuditLog
+from app.models.client_agenda import ClientAgendaEntry
 from app.models.payments import ClientPayment, ClientPaymentDetail, PaymentMethod
 from app.models.budgets import Budget, BudgetItem
 from app.models.accounting import ClientAccountMovement
@@ -61,6 +62,7 @@ ALL_MODELS = [
     Client,
     ClientEmail,
     ClientAddress,
+    ClientAgendaEntry,
     Product,
     ProductCostHistory,
     TipoIVA,

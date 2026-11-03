@@ -67,6 +67,10 @@ class ClientPaymentDialog(QDialog):
             if idx >= 0:
                 self.client_combo.setCurrentIndex(idx)
         form.addRow("Cliente", self.client_combo)
+        agenda_button = QPushButton("Agenda del cliente")
+        agenda_button.setObjectName("paymentClientAgendaButton")
+        agenda_button.clicked.connect(self._open_agenda)
+        form.addRow("", agenda_button)
 
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setObjectName("clientPaymentDateInput")
@@ -121,6 +125,14 @@ class ClientPaymentDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _open_agenda(self):
+        client_id = self.client_combo.currentData()
+        if client_id is None:
+            QMessageBox.information(self, "Agenda", "Seleccione un cliente.")
+            return
+        from app.ui.client_agenda_dialog import ClientAgendaDialog
+        ClientAgendaDialog(client_id, self.current_user, self).exec_()
 
     def _new_method_combo(self) -> QComboBox:
         combo = QComboBox()

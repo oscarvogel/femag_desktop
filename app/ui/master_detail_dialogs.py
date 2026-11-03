@@ -154,6 +154,10 @@ class MasterDetailDialog(QDialog):
         self.edit_button.setObjectName("editMasterDetailButton")
         self.edit_button.clicked.connect(self._edit_current)
         footer.addWidget(self.edit_button)
+        self.agenda_button = QPushButton("Agenda")
+        self.agenda_button.setObjectName("masterDetailAgendaButton")
+        self.agenda_button.clicked.connect(self._open_agenda)
+        footer.addWidget(self.agenda_button)
         footer.addStretch(1)
         self.close_button = QPushButton("Cerrar")
         self.close_button.setObjectName("closeMasterDetailButton")
@@ -170,6 +174,7 @@ class MasterDetailDialog(QDialog):
 
     def _render_current(self, tab_index: int = 0) -> None:
         self.record = self.load_record()
+        self.agenda_button.setVisible(self.kind == "client" and self.record is not None)
         self.setObjectName(DETAIL_OBJECT_NAMES.get(self.kind, "masterDetailDialog"))
         self.setWindowTitle(DETAIL_TITLES.get(self.kind, "Ficha"))
         self.whatsapp_status_label.setText("")
@@ -193,6 +198,11 @@ class MasterDetailDialog(QDialog):
                 min(max(tab_index, 0), self.tabs.count() - 1)
             )
         self.back_button.setEnabled(bool(self._history))
+
+    def _open_agenda(self):
+        if self.kind == "client" and self.record is not None:
+            from app.ui.client_agenda_dialog import ClientAgendaDialog
+            ClientAgendaDialog(self.record_id, self.current_user, self).exec_()
 
     def build_tabs(self) -> None:
         builders = {
