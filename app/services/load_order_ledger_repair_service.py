@@ -158,6 +158,7 @@ class LoadOrderLedgerRepairService:
         y en el botón de la pantalla sin abrir el diálogo.
         """
         from app.models.accounting import ClientAccountMovement
+        from app.models.load_orders import LoadOrderDestination
 
         orders = {
             o.id: o
@@ -174,6 +175,18 @@ class LoadOrderLedgerRepairService:
         )
         if not budgets:
             return {}
+
+        # Un presupuesto de un cliente que ya no está en la orden no es un
+        # faltante: quedó huérfano de una edición y no se le puede cobrar. Si no
+        # se filtrara, la alarma pediría reparar una deuda inexistente.
+        clientes_por_orden: dict[int, set[int]] = {order_id: set() for order_id in order_ids}
+        for destination in LoadOrderDestination.select().where(
+            LoadOrderDestination.order << order_ids
+        ):
+            clientes_por_orden[destination.order_id].add(destination.client_id)
+        for order_id, order in orders.items():
+            if not clientes_por_orden[order_id] and order.client_id is not None:
+                clientes_por_orden[order_id].add(order.client_id)
 
         budget_ids = [b.id for b in budgets]
         vinculados = {
@@ -193,6 +206,8 @@ class LoadOrderLedgerRepairService:
 
         agrupado: dict[int, list[LedgerGap]] = {}
         for budget in budgets:
+            if budget.client_id not in clientes_por_orden.get(budget.load_order_id, set()):
+                continue
             if f"Budget:{budget.id}" in vinculados:
                 continue
             tipo = (
@@ -265,8 +280,15 @@ class LoadOrderLedgerRepairService:
     def find_gap(self, order: LoadOrder) -> OrderLedgerGap:
         """Qué le falta registrar a una orden. No escribe nada."""
         order = LoadOrder.get_by_id(order.id)
+        clientes = {destination.client_id for destination in order.destinations}
+        if not clientes and order.client_id is not None:
+            clientes = {order.client_id}
         gaps: list[LedgerGap] = []
         for budget in self._budgets_of(order):
+            if budget.client_id not in clientes:
+                # Presupuesto huérfano: su cliente ya no está en la orden, así
+                # que no hay mercadería que cobrarle. No es un faltante.
+                continue
             if (
                 self._movement_of_budget(budget.id) is not None
                 or self._legacy_movement_of(order, budget) is not None
@@ -315,9 +337,12 @@ class LoadOrderLedgerRepairService:
     def repair(self, order: LoadOrder) -> RepairResult:
         """Repara UNA orden en una sola transacción.
 
-        Usa los mismos servicios que la emisión, que son idempotentes: si el
-        movimiento o el descuento ya estaban, no se duplican. Cualquier
-        excepción revierte todo, incluida la auditoría.
+        Registra exactamente los presupuestos que ``find_gap`` detectó, aunque
+        su cliente ya no esté entre los destinos actuales de la orden: reemitir
+        desde los destinos dejaría huérfano justamente el documento que hay que
+        reparar. Los servicios son idempotentes, así que repetir la reparación
+        no duplica movimientos. Cualquier excepción revierte todo, incluida la
+        auditoría.
         """
         order = LoadOrder.get_by_id(order.id)
         if order.status not in REPAIRABLE_STATUSES:
@@ -329,9 +354,14 @@ class LoadOrderLedgerRepairService:
         with database_proxy.atomic():
             gap = self.find_gap(order)
             movimientos = []
+            creados = []
             despachos = []
-            if gap.ledger_gaps:
-                movimientos = self.ledger.generate_for_load_order(order)
+            for ledger_gap in gap.ledger_gaps:
+                budget = Budget.get_by_id(ledger_gap.budget_id)
+                movimiento, creado = self.ledger.generate_for_budget(order, budget)
+                movimientos.append(movimiento)
+                if creado:
+                    creados.append(movimiento.id)
             if gap.missing_stock:
                 despachos = self.stock.register_dispatch(order)
             self.audit_service.record(
@@ -342,6 +372,7 @@ class LoadOrderLedgerRepairService:
                 new_value={
                     "order_number": int(order.order_number),
                     "movement_ids": [m.id for m in movimientos],
+                    "created_movement_ids": creados,
                     "stock_movement_ids": [m.id for m in despachos],
                 },
                 observation="Reparacion de emision parcial de cuenta corriente y stock (#726)",
@@ -352,6 +383,7 @@ class LoadOrderLedgerRepairService:
             order_number=int(order.order_number),
             movement_ids=tuple(m.id for m in movimientos),
             stock_movement_ids=tuple(m.id for m in despachos),
+            created_movement_ids=tuple(creados),
         )
 
     # -- Internos ----------------------------------------------------------

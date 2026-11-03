@@ -224,7 +224,7 @@ class LoadOrderLedgerRepairDialog(QDialog):
             self,
             "Reparar cuenta corriente",
             f"{result.order_reference} registrada.\n\n"
-            f"Movimientos de cuenta corriente: {len(result.movement_ids)}\n"
-            f"Movimientos de stock: {len(result.stock_movement_ids)}",
+            f"Movimientos nuevos de cuenta corriente: {len(result.created_movement_ids)}\n"
+            f"Movimientos nuevos de stock: {len(result.stock_movement_ids)}",
         )
         self.reload()

@@ -876,6 +876,7 @@ class FemagDesktopWindow(QMainWindow):
         dialog = LoadOrderLedgerRepairDialog(self.shell.username, self, user=self.user)
         dialog.exec_()
         if dialog.repaired:
+            self._refresh_customer_ledger()
             self._navigate_to_route("load_orders")
             self._refresh_aviso_badge()
 
@@ -1906,10 +1907,13 @@ class FemagDesktopWindow(QMainWindow):
             "El crédito manual fue reversado correctamente.",
         )
 
-    def _refresh_customer_ledger_after_payment(self) -> None:
+    def _refresh_customer_ledger(self) -> None:
         page = self.stack.widget(self._route_indexes.get("customer_ledger", -1))
         if isinstance(page, CustomerLedgerPage):
             page.refresh()
+
+    def _refresh_customer_ledger_after_payment(self) -> None:
+        self._refresh_customer_ledger()
 
     def _dashboard_page(self) -> QWidget:
         demo_mode = self.shell.connection_state == "Modo demo"
@@ -2726,6 +2730,7 @@ class FemagDesktopWindow(QMainWindow):
             dialog = LoadOrderLedgerRepairDialog(self.shell.username, self, user=self.user)
             dialog.exec_()
             if dialog.repaired:
+                self._refresh_customer_ledger()
                 refresh()
                 feedback.show_success(
                     "Orden(es) reparada(s): " + ", ".join(dialog.repaired) + "."
@@ -3114,6 +3119,8 @@ def _ledger_repair_button(window, actions_layout) -> tuple[QPushButton, object]:
             window.shell.username, window, user=window.user
         )
         dialog.exec_()
+        if dialog.repaired:
+            window._refresh_customer_ledger()
         refresh_count()
 
     button.clicked.connect(open_repair)
