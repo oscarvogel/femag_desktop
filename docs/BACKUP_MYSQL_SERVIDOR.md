@@ -114,17 +114,28 @@ cd C:\resguardo
 Salida esperada:
 
 ```
-[2026-11-01 11:04:48] Inicio dump MySQL en C:\FEMAG\backups\mysql
+[2026-11-03 11:33:56] Inicio dump MySQL en C:\FEMAG\backups\mysql
 Motor de dump: mysqldump
-OK femag_desktop -> C:\FEMAG\backups\mysql\femag_desktop.sql
-[2026-11-01 11:04:52] Fin (exit=0)
+OK femag_desktop -> C:\FEMAG\backups\mysql\femag_desktop.sql (3.97 MB)
+Archivo C:\FEMAG\backups\mysql\femag_desktop.sql (3.97 MB)
+[2026-11-03 11:34:02] Fin (exit=0)
 ```
+
+La cabecera dice la ruta **absoluta** donde quedaron los respaldos. Si no
+los ves donde los estas mirando, esa linea es la respuesta: el destino sale
+del bloque `CONFIGURACION`, no de la carpeta del script.
 
 Si el motor elegido no es el que se esperaba:
 
 ```powershell
 .\backup_mysql_all_databases.ps1 -DumpEngine mysqldump
 .\backup_mysql_all_databases.ps1 -DumpEngine python -PythonPath "C:\Python312\python.exe"
+```
+
+Para cambiar la carpeta de destino sin tocar el archivo, se pasa por parametro:
+
+```powershell
+.\backup_mysql_all_databases.ps1 -BackupDir "C:\resguardo\backups"
 ```
 
 ### 4. Registrar la tarea diaria
@@ -155,6 +166,33 @@ que base salio bien y cual fallo.
 
 El dump se publica por reemplazo atomico: se escribe a un temporal y se mueve.
 Un dump fallido **no** deja un `.sql` a medias.
+
+### Como saber si el ultimo respaldo sirve
+
+El log termina con una linea por archivo publicado, con su ruta absoluta y su
+tamano en disco:
+
+```
+[2026-11-03 11:33:56] Inicio dump MySQL en C:\FEMAG\backups\mysql
+Motor de dump: mysqldump
+OK femag_desktop -> C:\FEMAG\backups\mysql\femag_desktop.sql (3.97 MB)
+Archivo C:\FEMAG\backups\mysql\femag_desktop.sql (3.97 MB)
+[2026-11-03 11:34:02] Fin (exit=0)
+```
+
+Tres reglas para leerlo:
+
+- **`exit=0` y lineas `Archivo`**: el respaldo esta ahi y tiene contenido.
+- **`ERROR ... el dump salio vacio`**: la herramienta termino bien pero sin
+  escribir nada. No se publica el archivo y el respaldo anterior queda
+  intacto. Un `.sql` de 0 bytes no es un respaldo.
+- **Sin lineas `Archivo`**: no hay nada. Fijate en la cabecera del log: dice
+  la ruta **absoluta** donde se estuvo buscando.
+
+La carpeta de destino se resuelve a una ruta absoluta antes de usarla. Si es
+relativa, se resuelve contra la carpeta del script, no contra el directorio
+desde el que se lanza: asi el respaldo queda siempre en el mismo lugar, se
+llame como se llame.
 
 ---
 
@@ -203,13 +241,14 @@ desarrollo, usuario `femag` sobre `127.0.0.1:3306`:
 | Validacion | Resultado |
 |---|---|
 | Reparto del error en 3 niveles | 3 causas reproducidas de forma aislada |
-| Dump con motor nativo (`mysqldump`) | 2 bases, `exit=0`, `.sql` de 3,9 MB y 4,1 MB |
-| Dump con motor Python (PyMySQL) | 2 bases, `exit=0`, `.sql` de 5,1 MB y 5,4 MB |
-| Restauracion del dump nativo en base desechable | 57 tablas y 21.009 filas, identicas al origen |
-| Restauracion del dump Python en base desechable | 57 tablas y 21.009 filas, identicas al origen |
+| Dump con motor nativo (`mysqldump`) | 2 bases, `exit=0`, `.sql` de 3,7 MB y 4,0 MB |
+| Dump con motor Python (PyMySQL) | 2 bases, `exit=0`, `.sql` de 4,9 MB y 5,2 MB |
+| Restauracion del dump nativo en base desechable | 63 tablas y 21.009 filas, identicas al origen |
+| Restauracion del dump Python en base desechable | 63 tablas y 21.009 filas, identicas al origen |
 | Base de la app despues de restaurar | Sin cambios |
-| Pruebas focalizadas (`tests/test_backup_mysql_all_databases.py`) | 11 passed |
+| Pruebas focalizadas (`tests/test_backup_mysql_all_databases.py`) | 14 passed |
 | Pruebas del exportador (`tests/test_backup_mysql_databases.py`) | 6 passed |
+| Suite completa del repo | 2257 passed, 3 skipped |
 | Parser de PowerShell 5.1 sobre el `.ps1` | Sin errores |
 
 Errores encontrados durante la validacion, y como se resolvieron:
@@ -227,6 +266,27 @@ Errores encontrados durante la validacion, y como se resolvieron:
   `@dataclass` busca el modulo en `sys.modules`. No es un defecto de
   despliegue (en el servidor corre como script, con `__main__` en
   `sys.modules`), pero el test quedo exercising la forma real de ejecucion.
+- **El resumen de archivos salia como `Archivo femag_desktop.sql.FullName`**:
+  en PowerShell `"$objeto.Propiedad"` no interpola la propiedad, hay que
+  escribir `"$($objeto.Propiedad)"`. Solo se ve al ejecutarlo de verdad.
+
+### Segunda ronda: "dice que hizo pero nunca hizo"
+
+En la planta se reporto que el script anunciaba el respaldo pero los archivos no
+aparecian. Las causas que seinvestigaron y quedaron corregidas:
+
+- **La carpeta de destino podia ser relativa.** Con una ruta relativa, los
+  respaldos caian segun el directorio desde el que se lanzaba el script: a
+  mano, desde otra carpeta o desde la tarea programada caian en lugares
+  distintos. Ahora la ruta se resuelve a absoluta contra la carpeta del script
+  y el log la muestra.
+- **El script|reportaba OK sin verificar el archivo.** `mysqldump` puede
+  terminar con codigo 0 sin haber escrito nada, y el script lo tomaba como
+  exito: dejaba un `.sql` de 0 bytes con pinta de respaldo valido. Ahora se
+  verifica el tamano antes de publicar; si el dump sale vacio se reporta ERROR,
+  no se publica el archivo y el respaldo anterior queda intacto.
+- **El log no dizia donde buscar.** Ahora cierra con una linea por archivo, con
+  su ruta absoluta y su tamano en disco.
 
 ---
 

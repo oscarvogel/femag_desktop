@@ -78,9 +78,19 @@ foreach ($key in @("MysqlHost", "MysqlPort", "MysqlUser", "MysqlPassword", "Back
 
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $DumpScript = Join-Path $ScriptDir "backup_mysql_databases.py"
+$CurrentScript = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+
+# La carpeta de destino se resuelve a una ruta absoluta ANTES de usarla. Una
+# ruta relativa depende del directorio desde el que se lanza el script, y eso
+# deja los respaldos en un nivel distinto al esperado segun como se ejecute
+# (a mano, desde otra carpeta o desde la tarea programada).
+if (-not [System.IO.Path]::IsPathRooted($BackupDir)) {
+    $BackupDir = Join-Path $ScriptDir $BackupDir
+}
+$BackupDir = [System.IO.Path]::GetFullPath($BackupDir)
+
 $LogFile = Join-Path $BackupDir "backup.log"
 $ManifestFile = Join-Path $BackupDir "manifest.json"
-$CurrentScript = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
 
 # Bases del sistema que nunca se respaldan.
 $SystemDatabases = @("information_schema", "mysql", "performance_schema", "sys")
@@ -368,15 +378,25 @@ function Invoke-NativeDump {
             $exitCode = Invoke-NativeTool -FilePath $Engine.Dump -Arguments $arguments `
                 -StdOutFile $stdoutFile -StdErrFile $stderrFile
             $errors = @(Get-Content -LiteralPath $stderrFile -ErrorAction SilentlyContinue)
-            if ($exitCode -eq 0) {
+            $produced = Get-Item -LiteralPath $stdoutFile -ErrorAction SilentlyContinue
+            if ($exitCode -eq 0 -and $produced -and $produced.Length -gt 0) {
                 # Se publica por reemplazo: un dump fallido no deja un archivo
                 # a medias que alguien pueda restaurar por error.
                 Move-Item -LiteralPath $stdoutFile -Destination $destination -Force
+                $size = [math]::Round($produced.Length / 1MB, 2)
                 $results += @{ database = $database; file_path = $destination; status = "success"; message = $null }
-                Write-BackupLog -Lines @("OK $database -> $destination")
+                Write-BackupLog -Lines @("OK $database -> $destination ($size MB)")
+            }
+            elseif ($exitCode -eq 0) {
+                # Salio bien pero sin contenido: un .sql de 0 bytes no es un
+                # respaldo. No se publica, y el respaldo anterior queda intacto.
+                $message = "el dump salio vacio: no se publico nada para esta base"
+                $results += @{ database = $database; file_path = $null; status = "error"; message = $message }
+                Write-BackupLog -Lines @("ERROR $database : $message")
             }
             else {
                 $message = ($errors -join " ").Trim()
+                if (-not $message) { $message = "mysqldump finalizo con codigo $exitCode" }
                 $results += @{ database = $database; file_path = $null; status = "error"; message = $message }
                 Write-BackupLog -Lines @("ERROR $database : $message")
             }
@@ -429,6 +449,15 @@ function Invoke-PythonDump {
 
         Write-BackupLog -Lines @(Get-Content -LiteralPath $stdoutFile -ErrorAction SilentlyContinue)
         Write-BackupLog -Lines @(Get-Content -LiteralPath $stderrFile -ErrorAction SilentlyContinue)
+
+        # Un .sql de 0 bytes no es un respaldo: el exportador publica por
+        # reemplazo, asi que un vacio delata una corrida que no sirvio.
+        $vacios = @(Get-ChildItem -LiteralPath $BackupDir -Filter "*.sql" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -eq 0 })
+        foreach ($vacio in $vacios) {
+            Write-BackupLog -Lines @("ERROR $($vacio.BaseName) : el dump salio vacio ($($vacio.FullName))")
+            $exitCode = 1
+        }
 
         return $exitCode
     }
@@ -504,6 +533,14 @@ if ($engine.Kind -eq "mysqldump") {
 }
 else {
     $exitCode = Invoke-PythonDump -Engine $engine
+}
+
+# Resumen: que quedo respaldado de verdad, con el tamano en disco. Es lo que
+# hay que mirar para saber si el ultimo respaldo sirve.
+$publicados = @(Get-ChildItem -LiteralPath $BackupDir -Filter "*.sql" -ErrorAction SilentlyContinue |
+    Sort-Object Name)
+foreach ($publicado in $publicados) {
+    Write-BackupLog -Lines @("Archivo $($publicado.FullName) ($([math]::Round($publicado.Length / 1MB, 2)) MB)")
 }
 
 $footer = "[$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))] Fin (exit=$exitCode)"

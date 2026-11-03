@@ -60,6 +60,7 @@ def _run_script(
     port: str = "3306",
     user: str = "usuario_prueba",
     password: str = PASSWORD,
+    cwd: str = None,
     timeout: int = 180,
 ) -> subprocess.CompletedProcess:
     command = [
@@ -87,6 +88,7 @@ def _run_script(
         text=True,
         encoding="utf-8",
         errors="replace",
+        cwd=cwd,
         timeout=timeout,
     )
 
@@ -305,6 +307,115 @@ def test_daily_dump_never_puts_the_password_in_the_command_line(tmp_path):
 
     assert PASSWORD not in [line for line in dump.splitlines() if line.startswith("ARGV")][0]
     assert f"ENV_MYSQL_PWD={PASSWORD}" in dump
+
+
+def test_daily_dump_never_reports_ok_when_the_dump_comes_out_empty(tmp_path):
+    """Un .sql de 0 bytes no es un respaldo.
+
+    mysqldump puede terminar con codigo 0 sin haber escrito nada. Si el
+    script lo tomara como exito, dejaria un archivo vacio con pinta de
+    respaldo valido y el log diria que salio bien.
+    """
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    # Sale con codigo 0 pero no escribe nada.
+    _write_fake_tool(fakebin / "mysqldump.cmd")
+    _write_fake_tool(fakebin / "mysql.cmd", stdout=["femag_desktop"])
+    backup_dir = tmp_path / "backups"
+
+    result = _run_script(
+        [
+            "-MysqldumpPath",
+            str(fakebin / "mysqldump.cmd"),
+            "-MysqlClientPath",
+            str(fakebin / "mysql.cmd"),
+        ],
+        backup_dir,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "OK femag_desktop" not in result.stdout
+
+    log = _read_log(backup_dir)
+    assert "ERROR femag_desktop : el dump salio vacio" in log
+    assert "Fin (exit=1)" in log
+
+    # No se publica un .sql vacio: no hay respaldo, no hay archivo.
+    assert not (backup_dir / "femag_desktop.sql").exists()
+
+    manifest = _read_manifest(backup_dir)
+    assert manifest["databases"][0]["status"] == "error"
+    assert "vacio" in manifest["databases"][0]["message"]
+
+
+def test_daily_dump_keeps_the_previous_backup_when_the_new_one_comes_out_empty(tmp_path):
+    """Si el dump nuevo sale vacio, el respaldo anterior tiene que seguir ahi."""
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    _write_fake_tool(fakebin / "mysqldump.cmd")
+    _write_fake_tool(fakebin / "mysql.cmd", stdout=["femag_desktop"])
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    (backup_dir / "femag_desktop.sql").write_text("respaldo anterior", encoding="utf-8")
+
+    result = _run_script(
+        [
+            "-MysqldumpPath",
+            str(fakebin / "mysqldump.cmd"),
+            "-MysqlClientPath",
+            str(fakebin / "mysql.cmd"),
+        ],
+        backup_dir,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (backup_dir / "femag_desktop.sql").read_text(encoding="utf-8") == "respaldo anterior"
+
+
+def test_daily_dump_resolves_a_relative_backup_folder_against_the_script_folder(tmp_path):
+    """La carpeta de destino no puede depender del directorio de ejecucion.
+
+    Con una ruta relativa, los respaldos quedan en un lugar distinto segun
+    como se lance el script: a mano desde otra carpeta, o desde la tarea
+    programada. Se resuelve contra la carpeta del script y se deja la ruta
+    absoluta en el log.
+    """
+    resguardo = tmp_path / "resguardo"
+    resguardo.mkdir()
+    script = resguardo / SCRIPT.name
+    shutil.copy2(SCRIPT, script)
+
+    fakebin = tmp_path / "bin"
+    fakebin.mkdir()
+    _write_fake_tool(fakebin / "mysqldump.cmd", stdout=["-- dump de prueba"])
+    _write_fake_tool(fakebin / "mysql.cmd", stdout=["femag_desktop"])
+
+    otro = tmp_path / "otro_directorio"
+    otro.mkdir()
+
+    result = _run_script(
+        [
+            "-MysqldumpPath",
+            str(fakebin / "mysqldump.cmd"),
+            "-MysqlClientPath",
+            str(fakebin / "mysql.cmd"),
+        ],
+        "backups",
+        script=script,
+        cwd=str(otro),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    # El dump queda junto al script, no en el directorio desde el que se lanzo.
+    esperado = resguardo / "backups" / "femag_desktop.sql"
+    assert esperado.exists(), sorted(p.name for p in resguardo.rglob("*"))
+    assert not (otro / "backups").exists()
+
+    # Y el log dice la ruta absoluta, para que no haya que buscarla.
+    log = _read_log(esperado.parent)
+    assert str(esperado.parent) in log
+    assert str(otro) not in log
 
 
 def test_daily_dump_passes_the_right_arguments_to_the_python_exporter(tmp_path):
