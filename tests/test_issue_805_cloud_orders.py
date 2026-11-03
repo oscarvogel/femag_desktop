@@ -39,6 +39,7 @@ def _order(status="Emitida", version=1, lote="LOTE-FABRICA-1"):
                 "unit": "kg",
                 "lote": lote,
                 "fecha_elaboracion": "2026-10-28",
+                "fecha_envasado": "2026-10-27",
             }
         ],
         "pallets": [{"pallet_uid": str(uuid4()), "sequence": 1, "type": "Comun"}],
@@ -91,9 +92,10 @@ def test_projected_order_opens_by_qr_token(db):
     assert b"Fecula Fabrica" in response.data
     assert b"LOTE-FABRICA-1" in response.data
     assert b'value="2026-10-28"' in response.data
+    assert b'value="2026-10-27"' in response.data
     assert "Orden sincronizada desde la fábrica".encode() in response.data
     assert b'name="lote_' in response.data
-    assert b"Guardar lote y fecha" in response.data
+    assert b"Guardar lote y fechas" in response.data
     assert b"scanner-header" in response.data
     assert b"history.pushState" in response.data
     assert b"popstate" in response.data
@@ -128,6 +130,7 @@ def test_projected_order_edit_queues_pending_event(db):
             "csrf_token": csrf,
             f"lote_{line.id}": "LOTE-NUBE-1",
             f"fecha_{line.id}": "2026-10-29",
+            f"fecha_envasado_{line.id}": "2026-10-30",
         },
         follow_redirects=True,
     )
@@ -138,6 +141,7 @@ def test_projected_order_edit_queues_pending_event(db):
         SyncProjection.resource_uid == order["order_uid"]
     )
     assert projection.payload["lines"][0]["lote"] == "LOTE-NUBE-1"
+    assert projection.payload["lines"][0]["fecha_envasado"] == "2026-10-30"
     pending = list(
         SyncOutbox.select().where(
             (SyncOutbox.event_type == "order_lote_fecha_updated")
@@ -146,6 +150,7 @@ def test_projected_order_edit_queues_pending_event(db):
     )
     assert len(pending) == 1
     assert pending[0].payload["lote"] == "LOTE-NUBE-1"
+    assert pending[0].payload["fecha_envasado"] == "2026-10-30"
 
 
 def test_second_edit_updates_the_same_pending_event(db):
@@ -164,6 +169,7 @@ def test_second_edit_updates_the_same_pending_event(db):
                 "csrf_token": csrf,
                 f"lote_{line.id}": lote,
                 f"fecha_{line.id}": "2026-10-29",
+                f"fecha_envasado_{line.id}": "2026-10-30",
             },
         )
 
@@ -190,16 +196,19 @@ def test_pending_lote_survives_next_snapshot(db):
             "csrf_token": csrf,
             f"lote_{line.id}": "LOTE-NUBE",
             f"fecha_{line.id}": "2026-10-29",
+            f"fecha_envasado_{line.id}": "2026-10-30",
         },
     )
 
     order["lines"][0]["lote"] = "LOTE-FABRICA-NUEVO"
+    order["lines"][0]["fecha_envasado"] = "2026-10-31"
     SyncSnapshotService.apply_snapshot(_snapshot(order, cursor=2))
 
     projection = SyncProjection.get(
         SyncProjection.resource_uid == order["order_uid"]
     )
     assert projection.payload["lines"][0]["lote"] == "LOTE-NUBE"
+    assert projection.payload["lines"][0]["fecha_envasado"] == "2026-10-30"
 
 
 def test_annulled_projected_order_is_rejected(db):
@@ -234,6 +243,7 @@ def _order_with_contents(status="Emitida", version=1, lote="LOTE-FABRICA-1"):
             "unit": "bolsa",
             "lote": lote,
             "fecha_elaboracion": "2026-10-28",
+            "fecha_envasado": "2026-10-27",
             "client_name": "Cliente Fabrica",
             "destination": "Ruta Fabrica - Posadas",
         }
@@ -246,6 +256,7 @@ def _order_with_contents(status="Emitida", version=1, lote="LOTE-FABRICA-1"):
             "unit": "bolsa",
             "lote": "LOTE-SUELTO",
             "fecha_elaboracion": "2026-10-28",
+            "fecha_envasado": "2026-10-27",
             "client_name": "Cliente Fabrica",
             "destination": "Ruta Fabrica - Posadas",
         }
@@ -263,8 +274,11 @@ def test_projected_order_shows_pallet_contents(db):
     assert b"Mercader" in response.data
     assert f'name="lote_{content_uid}"'.encode() in response.data
     assert f'name="lote_{loose_uid}"'.encode() in response.data
+    assert f'name="fecha_envasado_{content_uid}"'.encode() in response.data
+    assert f'name="fecha_envasado_{loose_uid}"'.encode() in response.data
     assert b"LOTE-FABRICA-1" in response.data
     assert b"LOTE-SUELTO" in response.data
+    assert b'value="2026-10-27"' in response.data
 
 
 def test_content_edit_queues_content_event(db):
@@ -280,6 +294,7 @@ def test_content_edit_queues_content_event(db):
             "csrf_token": csrf,
             f"lote_{content_uid}": "LOTE-NUEVO",
             f"fecha_{content_uid}": "2026-10-29",
+            f"fecha_envasado_{content_uid}": "2026-10-30",
         },
         follow_redirects=True,
     )
@@ -290,6 +305,10 @@ def test_content_edit_queues_content_event(db):
         SyncProjection.resource_uid == order["order_uid"]
     )
     assert projection.payload["pallets"][0]["contents"][0]["lote"] == "LOTE-NUEVO"
+    assert (
+        projection.payload["pallets"][0]["contents"][0]["fecha_envasado"]
+        == "2026-10-30"
+    )
     pending = list(
         SyncOutbox.select().where(
             (SyncOutbox.event_type == "order_content_lote_fecha_updated")
@@ -299,6 +318,7 @@ def test_content_edit_queues_content_event(db):
     assert len(pending) == 1
     assert pending[0].payload["content_uid"] == content_uid
     assert pending[0].payload["lote"] == "LOTE-NUEVO"
+    assert pending[0].payload["fecha_envasado"] == "2026-10-30"
 
 
 def test_pending_content_survives_next_snapshot(db):
@@ -313,13 +333,19 @@ def test_pending_content_survives_next_snapshot(db):
             "csrf_token": csrf,
             f"lote_{content_uid}": "LOTE-NUBE",
             f"fecha_{content_uid}": "2026-10-29",
+            f"fecha_envasado_{content_uid}": "2026-10-30",
         },
     )
 
     order["pallets"][0]["contents"][0]["lote"] = "LOTE-FABRICA-NUEVO"
+    order["pallets"][0]["contents"][0]["fecha_envasado"] = "2026-10-31"
     SyncSnapshotService.apply_snapshot(_snapshot(order, cursor=2))
 
     projection = SyncProjection.get(
         SyncProjection.resource_uid == order["order_uid"]
     )
     assert projection.payload["pallets"][0]["contents"][0]["lote"] == "LOTE-NUBE"
+    assert (
+        projection.payload["pallets"][0]["contents"][0]["fecha_envasado"]
+        == "2026-10-30"
+    )

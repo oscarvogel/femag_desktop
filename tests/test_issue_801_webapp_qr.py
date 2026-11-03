@@ -169,6 +169,7 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
             "csrf_token": csrf,
             f"lote_{line.id}": "LOTE-2026-08",
             f"fecha_{line.id}": "2026-08-27",
+            f"fecha_envasado_{line.id}": "2026-08-28",
         },
         follow_redirects=True,
     )
@@ -178,6 +179,7 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
     line = LoadOrderProduct.get_by_id(line.id)
     assert line.lote == "LOTE-2026-08"
     assert line.fecha_elaboracion == date(2026, 8, 27)
+    assert line.fecha_envasado == date(2026, 8, 28)
 
     rows = list(AuditLog.select().where(AuditLog.action == "carga de lote"))
     assert len(rows) == 1
@@ -186,6 +188,7 @@ def test_post_with_login_and_csrf_updates_and_audits(db):
     assert rows[0].workstation == "127.0.0.1"
     assert rows[0].new_value["orden"] == 80101
     assert rows[0].new_value["renglones"][0]["lote"] == "LOTE-2026-08"
+    assert rows[0].new_value["renglones"][0]["fecha_envasado"] == "2026-08-28"
 
 def test_post_redirects_to_confirmation_with_saved_values(db):
     order, line = _order_with_line()
@@ -200,6 +203,7 @@ def test_post_redirects_to_confirmation_with_saved_values(db):
             "csrf_token": csrf,
             f"lote_{line.id}": "LOTE-2026-09",
             f"fecha_{line.id}": "2026-09-01",
+            f"fecha_envasado_{line.id}": "2026-09-02",
         },
     )
 
@@ -213,6 +217,7 @@ def test_post_redirects_to_confirmation_with_saved_values(db):
     assert "Orden #80101 guardada".encode() in page.data
     assert b"LOTE-2026-09" in page.data
     assert "01/09/2026".encode() in page.data
+    assert "02/09/2026".encode() in page.data
     assert b"Volver a la orden" in page.data
     assert b"Buscar otra orden" in page.data
 

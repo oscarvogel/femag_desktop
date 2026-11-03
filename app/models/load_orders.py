@@ -110,6 +110,7 @@ class LoadOrderProduct(BaseModel):
     total = FloatField(default=0.0)
     lote = CharField(null=True)
     fecha_elaboracion = DateField(null=True)
+    fecha_envasado = DateField(null=True)
 
     @property
     def tiene_reparto_facturacion(self) -> bool:
@@ -156,9 +157,10 @@ class LoadOrderPalletAllocation(BaseModel):
     product = ForeignKeyField(Product, backref="pallet_allocations")
     quantity = DecimalField(max_digits=14, decimal_places=3)
     peso_unitario_kg = DecimalField(max_digits=12, decimal_places=3)
-    # Trazabilidad por contenido: cada producto del pallet tiene su lote y fecha.
+    # Trazabilidad por contenido: cada producto del pallet tiene su lote y fechas.
     lote = CharField(null=True)
     fecha_elaboracion = DateField(null=True)
+    fecha_envasado = DateField(null=True)
 
     @property
     def kilos(self) -> Decimal:
@@ -183,6 +185,7 @@ class LoadOrderLooseAllocation(BaseModel):
     # Trazabilidad por contenido suelto.
     lote = CharField(null=True)
     fecha_elaboracion = DateField(null=True)
+    fecha_envasado = DateField(null=True)
 
     @property
     def kilos(self) -> Decimal:

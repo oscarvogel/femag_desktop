@@ -161,12 +161,25 @@ class SyncEventConsumer:
             return "rejected", "El lote supera los 255 caracteres."
         try:
             fecha = _parse_date(payload.get("fecha_elaboracion"))
+            has_packaging_date = "fecha_envasado" in payload
+            fecha_envasado = (
+                _parse_date(payload.get("fecha_envasado"))
+                if has_packaging_date
+                else line.fecha_envasado
+            )
         except ValueError as exc:
             return "rejected", str(exc)
 
         line.lote = lote
         line.fecha_elaboracion = fecha
-        line.save(only=[LoadOrderProduct.lote, LoadOrderProduct.fecha_elaboracion])
+        line.fecha_envasado = fecha_envasado
+        line.save(
+            only=[
+                LoadOrderProduct.lote,
+                LoadOrderProduct.fecha_elaboracion,
+                LoadOrderProduct.fecha_envasado,
+            ]
+        )
         self.audit.record(
             user="sync",
             module="Despachos",
@@ -179,6 +192,11 @@ class SyncEventConsumer:
                 "fecha_elaboracion": (
                     line.fecha_elaboracion.isoformat()
                     if line.fecha_elaboracion
+                    else None
+                ),
+                "fecha_envasado": (
+                    line.fecha_envasado.isoformat()
+                    if line.fecha_envasado
                     else None
                 ),
                 "event_id": inbox.event_id,
@@ -237,6 +255,12 @@ class SyncEventConsumer:
             return "rejected", "El lote supera los 255 caracteres."
         try:
             fecha = _parse_date(payload.get("fecha_elaboracion"))
+            has_packaging_date = "fecha_envasado" in payload
+            fecha_envasado = (
+                _parse_date(payload.get("fecha_envasado"))
+                if has_packaging_date
+                else None
+            )
         except ValueError as exc:
             return "rejected", str(exc)
 
@@ -260,14 +284,18 @@ class SyncEventConsumer:
 
         allocation.lote = lote
         allocation.fecha_elaboracion = fecha
+        if has_packaging_date:
+            allocation.fecha_envasado = fecha_envasado
+        model = (
+            LoadOrderPalletAllocation
+            if content_type == "pallet"
+            else LoadOrderLooseAllocation
+        )
         allocation.save(
             only=[
-                LoadOrderPalletAllocation.lote
-                if content_type == "pallet"
-                else LoadOrderLooseAllocation.lote,
-                LoadOrderPalletAllocation.fecha_elaboracion
-                if content_type == "pallet"
-                else LoadOrderLooseAllocation.fecha_elaboracion,
+                model.lote,
+                model.fecha_elaboracion,
+                model.fecha_envasado,
             ]
         )
         self.audit.record(
@@ -283,6 +311,11 @@ class SyncEventConsumer:
                 "fecha_elaboracion": (
                     allocation.fecha_elaboracion.isoformat()
                     if allocation.fecha_elaboracion
+                    else None
+                ),
+                "fecha_envasado": (
+                    allocation.fecha_envasado.isoformat()
+                    if allocation.fecha_envasado
                     else None
                 ),
                 "event_id": inbox.event_id,

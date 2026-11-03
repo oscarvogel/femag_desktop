@@ -35,6 +35,7 @@ class ProjectedLine:
     unit: str
     lote: str | None
     fecha_elaboracion: date | None
+    fecha_envasado: date | None
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class ProjectedContent:
     unit: str
     lote: str | None
     fecha_elaboracion: date | None
+    fecha_envasado: date | None
     client_name: str
     destination: str
 
@@ -118,6 +120,7 @@ def _content_from_dict(
         unit=str(item.get("unit") or ""),
         lote=item.get("lote"),
         fecha_elaboracion=_parse_date(item.get("fecha_elaboracion")),
+        fecha_envasado=_parse_date(item.get("fecha_envasado")),
         client_name=str(item.get("client_name") or fallback_client or "-"),
         destination=str(item.get("destination") or fallback_destination or "-"),
     )
@@ -271,6 +274,7 @@ def projected_order_lines(order: ProjectedOrder) -> list[ProjectedLine]:
                 unit=str(item.get("unit") or ""),
                 lote=item.get("lote"),
                 fecha_elaboracion=_parse_date(item.get("fecha_elaboracion")),
+                fecha_envasado=_parse_date(item.get("fecha_envasado")),
             )
         )
     return lines
@@ -299,6 +303,7 @@ def _update_content_in_payload(
     kind: str,
     lote: str | None,
     fecha_elaboracion: date | None,
+    fecha_envasado: date | None,
 ) -> bool:
     collections = (
         [payload.get("pallets") or []]
@@ -320,6 +325,9 @@ def _update_content_in_payload(
                 item["fecha_elaboracion"] = (
                     fecha_elaboracion.isoformat() if fecha_elaboracion else None
                 )
+                item["fecha_envasado"] = (
+                    fecha_envasado.isoformat() if fecha_envasado else None
+                )
                 return True
     return False
 
@@ -331,6 +339,7 @@ def _upsert_content_event(
     content_type: str,
     lote: str | None,
     fecha_elaboracion: date | None,
+    fecha_envasado: date | None,
 ) -> None:
     payload = {
         "order_uid": order.order_uid,
@@ -339,6 +348,9 @@ def _upsert_content_event(
         "lote": lote,
         "fecha_elaboracion": (
             fecha_elaboracion.isoformat() if fecha_elaboracion else None
+        ),
+        "fecha_envasado": (
+            fecha_envasado.isoformat() if fecha_envasado else None
         ),
         "expected_version": order.version,
     }
@@ -377,6 +389,7 @@ def update_projected_content(
     content_type: str,
     lote: str | None,
     fecha_elaboracion: str | None,
+    fecha_envasado: str | None = None,
 ) -> bool:
     projection = SyncProjection.get_or_none(
         (SyncProjection.resource_type == SyncProjection.RESOURCE_ORDER)
@@ -390,6 +403,7 @@ def update_projected_content(
     if normalized_lote and len(normalized_lote) > 255:
         raise ValueError("El lote no puede superar los 255 caracteres.")
     new_date = parse_optional_date(fecha_elaboracion)
+    new_packaging_date = parse_optional_date(fecha_envasado)
 
     content = next(
         (
@@ -405,7 +419,11 @@ def update_projected_content(
     )
     if content is None:
         raise ValueError("El contenido indicado no pertenece a esta orden.")
-    if content.lote == normalized_lote and content.fecha_elaboracion == new_date:
+    if (
+        content.lote == normalized_lote
+        and content.fecha_elaboracion == new_date
+        and content.fecha_envasado == new_packaging_date
+    ):
         return False
 
     if not _update_content_in_payload(
@@ -414,6 +432,7 @@ def update_projected_content(
         kind=content_type,
         lote=normalized_lote,
         fecha_elaboracion=new_date,
+        fecha_envasado=new_packaging_date,
     ):
         raise ValueError("El contenido indicado no pertenece a esta orden.")
 
@@ -425,6 +444,7 @@ def update_projected_content(
         content_type=content_type,
         lote=normalized_lote,
         fecha_elaboracion=new_date,
+        fecha_envasado=new_packaging_date,
     )
     return True
 
@@ -435,6 +455,7 @@ def update_projected_line(
     *,
     lote: str | None,
     fecha_elaboracion: str | None,
+    fecha_envasado: str | None = None,
 ) -> bool:
     projection = SyncProjection.get_or_none(
         (SyncProjection.resource_type == SyncProjection.RESOURCE_ORDER)
@@ -456,12 +477,21 @@ def update_projected_line(
     if normalized_lote and len(normalized_lote) > 255:
         raise ValueError("El lote no puede superar los 255 caracteres.")
     new_date = parse_optional_date(fecha_elaboracion)
+    new_packaging_date = parse_optional_date(fecha_envasado)
     old_date = _parse_date(target.get("fecha_elaboracion"))
-    if target.get("lote") == normalized_lote and old_date == new_date:
+    old_packaging_date = _parse_date(target.get("fecha_envasado"))
+    if (
+        target.get("lote") == normalized_lote
+        and old_date == new_date
+        and old_packaging_date == new_packaging_date
+    ):
         return False
 
     target["lote"] = normalized_lote
     target["fecha_elaboracion"] = new_date.isoformat() if new_date else None
+    target["fecha_envasado"] = (
+        new_packaging_date.isoformat() if new_packaging_date else None
+    )
     projection.payload = payload
     projection.save(only=[SyncProjection.payload])
 
@@ -470,6 +500,9 @@ def update_projected_line(
         "line_uid": line_id,
         "lote": normalized_lote,
         "fecha_elaboracion": new_date.isoformat() if new_date else None,
+        "fecha_envasado": (
+            new_packaging_date.isoformat() if new_packaging_date else None
+        ),
         "expected_version": order.version,
     }
     existing = SyncOutbox.get_or_none(

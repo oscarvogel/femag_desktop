@@ -276,6 +276,7 @@ def test_snapshot_includes_pallet_and_loose_contents(db):
         unit="bolsa",
         lote="LOTE-RENGLON",
         fecha_elaboracion=date(2026, 10, 20),
+        fecha_envasado=date(2026, 10, 19),
     )
     pallet = LoadOrderPallet.create(order=order, sequence=1)
     allocation = LoadOrderPalletAllocation.create(
@@ -286,6 +287,7 @@ def test_snapshot_includes_pallet_and_loose_contents(db):
         peso_unitario_kg=Decimal("25"),
         lote="LOTE-PALLET",
         fecha_elaboracion=date(2026, 10, 21),
+        fecha_envasado=date(2026, 10, 20),
     )
     loose = LoadOrderLooseAllocation.create(
         order=order,
@@ -295,13 +297,17 @@ def test_snapshot_includes_pallet_and_loose_contents(db):
         peso_unitario_kg=Decimal("25"),
         lote="LOTE-SUELTO",
         fecha_elaboracion=date(2026, 10, 22),
+        fecha_envasado=date(2026, 10, 21),
     )
 
     first = SyncOrderPublisher().build_order(order)
     second = SyncOrderPublisher().build_order(order)
 
+    line_payload = first["lines"][0]
     content = first["pallets"][0]["contents"][0]
     loose_content = first["loose_contents"][0]
+    assert line_payload["lote"] == "LOTE-RENGLON"
+    assert line_payload["fecha_envasado"] == "2026-10-19"
     assert content["content_uid"] == second["pallets"][0]["contents"][0]["content_uid"]
     assert content["content_uid"]
     assert content["product_name"] == data["product"].name
@@ -309,7 +315,9 @@ def test_snapshot_includes_pallet_and_loose_contents(db):
     assert content["unit"] == "bolsa"
     assert content["lote"] == "LOTE-PALLET"
     assert content["fecha_elaboracion"] == "2026-10-21"
+    assert content["fecha_envasado"] == "2026-10-20"
     assert content["client_name"] == data["client"].name
     assert loose_content["content_uid"]
     assert loose_content["lote"] == "LOTE-SUELTO"
     assert loose_content["fecha_elaboracion"] == "2026-10-22"
+    assert loose_content["fecha_envasado"] == "2026-10-21"

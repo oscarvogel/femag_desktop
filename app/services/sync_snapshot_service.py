@@ -72,11 +72,17 @@ def _merge_pending_lotes(order: dict) -> dict:
                 pending[event.aggregate_id] = (
                     event.payload.get("lote"),
                     event.payload.get("fecha_elaboracion"),
+                    "fecha_envasado" in event.payload,
+                    event.payload.get("fecha_envasado"),
                 )
     for line in lines:
         values = pending.get(str(line.get("line_uid") or ""))
         if values is not None:
-            line["lote"], line["fecha_elaboracion"] = values
+            lote, fecha_elaboracion, has_envasado, fecha_envasado = values
+            line["lote"] = lote
+            line["fecha_elaboracion"] = fecha_elaboracion
+            if has_envasado:
+                line["fecha_envasado"] = fecha_envasado
 
     pallets = [item for item in (merged.get("pallets") or []) if isinstance(item, dict)]
     contents = [
@@ -104,11 +110,17 @@ def _merge_pending_lotes(order: dict) -> dict:
                 pending_content[event.aggregate_id] = (
                     event.payload.get("lote"),
                     event.payload.get("fecha_elaboracion"),
+                    "fecha_envasado" in event.payload,
+                    event.payload.get("fecha_envasado"),
                 )
     for content in contents:
         values = pending_content.get(str(content.get("content_uid") or ""))
         if values is not None:
-            content["lote"], content["fecha_elaboracion"] = values
+            lote, fecha_elaboracion, has_envasado, fecha_envasado = values
+            content["lote"] = lote
+            content["fecha_elaboracion"] = fecha_elaboracion
+            if has_envasado:
+                content["fecha_envasado"] = fecha_envasado
     return merged
 
 

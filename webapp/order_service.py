@@ -145,6 +145,7 @@ def update_order_line(
     *,
     lote: str | None,
     fecha_elaboracion: str | None,
+    fecha_envasado: str | None = None,
 ) -> LoadOrderProduct:
     try:
         line = LoadOrderProduct.get(
@@ -159,5 +160,12 @@ def update_order_line(
 
     line.lote = normalized_lote
     line.fecha_elaboracion = parse_optional_date(fecha_elaboracion)
-    line.save(only=[LoadOrderProduct.lote, LoadOrderProduct.fecha_elaboracion])
+    line.fecha_envasado = parse_optional_date(fecha_envasado)
+    line.save(
+        only=[
+            LoadOrderProduct.lote,
+            LoadOrderProduct.fecha_elaboracion,
+            LoadOrderProduct.fecha_envasado,
+        ]
+    )
     return line
