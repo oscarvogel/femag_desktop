@@ -606,6 +606,8 @@ class PalletCompositionWidget(QWidget):
             return 0
         for pallet in self._pallets:
             pallet["allocations"] = []
+            pallet["locked"] = False
+        self._locked_sequences.clear()
         self._refresh()
         self.composition_changed.emit()
         return allocation_count
