@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -112,9 +113,25 @@ class PendingOrdersAgingService:
         pallet_count = len(pallet_ids)
         complete_pallets = pallet_count if pending_quantity == 0 and pallet_count else 0
 
-        traceability_missing_lines = sum(
-            1 for line in products if not (line.lote or "").strip() or line.fecha_elaboracion is None
-        )
+        assignments_by_line: dict[tuple[int | None, int], list] = defaultdict(list)
+        for allocation in pallet_allocations:
+            assignments_by_line[(allocation.destination_id, allocation.product_id)].append(allocation)
+        for allocation in loose_allocations:
+            assignments_by_line[(allocation.destination_id, allocation.product_id)].append(allocation)
+
+        def _traceability_complete(line: LoadOrderProduct, assignment) -> bool:
+            lote = (getattr(assignment, "lote", None) or "").strip() or (line.lote or "").strip()
+            fecha = getattr(assignment, "fecha_elaboracion", None) or line.fecha_elaboracion
+            return bool(lote) and fecha is not None
+
+        traceability_missing_lines = 0
+        for line in products:
+            assignments = assignments_by_line.get((line.destination_id, line.product_id), [])
+            if assignments:
+                if any(not _traceability_complete(line, assignment) for assignment in assignments):
+                    traceability_missing_lines += 1
+            elif not (line.lote or "").strip() or line.fecha_elaboracion is None:
+                traceability_missing_lines += 1
         traceability_pending = traceability_missing_lines > 0
 
         active_remittance = (

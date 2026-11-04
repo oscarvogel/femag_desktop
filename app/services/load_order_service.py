@@ -125,6 +125,7 @@ class LoadOrderService:
         if destinations is not None:
             if not order.is_unissued:
                 raise ValueError("Solo se pueden editar clientes y productos de ordenes pendientes.")
+            destinations = self._merge_destination_traceability(order, destinations)
             normalized_destinations = self._validate_destinations(
                 destinations,
                 legacy_client=None,
@@ -848,6 +849,53 @@ class LoadOrderService:
             )
         return normalized
 
+    def _merge_destination_traceability(self, order: LoadOrder, destinations: list[dict]) -> list[dict]:
+        """Conserva lote y fechas de los renglones que sobreviven a una edicion.
+
+        Editar clientes o productos reemplaza los renglones persistidos. Si el
+        formulario no vuelve a enviar la trazabilidad de un renglon que sigue
+        existiendo (mismo cliente, destino y producto), se recupera la que ya
+        estaba guardada para no perderla.
+        """
+
+        existing = {
+            (line.destination.client.id, line.destination.delivery_address.id, line.product_id): line
+            for line in order.products
+            if line.destination_id is not None
+        }
+        merged: list[dict] = []
+        for item in destinations:
+            if not isinstance(item, dict):
+                merged.append(item)
+                continue
+            client = item.get("client")
+            address = item.get("delivery_address")
+            products: list[dict] = []
+            for product_item in item.get("products") or []:
+                if not isinstance(product_item, dict):
+                    products.append(product_item)
+                    continue
+                product_item = dict(product_item)
+                product = product_item.get("product")
+                if (
+                    client is not None
+                    and address is not None
+                    and product is not None
+                    and hasattr(client, "id")
+                    and hasattr(address, "id")
+                    and hasattr(product, "id")
+                ):
+                    line = existing.get((client.id, address.id, product.id))
+                    if line is not None:
+                        for field in ("lote", "fecha_elaboracion", "fecha_envasado"):
+                            if product_item.get(field) is None:
+                                product_item[field] = getattr(line, field)
+                products.append(product_item)
+            item = dict(item)
+            item["products"] = products
+            merged.append(item)
+        return merged
+
     @staticmethod
     def _normalize_billing_split(value, quantity) -> float | None:
         """Normaliza la parte de la cantidad que se factura al contado.
@@ -932,6 +980,9 @@ class LoadOrderService:
                                 (sequence, address.id, product.id),
                                 product.peso_unitario_kg,
                             ),
+                            "lote": allocation.get("lote"),
+                            "fecha_elaboracion": allocation.get("fecha_elaboracion"),
+                            "fecha_envasado": allocation.get("fecha_envasado"),
                         }
                     )
                 normalized.append(
@@ -994,6 +1045,9 @@ class LoadOrderService:
                         (address.id, product.id),
                         product.peso_unitario_kg,
                     ),
+                    "lote": item.get("lote"),
+                    "fecha_elaboracion": item.get("fecha_elaboracion"),
+                    "fecha_envasado": item.get("fecha_envasado"),
                 }
             )
         return normalized
@@ -1023,6 +1077,9 @@ class LoadOrderService:
                         "product": product.product,
                         "quantity": product.quantity,
                         "cantidad_facturar_ahora": product.cantidad_facturar_ahora,
+                        "lote": product.lote,
+                        "fecha_elaboracion": product.fecha_elaboracion,
+                        "fecha_envasado": product.fecha_envasado,
                     }
                     for product in destination.products
                 ],
@@ -1045,6 +1102,9 @@ class LoadOrderService:
                         "product": allocation.product,
                         "quantity": allocation.quantity,
                         "peso_unitario_kg": allocation.peso_unitario_kg,
+                        "lote": allocation.lote,
+                        "fecha_elaboracion": allocation.fecha_elaboracion,
+                        "fecha_envasado": allocation.fecha_envasado,
                     }
                     for allocation in pallet.allocations
                 ],
@@ -1060,6 +1120,9 @@ class LoadOrderService:
                 "product": allocation.product,
                 "quantity": allocation.quantity,
                 "peso_unitario_kg": allocation.peso_unitario_kg,
+                "lote": allocation.lote,
+                "fecha_elaboracion": allocation.fecha_elaboracion,
+                "fecha_envasado": allocation.fecha_envasado,
             }
             for allocation in order.loose_allocations
         ]
@@ -1282,6 +1345,9 @@ class LoadOrderService:
                     cantidad_facturar_ahora=product_item.get("cantidad_facturar_ahora"),
                     unit=product_item.get("unit") or product.unit,
                     observations=product_item.get("observations"),
+                    lote=product_item.get("lote"),
+                    fecha_elaboracion=product_item.get("fecha_elaboracion"),
+                    fecha_envasado=product_item.get("fecha_envasado"),
                     **prices,
                 )
             budget, _ = LoadOrderBudgetStatus.get_or_create(
@@ -1368,6 +1434,9 @@ class LoadOrderService:
                     product=allocation["product"],
                     quantity=allocation["quantity"],
                     peso_unitario_kg=allocation["peso_unitario_kg"],
+                    lote=allocation.get("lote"),
+                    fecha_elaboracion=allocation.get("fecha_elaboracion"),
+                    fecha_envasado=allocation.get("fecha_envasado"),
                 )
 
     def _replace_loose_allocations(self, order: LoadOrder, loose: list[dict]) -> None:
@@ -1384,6 +1453,9 @@ class LoadOrderService:
                 product=item["product"],
                 quantity=item["quantity"],
                 peso_unitario_kg=item["peso_unitario_kg"],
+                lote=item.get("lote"),
+                fecha_elaboracion=item.get("fecha_elaboracion"),
+                fecha_envasado=item.get("fecha_envasado"),
             )
 
     def composition(self, order: LoadOrder):
