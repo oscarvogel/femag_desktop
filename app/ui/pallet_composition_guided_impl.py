@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -225,6 +226,23 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self.guided_lock_button.clicked.connect(self.toggle_selected_pallet_lock)
         pallet_actions.addWidget(self.guided_lock_button)
         current_layout.addLayout(pallet_actions)
+
+        self.guided_clear_assignments_button = QPushButton("Vaciar todos los pallets")
+        self.guided_clear_assignments_button.setObjectName(
+            "guidedClearAllPalletAllocationsButton"
+        )
+        self.guided_clear_assignments_button.setProperty("uiRole", "danger")
+        self.guided_clear_assignments_button.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Fixed
+        )
+        self.guided_clear_assignments_button.setToolTip(
+            "Quita toda la mercadería de los pallets y la devuelve a pendiente. "
+            "No elimina los pallets ni la mercadería suelta."
+        )
+        self.guided_clear_assignments_button.clicked.connect(
+            self._guided_confirm_clear_allocations
+        )
+        current_layout.addWidget(self.guided_clear_assignments_button)
 
         self.guided_splitter.addWidget(pending_group)
         self.guided_splitter.addWidget(current_group)
@@ -671,6 +689,10 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         if not hasattr(self, "guided_pallet_combo"):
             return
         self._render_guided_loose_table()
+        if hasattr(self, "guided_clear_assignments_button"):
+            self.guided_clear_assignments_button.setEnabled(
+                any(pallet.get("allocations") for pallet in self._pallets)
+            )
         selected = self._selected_sequence
         self.guided_pallet_combo.blockSignals(True)
         self.guided_pallet_combo.clear()
