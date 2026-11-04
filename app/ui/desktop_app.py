@@ -85,6 +85,7 @@ from app.services.auth_service import AuthService
 from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
+from app.services.load_order_traceability_service import LoadOrderTraceabilityService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
@@ -133,6 +134,7 @@ from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.load_order_annul_dialog import LoadOrderAnnulDialog
 from app.ui.load_order_ledger_repair_dialog import LoadOrderLedgerRepairDialog
 from app.ui.load_order_stock_shortfall_dialog import emit_order_with_stock_check
+from app.ui.load_order_traceability_dialog import LoadOrderTraceabilityDialog
 from app.services.load_order_ledger_repair_service import (
     LoadOrderLedgerRepairService,
 )
@@ -2152,6 +2154,9 @@ class FemagDesktopWindow(QMainWindow):
         layout = page.layout()
         service = LoadOrderService(current_user=self.shell.username)
         closure_service = LoadOrderClosureService(current_user=self.shell.username)
+        traceability_service = LoadOrderTraceabilityService(
+            current_user=self.shell.username
+        )
         operation_service = LoadOrderOperationService(
             current_user=self.shell.username,
             prints_dir=LOAD_ORDER_PRINTS_DIR,
@@ -2184,6 +2189,9 @@ class FemagDesktopWindow(QMainWindow):
         print_button = _action_button("printLoadOrderButton", "Imprimir")
         reprint_button = _action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
         budget_button = _action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
+        traceability_button = _action_button(
+            "editLoadOrderTraceabilityButton", "Lote / fecha", secondary=True
+        )
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
@@ -2191,9 +2199,12 @@ class FemagDesktopWindow(QMainWindow):
         _set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
         _set_button_icon(reprint_button, QStyle.SP_BrowserReload)
         _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
+        _set_button_icon(traceability_button, QStyle.SP_DialogSaveButton)
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         can_reprint = _can_reprint_load_orders(self.user)
         reprint_button.setVisible(can_reprint)
+        can_edit_traceability = _can_edit_load_order_traceability(self.user)
+        traceability_button.setVisible(can_edit_traceability)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
@@ -2214,6 +2225,7 @@ class FemagDesktopWindow(QMainWindow):
             print_button,
             reprint_button,
             budget_button,
+            traceability_button,
             annul_button,
         ):
             actions.addWidget(button)
@@ -2428,10 +2440,15 @@ class FemagDesktopWindow(QMainWindow):
             close_button.setToolTip("Seleccione una orden emitida para cerrar.")
             reprint_button.setEnabled(False)
             reprint_button.setToolTip("Seleccione una orden con impresión original.")
+            traceability_button.setEnabled(False)
+            traceability_button.setToolTip(
+                "Seleccione una orden para corregir lote y fechas."
+            )
 
         def set_action_state(order: LoadOrder) -> None:
             is_pending = order.is_unissued
             is_issued = order.status == LoadOrder.STATUS_ISSUED
+            is_annulled = order.status == LoadOrder.STATUS_ANNULLED
             issue_button.setEnabled(is_pending)
             edit_button.setEnabled(is_pending)
             history_button.setEnabled(True)
@@ -2439,6 +2456,15 @@ class FemagDesktopWindow(QMainWindow):
             close_button.setEnabled(is_issued)
             has_original_print = _has_printed_load_order(order)
             reprint_button.setEnabled(can_reprint and has_original_print)
+            traceability_button.setEnabled(can_edit_traceability and not is_annulled)
+            if is_annulled:
+                traceability_button.setToolTip(
+                    "No se puede editar la trazabilidad de una orden anulada."
+                )
+            else:
+                traceability_button.setToolTip(
+                    "Corregir lote y fechas de cada contenido de la orden."
+                )
             if has_original_print:
                 reprint_button.setToolTip("Generar una copia marcada de la impresión original.")
             else:
@@ -2469,6 +2495,37 @@ class FemagDesktopWindow(QMainWindow):
                 feedback.show_warning("Seleccione una orden para ver su historial.", focus_widget=table)
                 return
             LoadOrderHistoryDialog(order, self).exec_()
+
+        def open_traceability_dialog() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.show_warning(
+                    "Seleccione una orden para corregir lote y fechas.",
+                    focus_widget=table,
+                )
+                return
+            if not can_edit_traceability:
+                feedback.show_error(
+                    "No tiene permiso para cargar lote y fechas en ordenes de carga.",
+                    focus_widget=table,
+                )
+                return
+            if order.status == LoadOrder.STATUS_ANNULLED:
+                feedback.show_warning(
+                    "No se puede editar la trazabilidad de una orden anulada.",
+                    focus_widget=table,
+                )
+                return
+            dialog = LoadOrderTraceabilityDialog(traceability_service, order, self)
+            if dialog.exec_() != QDialog.Accepted:
+                return
+            if dialog.updated_count:
+                feedback.show_success(
+                    "Lote y fecha actualizados. Pendiente de sincronización con la nube."
+                )
+            else:
+                feedback.show_info("No hubo cambios en lote o fechas.")
+            refresh()
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -2774,6 +2831,7 @@ class FemagDesktopWindow(QMainWindow):
         print_button.clicked.connect(print_order)
         reprint_button.clicked.connect(reprint_order)
         budget_button.clicked.connect(print_budget)
+        traceability_button.clicked.connect(open_traceability_dialog)
         repair_button.clicked.connect(repair_ledger)
         refresh()
         return page
@@ -5210,6 +5268,20 @@ def _can_annul_load_orders(user) -> bool:
             user,
             "Operaciones",
             "anular",
+            "Órdenes de carga",
+        )
+    except (InterfaceError, OperationalError):
+        return False
+
+
+def _can_edit_load_order_traceability(user) -> bool:
+    if user is None:
+        return False
+    try:
+        return PermissionService().has_permission(
+            user,
+            "Operaciones",
+            "cargar lote",
             "Órdenes de carga",
         )
     except (InterfaceError, OperationalError):

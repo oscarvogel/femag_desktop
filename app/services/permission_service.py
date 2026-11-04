@@ -16,6 +16,7 @@ ACTIONS = [
     "cerrar",
     "importar",
     "configurar",
+    "cargar lote",
 ]
 
 
@@ -50,7 +51,15 @@ MENU = {
 PROFILE_ACTIONS = {
     "Administrador": set(ACTIONS),
     "Gerencia": {"ver", "reimprimir"},
-    "Secretaría": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
+    "Secretaría": {
+        "ver",
+        "crear",
+        "modificar",
+        "imprimir",
+        "reimprimir",
+        "cerrar",
+        "cargar lote",
+    },
     "Administración": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
     "Solo consulta": {"ver", "reimprimir"},
 }
