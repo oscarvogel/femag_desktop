@@ -39,22 +39,33 @@ from webapp.auth import (
     redirect_after_login,
     resolve_secret_key,
 )
+from app.models.load_orders import LoadOrderProduct
 from webapp.gerencia_service import GerenciaService
+from webapp.load_groups import (
+    LoadLine,
+    main_group,
+    parse_groups,
+    unassigned_slots,
+    validate_groups,
+)
 from webapp.managerial_dashboard_service import ManagerialDashboardService
 from webapp.managerial_repurchase_service import ManagerialRepurchaseService
 from webapp.order_service import (
     InvalidQrPayloadError,
     OrderNotFoundError,
     OrderUnavailableError,
+    build_load_lines,
     get_order_by_token,
     normalize_qr_token,
     order_line_context,
     order_lines,
+    update_order_content,
     update_order_line,
 )
 from webapp.projected_order_service import (
     get_projected_order_by_token,
     projected_line_context,
+    projected_load_lines,
     projected_order_lines,
     update_projected_content,
     update_projected_line,
@@ -79,6 +90,130 @@ def _production_target(value: str) -> str | None:
     if parsed.path.startswith("/produccion"):
         return parsed.path + (f"?{parsed.query}" if parsed.query else "")
     return None
+
+
+def _fecha_texto(value) -> str:
+    """Muestra una fecha ISO como dd/mm/aaaa."""
+
+    raw = (value or "").strip() if isinstance(value, str) else ""
+    if len(raw) == 10:
+        return f"{raw[8:10]}/{raw[5:7]}/{raw[0:4]}"
+    return raw
+
+
+def _apply_load_groups(order, load_lines, form, *, is_projected: bool):
+    """Guarda la carga de lote y fechas por linea y grupo de pallets (#873).
+
+    Cada grupo es un conjunto de pallets que comparten lote y fecha. La linea
+    de despacho se queda con el lote del grupo que cubre mas pallets, para que
+    la hoja de despacho y el informe de trazabilidad tengan dato.
+
+    Devuelve (cambio, errores, avisos, detalle_auditoria).
+    """
+
+    changed = False
+    errors: list[str] = []
+    warnings: list[str] = []
+    detail: list[dict] = []
+
+    for line in load_lines:
+        groups = parse_groups(form, line)
+        line_errors = validate_groups(line, groups)
+        if line_errors:
+            errors.extend(line_errors)
+            continue
+
+        contents = line.content_by_slot
+        group_detail: list[dict] = []
+        for group in groups:
+            if not group.lote:
+                continue
+            for slot in group.slots:
+                content = contents.get(slot)
+                if content is None:
+                    continue
+                if is_projected:
+                    saved = update_projected_content(
+                        order,
+                        content.id,
+                        content_type=content.kind,
+                        lote=group.lote,
+                        fecha_elaboracion=group.fecha_elaboracion,
+                        fecha_envasado=group.fecha_envasado,
+                    )
+                else:
+                    saved = update_order_content(
+                        order,
+                        int(content.id),
+                        kind=content.kind,
+                        lote=group.lote,
+                        fecha_elaboracion=group.fecha_elaboracion,
+                        fecha_envasado=group.fecha_envasado,
+                    )
+                changed = changed or saved
+            group_detail.append(
+                {
+                    "lote": group.lote,
+                    "fecha_elaboracion": group.fecha_elaboracion,
+                    "fecha_envasado": group.fecha_envasado,
+                    "pallets": list(group.slots),
+                }
+            )
+
+        main = main_group(groups)
+        if main is not None:
+            if is_projected:
+                if line.line_uid:
+                    changed = update_projected_line(
+                        order,
+                        line.line_uid,
+                        lote=main.lote,
+                        fecha_elaboracion=main.fecha_elaboracion,
+                        fecha_envasado=main.fecha_envasado,
+                    ) or changed
+            elif line.line_id is not None:
+                current = LoadOrderProduct.get_or_none(
+                    (LoadOrderProduct.id == line.line_id)
+                    & (LoadOrderProduct.order == order)
+                )
+                if current is not None:
+                    before = (
+                        current.lote,
+                        current.fecha_elaboracion,
+                        current.fecha_envasado,
+                    )
+                    updated = update_order_line(
+                        order,
+                        line.line_id,
+                        lote=main.lote,
+                        fecha_elaboracion=main.fecha_elaboracion,
+                        fecha_envasado=main.fecha_envasado,
+                    )
+                    if (
+                        updated.lote,
+                        updated.fecha_elaboracion,
+                        updated.fecha_envasado,
+                    ) != before:
+                        changed = True
+
+        pending = unassigned_slots(line, groups)
+        if pending:
+            warnings.append(
+                f"{line.product}: {len(pending)} pallet(s) sin lote cargado."
+            )
+        detail.append(
+            {
+                "linea": line.line_id if line.line_id is not None else line.line_uid,
+                "producto": line.product,
+                "lote_linea": main.lote if main is not None else None,
+                "grupos": group_detail,
+            }
+        )
+
+    return changed, errors, warnings, {
+        "orden": getattr(order, "order_number", None),
+        "lineas": detail,
+    }
 
 
 def create_app(*, secret_key: str | None = None) -> Flask:
@@ -109,6 +244,9 @@ def create_app(*, secret_key: str | None = None) -> Flask:
         )
     # Los numeros se muestran como se leen aca: punto de miles y coma decimal.
     app.jinja_env.filters["kg"] = production_service.kg_text
+    # Las fechas de los grupos de lote llegan como texto ISO: se muestran como
+    # las demas fechas de la app (dd/mm/aaaa).
+    app.jinja_env.filters["fecha"] = _fecha_texto
     app.register_blueprint(sync_api)
 
     @app.after_request
@@ -343,6 +481,7 @@ self.addEventListener("fetch", event => {
 
         if is_projected:
             lines = projected_order_lines(order)
+            load_lines = projected_load_lines(order)
             if request.method == "POST":
                 username = current_username()
                 if not username:
@@ -370,116 +509,52 @@ self.addEventListener("fetch", event => {
                         400,
                     )
                 try:
-                    changed = False
-                    if order.has_contents:
-                        contents = [
-                            content
-                            for pallet in order.pallets
-                            for content in pallet.contents
-                        ] + list(order.loose_contents)
-                        for content in contents:
-                            lote_key = f"lote_{content.id}"
-                            fecha_key = f"fecha_{content.id}"
-                            fecha_envasado_key = f"fecha_envasado_{content.id}"
-                            if (
-                                lote_key not in request.form
-                                and fecha_key not in request.form
-                                and fecha_envasado_key not in request.form
-                            ):
-                                continue
-                            if update_projected_content(
-                                order,
-                                content.id,
-                                content_type=content.kind,
-                                lote=request.form.get(lote_key),
-                                fecha_elaboracion=request.form.get(fecha_key),
-                                fecha_envasado=request.form.get(
-                                    fecha_envasado_key
-                                ),
-                            ):
-                                changed = True
-                        audit_value = {
-                            "orden": order.order_number,
-                            "contenidos": [
-                                {
-                                    "contenido": content.id,
-                                    "tipo": content.kind,
-                                    "producto": content.product.name,
-                                    "lote": request.form.get(
-                                        f"lote_{content.id}"
-                                    ),
-                                    "fecha_elaboracion": request.form.get(
-                                        f"fecha_{content.id}"
-                                    ),
-                                    "fecha_envasado": request.form.get(
-                                        f"fecha_envasado_{content.id}"
-                                    ),
-                                }
-                                for content in contents
-                            ],
-                        }
-                    else:
-                        for line in lines:
-                            if update_projected_line(
-                                order,
-                                line.id,
-                                lote=request.form.get(f"lote_{line.id}"),
-                                fecha_elaboracion=request.form.get(
-                                    f"fecha_{line.id}"
-                                ),
-                                fecha_envasado=request.form.get(
-                                    f"fecha_envasado_{line.id}"
-                                ),
-                            ):
-                                changed = True
-                        audit_value = {
-                            "orden": order.order_number,
-                            "renglones": [
-                                {
-                                    "renglon": line.id,
-                                    "producto": line.product.name,
-                                    "lote": request.form.get(f"lote_{line.id}"),
-                                    "fecha_elaboracion": request.form.get(
-                                        f"fecha_{line.id}"
-                                    ),
-                                    "fecha_envasado": request.form.get(
-                                        f"fecha_envasado_{line.id}"
-                                    ),
-                                }
-                                for line in lines
-                            ],
-                        }
-                    if changed:
-                        audit.record(
-                            user=username,
-                            module=audit.MODULE_DESPACHOS,
-                            action=audit.ACTION_LOTE,
-                            record_ref=f"SyncOrder:{order.order_uid}",
-                            new_value=audit_value,
-                        )
-                        flash(
-                            "Lote y fechas guardados. Pendiente de sincronización "
-                            "con fábrica.",
-                            "success",
-                        )
-                    else:
-                        flash("No había cambios para guardar.", "success")
-                    return redirect(
-                        url_for("order_saved", token=order.ensure_qr_token())
+                    changed, errors, warnings, audit_value = _apply_load_groups(
+                        order,
+                        projected_load_lines(order),
+                        request.form,
+                        is_projected=True,
                     )
+                    if errors:
+                        flash(" ".join(errors), "error")
+                        load_lines = projected_load_lines(order)
+                    else:
+                        if changed:
+                            audit.record(
+                                user=username,
+                                module=audit.MODULE_DESPACHOS,
+                                action=audit.ACTION_LOTE,
+                                record_ref=f"SyncOrder:{order.order_uid}",
+                                new_value=audit_value,
+                            )
+                            flash(
+                                "Lote y fechas guardados. Pendiente de sincronización "
+                                "con fábrica.",
+                                "success",
+                            )
+                        else:
+                            flash("No había cambios para guardar.", "success")
+                        for warning in warnings:
+                            flash(warning, "warning")
+                        return redirect(
+                            url_for("order_saved", token=order.ensure_qr_token())
+                        )
                 except (ValueError, OrderUnavailableError) as exc:
                     flash(str(exc), "error")
                     lines = projected_order_lines(order)
+                    load_lines = projected_load_lines(order)
 
             return render_template(
                 "order.html",
                 order=order,
                 lines=lines,
+                load_lines=load_lines,
                 line_context=projected_line_context(order, lines),
                 is_projected=True,
             )
 
         lines = order_lines(order)
+        load_lines = build_load_lines(order)
         if request.method == "POST":
             username = current_username()
             if not username:
@@ -502,77 +577,44 @@ self.addEventListener("fetch", event => {
                     400,
                 )
             try:
-                before = {
-                    line.id: (
-                        line.lote,
-                        line.fecha_elaboracion,
-                        line.fecha_envasado,
-                    )
-                    for line in lines
-                }
                 with database_proxy.atomic():
-                    for line in lines:
-                        update_order_line(
-                            order,
-                            line.id,
-                            lote=request.form.get(f"lote_{line.id}"),
-                            fecha_elaboracion=request.form.get(f"fecha_{line.id}"),
-                            fecha_envasado=request.form.get(
-                                f"fecha_envasado_{line.id}"
-                            ),
-                        )
+                    changed, errors, warnings, audit_value = _apply_load_groups(
+                        order,
+                        build_load_lines(order),
+                        request.form,
+                        is_projected=False,
+                    )
                 lines = order_lines(order)
-                changed = any(
-                    (
-                        line.lote,
-                        line.fecha_elaboracion,
-                        line.fecha_envasado,
-                    )
-                    != before.get(line.id)
-                    for line in lines
-                )
-                if changed:
-                    audit.record(
-                        user=username,
-                        module=audit.MODULE_DESPACHOS,
-                        action=audit.ACTION_LOTE,
-                        record_ref=f"LoadOrder:{order.id}",
-                        new_value={
-                            "orden": order.order_number,
-                            "renglones": [
-                                {
-                                    "renglon": line.id,
-                                    "producto": line.product.name,
-                                    "lote": line.lote,
-                                    "fecha_elaboracion": (
-                                        line.fecha_elaboracion.isoformat()
-                                        if line.fecha_elaboracion
-                                        else None
-                                    ),
-                                    "fecha_envasado": (
-                                        line.fecha_envasado.isoformat()
-                                        if line.fecha_envasado
-                                        else None
-                                    ),
-                                }
-                                for line in lines
-                            ],
-                        },
-                    )
-                    flash("Lote y fechas guardados.", "success")
+                load_lines = build_load_lines(order)
+                if errors:
+                    flash(" ".join(errors), "error")
                 else:
-                    flash("No había cambios para guardar.", "success")
-                return redirect(
-                    url_for("order_saved", token=order.ensure_qr_token())
-                )
+                    if changed:
+                        audit.record(
+                            user=username,
+                            module=audit.MODULE_DESPACHOS,
+                            action=audit.ACTION_LOTE,
+                            record_ref=f"LoadOrder:{order.id}",
+                            new_value=audit_value,
+                        )
+                        flash("Lote y fechas guardados.", "success")
+                    else:
+                        flash("No había cambios para guardar.", "success")
+                    for warning in warnings:
+                        flash(warning, "warning")
+                    return redirect(
+                        url_for("order_saved", token=order.ensure_qr_token())
+                    )
             except (ValueError, OrderNotFoundError) as exc:
                 flash(str(exc), "error")
                 lines = order_lines(order)
+                load_lines = build_load_lines(order)
 
         return render_template(
             "order.html",
             order=order,
             lines=lines,
+            load_lines=load_lines,
             line_context=order_line_context(order, lines),
             is_projected=False,
         )
@@ -591,10 +633,16 @@ self.addEventListener("fetch", event => {
             if is_projected
             else order_lines(order)
         )
+        load_lines = (
+            projected_load_lines(order)
+            if is_projected
+            else build_load_lines(order)
+        )
         return render_template(
             "order_saved.html",
             order=order,
             lines=lines,
+            load_lines=load_lines,
             is_projected=is_projected,
         )
 

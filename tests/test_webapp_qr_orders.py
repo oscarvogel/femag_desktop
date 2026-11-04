@@ -104,7 +104,7 @@ def test_mobile_order_page_shows_order_and_product(db):
     assert b"Orden #91001" in response.data
     assert b"Fecula de mandioca" in response.data
     assert b"Escanear" in response.data
-    assert f'data-target="lote_{line.id}"'.encode() in response.data
+    assert f'data-target="lote_n{line.id}_0"'.encode() in response.data
     assert b"BarcodeDetector" in response.data
     assert b"getUserMedia" in response.data
     assert b"Ingresar lote" in response.data
@@ -159,10 +159,14 @@ def test_mobile_order_line_shows_client_delivery_and_pallet_without_duplication(
     assert response.status_code == 200
     assert data["client"].name.encode() in response.data
     assert data["address"].city.encode() in response.data
-    assert b"1, 2, 3" in response.data
-    assert response.data.count(f'name="lote_{line.id}"'.encode()) == 1
-    assert response.data.count(f'name="fecha_{line.id}"'.encode()) == 1
-    assert response.data.count(f'data-target="lote_{line.id}"'.encode()) == 1
+    assert b"P1, P2, P3" in response.data
+    # La linea se carga una sola vez, aunque tenga tres pallets (#873).
+    assert response.data.count(f'name="lote_n{line.id}_0"'.encode()) == 1
+    assert response.data.count(f'name="fecha_n{line.id}_0"'.encode()) == 1
+    assert response.data.count(f'data-target="lote_n{line.id}_0"'.encode()) == 1
+    # Los tres pallets de la linea aparecen como botones.
+    for sequence in (1, 2, 3):
+        assert f'data-slot="{sequence}"'.encode() in response.data
 
 
 def test_mobile_order_post_updates_lot_and_manufacture_date(db):
@@ -177,8 +181,8 @@ def test_mobile_order_post_updates_lot_and_manufacture_date(db):
         f"/orden/{order.qr_token}",
         data={
             "csrf_token": csrf,
-            f"lote_{line.id}": "LOTE-2026-08",
-            f"fecha_{line.id}": "2026-08-27",
+            f"lote_n{line.id}_0": "LOTE-2026-08",
+            f"fecha_n{line.id}_0": "2026-08-27",
         },
         follow_redirects=True,
     )

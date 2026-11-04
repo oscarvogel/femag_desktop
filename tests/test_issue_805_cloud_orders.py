@@ -10,6 +10,7 @@ from webapp.projected_order_service import (
     get_projected_order_by_token,
     projected_order_lines,
 )
+from webapp.load_groups import fallback_key
 
 PASSWORD = "clave-de-prueba-123"
 
@@ -128,9 +129,9 @@ def test_projected_order_edit_queues_pending_event(db):
         "/orden/token-real-fabrica",
         data={
             "csrf_token": csrf,
-            f"lote_{line.id}": "LOTE-NUBE-1",
-            f"fecha_{line.id}": "2026-10-29",
-            f"fecha_envasado_{line.id}": "2026-10-30",
+            f"lote_p{line.id}_0": "LOTE-NUBE-1",
+            f"fecha_p{line.id}_0": "2026-10-29",
+            f"fecha_envasado_p{line.id}_0": "2026-10-30",
         },
         follow_redirects=True,
     )
@@ -167,9 +168,9 @@ def test_second_edit_updates_the_same_pending_event(db):
             "/orden/token-real-fabrica",
             data={
                 "csrf_token": csrf,
-                f"lote_{line.id}": lote,
-                f"fecha_{line.id}": "2026-10-29",
-                f"fecha_envasado_{line.id}": "2026-10-30",
+                f"lote_p{line.id}_0": lote,
+                f"fecha_p{line.id}_0": "2026-10-29",
+                f"fecha_envasado_p{line.id}_0": "2026-10-30",
             },
         )
 
@@ -194,9 +195,9 @@ def test_pending_lote_survives_next_snapshot(db):
         "/orden/token-real-fabrica",
         data={
             "csrf_token": csrf,
-            f"lote_{line.id}": "LOTE-NUBE",
-            f"fecha_{line.id}": "2026-10-29",
-            f"fecha_envasado_{line.id}": "2026-10-30",
+            f"lote_p{line.id}_0": "LOTE-NUBE",
+            f"fecha_p{line.id}_0": "2026-10-29",
+            f"fecha_envasado_p{line.id}_0": "2026-10-30",
         },
     )
 
@@ -270,12 +271,15 @@ def test_projected_order_shows_pallet_contents(db):
     response = _app().test_client().get("/orden/token-real-fabrica")
 
     assert response.status_code == 200
-    assert b"Pallet 1" in response.data
-    assert b"Mercader" in response.data
-    assert f'name="lote_{content_uid}"'.encode() in response.data
-    assert f'name="lote_{loose_uid}"'.encode() in response.data
-    assert f'name="fecha_envasado_{content_uid}"'.encode() in response.data
-    assert f'name="fecha_envasado_{loose_uid}"'.encode() in response.data
+    # El pallet y la mercaderia suelta comparten linea: se cargan en la misma
+    # tarjeta, cada uno en su grupo de lote (#873).
+    key = fallback_key("Fecula Fabrica", "Cliente Fabrica", "Ruta Fabrica - Posadas")
+    assert b"P1" in response.data
+    assert b"SUELTO" in response.data
+    assert f'name="lote_{key}_0"'.encode() in response.data
+    assert f'name="lote_{key}_1"'.encode() in response.data
+    assert f'name="fecha_envasado_{key}_0"'.encode() in response.data
+    assert f'name="fecha_envasado_{key}_1"'.encode() in response.data
     assert b"LOTE-FABRICA-1" in response.data
     assert b"LOTE-SUELTO" in response.data
     assert b'value="2026-10-27"' in response.data
@@ -287,14 +291,16 @@ def test_content_edit_queues_content_event(db):
     client = _app().test_client()
     _login(client)
     csrf = _csrf(client, "token-real-fabrica")
+    key = fallback_key("Fecula Fabrica", "Cliente Fabrica", "Ruta Fabrica - Posadas")
 
     response = client.post(
         "/orden/token-real-fabrica",
         data={
             "csrf_token": csrf,
-            f"lote_{content_uid}": "LOTE-NUEVO",
-            f"fecha_{content_uid}": "2026-10-29",
-            f"fecha_envasado_{content_uid}": "2026-10-30",
+            f"lote_{key}_0": "LOTE-NUEVO",
+            f"fecha_{key}_0": "2026-10-29",
+            f"fecha_envasado_{key}_0": "2026-10-30",
+            f"pallets_{key}_0": "1",
         },
         follow_redirects=True,
     )
@@ -327,13 +333,15 @@ def test_pending_content_survives_next_snapshot(db):
     client = _app().test_client()
     _login(client)
     csrf = _csrf(client, "token-real-fabrica")
+    key = fallback_key("Fecula Fabrica", "Cliente Fabrica", "Ruta Fabrica - Posadas")
     client.post(
         "/orden/token-real-fabrica",
         data={
             "csrf_token": csrf,
-            f"lote_{content_uid}": "LOTE-NUBE",
-            f"fecha_{content_uid}": "2026-10-29",
-            f"fecha_envasado_{content_uid}": "2026-10-30",
+            f"lote_{key}_0": "LOTE-NUBE",
+            f"fecha_{key}_0": "2026-10-29",
+            f"fecha_envasado_{key}_0": "2026-10-30",
+            f"pallets_{key}_0": "1",
         },
     )
 

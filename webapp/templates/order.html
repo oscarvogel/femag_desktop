@@ -27,94 +27,57 @@
     <p class="muted">Para guardar lote y fechas tenés que <a href="{{ url_for('login', next=request.path) }}">iniciar sesión</a>.</p>
   </div>
   {% endif %}
-  {% if order.has_contents %}
-    {% for pallet in order.pallets %}
-    <div class="card">
-      <h2>Pallet {{ pallet.sequence }}</h2>
-      {% for content in pallet.contents %}
-      <div class="line">
-        <strong>{{ content.product.name }}</strong>
-        <p class="muted">Cantidad: {{ content.quantity }} {{ content.unit }}</p>
-        <div class="dispatch-context">
-          <div><span>Cliente</span><strong>{{ content.client_name }}</strong></div>
-          <div><span>Lugar de entrega</span><strong>{{ content.destination }}</strong></div>
-        </div>
-        <label for="lote_{{ content.id }}">Lote</label>
-        <div class="lot-row">
-          <input id="lote_{{ content.id }}" name="lote_{{ content.id }}" value="{{ content.lote or '' }}" placeholder="Ingresar lote">
-          <button class="scan-lot-button" type="button" data-target="lote_{{ content.id }}" aria-label="Escanear lote de {{ content.product.name }}">Escanear</button>
-        </div>
-        <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
-        <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
-        <label for="fecha_envasado_{{ content.id }}">Fecha de envasado</label>
-        <input id="fecha_envasado_{{ content.id }}" name="fecha_envasado_{{ content.id }}" type="date" value="{{ content.fecha_envasado.isoformat() if content.fecha_envasado else '' }}">
+  {% if load_lines %}
+    <p class="muted">Cargá el lote y la fecha de elaboración una vez por grupo de pallets. La fecha pertenece al lote: no se repite en cada pallet.</p>
+    {% for line in load_lines %}
+    <div class="card load-line" data-line-key="{{ line.key }}">
+      <h2>{{ line.product }}</h2>
+      <p class="muted">
+        {{ line.quantity }} {{ line.unit }} ·
+        {% if line.contents %}{{ line.contents|length }} pallet(s){% else %}sin pallets asignados{% endif %}
+      </p>
+      <div class="dispatch-context">
+        <div><span>Cliente</span><strong>{{ line.client }}</strong></div>
+        <div><span>Lugar de entrega</span><strong>{{ line.destination }}</strong></div>
       </div>
-      {% endfor %}
+
+      {% if line.contents %}
+      <div class="load-slots" data-slots>
+        {% for content in line.contents %}
+        <button type="button" class="slot-chip" data-slot="{{ content.slot }}" data-slot-label="{{ content.slot_label }}" data-group="0">{{ content.slot_label }}</button>
+        {% endfor %}
+      </div>
+      <p class="muted load-slots-hint">Tocá un pallet para pasarlo al otro lote cuando la línea va con más de un lote.</p>
+      {% endif %}
+
+      <div class="load-groups" data-groups>
+        {% for group in line.groups %}
+        <fieldset class="load-group" data-group-index="{{ loop.index0 }}">
+          <legend data-group-title>Grupo {{ loop.index }}</legend>
+          <p class="group-slots muted" data-slots-label>{% if group.slots %}Pallets: {% for slot in group.slots %}{{ line.slot_labels.get(slot, slot) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}Sin pallets todavía.{% endif %}</p>
+          <label for="lote_{{ line.key }}_{{ loop.index0 }}">Lote</label>
+          <div class="lot-row">
+            <input id="lote_{{ line.key }}_{{ loop.index0 }}" name="lote_{{ line.key }}_{{ loop.index0 }}" value="{{ group.lote }}" placeholder="Ingresar lote" data-field="lote" autocomplete="off">
+            <button class="scan-lot-button" type="button" data-target="lote_{{ line.key }}_{{ loop.index0 }}" aria-label="Escanear lote de {{ line.product }}">Escanear</button>
+          </div>
+          <label for="fecha_{{ line.key }}_{{ loop.index0 }}">Fecha de elaboración</label>
+          <input id="fecha_{{ line.key }}_{{ loop.index0 }}" name="fecha_{{ line.key }}_{{ loop.index0 }}" type="date" value="{{ group.fecha_elaboracion }}" data-field="fecha">
+          <label for="fecha_envasado_{{ line.key }}_{{ loop.index0 }}">Fecha de envasado</label>
+          <input id="fecha_envasado_{{ line.key }}_{{ loop.index0 }}" name="fecha_envasado_{{ line.key }}_{{ loop.index0 }}" type="date" value="{{ group.fecha_envasado }}" data-field="fecha_envasado">
+          <input type="hidden" name="pallets_{{ line.key }}_{{ loop.index0 }}" value="{{ group.slots|join(',') }}" data-field="pallets" data-slots-input>
+        </fieldset>
+        {% endfor %}
+      </div>
+      <button type="button" class="add-group-button" data-add-group>+ otro lote para otros pallets</button>
     </div>
     {% endfor %}
-    {% if order.loose_contents %}
-    <div class="card">
-      <h2>Mercadería suelta</h2>
-      {% for content in order.loose_contents %}
-      <div class="line">
-        <strong>{{ content.product.name }}</strong>
-        <p class="muted">Cantidad: {{ content.quantity }} {{ content.unit }}</p>
-        <div class="dispatch-context">
-          <div><span>Cliente</span><strong>{{ content.client_name }}</strong></div>
-          <div><span>Lugar de entrega</span><strong>{{ content.destination }}</strong></div>
-        </div>
-        <label for="lote_{{ content.id }}">Lote</label>
-        <div class="lot-row">
-          <input id="lote_{{ content.id }}" name="lote_{{ content.id }}" value="{{ content.lote or '' }}" placeholder="Ingresar lote">
-          <button class="scan-lot-button" type="button" data-target="lote_{{ content.id }}" aria-label="Escanear lote de {{ content.product.name }}">Escanear</button>
-        </div>
-        <label for="fecha_{{ content.id }}">Fecha de elaboración</label>
-        <input id="fecha_{{ content.id }}" name="fecha_{{ content.id }}" type="date" value="{{ content.fecha_elaboracion.isoformat() if content.fecha_elaboracion else '' }}">
-        <label for="fecha_envasado_{{ content.id }}">Fecha de envasado</label>
-        <input id="fecha_envasado_{{ content.id }}" name="fecha_envasado_{{ content.id }}" type="date" value="{{ content.fecha_envasado.isoformat() if content.fecha_envasado else '' }}">
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
+    <button type="submit">Guardar lote y fechas</button>
   {% else %}
   <div class="card">
     <h2>Productos</h2>
-    {% if lines %}
-      {% for line in lines %}
-      {% set ctx = line_context.get(line.id, {}) %}
-      <div class="line">
-        <strong>{{ line.product.name }}</strong>
-        <p class="muted">Cantidad: {{ line.quantity }} {{ line.unit }}</p>
-        <div class="dispatch-context">
-          <div><span>Cliente</span><strong>{{ ctx.get('client', '-') }}</strong></div>
-          <div><span>Lugar de entrega</span><strong>{{ ctx.get('delivery', '-') }}</strong></div>
-          <div><span>Pallet</span><strong>
-            {% if ctx.get('pallets') %}
-              {{ ctx.get('pallets') | join(', ') }}
-            {% elif ctx.get('is_loose') %}
-              Mercadería suelta
-            {% else %}
-              Sin pallet asignado
-            {% endif %}
-          </strong></div>
-        </div>
-        <label for="lote_{{ line.id }}">Lote</label>
-        <div class="lot-row">
-          <input id="lote_{{ line.id }}" name="lote_{{ line.id }}" value="{{ line.lote or '' }}" placeholder="Ingresar lote">
-          <button class="scan-lot-button" type="button" data-target="lote_{{ line.id }}" aria-label="Escanear lote de {{ line.product.name }}">Escanear</button>
-        </div>
-        <label for="fecha_{{ line.id }}">Fecha de elaboración</label>
-        <input id="fecha_{{ line.id }}" name="fecha_{{ line.id }}" type="date" value="{{ line.fecha_elaboracion.isoformat() if line.fecha_elaboracion else '' }}">
-        <label for="fecha_envasado_{{ line.id }}">Fecha de envasado</label>
-        <input id="fecha_envasado_{{ line.id }}" name="fecha_envasado_{{ line.id }}" type="date" value="{{ line.fecha_envasado.isoformat() if line.fecha_envasado else '' }}">
-      </div>
-      {% endfor %}
-    {% else %}
-      <p>La orden no tiene productos cargados.</p>
-    {% endif %}
+    <p>La orden no tiene productos cargados.</p>
   </div>
   {% endif %}
-  {% if lines or order.has_contents %}<button type="submit">Guardar lote y fechas</button>{% endif %}
 </form>
 <div style="height:12px"></div>
 <a class="button" href="{{ url_for('home') }}">Buscar otra orden</a>
@@ -143,6 +106,14 @@
   .scanner-header h2 { margin: 0; }
   .scanner-header button { width: auto; min-height: 40px; padding: 8px 16px; white-space: nowrap; }
   #lot-scanner-video { display: block; width: 100%; min-height: 240px; max-height: 55vh; object-fit: cover; border-radius: 10px; background: #111; margin: 12px 0; }
+  .load-slots { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+  .slot-chip { width: auto; min-height: 40px; padding: 8px 12px; border-radius: 999px; border: 1px solid #c6d2dd; background: #fff; color: #22303c; font-size: .9rem; font-weight: 700; }
+  .slot-chip.is-moved { border-color: #1f3f78; background: #eaf0fb; color: #1f3f78; }
+  .load-slots-hint { font-size: .82rem; margin: 0 0 12px; }
+  .load-group { border: 1px solid #dbe3ea; border-radius: 12px; padding: 12px 14px 14px; margin: 0 0 12px; }
+  .load-group legend { font-weight: 800; padding: 0 6px; }
+  .group-slots { font-size: .82rem; margin: 0 0 8px; }
+  .add-group-button { width: 100%; min-height: 44px; border-style: dashed; }
   @media (max-width: 430px) {
     .lot-row { grid-template-columns: 1fr; }
     .scan-lot-button { width: 100%; }
@@ -215,7 +186,15 @@
     } catch (error) { status.textContent = 'No se pudo abrir la cámara. Revisá los permisos del navegador.'; }
   }
 
-  document.querySelectorAll('.scan-lot-button').forEach(button => button.addEventListener('click', () => startScanner(button.dataset.target)));
+  // El boton de escaneo se resuelve por delegacion porque los grupos de lote
+  // se agregan en el momento y no estan en el DOM al cargar la pagina.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('.scan-lot-button');
+    if (button) {
+      event.preventDefault();
+      startScanner(button.dataset.target);
+    }
+  });
   closeButton.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
@@ -233,6 +212,107 @@
     }
   });
   window.addEventListener('pagehide', () => stopScanner(true));
+
+  // ------------------------------------------------------------------
+  // Grupos de lote por linea de despacho (#873)
+  // ------------------------------------------------------------------
+  const MAX_GROUPS = 8;
+
+  const groupsOf = card => Array.from(card.querySelectorAll('.load-group'));
+  const chipsOf = card => Array.from(card.querySelectorAll('.slot-chip'));
+
+  function slotLabel(chips, slot) {
+    const chip = chips.find(item => item.dataset.slot === slot);
+    return chip ? chip.dataset.slotLabel : slot;
+  }
+
+  function refreshLine(card) {
+    const key = card.dataset.lineKey;
+    const groups = groupsOf(card);
+    const chips = chipsOf(card);
+
+    groups.forEach((group, index) => {
+      group.dataset.groupIndex = index;
+      group.querySelectorAll('[data-field]').forEach(input => {
+        const field = input.dataset.field;
+        input.name = `${field}_${key}_${index}`;
+        input.id = `${field}_${key}_${index}`;
+      });
+      const scan = group.querySelector('.scan-lot-button');
+      if (scan) scan.dataset.target = `lote_${key}_${index}`;
+      const slots = chips.filter(chip => Number(chip.dataset.group) === index).map(chip => chip.dataset.slot);
+      const hidden = group.querySelector('[data-slots-input]');
+      if (hidden) hidden.value = slots.join(',');
+      const label = group.querySelector('[data-slots-label]');
+      if (label) {
+        label.textContent = slots.length
+          ? `Pallets: ${slots.map(slot => slotLabel(chips, slot)).join(', ')}`
+          : 'Sin pallets todavía.';
+      }
+      const title = group.querySelector('[data-group-title]');
+      if (title) title.textContent = `Grupo ${index + 1}`;
+    });
+
+    chips.forEach(chip => {
+      const group = groups[Number(chip.dataset.group)];
+      const loteInput = group ? group.querySelector('[data-field="lote"]') : null;
+      const lote = loteInput ? loteInput.value.trim() : '';
+      chip.textContent = lote ? `${chip.dataset.slotLabel} · ${lote}` : chip.dataset.slotLabel;
+      chip.classList.toggle('is-moved', Number(chip.dataset.group) > 0);
+    });
+  }
+
+  function initLine(card) {
+    // El reparto inicial viene del servidor: cada grupo arranca con los
+    // pallets que ya tenia cargados.
+    groupsOf(card).forEach((group, index) => {
+      const hidden = group.querySelector('[data-slots-input]');
+      const slots = (hidden && hidden.value ? hidden.value : '').split(',').map(part => part.trim()).filter(Boolean);
+      slots.forEach(slot => {
+        const chip = chipsOf(card).find(item => item.dataset.slot === slot);
+        if (chip) chip.dataset.group = index;
+      });
+    });
+    refreshLine(card);
+  }
+
+  function addGroup(card) {
+    const groups = groupsOf(card);
+    if (groups.length >= MAX_GROUPS) {
+      window.alert(`No se pueden agregar más de ${MAX_GROUPS} lotes por línea.`);
+      return;
+    }
+    const last = groups[groups.length - 1];
+    if (!last) return;
+    const clone = last.cloneNode(true);
+    clone.dataset.groupIndex = groups.length;
+    clone.querySelectorAll('[data-field]').forEach(input => { input.value = ''; });
+    const label = clone.querySelector('[data-slots-label]');
+    if (label) label.textContent = 'Sin pallets todavía.';
+    card.querySelector('[data-groups]').appendChild(clone);
+    refreshLine(card);
+  }
+
+  document.querySelectorAll('.load-line').forEach(card => {
+    initLine(card);
+    const addButton = card.querySelector('[data-add-group]');
+    if (addButton) addButton.addEventListener('click', () => addGroup(card));
+    chipsOf(card).forEach(chip => {
+      chip.addEventListener('click', () => {
+        const groups = groupsOf(card);
+        if (groups.length < 2) {
+          window.alert('Agregá otro lote para poder separar pallets.');
+          return;
+        }
+        const current = Number(chip.dataset.group);
+        chip.dataset.group = (current + 1) % groups.length;
+        refreshLine(card);
+      });
+    });
+    card.querySelectorAll('[data-field="lote"]').forEach(input => {
+      input.addEventListener('input', () => refreshLine(card));
+    });
+  });
 
   const saveForm = document.getElementById('lot-save-form');
   if (saveForm) {

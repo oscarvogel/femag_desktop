@@ -157,6 +157,8 @@ class LotTraceabilityService:
                 LoadOrderPalletAllocation.product.alias("product_id"),
                 LoadOrderPalletAllocation.quantity.alias("quantity"),
                 LoadOrderPalletAllocation.peso_unitario_kg.alias("weight"),
+                LoadOrderPalletAllocation.lote.alias("lote"),
+                LoadOrderPalletAllocation.fecha_elaboracion.alias("elaboration_date"),
                 LoadOrderPallet.sequence.alias("sequence"),
             )
             .join(LoadOrderPallet)
@@ -170,6 +172,8 @@ class LotTraceabilityService:
                     "pallet": f"Pallet {int(row['sequence'])}",
                     "quantity": float(row["quantity"] or 0),
                     "kilos": float(row["quantity"] or 0) * float(row["weight"] or 0),
+                    "lote": (row["lote"] or "").strip(),
+                    "elaboration_date": row["elaboration_date"],
                 }
             )
         loose_rows = (
@@ -179,6 +183,8 @@ class LotTraceabilityService:
                 LoadOrderLooseAllocation.product.alias("product_id"),
                 LoadOrderLooseAllocation.quantity.alias("quantity"),
                 LoadOrderLooseAllocation.peso_unitario_kg.alias("weight"),
+                LoadOrderLooseAllocation.lote.alias("lote"),
+                LoadOrderLooseAllocation.fecha_elaboracion.alias("elaboration_date"),
             )
             .where(LoadOrderLooseAllocation.order.in_(order_ids))
             .dicts()
@@ -190,6 +196,8 @@ class LotTraceabilityService:
                     "pallet": self.LOOSE_LABEL,
                     "quantity": float(row["quantity"] or 0),
                     "kilos": float(row["quantity"] or 0) * float(row["weight"] or 0),
+                    "lote": (row["lote"] or "").strip(),
+                    "elaboration_date": row["elaboration_date"],
                 }
             )
         return grouped
@@ -241,6 +249,13 @@ class LotTraceabilityService:
             rows.append(
                 {
                     **base,
+                    # Cada pallet muestra el lote y la elaboración de su propio
+                    # contenido; si el contenido no los tiene, se usa la línea.
+                    "lote": assignment.get("lote") or base["lote"],
+                    "elaboration_date": (
+                        assignment.get("elaboration_date")
+                        or base["elaboration_date"]
+                    ),
                     "pallet": assignment["pallet"],
                     "quantity": round(take, 3),
                     "kilos": round(assignment["kilos"] * share, 3),

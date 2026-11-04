@@ -193,14 +193,18 @@ class LoadOrderPrintService:
         for pallet, allocations in self._pallet_allocations_by_destination(destination):
             rows = []
             for allocation in allocations:
-                lote, elab = self._lote_elab(requested, destination, allocation.product)
+                lote, elab = self._lote_elab(
+                    requested, destination, allocation.product, allocation
+                )
                 rows.append(self._allocation_row(allocation, lote, elab))
                 assigned[(destination.id, allocation.product_id)] += float(allocation.quantity)
             pallet_blocks.append({"label": str(pallet.sequence), "rows": rows})
         loose_block = None
         loose_rows = []
         for allocation in destination.loose_allocations:
-            lote, elab = self._lote_elab(requested, destination, allocation.product)
+            lote, elab = self._lote_elab(
+                requested, destination, allocation.product, allocation
+            )
             loose_rows.append(self._allocation_row(allocation, lote, elab))
             assigned[(destination.id, allocation.product_id)] += float(allocation.quantity)
         if loose_rows:
@@ -274,11 +278,33 @@ class LoadOrderPrintService:
             if product.destination_id is not None
         }
 
-    def _lote_elab(self, requested: dict, destination, product) -> tuple[str, str]:
+    def _lote_elab(
+        self, requested: dict, destination, product, allocation=None
+    ) -> tuple[str, str]:
+        """Lote y elaboración del contenido del pallet, con fallback a la línea.
+
+        La carga por QR completa el contenido de cada pallet (#873) y deja en la
+        línea el lote del grupo más grande. La hoja de despacho debe mostrar el
+        lote real de cada pallet; si el contenido todavía no lo tiene, se usa el
+        de la línea para no perder el dato previo.
+        """
+
         product_row = requested.get((destination.id, product.id))
-        if product_row is None:
-            return "-", "-"
-        return product_row.lote or "-", self._elab_text(product_row.fecha_elaboracion)
+        line_lote = (product_row.lote or "").strip() if product_row is not None else ""
+        line_elab = product_row.fecha_elaboracion if product_row is not None else None
+        content_lote = (
+            (getattr(allocation, "lote", None) or "").strip()
+            if allocation is not None
+            else ""
+        )
+        content_elab = (
+            getattr(allocation, "fecha_elaboracion", None)
+            if allocation is not None
+            else None
+        )
+        lote = content_lote or line_lote or "-"
+        elab = content_elab if content_elab is not None else line_elab
+        return lote, self._elab_text(elab)
 
     @staticmethod
     def _elab_text(value) -> str:
