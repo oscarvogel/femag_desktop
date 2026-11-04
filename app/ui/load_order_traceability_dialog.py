@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QDate
+from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
+    QApplication,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
@@ -155,8 +156,18 @@ class LoadOrderTraceabilityDialog(QDialog):
             f"Lote / fecha OC-{self.order.order_number:06d}"
         )
         self.setModal(True)
-        self.resize(1080, 520)
-        self.setMinimumWidth(900)
+        self.setSizeGripEnabled(True)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self.setMinimumSize(900, 520)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(max(1000, int(available.width() * 0.9)), available.width() - 40)
+            height = min(max(560, int(available.height() * 0.8)), available.height() - 40)
+        else:
+            width, height = 1200, 640
+        self.resize(width, height)
 
         layout = QVBoxLayout(self)
 
@@ -187,11 +198,19 @@ class LoadOrderTraceabilityDialog(QDialog):
                 "Envasado",
             ]
         )
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        for column, width in enumerate((90, 160, 170, 160, 70, 150, 120, 120)):
-            self.table.setColumnWidth(column, width)
+        header = self.table.horizontalHeader()
+        header.setMinimumSectionSize(60)
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.Interactive)
+        self.table.setColumnWidth(5, 190)
+        header.setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(30)
         self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
         layout.addWidget(self.table, 1)
 
         self.reason_input = None
