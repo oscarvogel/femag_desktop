@@ -6,7 +6,6 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -226,29 +225,6 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         self.guided_lock_button.clicked.connect(self.toggle_selected_pallet_lock)
         pallet_actions.addWidget(self.guided_lock_button)
         current_layout.addLayout(pallet_actions)
-
-        separator = QFrame(self.guided_splitter)
-        separator.setObjectName("guidedDangerSeparator")
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        current_layout.addWidget(separator)
-
-        destructive_actions = QHBoxLayout()
-        destructive_actions.addStretch(1)
-        self.guided_clear_assignments_button = QPushButton("Vaciar todos los pallets")
-        self.guided_clear_assignments_button.setObjectName(
-            "guidedClearAllPalletAllocationsButton"
-        )
-        self.guided_clear_assignments_button.setProperty("uiRole", "danger")
-        self.guided_clear_assignments_button.setToolTip(
-            "Quita toda la mercadería de los pallets y la devuelve a pendiente. "
-            "No elimina los pallets ni la mercadería suelta."
-        )
-        self.guided_clear_assignments_button.clicked.connect(
-            self._guided_confirm_clear_allocations
-        )
-        destructive_actions.addWidget(self.guided_clear_assignments_button)
-        current_layout.addLayout(destructive_actions)
 
         self.guided_splitter.addWidget(pending_group)
         self.guided_splitter.addWidget(current_group)
@@ -695,10 +671,6 @@ class PalletCompositionWidget(_BasePalletCompositionWidget):
         if not hasattr(self, "guided_pallet_combo"):
             return
         self._render_guided_loose_table()
-        if hasattr(self, "guided_clear_assignments_button"):
-            self.guided_clear_assignments_button.setEnabled(
-                any(pallet.get("allocations") for pallet in self._pallets)
-            )
         selected = self._selected_sequence
         self.guided_pallet_combo.blockSignals(True)
         self.guided_pallet_combo.clear()
