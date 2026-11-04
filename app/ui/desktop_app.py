@@ -3611,6 +3611,9 @@ class LoadOrderPalletDialog(QDialog):
                         "product_label": allocation.product.name,
                         "quantity": float(allocation.quantity),
                         "peso_unitario_kg": allocation.peso_unitario_kg,
+                        "lote": allocation.lote,
+                        "fecha_elaboracion": allocation.fecha_elaboracion,
+                        "fecha_envasado": allocation.fecha_envasado,
                     }
                     for allocation in pallet.allocations
                 ],
@@ -3627,6 +3630,9 @@ class LoadOrderPalletDialog(QDialog):
                 "product_label": allocation.product.name,
                 "quantity": float(allocation.quantity),
                 "peso_unitario_kg": allocation.peso_unitario_kg,
+                "lote": allocation.lote,
+                "fecha_elaboracion": allocation.fecha_elaboracion,
+                "fecha_envasado": allocation.fecha_envasado,
             }
             for allocation in self.order.loose_allocations.order_by()
         ]
@@ -3645,6 +3651,9 @@ class LoadOrderPalletDialog(QDialog):
                             "product": Product.get_by_id(allocation["product_id"]),
                             "quantity": allocation["quantity"],
                             "peso_unitario_kg": allocation.get("peso_unitario_kg"),
+                            "lote": allocation.get("lote"),
+                            "fecha_elaboracion": allocation.get("fecha_elaboracion"),
+                            "fecha_envasado": allocation.get("fecha_envasado"),
                         }
                     )
                 pallet_type_id = pallet.get("pallet_type_id")
@@ -3665,6 +3674,9 @@ class LoadOrderPalletDialog(QDialog):
                         "product": Product.get_by_id(allocation["product_id"]),
                         "quantity": allocation["quantity"],
                         "peso_unitario_kg": allocation.get("peso_unitario_kg"),
+                        "lote": allocation.get("lote"),
+                        "fecha_elaboracion": allocation.get("fecha_elaboracion"),
+                        "fecha_envasado": allocation.get("fecha_envasado"),
                     }
                 )
             self.order = self.service.update_order(
