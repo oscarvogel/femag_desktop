@@ -26,9 +26,11 @@ from app.models.masters import Client
 from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
+from app.services.load_order_traceability_service import LoadOrderTraceabilityService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
 from app.ui.load_order_stock_shortfall_dialog import emit_order_with_stock_check
+from app.ui.load_order_traceability_dialog import LoadOrderTraceabilityDialog
 import app.ui.desktop_app as desktop
 
 
@@ -107,6 +109,9 @@ def _restored_load_order_page(self):
     layout = page.layout()
     service = LoadOrderService(current_user=self.shell.username)
     closure_service = LoadOrderClosureService(current_user=self.shell.username)
+    traceability_service = LoadOrderTraceabilityService(
+        current_user=self.shell.username
+    )
     operation_service = LoadOrderOperationService(
         current_user=self.shell.username,
         prints_dir=desktop.LOAD_ORDER_PRINTS_DIR,
@@ -136,6 +141,9 @@ def _restored_load_order_page(self):
     print_button = desktop._action_button("printLoadOrderButton", "Imprimir", secondary=True)
     reprint_button = desktop._action_button("reprintLoadOrderButton", "Reimprimir", secondary=True)
     budget_button = desktop._action_button("budgetLoadOrderButton", "Presupuesto", secondary=True)
+    traceability_button = desktop._action_button(
+        "editLoadOrderTraceabilityButton", "Lote / fecha", secondary=True
+    )
     annul_button = desktop._action_button("annulLoadOrderButton", "Anular", secondary=True)
     annul_button.setProperty("uiRole", "danger")
 
@@ -149,10 +157,13 @@ def _restored_load_order_page(self):
     desktop._set_button_icon(print_button, QStyle.SP_FileDialogContentsView)
     desktop._set_button_icon(reprint_button, QStyle.SP_BrowserReload)
     desktop._set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
+    desktop._set_button_icon(traceability_button, QStyle.SP_DialogSaveButton)
     desktop._set_button_icon(annul_button, QStyle.SP_TrashIcon)
 
     can_reprint = desktop._can_reprint_load_orders(self.user)
     reprint_button.setVisible(can_reprint)
+    can_edit_traceability = desktop._can_edit_load_order_traceability(self.user)
+    traceability_button.setVisible(can_edit_traceability)
     # Esta extension REEMPLAZA la pantalla de ordenes del codigo base, asi que
     # el boton de reparacion tiene que estar aqui tambien: antes solo estaba
     # en la pagina base, que en runtime no se ve, y el administrador no lo
@@ -171,6 +182,7 @@ def _restored_load_order_page(self):
         print_button,
         reprint_button,
         budget_button,
+        traceability_button,
         annul_button,
     ):
         actions.addWidget(button)
@@ -401,12 +413,17 @@ def _restored_load_order_page(self):
             pallets_button,
             close_button,
             reprint_button,
+            traceability_button,
         ):
             button.setEnabled(False)
+        traceability_button.setToolTip(
+            "Seleccione una orden para corregir lote y fechas."
+        )
 
     def set_action_state(order: LoadOrder) -> None:
         is_pending = order.is_unissued
         is_issued = order.status == LoadOrder.STATUS_ISSUED
+        is_annulled = order.status == LoadOrder.STATUS_ANNULLED
         issue_button.setEnabled(is_pending)
         edit_button.setEnabled(is_pending)
         detail_button.setEnabled(True)
@@ -415,6 +432,15 @@ def _restored_load_order_page(self):
         close_button.setEnabled(is_issued)
         has_original_print = desktop._has_printed_load_order(order)
         reprint_button.setEnabled(can_reprint and has_original_print)
+        traceability_button.setEnabled(can_edit_traceability and not is_annulled)
+        if is_annulled:
+            traceability_button.setToolTip(
+                "No se puede editar la trazabilidad de una orden anulada."
+            )
+        else:
+            traceability_button.setToolTip(
+                "Corregir lote y fechas de cada contenido de la orden."
+            )
 
     def open_detail_dialog() -> None:
         order = selected_order()
@@ -429,6 +455,37 @@ def _restored_load_order_page(self):
             feedback.show_warning("Seleccione una orden para ver su historial.", focus_widget=table)
             return
         desktop.LoadOrderHistoryDialog(order, self).exec_()
+
+    def open_traceability_dialog() -> None:
+        order = selected_order()
+        if order is None:
+            feedback.show_warning(
+                "Seleccione una orden para corregir lote y fechas.",
+                focus_widget=table,
+            )
+            return
+        if not can_edit_traceability:
+            feedback.show_error(
+                "No tiene permiso para cargar lote y fechas en ordenes de carga.",
+                focus_widget=table,
+            )
+            return
+        if order.status == LoadOrder.STATUS_ANNULLED:
+            feedback.show_warning(
+                "No se puede editar la trazabilidad de una orden anulada.",
+                focus_widget=table,
+            )
+            return
+        dialog = LoadOrderTraceabilityDialog(traceability_service, order, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        if dialog.updated_count:
+            feedback.show_success(
+                "Lote y fecha actualizados. Pendiente de sincronización con la nube."
+            )
+        else:
+            feedback.show_info("No hubo cambios en lote o fechas.")
+        refresh()
 
     def open_new_order_dialog() -> None:
         dialog = desktop.LoadOrderEntryDialog(service, self.shell.username, self)
@@ -724,5 +781,6 @@ def _restored_load_order_page(self):
     print_button.clicked.connect(print_order)
     reprint_button.clicked.connect(reprint_order)
     budget_button.clicked.connect(print_budget)
+    traceability_button.clicked.connect(open_traceability_dialog)
     refresh()
     return page

@@ -1,6 +1,7 @@
 """Edicion auditada de lote/fechas desde Escritorio (#864, PR 2)."""
 
 import os
+from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 
@@ -67,6 +68,21 @@ def service_create_order(data, *, status=LoadOrder.STATUS_PENDING):
         order.status = status
         order.save()
     return order
+
+
+@contextmanager
+def _runtime_load_order_page():
+    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.load_order_workspace_restore_extension import (
+        install_load_order_workspace_restore_extension,
+    )
+
+    original = FemagDesktopWindow._load_order_page
+    install_load_order_workspace_restore_extension()
+    try:
+        yield
+    finally:
+        FemagDesktopWindow._load_order_page = original
 
 
 def _items(allocation, loose):
@@ -291,28 +307,32 @@ def test_toolbar_button_follows_permission_and_annulled_state(db):
     user = User.create(username="secre_toolbar", password_hash="x", profile=profile)
     order, _line, _allocation, _loose = _order_with_contents()
 
-    window = FemagDesktopWindow(user=user, demo_mode=True)
-    app.processEvents()
-    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
-    app.processEvents()
+    with _runtime_load_order_page():
+        window = FemagDesktopWindow(user=user, demo_mode=True)
+        window.show()
+        app.processEvents()
+        window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+        app.processEvents()
 
-    button = window.findChild(QPushButton, "editLoadOrderTraceabilityButton")
-    assert button.isHidden() is False
-    assert button.isEnabled()
+        button = window.findChild(QPushButton, "editLoadOrderTraceabilityButton")
+        assert button.isHidden() is False
+        assert button.isEnabled()
+        window.close()
 
-    order.status = LoadOrder.STATUS_ANNULLED
-    order.save()
-    window.close()
-    annulled_window = FemagDesktopWindow(user=user, demo_mode=True)
-    app.processEvents()
-    annulled_window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
-    app.processEvents()
+        order.status = LoadOrder.STATUS_ANNULLED
+        order.save()
+        annulled_window = FemagDesktopWindow(user=user, demo_mode=True)
+        annulled_window.show()
+        app.processEvents()
+        annulled_window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+        app.processEvents()
 
-    annulled_button = annulled_window.findChild(
-        QPushButton, "editLoadOrderTraceabilityButton"
-    )
-    assert annulled_button.isHidden() is False
-    assert annulled_button.isEnabled() is False
+        annulled_button = annulled_window.findChild(
+            QPushButton, "editLoadOrderTraceabilityButton"
+        )
+        assert annulled_button.isHidden() is False
+        assert annulled_button.isEnabled() is False
+        annulled_window.close()
 
 
 def test_toolbar_hides_traceability_without_permission(db):
@@ -328,14 +348,17 @@ def test_toolbar_hides_traceability_without_permission(db):
     user = User.create(username="consulta_toolbar", password_hash="x", profile=profile)
     _order_with_contents()
 
-    window = FemagDesktopWindow(user=user, demo_mode=True)
-    app.processEvents()
-    window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
-    app.processEvents()
+    with _runtime_load_order_page():
+        window = FemagDesktopWindow(user=user, demo_mode=True)
+        window.show()
+        app.processEvents()
+        window.findChild(QTableWidget, "loadOrdersTable").setCurrentCell(0, 0)
+        app.processEvents()
 
-    button = window.findChild(QPushButton, "editLoadOrderTraceabilityButton")
-    assert button is not None
-    assert button.isHidden() is True
+        button = window.findChild(QPushButton, "editLoadOrderTraceabilityButton")
+        assert button is not None
+        assert button.isHidden() is True
+        window.close()
 
 
 def test_stale_cloud_event_conflicts_after_local_edit(db):
