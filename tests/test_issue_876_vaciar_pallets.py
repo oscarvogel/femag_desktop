@@ -86,25 +86,44 @@ def _answer(monkeypatch, choice):
     return captured
 
 
-def test_guided_clear_button_is_visible_and_disabled_without_assignments(db):
-    from PyQt5.QtWidgets import QPushButton
+def test_clear_button_lives_in_dialog_footer_and_follows_assignments(db):
+    from PyQt5.QtWidgets import QApplication, QPushButton
 
-    destination = _destinations(db)[0]
-    widget = _widget([destination])
-    button = widget.findChild(QPushButton, "guidedClearAllPalletAllocationsButton")
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderPalletDialog
 
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    data["product"].peso_unitario_kg = Decimal("25.000")
+    data["product"].save()
+    service = LoadOrderService(current_user="issue876")
+    order = service.create_order(**_valid_order_payload(data))
+    dialog = LoadOrderPalletDialog(service, order)
+    app.processEvents()
+
+    button = dialog.findChild(QPushButton, "clearLoadOrderPalletsButton")
     assert button is not None
     assert button.isEnabled() is False
-
-    widget.add_pallet()
-    widget.add_allocation(
-        1,
-        destination["address_id"],
-        destination["products"][0]["product_id"],
-        10,
+    assert (
+        dialog.findChild(
+            QPushButton, "guidedClearAllPalletAllocationsButton"
+        )
+        is None
     )
 
+    destination = order.destinations.get()
+    dialog.pallet_widget.add_pallet()
+    dialog.pallet_widget.add_allocation(
+        1,
+        destination.delivery_address.id,
+        data["product"].id,
+        10,
+    )
+    app.processEvents()
     assert button.isEnabled() is True
+
+    read_only = LoadOrderPalletDialog(service, order, read_only=True)
+    assert read_only.findChild(QPushButton, "clearLoadOrderPalletsButton") is None
 
 
 def test_cancel_keeps_assignments_locks_and_loose_goods(db, monkeypatch):
@@ -205,7 +224,7 @@ def test_clear_then_save_keeps_empty_pallets_and_pending_quantity(db, monkeypatc
     dialog = LoadOrderPalletDialog(service, order)
     app.processEvents()
 
-    dialog.pallet_widget._guided_confirm_clear_allocations()
+    dialog._clear_all_pallets()
     dialog._save()
 
     assert LoadOrderPallet.select().where(LoadOrderPallet.order == order).count() == 2

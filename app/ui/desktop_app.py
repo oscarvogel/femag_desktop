@@ -3617,6 +3617,16 @@ class LoadOrderPalletDialog(QDialog):
         root.addWidget(self.feedback)
 
         footer = QHBoxLayout()
+        if not read_only:
+            self.clear_pallets_button = _action_button(
+                "clearLoadOrderPalletsButton", "Vaciar todos los pallets", secondary=True
+            )
+            self.clear_pallets_button.setProperty("uiRole", "danger")
+            self.clear_pallets_button.setToolTip(
+                "Quita toda la mercadería de los pallets y la devuelve a pendiente. "
+                "No elimina los pallets ni la mercadería suelta."
+            )
+            footer.addWidget(self.clear_pallets_button)
         footer.addStretch(1)
         if read_only:
             close_button = _action_button("closeLoadOrderPalletsButton", "Cerrar", secondary=True)
@@ -3630,8 +3640,25 @@ class LoadOrderPalletDialog(QDialog):
             footer.addWidget(self.save_button)
             cancel_button.clicked.connect(self.reject)
             self.save_button.clicked.connect(self._save)
+            self.clear_pallets_button.clicked.connect(self._clear_all_pallets)
+            self.pallet_widget.composition_changed.connect(self._update_clear_button_state)
             self.pallet_widget.composition_changed.connect(lambda: self.save_button.setEnabled(True))
+            self._update_clear_button_state()
         root.addLayout(footer)
+
+    def _update_clear_button_state(self) -> None:
+        if not hasattr(self, "clear_pallets_button"):
+            return
+        self.clear_pallets_button.setEnabled(
+            any(
+                pallet.get("allocations")
+                for pallet in self.pallet_widget.pallet_drafts()
+            )
+        )
+
+    def _clear_all_pallets(self) -> None:
+        self.pallet_widget._guided_confirm_clear_allocations()
+        self._update_clear_button_state()
 
     def _destination_drafts(self) -> list[dict]:
         return [
