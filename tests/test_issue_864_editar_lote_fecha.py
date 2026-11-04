@@ -401,4 +401,3 @@ def test_stale_cloud_event_conflicts_after_local_edit(db):
     assert SyncConflict.select().where(SyncConflict.status == "open").count() == 1
     allocation = LoadOrderPalletAllocation.get_by_id(allocation.id)
     assert allocation.lote == "LOTE-LOCAL"
-
