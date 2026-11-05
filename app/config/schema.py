@@ -210,6 +210,7 @@ def ensure_runtime_schema(database) -> None:
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
         _ensure_client_salesperson_index(database)
+        _ensure_client_payment_idempotency_index(database)
         _ensure_budget_timing_index(database)
         _ensure_return_line_timing_index(database)
     _ensure_sqlite_index_integrity(database)
@@ -520,6 +521,27 @@ def _ensure_client_salesperson_index(database) -> None:
         return
     _execute_schema_statement(
         database, "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    )
+
+
+def _ensure_client_payment_idempotency_index(database) -> None:
+    """Garantiza la clave unica de idempotencia de pagos en bases existentes.
+
+    ``create_tables`` no modifica tablas ya creadas, asi que el indice unico que
+    declara el modelo hay que crearlo aparte. SQLite y MySQL permiten varios
+    NULL en un indice unico, por lo que los recibos historicos no se bloquean.
+    """
+    table_name = "clientpayment"
+    expected_columns = {"idempotency_key"}
+    indexes = database.get_indexes(table_name)
+    if any(
+        index.unique and set(index.columns) == expected_columns for index in indexes
+    ):
+        return
+    _execute_schema_statement(
+        database,
+        "CREATE UNIQUE INDEX `clientpayment_idempotency_key` "
+        "ON `clientpayment` (`idempotency_key`)",
     )
 
 

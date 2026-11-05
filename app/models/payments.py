@@ -45,6 +45,8 @@ class ClientPayment(BaseModel):
     STATUSES = (STATUS_ACTIVE, STATUS_ANNULLED)
 
     receipt_number = CharField(unique=True)
+    # Evita duplicar un pago ante reintentos o guardados concurrentes (#867).
+    idempotency_key = CharField(max_length=64, null=True, unique=True)
     client = ForeignKeyField(Client, backref="payments")
     closure = ForeignKeyField(LoadOrderClosure, backref="payments", null=True)
     payment_date = DateField(default=date.today)

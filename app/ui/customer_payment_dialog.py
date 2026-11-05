@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -46,6 +48,10 @@ class ClientPaymentDialog(QDialog):
         self.current_user = current_user
         self.service = service or ClientPaymentService(current_user=current_user)
         self._registered_payment: ClientPayment | None = None
+        # La misma clave sobrevive a reintentos dentro de este formulario: si el
+        # commit quedo incierto, el segundo intento devuelve el pago ya guardado
+        # en vez de crear otro recibo (#867).
+        self._idempotency_key = uuid4().hex
         self._method_options = self.service.active_payment_methods()
 
         layout = QVBoxLayout(self)
@@ -219,6 +225,7 @@ class ClientPaymentDialog(QDialog):
                 client=Client.get_by_id(client_id),
                 payment_date=self.date_input.date().toPyDate(),
                 details=details,
+                idempotency_key=self._idempotency_key,
             )
         except ClientPaymentError as exc:
             QMessageBox.warning(self, "Pago", str(exc))

@@ -66,8 +66,9 @@ class ClientPaymentService:
         reference: str | None = None,
         observations: str | None = None,
         closure: LoadOrderClosure | None = None,
+        idempotency_key: str | None = None,
     ) -> ClientPayment:
-        """Compatibilidad: registra un recibo con un único medio."""
+        """Compatibilidad: registra un recibo con un ǧnico medio."""
         return self.register_compound_payment(
             client=client,
             payment_date=payment_date,
@@ -80,6 +81,7 @@ class ClientPaymentService:
             ],
             observations=observations,
             closure=closure,
+            idempotency_key=idempotency_key,
         )
 
     def register_compound_payment(
@@ -90,11 +92,16 @@ class ClientPaymentService:
         payment_date: date | None = None,
         observations: str | None = None,
         closure: LoadOrderClosure | None = None,
+        idempotency_key: str | None = None,
     ) -> ClientPayment:
         if client is None or not isinstance(client, Client):
             raise ClientPaymentError("Debe seleccionar un cliente.")
         if not details:
             raise ClientPaymentError("Debe cargar al menos un medio de pago.")
+
+        idempotency_key = (idempotency_key or "").strip() or None
+        if idempotency_key and len(idempotency_key) > 64:
+            raise ClientPaymentError("La clave de idempotencia es demasiado larga.")
 
         closure = self._validate_closure(client=client, closure=closure)
         methods = {row.code: row for row in self.active_payment_methods()}
@@ -126,13 +133,18 @@ class ClientPaymentService:
         if total <= 0:
             raise ClientPaymentError("El monto total del pago debe ser mayor a cero.")
 
-        receipt_number = self._next_receipt_number()
         first = normalized[0]
         database = ClientPayment._meta.database
         try:
             with database.atomic():
+                if idempotency_key:
+                    existing = self._payment_for_key(idempotency_key)
+                    if existing is not None:
+                        return self._resolve_idempotent_payment(existing, client, total)
+                receipt_number = self._next_receipt_number()
                 payment = ClientPayment.create(
                     receipt_number=receipt_number,
+                    idempotency_key=idempotency_key,
                     client=client,
                     closure=closure,
                     payment_date=payment_date or date.today(),
@@ -177,9 +189,31 @@ class ClientPaymentService:
                     },
                 )
         except IntegrityError as exc:
+            if idempotency_key:
+                existing = self._payment_for_key(idempotency_key)
+                if existing is not None:
+                    return self._resolve_idempotent_payment(existing, client, total)
             raise ClientPaymentError(f"No se pudo registrar el pago: {exc}") from exc
 
         return payment
+
+    @staticmethod
+    def _payment_for_key(idempotency_key: str) -> ClientPayment | None:
+        return ClientPayment.get_or_none(
+            ClientPayment.idempotency_key == idempotency_key
+        )
+
+    @staticmethod
+    def _resolve_idempotent_payment(
+        existing: ClientPayment, client: Client, total: float
+    ) -> ClientPayment:
+        if existing.client_id != client.id or abs(float(existing.amount) - total) > 0.009:
+            raise ClientPaymentError(
+                "La clave de idempotencia ya fue usada por otro pago."
+            )
+        if existing.status == ClientPayment.STATUS_ANNULLED:
+            raise ClientPaymentError("El pago ya fue registrado y anulado.")
+        return existing
 
     def _validate_closure(
         self, *, client: Client, closure: LoadOrderClosure | None
