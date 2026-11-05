@@ -37,18 +37,40 @@ from app.services.whatsapp_configuration_service import (
 
 
 class WhatsAppConfigurationDialog(QDialog):
-    def __init__(self, *, current: WhatsAppCentralConfiguration | None = None, parent=None):
+    def __init__(
+        self,
+        *,
+        current: WhatsAppCentralConfiguration | None = None,
+        load_error: str | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setObjectName("whatsappConfigurationDialog")
         self.setWindowTitle("Configurar WhatsApp")
         self.setMinimumWidth(520)
         self._current = current
+        self._load_error = load_error
 
         intro = QLabel(
             "La configuración se guarda en la base MySQL y queda disponible para todos los puestos. "
             "La API key se almacena cifrada y nunca se muestra completa después de guardarla."
         )
         intro.setWordWrap(True)
+        self.recovery_notice = QLabel("")
+        self.recovery_notice.setObjectName("whatsappApiKeyRecoveryNotice")
+        self.recovery_notice.setWordWrap(True)
+        self.recovery_notice.setStyleSheet(
+            "background: #fffbeb; color: #92400e; border: 1px solid #f6c453; "
+            "border-radius: 6px; padding: 8px;"
+        )
+        if load_error:
+            self.recovery_notice.setText(
+                "No se pudo recuperar la clave guardada. Ingresá nuevamente la "
+                "API key para restablecer la conexión. La URL y el resto de la "
+                "configuración se conservan."
+            )
+        else:
+            self.recovery_notice.hide()
         self.enabled = QCheckBox("Habilitar envíos por WhatsApp")
         self.enabled.setChecked(current.enabled if current else False)
         self.api_url = QLineEdit(current.api_url if current else "")
@@ -56,8 +78,10 @@ class WhatsAppConfigurationDialog(QDialog):
         self.api_key = QLineEdit()
         self.api_key.setObjectName("whatsappApiKeyInput")
         self.api_key.setEchoMode(QLineEdit.Password)
-        if current:
+        if current and current.api_key:
             self.api_key.setPlaceholderText("Clave configurada; escribir sólo para reemplazarla")
+        elif load_error:
+            self.api_key.setPlaceholderText("Ingrese la nueva API key")
         self.timeout = QSpinBox()
         self.timeout.setRange(1, 120)
         self.timeout.setValue(int(current.timeout_seconds) if current else 15)
@@ -76,6 +100,8 @@ class WhatsAppConfigurationDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
+        if load_error:
+            layout.addWidget(self.recovery_notice)
         layout.addLayout(form)
         layout.addWidget(buttons)
 
@@ -255,13 +281,23 @@ class WhatsAppConfigurationPage(QWidget):
         if not allowed:
             self.configure_button.setToolTip("No tiene permiso para configurar WhatsApp.")
 
+        load_error = None
         try:
             configuration = self._current_configuration()
         except (CentralConfigurationError, ValueError) as exc:
-            self.status.setText(f"Configuración central inválida: {exc}")
+            load_error = str(exc)
             configuration = None
 
-        if configuration is None:
+        if load_error is not None:
+            if WhatsAppCentralConfigurationService.is_configured():
+                self.status.setText(
+                    "Configuración central pendiente de reemplazo: no se pudo "
+                    "recuperar la API key guardada. Abra Configurar conexión para "
+                    "ingresar una nueva clave."
+                )
+            else:
+                self.status.setText(f"Configuración central inválida: {load_error}")
+        elif configuration is None:
             if has_runtime_whatsapp_configuration():
                 self.status.setText(
                     "Aún no hay configuración central. Se detectó una configuración local anterior; "
@@ -295,13 +331,16 @@ class WhatsAppConfigurationPage(QWidget):
         if not self._allowed():
             QMessageBox.warning(self, "Configurar WhatsApp", "No tiene permiso para esta acción.")
             return
+        load_error = None
         try:
             current = self._current_configuration()
         except (CentralConfigurationError, ValueError) as exc:
-            QMessageBox.warning(self, "Configurar WhatsApp", str(exc))
-            return
+            load_error = str(exc)
+            current = WhatsAppCentralConfigurationService.load_metadata()
         current = current or self._legacy_configuration()
-        dialog = WhatsAppConfigurationDialog(current=current, parent=self)
+        dialog = WhatsAppConfigurationDialog(
+            current=current, load_error=load_error, parent=self
+        )
         if dialog.exec_() != QDialog.Accepted:
             return
         configuration = dialog.configuration()
