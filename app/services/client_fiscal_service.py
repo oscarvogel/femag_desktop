@@ -168,15 +168,23 @@ class ClientFiscalService:
         certificate = self.current_certificate(client, kind)
         if certificate is None:
             return self._state_payload(kind, STATUS_SIN_CERTIFICADO, None, today)
-        if today < certificate.valid_from:
-            status = STATUS_PROGRAMADA
-        elif today > certificate.valid_until:
-            status = STATUS_VENCIDA
-        elif certificate.valid_until <= today + timedelta(days=POR_VENCER_DAYS):
-            status = STATUS_POR_VENCER
-        else:
-            status = STATUS_VIGENTE
+        status = self.status_for_dates(
+            certificate.valid_from, certificate.valid_until, today=today
+        )
         return self._state_payload(kind, status, certificate, today)
+
+    @staticmethod
+    def status_for_dates(
+        valid_from: date, valid_until: date, *, today: date | None = None
+    ) -> str:
+        today = today or date.today()
+        if today < valid_from:
+            return STATUS_PROGRAMADA
+        if today > valid_until:
+            return STATUS_VENCIDA
+        if valid_until <= today + timedelta(days=POR_VENCER_DAYS):
+            return STATUS_POR_VENCER
+        return STATUS_VIGENTE
 
     def client_fiscal_summary(
         self, client: Client, *, today: date | None = None

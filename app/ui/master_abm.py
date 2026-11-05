@@ -55,12 +55,14 @@ from app.models.masters import (
 )
 from app.services.client_service import ClientService
 from app.services.client_email_service import ClientEmailService
+from app.services.client_fiscal_service import ClientFiscalError, ClientFiscalService
 from app.services.dgr_validation import derive_city_province, is_missing_dgr_text
 from app.services.client_opening_balance_service import (
     ClientOpeningBalanceService,
 )
 from app.services.master_service import MasterService
 from app.services.permission_service import PermissionService
+from app.ui.client_fiscal_dialog import ClientFiscalDialog
 from app.ui.combo_autocomplete import combo_current_data, enable_combo_autocomplete
 from app.ui.dgr_locality_combo import create_locality_combo, selected_locality_id
 from app.ui.master_detail_dialogs import (
@@ -2114,8 +2116,21 @@ def build_client_abm_page(
     layout = page.layout()
     can_create = _can_use_menu_action(user, "Maestros", "crear", "Clientes")
     can_modify = _can_use_menu_action(user, "Maestros", "modificar", "Clientes")
+    fiscal_can_edit = _can_use_menu_action(
+        user, "Maestros", "cargar certificado", "Clientes"
+    )
 
     client_feedback = FormFeedback("clientAbmFeedback")
+
+    fiscal_alert_label = QLabel("")
+    fiscal_alert_label.setObjectName("clientFiscalExpiredAlert")
+    fiscal_alert_label.setWordWrap(True)
+    fiscal_alert_label.setStyleSheet(
+        "background: #fffbeb; color: #92400e; border: 1px solid #f6c453; "
+        "border-radius: 6px; padding: 8px; font-weight: 600;"
+    )
+    fiscal_alert_label.hide()
+    layout.addWidget(fiscal_alert_label)
 
     client_search_input = QLineEdit()
     client_search_input.setObjectName("clientSearchInput")
@@ -2155,6 +2170,12 @@ def build_client_abm_page(
     agenda_client_btn.setToolTip(
         "Anotaciones y consultas del cliente seleccionado."
     )
+    fiscal_client_btn = _action_button(
+        "clientFiscalButton", "Fiscal", secondary=True
+    )
+    fiscal_client_btn.setToolTip(
+        "Certificados de exclusion de Rentas e IVA, alicuota y observaciones."
+    )
     opening_balance_btn = _action_button(
         "addClientOpeningBalanceButton", "Agregar saldo inicial", secondary=True
     )
@@ -2174,6 +2195,7 @@ def build_client_abm_page(
     new_client_btn.setEnabled(can_create)
     edit_client_btn.setEnabled(can_modify)
     emails_btn.setEnabled(False)
+    fiscal_client_btn.setEnabled(False)
     opening_balance_btn.setEnabled(False)
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
@@ -2181,6 +2203,7 @@ def build_client_abm_page(
     client_actions.addWidget(emails_btn)
     client_actions.addWidget(view_ledger_btn)
     client_actions.addWidget(agenda_client_btn)
+    client_actions.addWidget(fiscal_client_btn)
     client_actions.addWidget(opening_balance_btn)
     client_actions.addWidget(export_clients_btn)
     client_actions.addWidget(import_price_list_btn)
@@ -2236,9 +2259,29 @@ def build_client_abm_page(
     layout.addWidget(places_table, 1)
     layout.addWidget(places_feedback)
 
+    def refresh_fiscal_alert() -> None:
+        try:
+            expired = ClientFiscalService(current_user).clients_with_expired_certificates()
+        except (InterfaceError, OperationalError):
+            fiscal_alert_label.hide()
+            return
+        if not expired:
+            fiscal_alert_label.hide()
+            return
+        names = "; ".join(
+            f"{row['client_name']} - {row['label']} vencio el "
+            f"{row['valid_until']:%d/%m/%Y}"
+            for row in expired
+        )
+        fiscal_alert_label.setText(
+            f"Exclusiones vencidas ({len(expired)}): {names}"
+        )
+        fiscal_alert_label.show()
+
     def refresh_clients() -> None:
         client_table_controller.refresh()
         refresh_places()
+        refresh_fiscal_alert()
 
     def selected_client_id() -> int | None:
         item = client_table.item(client_table.currentRow(), 0)
@@ -2251,6 +2294,7 @@ def build_client_abm_page(
         emails_btn.setEnabled(can_modify and cid is not None)
         view_ledger_btn.setEnabled(view_ledger_callback is not None and cid is not None)
         agenda_client_btn.setEnabled(cid is not None)
+        fiscal_client_btn.setEnabled(cid is not None)
         opening_balance_btn.setEnabled(
             can_modify
             and cid is not None
@@ -2410,6 +2454,23 @@ def build_client_abm_page(
 
         ClientAgendaDialog(cid, current_user, parent).exec_()
 
+    def open_client_fiscal() -> None:
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.show_warning(
+                "Seleccione un cliente para ver sus datos fiscales.",
+                focus_widget=client_table,
+            )
+            return
+        dialog = ClientFiscalDialog(
+            current_user=current_user,
+            client_id=cid,
+            can_edit=fiscal_can_edit,
+            parent=parent,
+        )
+        dialog.exec_()
+        refresh_fiscal_alert()
+
     def open_opening_balance() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2525,6 +2586,7 @@ def build_client_abm_page(
     emails_btn.clicked.connect(open_client_emails)
     view_ledger_btn.clicked.connect(open_client_ledger)
     agenda_client_btn.clicked.connect(open_client_agenda)
+    fiscal_client_btn.clicked.connect(open_client_fiscal)
     opening_balance_btn.clicked.connect(open_opening_balance)
     export_clients_btn.clicked.connect(export_clients_to_excel)
     import_price_list_btn.clicked.connect(import_price_list_from_excel)

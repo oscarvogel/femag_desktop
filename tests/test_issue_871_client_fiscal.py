@@ -249,3 +249,125 @@ def test_schema_has_client_fiscal_fields_and_table(db):
     columns = {column.name for column in db.get_columns("client")}
     assert {"rentas_alicuota", "fiscal_observations"} <= columns
     assert db.table_exists("clientfiscalcertificate")
+
+
+def test_client_fiscal_dialog_shows_status_history_and_permissions(db, tmp_path):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton
+
+    from app.ui.client_fiscal_dialog import ClientFiscalDialog
+
+    app = QApplication.instance() or QApplication([])
+    client = _client("Cliente dialogo", "30700871006")
+    service = _service(tmp_path)
+    service.upload_certificate(
+        client=client,
+        kind=ClientFiscalCertificate.RENTAS,
+        source_path=_pdf(tmp_path, "rentas.pdf"),
+        valid_from=date(2026, 1, 1),
+        valid_until=date(2027, 12, 31),
+    )
+
+    dialog = ClientFiscalDialog(
+        current_user="secretaria",
+        client_id=client.id,
+        service=service,
+        can_edit=True,
+    )
+    app.processEvents()
+
+    rentas_status = dialog.findChild(QLabel, "clientFiscalRentasStatusLabel")
+    assert "Vigente" in rentas_status.text()
+    assert dialog.findChild(QLabel, "clientFiscalIvaStatusLabel").text().startswith(
+        "Sin certificado"
+    )
+    assert dialog.history_table.rowCount() == 1
+    assert dialog.save_fiscal_button.isEnabled() is True
+    assert (
+        dialog.findChild(QPushButton, "clientFiscalUploadRentasButton").isEnabled()
+        is True
+    )
+
+    read_only = ClientFiscalDialog(
+        current_user="consulta",
+        client_id=client.id,
+        service=service,
+        can_edit=False,
+    )
+    assert read_only.save_fiscal_button.isEnabled() is False
+    assert (
+        read_only.findChild(
+            QPushButton, "clientFiscalUploadRentasButton"
+        ).isEnabled()
+        is False
+    )
+
+
+def test_client_abm_page_shows_expired_alert_and_fiscal_button(db, tmp_path):
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QTableWidget
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.master_abm import build_client_abm_page
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_fiscal", password_hash="x", profile=profile)
+    client = _client("Cliente vencido ABM", "30700871007")
+    service = _service(tmp_path)
+    service.upload_certificate(
+        client=client,
+        kind=ClientFiscalCertificate.IVA,
+        source_path=_pdf(tmp_path, "vencido.pdf"),
+        valid_from=date(2025, 1, 1),
+        valid_until=date(2025, 12, 31),
+    )
+
+    page = build_client_abm_page(user=user, current_user=user.username)
+    app.processEvents()
+
+    alert = page.findChild(QLabel, "clientFiscalExpiredAlert")
+    assert alert.isHidden() is False
+    assert "Cliente vencido ABM" in alert.text()
+
+    table = page.findChild(QTableWidget, "clientTable")
+    table.setCurrentCell(0, 0)
+    app.processEvents()
+    fiscal_button = page.findChild(QPushButton, "clientFiscalButton")
+    assert fiscal_button.isEnabled() is True
+
+
+def test_order_entry_shows_expired_fiscal_notice(db, tmp_path):
+    from PyQt5.QtWidgets import QApplication, QComboBox, QLabel
+
+    from conftest import _master_data
+
+    from app.services.load_order_service import LoadOrderService
+    from app.ui.desktop_app import LoadOrderEntryDialog
+
+    app = QApplication.instance() or QApplication([])
+    data = _master_data()
+    service = _service(tmp_path)
+    service.upload_certificate(
+        client=data["client"],
+        kind=ClientFiscalCertificate.RENTAS,
+        source_path=_pdf(tmp_path, "vencido.pdf"),
+        valid_from=date(2025, 1, 1),
+        valid_until=date(2025, 12, 31),
+    )
+
+    dialog = LoadOrderEntryDialog(
+        LoadOrderService(current_user="test"), "test"
+    )
+    app.processEvents()
+    combo = dialog.findChild(QComboBox, "loadOrderClientInput")
+    index = combo.findData(data["client"].id)
+    assert index >= 0
+    combo.setCurrentIndex(index)
+    dialog._update_fiscal_notices()
+    app.processEvents()
+
+    label = dialog.findChild(QLabel, "loadOrderFiscalNotices")
+    assert label.isHidden() is False
+    assert "VENCIDA" in label.text()
+    assert data["client"].name in label.text()
