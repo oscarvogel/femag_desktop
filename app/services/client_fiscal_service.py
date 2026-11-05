@@ -36,7 +36,9 @@ class ClientFiscalError(ValueError):
 
 
 def default_docs_dir() -> Path:
-    configured = os.getenv("FEMAG_FISCAL_DOCS_DIR")
+    from app.services.fiscal_configuration_service import FiscalConfigurationService
+
+    configured = FiscalConfigurationService.docs_dir()
     if configured:
         return Path(configured)
     base = os.getenv("LOCALAPPDATA") or str(Path.home())

@@ -371,3 +371,54 @@ def test_order_entry_shows_expired_fiscal_notice(db, tmp_path):
     assert label.isHidden() is False
     assert "VENCIDA" in label.text()
     assert data["client"].name in label.text()
+
+
+def test_fiscal_docs_dir_is_stored_in_app_parameters(db, tmp_path):
+    from app.services.fiscal_configuration_service import (
+        FiscalConfigurationError,
+        FiscalConfigurationService,
+    )
+
+    target = tmp_path / "documentos" / "fiscales"
+    saved = FiscalConfigurationService.save_docs_dir(target)
+
+    assert saved == str(target)
+    assert target.exists()
+    assert FiscalConfigurationService.docs_dir() == str(target)
+    assert FiscalConfigurationService.is_configured() is True
+
+    configured_service = ClientFiscalService("secretaria")
+    assert configured_service.docs_dir == target
+
+    with pytest.raises(FiscalConfigurationError, match="absoluta"):
+        FiscalConfigurationService.save_docs_dir("relativa/fiscales")
+
+    FiscalConfigurationService.clear_docs_dir()
+    assert FiscalConfigurationService.is_configured() is False
+
+
+def test_fiscal_configuration_page_saves_path(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QLineEdit, QMessageBox
+
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.fiscal_configuration import FiscalConfigurationPage
+
+    app = QApplication.instance() or QApplication([])
+    PermissionService().seed_defaults()
+    profile = UserProfile.get(UserProfile.name == "Administrador")
+    user = User.create(username="admin_fiscal_cfg", password_hash="x", profile=profile)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    target = tmp_path / "config" / "fiscales"
+
+    page = FiscalConfigurationPage(
+        user=user, current_user=user.username
+    )
+    app.processEvents()
+    page.findChild(QLineEdit, "fiscalDocsDirInput").setText(str(target))
+    page._save()
+
+    from app.services.fiscal_configuration_service import FiscalConfigurationService
+
+    assert FiscalConfigurationService.docs_dir() == str(target)
+    assert target.exists()

@@ -164,6 +164,7 @@ from app.ui.stock_count import StockCountPage
 from app.ui.stock_initial_inventory import StockInitialInventoryPage
 from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
 from app.ui.webapp_configuration import WebappConfigurationPage
+from app.ui.fiscal_configuration import FiscalConfigurationPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -625,6 +626,12 @@ class FemagDesktopWindow(QMainWindow):
         self._add_page(
             "webapp_configuration",
             WebappConfigurationPage(
+                user=self.user, current_user=self.shell.username, parent=self
+            ),
+        )
+        self._add_page(
+            "fiscal_configuration",
+            FiscalConfigurationPage(
                 user=self.user, current_user=self.shell.username, parent=self
             ),
         )
