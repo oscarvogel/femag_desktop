@@ -86,6 +86,7 @@ from app.services.load_order_closure_service import LoadOrderClosureService
 from app.services.load_order_operation_service import LoadOrderOperationService
 from app.services.load_order_service import LoadOrderService
 from app.services.load_order_traceability_service import LoadOrderTraceabilityService
+from app.services.client_fiscal_service import ClientFiscalService
 from app.services.permission_service import PermissionService
 from app.services.client_payment_service import ClientPaymentService
 from app.services.client_manual_debit_service import ClientManualDebitService
@@ -3906,6 +3907,12 @@ class LoadOrderEntryDialog(QDialog):
         agenda_button.clicked.connect(self._open_client_agenda)
         destination_inputs.addWidget(agenda_button, 0, 2)
         destination_layout.addLayout(destination_inputs)
+        self.fiscal_notices_label = QLabel("")
+        self.fiscal_notices_label.setObjectName("loadOrderFiscalNotices")
+        self.fiscal_notices_label.setWordWrap(True)
+        self.fiscal_notices_label.setTextFormat(Qt.RichText)
+        self.fiscal_notices_label.hide()
+        destination_layout.addWidget(self.fiscal_notices_label)
         self.destination_table = QTableWidget(0, 5)
         self.destination_table.setObjectName("loadOrderDestinationDraftTable")
         self.destination_table.setHorizontalHeaderLabels(
@@ -4065,7 +4072,9 @@ class LoadOrderEntryDialog(QDialog):
         self.driver_combo.currentIndexChanged.connect(lambda _index: self._refresh_from_driver())
         self.carrier_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
         self.truck_combo.currentIndexChanged.connect(lambda _index: self._update_save_button_state())
-        self.client_combo.currentIndexChanged.connect(lambda _index: self._refresh_address_options())
+        self.client_combo.currentIndexChanged.connect(
+            lambda _index: self._client_selection_changed()
+        )
         self._configure_keyboard_navigation()
         self._go_to_step(0)
         self._update_save_button_state()
@@ -4606,6 +4615,46 @@ class LoadOrderEntryDialog(QDialog):
         self._select_destination(self.destination_table.currentRow())
         self._render_review()
         self._update_save_button_state()
+        self._update_fiscal_notices()
+
+    def _client_selection_changed(self) -> None:
+        self._refresh_address_options()
+        self._update_fiscal_notices()
+
+    def _update_fiscal_notices(self) -> None:
+        if not hasattr(self, "fiscal_notices_label"):
+            return
+        client_ids = {
+            destination.get("client_id")
+            for destination in self.destinations
+            if destination.get("client_id")
+        }
+        selected = self.client_combo.currentData()
+        if selected is not None:
+            client_ids.add(selected)
+        if not client_ids:
+            self.fiscal_notices_label.hide()
+            return
+        clients = list(Client.select().where(Client.id.in_(client_ids)))
+        try:
+            notices = ClientFiscalService(
+                current_user=self.current_user
+            ).fiscal_notices_for_clients(clients)
+        except Exception:
+            self.fiscal_notices_label.hide()
+            return
+        if not notices:
+            self.fiscal_notices_label.hide()
+            return
+        lines = []
+        for notice in notices:
+            color = "#991b1b" if notice["has_expired"] else "#92400e"
+            lines.append(
+                f"<span style='color:{color}; font-weight:700;'>"
+                f"{notice['client_name']}: {', '.join(notice['messages'])}</span>"
+            )
+        self.fiscal_notices_label.setText("<br>".join(lines))
+        self.fiscal_notices_label.show()
 
     def _select_destination(self, destination_index: int) -> None:
         self._render_products(destination_index)
