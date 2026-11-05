@@ -8,14 +8,23 @@ import pytest
     [
         ("+54 9 376 412-3456", "5493764123456"),
         ("0376 15 4123456", "5493764123456"),
-        ("376 4123456", "5493764123456"),
-        ("+55 11 98765-4321", "5511987654321"),
     ],
 )
-def test_normalize_whatsapp_phone(raw, expected):
+def test_normalize_whatsapp_phone_keeps_unambiguous_mobiles(raw, expected):
     from app.services.account_statement_share_service import normalize_whatsapp_phone
 
     assert normalize_whatsapp_phone(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["376 4123456", "011 4441-2835", "+55 11 98765-4321"],
+)
+def test_normalize_whatsapp_phone_rejects_ambiguous_or_foreign(raw):
+    from app.services.account_statement_share_service import normalize_whatsapp_phone
+
+    with pytest.raises(ValueError, match="telefono"):
+        normalize_whatsapp_phone(raw)
 
 
 @pytest.mark.parametrize("raw", ["", "sin telefono", "123"])
