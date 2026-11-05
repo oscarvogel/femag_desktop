@@ -39,15 +39,11 @@ def _install_operational_pages() -> None:
     def _add_master_pages_with_operations(window) -> None:
         original_add_master_pages(window)
         if "remittances" not in window._route_indexes:
-            from app.ui.remittances import RemittanceSeriesPage, RemittancesPage
+            from app.ui.remittances import RemittancesPage
 
             window._add_page(
                 "remittances",
                 RemittancesPage(current_user=window.shell.username, parent=window),
-            )
-            window._add_page(
-                "remittance_series",
-                RemittanceSeriesPage(current_user=window.shell.username, parent=window),
             )
         if "f150" not in window._route_indexes:
             from app.ui.f150 import F150Page

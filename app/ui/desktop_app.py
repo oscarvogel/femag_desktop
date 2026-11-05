@@ -162,9 +162,7 @@ from app.ui.production_parts import ProductionPartPage
 from app.ui.production_contrast import ProductionContrastPage
 from app.ui.stock_count import StockCountPage
 from app.ui.stock_initial_inventory import StockInitialInventoryPage
-from app.ui.whatsapp_configuration import WhatsAppConfigurationPage
-from app.ui.webapp_configuration import WebappConfigurationPage
-from app.ui.fiscal_configuration import FiscalConfigurationPage
+from app.ui.parameters_page import ParametersPage
 
 
 LOAD_ORDER_PRINTS_DIR = Path("outputs") / "load_orders"
@@ -620,18 +618,8 @@ class FemagDesktopWindow(QMainWindow):
             StockCountPage(current_username=self.shell.username, parent=self),
         )
         self._add_page(
-            "whatsapp_configuration",
-            WhatsAppConfigurationPage(user=self.user, current_user=self.shell.username, parent=self),
-        )
-        self._add_page(
-            "webapp_configuration",
-            WebappConfigurationPage(
-                user=self.user, current_user=self.shell.username, parent=self
-            ),
-        )
-        self._add_page(
-            "fiscal_configuration",
-            FiscalConfigurationPage(
+            "parameters",
+            ParametersPage(
                 user=self.user, current_user=self.shell.username, parent=self
             ),
         )
@@ -741,7 +729,7 @@ class FemagDesktopWindow(QMainWindow):
         can_configure = PermissionService.is_administrator(self.user)
         settings.setEnabled(can_configure)
         if can_configure:
-            settings.clicked.connect(lambda: self._navigate_to_route("remittance_series"))
+            settings.clicked.connect(lambda: self._navigate_to_route("parameters"))
         else:
             settings.setToolTip("Sólo un administrador puede configurar la numeración.")
         logout.clicked.connect(self._logout)

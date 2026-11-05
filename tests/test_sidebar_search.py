@@ -69,7 +69,7 @@ def _spec():
                     ),
                     _grupo(
                         "Sistema",
-                        [_hoja("Configuración", "remittance_series")],
+                        [_hoja("Parámetros", "parameters")],
                     ),
                 ],
             )
@@ -102,16 +102,16 @@ def test_sin_consulta_devuelve_el_menu_entero():
 
 
 def test_la_coincidencia_ignora_tildes_y_mayusculas():
-    """'configuracion' tiene que encontrar 'Configuración'.
+    """'parametros' tiene que encontrar 'Parámetros'.
 
     Sin esto el operador escribe la palabra como la recuerda, no como esta
     escrita, y concluye que la pantalla no existe.
     """
-    assert normalizar_texto_menu("Configuración") == "configuracion"
+    assert normalizar_texto_menu("Parámetros") == "parametros"
 
-    resultado = filtrar_sidebar(_spec().sections, "configuracion")
+    resultado = filtrar_sidebar(_spec().sections, "parametros")
 
-    assert _títulos(resultado) == ["Sistema", "    Configuración"]
+    assert _títulos(resultado) == ["Sistema", "    Parámetros"]
 
 
 def test_el_titulo_de_un_grupo_muestra_el_grupo_entero():

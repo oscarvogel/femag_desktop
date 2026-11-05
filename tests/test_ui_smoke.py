@@ -179,36 +179,22 @@ def test_sidebar_spec_exposes_legacy_dbf_import_page(db):
     assert import_item.route_key == "legacy_dbf_import"
 
 
-def test_admin_sidebar_exposes_remittance_numbering_configuration(db):
+def test_admin_sidebar_exposes_unified_parameters(db):
     from app.services.auth_service import AuthService
     from app.services.permission_service import PermissionService
     from app.ui.menu import build_sidebar_tree_spec
 
     PermissionService().seed_defaults()
-    user = AuthService().create_user("admin_remittance_config", "clave", "Administrador")
+    user = AuthService().create_user("admin_parameters_menu", "clave", "Administrador")
 
     principal = build_sidebar_tree_spec(user).sections[0]
     system = next(item for item in principal.items if item.title == "Sistema")
-    config = next(item for item in system.children if item.title == "Configuración")
+    parameters = next(item for item in system.children if item.title == "Parámetros")
 
-    assert config.placeholder is False
-    assert config.route_key == "remittance_series"
-
-
-def test_admin_sidebar_exposes_whatsapp_configuration(db):
-    from app.services.auth_service import AuthService
-    from app.services.permission_service import PermissionService
-    from app.ui.menu import build_sidebar_tree_spec
-
-    PermissionService().seed_defaults()
-    user = AuthService().create_user("admin_whatsapp_menu", "clave", "Administrador")
-
-    principal = build_sidebar_tree_spec(user).sections[0]
-    system = next(item for item in principal.items if item.title == "Sistema")
-    whatsapp = next(item for item in system.children if item.title == "WhatsApp")
-
-    assert whatsapp.placeholder is False
-    assert whatsapp.route_key == "whatsapp_configuration"
+    assert parameters.placeholder is False
+    assert parameters.route_key == "parameters"
+    titles = {item.title for item in system.children}
+    assert not titles & {"Configuración", "WhatsApp", "Servidor web", "Documentos fiscales"}
 
 
 def test_sidebar_places_customer_ledger_after_managerial_block(db):

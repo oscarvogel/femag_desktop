@@ -167,14 +167,7 @@ def build_sidebar_tree_spec(user: User, *, active_route: str = "dashboard") -> S
     system_children = [
         item
         for item in (
-            approved_item("Configuración", "Parámetros", route_key="remittance_series"),
-            approved_item("WhatsApp", "Parámetros", route_key="whatsapp_configuration"),
-            approved_item("Servidor web", "Parámetros", route_key="webapp_configuration"),
-            approved_item(
-                "Documentos fiscales",
-                "Parámetros",
-                route_key="fiscal_configuration",
-            ),
+            approved_item("Parámetros", "Parámetros", route_key="parameters"),
             approved_item("Importación DBF", "Importación", route_key="legacy_dbf_import"),
             approved_item("Usuarios", route_key="user_management"),
             approved_item("Perfiles y permisos", "Permisos por menú", route_key="user_management"),
