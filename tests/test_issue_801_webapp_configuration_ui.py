@@ -10,6 +10,7 @@ def test_admin_configures_server_url_from_desktop(db, monkeypatch):
     from app.services.permission_service import PermissionService
     from app.services.webapp_configuration_service import WebappConfigurationService
     from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.webapp_configuration import WebappConfigurationPage
 
     PermissionService().seed_defaults()
     admin = AuthService().create_initial_admin("admin-webapp", "secreto")
@@ -17,8 +18,9 @@ def test_admin_configures_server_url_from_desktop(db, monkeypatch):
     app = QApplication.instance() or QApplication([])
     window = FemagDesktopWindow(user=admin, demo_mode=True)
     try:
-        assert "webapp_configuration" in window._route_indexes
-        page = window.stack.widget(window._route_indexes["webapp_configuration"])
+        assert "parameters" in window._route_indexes
+        page = window.findChild(WebappConfigurationPage)
+        assert page is not None
         assert page.objectName() == "webappConfigurationPage"
 
         monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
