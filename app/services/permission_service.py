@@ -17,6 +17,7 @@ ACTIONS = [
     "importar",
     "configurar",
     "cargar lote",
+    "cargar certificado",
 ]
 
 
@@ -59,6 +60,7 @@ PROFILE_ACTIONS = {
         "reimprimir",
         "cerrar",
         "cargar lote",
+        "cargar certificado",
     },
     "Administración": {"ver", "crear", "modificar", "imprimir", "reimprimir", "cerrar"},
     "Solo consulta": {"ver", "reimprimir"},

@@ -1,8 +1,8 @@
 from decimal import Decimal
 
-from peewee import BooleanField, CharField, DateTimeField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
+from peewee import BooleanField, CharField, DateField, DateTimeField, DecimalField, FloatField, ForeignKeyField, IntegerField, TextField
 
-from app.models.base import BaseModel
+from app.models.base import BaseModel, utc_now
 from app.models.dgr import DgrLocality
 from app.models.system import ImportBatch
 
@@ -126,9 +126,38 @@ class Client(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_clients", null=True)
+    rentas_alicuota = DecimalField(max_digits=5, decimal_places=2, null=True)
+    fiscal_observations = TextField(null=True)
 
     class Meta:
         indexes = ((("salesperson",), False),)
+
+
+class ClientFiscalCertificate(BaseModel):
+    """Certificado de exclusion de Rentas o IVA con historial por vigencia."""
+
+    RENTAS = "rentas"
+    IVA = "iva"
+    KINDS = (RENTAS, IVA)
+    KIND_LABELS = {
+        RENTAS: "Exclusion de Rentas",
+        IVA: "Exclusion de IVA",
+    }
+
+    client = ForeignKeyField(Client, backref="fiscal_certificates")
+    kind = CharField()
+    valid_from = DateField()
+    valid_until = DateField()
+    file_path = CharField()
+    original_name = CharField()
+    mime = CharField(default="application/pdf")
+    size_bytes = IntegerField(default=0)
+    uploaded_at = DateTimeField(default=utc_now)
+    uploaded_by = CharField(null=True)
+    observations = TextField(null=True)
+
+    class Meta:
+        indexes = ((("client", "kind", "valid_from"), False),)
 
 
 class ClientEmail(BaseModel):
