@@ -114,6 +114,28 @@ class WhatsAppCentralConfigurationService:
         return configuration
 
     @classmethod
+    def load_metadata(cls) -> WhatsAppCentralConfiguration | None:
+        """Carga la configuración no secreta aunque la API key no se pueda descifrar.
+
+        Permite abrir el formulario de recuperación con URL, timeout y estado
+        habilitado ya cargados, sin exponer ni inventar la clave (#794).
+        """
+
+        if not cls.is_configured() and not cls._get(cls.API_URL_KEY):
+            return None
+        try:
+            timeout = float(cls._get(cls.TIMEOUT_KEY) or "15")
+        except ValueError:
+            timeout = 15.0
+        return WhatsAppCentralConfiguration(
+            api_url=(cls._get(cls.API_URL_KEY) or "").strip().rstrip("/"),
+            api_key="",
+            timeout_seconds=timeout,
+            enabled=(cls._get(cls.ENABLED_KEY) or "true").strip().lower()
+            in {"1", "true", "yes", "si", "sí", "on"},
+        )
+
+    @classmethod
     def save(cls, configuration: WhatsAppCentralConfiguration) -> None:
         configuration.validate()
         cls._set(cls.ENABLED_KEY, "true" if configuration.enabled else "false")
