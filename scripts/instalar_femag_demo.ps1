@@ -196,7 +196,7 @@ try {
 
         if (Test-Path "scripts\init_db.py") {
             Write-Step "Inicializando schema FEMAG en SQLite demo"
-            Invoke-VenvPython -Arguments @("scripts\init_db.py")
+            Invoke-VenvPython -Arguments @("scripts\init_db.py", "--allow-sqlite")
         }
 
         if (-not $SkipDemoSeed) {

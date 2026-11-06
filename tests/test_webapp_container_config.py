@@ -40,7 +40,7 @@ def test_entrypoint_runs_demo_seed_and_gunicorn_wsgi():
     entrypoint = _text("deploy/coolify/entrypoint.sh")
     gunicorn = _text("deploy/coolify/gunicorn.conf.py")
 
-    assert "scripts/init_db.py" in entrypoint
+    assert "scripts/init_db.py --allow-sqlite" in entrypoint
     assert "FEMAG_WEB_AUTO_INIT_SCHEMA" in entrypoint
     assert "scripts/seed_webapp_demo.py" in entrypoint
     assert "webapp.wsgi:app" in entrypoint

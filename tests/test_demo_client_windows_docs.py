@@ -19,6 +19,8 @@ def test_windows_demo_installer_script_documents_required_flow():
     assert "preservamos WHATSAPP_*" in script
     assert "backups\\issue_73_integral_demo.sqlite3" not in script
     assert "scripts\\init_db.py" in script
+    assert "--allow-sqlite" in script
+    assert "scripts/init_db.py --allow-sqlite" in docs
     assert "scripts\\issue_73_integral_demo.py" in script
     assert "app.main" in script
     assert "--smoke" in script
