@@ -2,6 +2,12 @@
 
 La contrasena nunca se incluye en la linea de comandos ni en los archivos de
 salida. Se obtiene de la configuracion DPAPI del usuario que ejecuta el script.
+
+Este script se copia al servidor junto a ``backup_mysql_all_databases.ps1`` y
+tiene que correr **sin el repositorio**: en el servidor no existe el paquete
+``app``. Por eso la importacion de la configuracion segura es opcional: cuando
+no esta disponible se usan las variables de entorno y los argumentos
+``--user``/``--password``, y la credencial DPAPI no hace falta.
 """
 
 from __future__ import annotations
@@ -17,15 +23,42 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if (_REPOSITORY_ROOT / "app" / "__init__.py").is_file():
+    # Solo cuando el checkout esta presente: en el servidor la raiz no es un
+    # checkout y meterla en el sys.path expondría el disco raiz a imports.
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 import pymysql
 
-from app.config.secure_credentials import (
-    RuntimeConnection,
-    default_config_dir,
-    load_runtime_connection,
-)
+try:
+    from app.config.secure_credentials import (
+        RuntimeConnection,
+        default_config_dir,
+        load_runtime_connection,
+    )
+except ModuleNotFoundError:  # despliegue standalone, sin el paquete app
+    @dataclass(frozen=True)
+    class RuntimeConnection:
+        """Conexion MySQL. Misma forma que la de la app, sin depender de ella."""
+
+        host: str
+        port: int
+        database: str
+        user: str
+        password: str
+
+    def default_config_dir() -> Path:
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if not local_app_data:
+            local_app_data = str(Path.home() / "AppData" / "Local")
+        return Path(local_app_data) / "FEMAG Desktop"
+
+    def load_runtime_connection(config_dir: Path | None = None) -> RuntimeConnection:
+        raise RuntimeError(
+            "Este equipo no tiene la configuracion segura de FEMAG. "
+            "Indique --user y --password."
+        )
 
 
 SYSTEM_DATABASES = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
@@ -102,6 +135,7 @@ def dump_database_with_python(
     """Create a portable SQL dump without depending on the MySQL client tools."""
     del mysqldump_path
     temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    temporary.unlink(missing_ok=True)
     database_identifier = quote_identifier(database)
     db = None
     try:
@@ -192,6 +226,7 @@ def dump_database(
 ) -> DatabaseDump:
     """Run one mysqldump process and atomically publish its SQL file on success."""
     temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    temporary.unlink(missing_ok=True)
     environment = os.environ.copy()
     # MYSQL_PWD keeps the secret out of process arguments and command history.
     environment["MYSQL_PWD"] = connection.password
@@ -236,8 +271,10 @@ def create_backup(
     backup_dir: Path,
     *,
     databases: list[str] | None = None,
+    excludes: list[str] | None = None,
     mysqldump_path: str = "mysqldump",
     dump_engine: str = "auto",
+    overwrite: bool = False,
     now: datetime | None = None,
 ) -> tuple[Path, list[DatabaseDump]]:
     """Dump each requested schema into an independently restorable SQL file."""
@@ -253,12 +290,20 @@ def create_backup(
     )
 
     target_databases = databases if databases is not None else accessible_databases(connection)
+    ignored = {name.lower() for name in (excludes or [])}
+    target_databases = [
+        database for database in target_databases if database.lower() not in ignored
+    ]
     if not target_databases:
         raise RuntimeError("No hay bases de datos de usuario accesibles para respaldar.")
 
-    timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d-%H%M%S")
-    run_dir = backup_dir / timestamp
-    run_dir.mkdir(parents=True, exist_ok=False)
+    if overwrite:
+        run_dir = backup_dir
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d-%H%M%S")
+        run_dir = backup_dir / timestamp
+        run_dir.mkdir(parents=True, exist_ok=False)
     results = [
         dump_runner(
             connection,
@@ -295,6 +340,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Base a respaldar. Repetir para evitar usar SHOW DATABASES.",
     )
     parser.add_argument(
+        "--exclude-database",
+        action="append",
+        dest="excludes",
+        help="Base a excluir del respaldo. Repetir para varias.",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.getenv("MYSQL_HOST") or os.getenv("DB_HOST") or "127.0.0.1",
+        help="Servidor MySQL (por defecto MYSQL_HOST/DB_HOST o 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("MYSQL_PORT") or os.getenv("DB_PORT") or "3306"),
+        help="Puerto MySQL (por defecto MYSQL_PORT/DB_PORT o 3306).",
+    )
+    parser.add_argument(
+        "--user",
+        default=os.getenv("MYSQL_USER") or os.getenv("DB_USER"),
+        help="Usuario MySQL. Si se omite usa la credencial segura local.",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.getenv("MYSQL_PASSWORD") or os.getenv("DB_PASSWORD"),
+        help="Clave MySQL. Si se omite usa la credencial segura local.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Sobrescribe <base>.sql en --backup-dir en lugar de crear carpetas por fecha.",
+    )
+    parser.add_argument(
         "--mysqldump",
         default="mysqldump",
         help="Ruta a mysqldump.exe o comando disponible en PATH cuando se usa el motor nativo.",
@@ -311,13 +388,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        connection = load_runtime_connection()
+        if args.user or args.password:
+            if not args.user or not args.password:
+                raise ValueError(
+                    "Indique usuario y clave juntos, o deje ambos para usar la credencial segura."
+                )
+            connection = RuntimeConnection(
+                host=args.host,
+                port=args.port,
+                database=(args.databases[0] if args.databases else ""),
+                user=args.user,
+                password=args.password,
+            )
+        else:
+            connection = load_runtime_connection()
         run_dir, results = create_backup(
             connection,
             args.backup_dir,
             databases=args.databases,
+            excludes=args.excludes,
             mysqldump_path=args.mysqldump,
             dump_engine=args.dump_engine,
+            overwrite=args.overwrite,
         )
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
