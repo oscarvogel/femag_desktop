@@ -8,7 +8,9 @@ set -eu
 
 if [ "${FEMAG_WEB_AUTO_INIT_SCHEMA:-0}" = "1" ]; then
     echo "Preparando esquema de FEMAG Web..."
-    python scripts/init_db.py
+    # La instancia demo del contenedor usa SQLite; el flag es necesario para
+    # prepararla explicitamente y no cae en el guard de scripts admin (#685).
+    python scripts/init_db.py --allow-sqlite
 fi
 
 if [ "${FEMAG_WEB_SEED_DEMO:-0}" = "1" ]; then
