@@ -30,8 +30,11 @@ POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
 PASSWORD = "clave-de-prueba-123"
 
 pytestmark = pytest.mark.skipif(
-    POWERSHELL is None,
-    reason="Se necesita PowerShell para ejecutar el script del servidor.",
+    POWERSHELL is None or sys.platform != "win32",
+    reason=(
+        "El dump diario se despliega en Windows Server 2019: el script usa "
+        "PowerShell 5.1, Start-Process con .cmd y el Programador de tareas."
+    ),
 )
 
 
