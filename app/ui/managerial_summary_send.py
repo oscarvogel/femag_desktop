@@ -30,7 +30,8 @@ class ManagerialSummarySendDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("managerialSummarySendDialog")
         self.setWindowTitle("Enviar resumen gerencial")
-        self.resize(620, 360)
+        self.resize(800, 580)
+        self.setMinimumSize(680, 500)
         self.service = service or ManagerialSummaryService()
         self.summary = self.service.build()
         config = ManagerialDeliveryConfig.from_env()
@@ -74,12 +75,13 @@ class ManagerialSummarySendDialog(QDialog):
         self.history_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.history_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.history_table.verticalHeader().setVisible(False)
-        self.history_table.setMaximumHeight(170)
+        self.history_table.setMinimumHeight(220)
+        self.history_table.setMaximumHeight(300)
         self.history_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents
         )
         self.history_table.horizontalHeader().setStretchLastSection(True)
-        root.addWidget(self.history_table)
+        root.addWidget(self.history_table, 1)
         self._load_history()
 
         self.status_label = QLabel("")
