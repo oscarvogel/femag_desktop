@@ -5,13 +5,59 @@ import os
 import smtplib
 import tempfile
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
 from app.reports.managerial_account_risk import AccountRiskFilters, ManagerialAccountRiskService
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 from app.services.whatsapp_api_client import WhatsAppApiClient, WhatsAppApiConfig
+from app.utils.datetime_utils import as_datetime
+
+
+DELIVERY_STATUS_SENT = "sent"
+DELIVERY_STATUS_ACCEPTED = "accepted"
+DELIVERY_STATUS_FAILED = "failed"
+DELIVERY_STATUS_UNKNOWN = "unknown"
+DELIVERY_STATUS_TRANSIENT = ("pending", "queued", "processing")
+DELIVERY_STATUS_SUCCESS = (DELIVERY_STATUS_SENT, DELIVERY_STATUS_ACCEPTED)
+DELIVERY_STALE_AFTER_HOURS = 24
+DELIVERY_HEALTH_MAX_AGE_HOURS = 36
+
+_DELIVERY_STATUS_MAP = {
+    "sent": DELIVERY_STATUS_SENT,
+    "delivered": DELIVERY_STATUS_SENT,
+    "read": DELIVERY_STATUS_SENT,
+    "accepted": DELIVERY_STATUS_ACCEPTED,
+    "queued": DELIVERY_STATUS_ACCEPTED,
+    "processing": DELIVERY_STATUS_ACCEPTED,
+    "pending": DELIVERY_STATUS_ACCEPTED,
+    "failed": DELIVERY_STATUS_FAILED,
+    "error": DELIVERY_STATUS_FAILED,
+    "rejected": DELIVERY_STATUS_FAILED,
+}
+
+
+def normalize_delivery_status(raw_status: str | None) -> str:
+    """Convierte el estado del gateway en un estado estable para el historial.
+
+    ``processing`` y ``queued`` son transitorios del proveedor. Si se guardan
+    tal cual, quedan trabados para siempre porque no hay polling. Para el
+    resumen gerencial, que el gateway haya aceptado el mensaje alcanza para
+    considerarlo enviado; el estado crudo se conserva en ``provider_status``.
+    """
+    value = (raw_status or "").strip().lower()
+    return _DELIVERY_STATUS_MAP.get(value, DELIVERY_STATUS_UNKNOWN)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    value = as_datetime(value)
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 
 def _money(value: float) -> str:
@@ -420,6 +466,7 @@ class ManagerialSummaryService:
         channel: str,
         recipient: str,
         status: str,
+        provider_status: str | None = None,
         run_key: str | None = None,
         provider_message_id: str | None = None,
         error: str | None = None,
@@ -427,16 +474,114 @@ class ManagerialSummaryService:
         from app.models.system import ManagerialSummaryDelivery
         from app.models.base import utc_now
 
+        raw_status = (status or "").strip()
+        normalized = normalize_delivery_status(raw_status)
+        if provider_status is None and raw_status and raw_status.lower() != normalized:
+            provider_status = raw_status
+
         return ManagerialSummaryDelivery.create(
             run_key=run_key,
             mode=mode,
             channel=channel,
             recipient=recipient,
-            status=status,
+            status=normalized,
+            provider_status=provider_status,
             provider_message_id=provider_message_id,
             error=error,
             finished_at=utc_now(),
         )
+
+    def reconcile_stale_deliveries(
+        self,
+        *,
+        max_age_hours: int = DELIVERY_STALE_AFTER_HOURS,
+        now: datetime | None = None,
+    ) -> int:
+        """Marca como ``unknown`` los estados transitorios que ya no van a cambiar.
+
+        No borra historial: conserva el registro, el mensaje de error y la fecha
+        de cierre. Se ejecuta antes del envío diario y también por CLI.
+        """
+        from app.models.system import ManagerialSummaryDelivery
+        from app.models.base import utc_now
+
+        current = _as_utc(now) or _as_utc(utc_now())
+        cutoff = current - timedelta(hours=max_age_hours)
+        updated = 0
+        for row in ManagerialSummaryDelivery.select().where(
+            ManagerialSummaryDelivery.status.in_(DELIVERY_STATUS_TRANSIENT)
+        ):
+            created = _as_utc(row.created_at)
+            if created is not None and created >= cutoff:
+                continue
+            note = f"Estado transitorio sin confirmación después de {max_age_hours} h."
+            if not row.provider_status:
+                row.provider_status = row.status
+            row.status = DELIVERY_STATUS_UNKNOWN
+            row.error = f"{row.error} / {note}" if row.error else note
+            row.finished_at = current
+            row.save()
+            updated += 1
+        return updated
+
+    def recent_deliveries(self, *, limit: int = 20):
+        """Últimos envíos para el historial visible en la pantalla."""
+        from app.models.system import ManagerialSummaryDelivery
+
+        return list(
+            ManagerialSummaryDelivery.select()
+            .order_by(
+                ManagerialSummaryDelivery.created_at.desc(),
+                ManagerialSummaryDelivery.id.desc(),
+            )
+            .limit(limit)
+        )
+
+    def delivery_health(
+        self,
+        *,
+        max_age_hours: int = DELIVERY_HEALTH_MAX_AGE_HOURS,
+    ) -> dict:
+        """Estado del último envío exitoso y cantidad de transitorios pendientes."""
+        from app.models.system import ManagerialSummaryDelivery
+        from app.models.base import utc_now
+
+        pending = (
+            ManagerialSummaryDelivery.select()
+            .where(ManagerialSummaryDelivery.status.in_(DELIVERY_STATUS_TRANSIENT))
+            .count()
+        )
+        latest = (
+            ManagerialSummaryDelivery.select()
+            .where(ManagerialSummaryDelivery.status.in_(DELIVERY_STATUS_SUCCESS))
+            .order_by(
+                ManagerialSummaryDelivery.created_at.desc(),
+                ManagerialSummaryDelivery.id.desc(),
+            )
+            .first()
+        )
+        if latest is None:
+            return {
+                "state": "missing",
+                "last_success_at": None,
+                "last_channel": None,
+                "age_hours": None,
+                "pending": pending,
+            }
+
+        created = _as_utc(latest.created_at)
+        current = _as_utc(utc_now())
+        age_hours = (
+            None if created is None else round((current - created).total_seconds() / 3600, 1)
+        )
+        state = "ok" if age_hours is not None and age_hours <= max_age_hours else "stale"
+        return {
+            "state": state,
+            "last_success_at": created.isoformat() if created else None,
+            "last_channel": latest.channel,
+            "age_hours": age_hours,
+            "pending": pending,
+        }
 
     def send_email(
         self,

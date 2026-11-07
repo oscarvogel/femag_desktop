@@ -257,3 +257,146 @@ def test_whatsapp_zero_activity_is_readable(db):
     whatsapp = service.render_whatsapp(summary)
     if "Despachos hoy: $ 0,00" in whatsapp:
         assert "🚚 Sin despachos registrados hoy" in whatsapp
+
+
+def test_normalize_delivery_status():
+    from app.services.managerial_summary_service import normalize_delivery_status
+
+    assert normalize_delivery_status("sent") == "sent"
+    assert normalize_delivery_status("delivered") == "sent"
+    assert normalize_delivery_status("read") == "sent"
+    assert normalize_delivery_status("accepted") == "accepted"
+    assert normalize_delivery_status("queued") == "accepted"
+    assert normalize_delivery_status("processing") == "accepted"
+    assert normalize_delivery_status("failed") == "failed"
+    assert normalize_delivery_status("error") == "failed"
+    assert normalize_delivery_status("") == "unknown"
+    assert normalize_delivery_status(None) == "unknown"
+    assert normalize_delivery_status("algo-raro") == "unknown"
+
+
+def test_record_delivery_preserves_provider_status_and_normalizes(db):
+    from app.services.managerial_summary_service import ManagerialSummaryService
+
+    service = ManagerialSummaryService()
+    row = service.record_delivery(
+        mode="automatic",
+        channel="whatsapp",
+        recipient="5491112345678",
+        status="processing",
+        provider_message_id="msg-1",
+        run_key="managerial:2026-11-07:whatsapp",
+    )
+    assert row.status == "accepted"
+    assert row.provider_status == "processing"
+    assert row.provider_message_id == "msg-1"
+    assert row.finished_at is not None
+
+    sent = service.record_delivery(
+        mode="manual",
+        channel="email",
+        recipient="dueno@example.com",
+        status="sent",
+    )
+    assert sent.status == "sent"
+    assert sent.provider_status is None
+
+
+def test_reconcile_stale_deliveries_marks_old_transient_only(db):
+    from datetime import timedelta
+
+    from app.models.base import utc_now
+    from app.models.system import ManagerialSummaryDelivery
+    from app.services.managerial_summary_service import ManagerialSummaryService
+
+    now = utc_now()
+    old = ManagerialSummaryDelivery.create(
+        mode="automatic",
+        channel="whatsapp",
+        recipient="x",
+        status="processing",
+        created_at=now - timedelta(hours=48),
+    )
+    recent = ManagerialSummaryDelivery.create(
+        mode="automatic",
+        channel="whatsapp",
+        recipient="x",
+        status="queued",
+        created_at=now - timedelta(hours=1),
+    )
+    sent = ManagerialSummaryDelivery.create(
+        mode="automatic",
+        channel="whatsapp",
+        recipient="x",
+        status="sent",
+        created_at=now - timedelta(hours=48),
+    )
+
+    count = ManagerialSummaryService().reconcile_stale_deliveries(
+        max_age_hours=24, now=now
+    )
+
+    assert count == 1
+    old = ManagerialSummaryDelivery.get_by_id(old.id)
+    recent = ManagerialSummaryDelivery.get_by_id(recent.id)
+    sent = ManagerialSummaryDelivery.get_by_id(sent.id)
+    assert old.status == "unknown"
+    assert old.provider_status == "processing"
+    assert "24 h" in (old.error or "")
+    assert old.finished_at is not None
+    assert recent.status == "queued"
+    assert sent.status == "sent"
+
+
+def test_delivery_health_reports_missing_stale_and_ok(db):
+    from datetime import timedelta
+
+    from app.models.base import utc_now
+    from app.models.system import ManagerialSummaryDelivery
+    from app.services.managerial_summary_service import ManagerialSummaryService
+
+    service = ManagerialSummaryService()
+    assert service.delivery_health()["state"] == "missing"
+
+    ManagerialSummaryDelivery.create(
+        mode="automatic",
+        channel="whatsapp",
+        recipient="x",
+        status="sent",
+        created_at=utc_now() - timedelta(hours=48),
+    )
+    health = service.delivery_health(max_age_hours=36)
+    assert health["state"] == "stale"
+    assert health["pending"] == 0
+
+    ManagerialSummaryDelivery.create(
+        mode="automatic",
+        channel="email",
+        recipient="x",
+        status="accepted",
+        created_at=utc_now(),
+    )
+    health = service.delivery_health(max_age_hours=36)
+    assert health["state"] == "ok"
+
+
+def test_already_sent_uses_run_key(db):
+    from app.jobs.send_managerial_summary import _already_sent
+    from app.models.system import ManagerialSummaryDelivery
+
+    assert _already_sent("managerial:2026-11-07:whatsapp") is False
+    ManagerialSummaryDelivery.create(
+        run_key="managerial:2026-11-07:whatsapp",
+        mode="automatic",
+        channel="whatsapp",
+        recipient="x",
+        status="sent",
+    )
+    assert _already_sent("managerial:2026-11-07:whatsapp") is True
+    assert _already_sent("managerial:2026-11-08:whatsapp") is False
+
+
+def test_managerial_summary_cli_includes_reconcile():
+    from app.jobs.send_managerial_summary import build_parser
+
+    assert build_parser().parse_args(["--reconcile"]).reconcile is True

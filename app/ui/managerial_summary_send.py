@@ -3,14 +3,18 @@ from __future__ import annotations
 import webbrowser
 
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
 )
 
@@ -18,6 +22,7 @@ from app.services.managerial_summary_service import (
     ManagerialDeliveryConfig,
     ManagerialSummaryService,
 )
+from app.utils.datetime_utils import utc_datetime_to_local
 
 
 class ManagerialSummarySendDialog(QDialog):
@@ -25,7 +30,8 @@ class ManagerialSummarySendDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("managerialSummarySendDialog")
         self.setWindowTitle("Enviar resumen gerencial")
-        self.resize(620, 360)
+        self.resize(800, 580)
+        self.setMinimumSize(680, 500)
         self.service = service or ManagerialSummaryService()
         self.summary = self.service.build()
         config = ManagerialDeliveryConfig.from_env()
@@ -58,6 +64,26 @@ class ManagerialSummarySendDialog(QDialog):
         note.setWordWrap(True)
         root.addWidget(note)
 
+        history_label = QLabel("Últimos envíos")
+        history_label.setObjectName("managerialSummaryHistoryLabel")
+        root.addWidget(history_label)
+        self.history_table = QTableWidget(0, 5)
+        self.history_table.setObjectName("managerialSummaryHistory")
+        self.history_table.setHorizontalHeaderLabels(
+            ["Fecha", "Canal", "Estado", "Gateway", "Error"]
+        )
+        self.history_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.history_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.history_table.verticalHeader().setVisible(False)
+        self.history_table.setMinimumHeight(220)
+        self.history_table.setMaximumHeight(300)
+        self.history_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents
+        )
+        self.history_table.horizontalHeader().setStretchLastSection(True)
+        root.addWidget(self.history_table, 1)
+        self._load_history()
+
         self.status_label = QLabel("")
         self.status_label.setObjectName("managerialSummarySendStatus")
         self.status_label.setWordWrap(True)
@@ -81,6 +107,35 @@ class ManagerialSummarySendDialog(QDialog):
     def _preview(self) -> None:
         path = self.service.write_preview(self.summary)
         webbrowser.open(path.resolve().as_uri())
+
+    def _load_history(self) -> None:
+        labels = {
+            "sent": "Enviado",
+            "accepted": "Aceptado por gateway",
+            "failed": "Fallido",
+            "unknown": "Sin confirmar",
+            "pending": "Pendiente",
+            "queued": "Encolado",
+            "processing": "Procesando",
+        }
+        rows = self.service.recent_deliveries(limit=10)
+        self.history_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            created = utc_datetime_to_local(row.created_at)
+            values = [
+                created.strftime("%d/%m/%Y %H:%M") if created else "",
+                row.channel or "",
+                labels.get(row.status, row.status or ""),
+                row.provider_status or "",
+                row.error or "",
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if value:
+                    item.setToolTip(str(value))
+                self.history_table.setItem(row_index, column, item)
+        self.history_table.resizeColumnsToContents()
+        self.history_table.horizontalHeader().setStretchLastSection(True)
 
     def _send(self) -> None:
         if not self.email_check.isChecked() and not self.whatsapp_check.isChecked():
@@ -124,6 +179,7 @@ class ManagerialSummarySendDialog(QDialog):
 
         message = "\n".join(results + errors)
         self.status_label.setText(message)
+        self._load_history()
         if errors:
             QMessageBox.warning(self, "Resumen gerencial", message)
         else:
