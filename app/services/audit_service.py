@@ -2,6 +2,7 @@ import socket
 
 from app.models.audit import AuditLog
 from app.models.base import utc_now
+from app.services.audit_identity_service import resolve_audit_user_id
 
 WORKSTATION_VERSION_MODULE = "Sistema"
 WORKSTATION_VERSION_ACTION = "version de puesto"
@@ -22,6 +23,7 @@ class AuditService:
     ) -> AuditLog:
         return AuditLog.create(
             user=user,
+            user_id=resolve_audit_user_id(user),
             module=module,
             action=action,
             record_ref=record_ref,

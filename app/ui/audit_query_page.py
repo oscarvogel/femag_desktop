@@ -217,13 +217,20 @@ class AuditQueryPage(QWidget):
         try:
             self.table.clearContents()
             self.table.setRowCount(len(page.rows))
+            user_names = self.service.user_names()
             for row_index, row in enumerate(page.rows):
                 occurred = utc_datetime_to_local(row.occurred_at)
+                user_display = user_names.get(row.user_id, row.user or "Sistema")
+                user_tooltip = (
+                    f"{user_display} (registrado como {row.user})"
+                    if row.user and user_display != row.user
+                    else user_display
+                )
                 values = (
                     occurred.strftime("%d/%m/%Y %H:%M"),
                     row.module,
                     self.service.display_reference(row),
-                    row.user or "Sistema",
+                    user_display,
                     row.action.replace("_", " "),
                     self.service.transition(row),
                     self.service.reason_or_summary(row),
@@ -232,7 +239,9 @@ class AuditQueryPage(QWidget):
                     item = QTableWidgetItem(str(value or ""))
                     if column == 0:
                         item.setTextAlignment(Qt.AlignCenter)
-                    item.setToolTip(str(value or ""))
+                    item.setToolTip(
+                        str(user_tooltip or "") if column == 3 else str(value or "")
+                    )
                     self.table.setItem(row_index, column, item)
         finally:
             self.table.setUpdatesEnabled(True)

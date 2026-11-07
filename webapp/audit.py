@@ -18,7 +18,7 @@ import socket
 
 from flask import has_request_context, request
 
-from app.models.audit import AuditLog
+from app.services.audit_service import AuditService
 
 
 #: Los mismos modulos que usa el escritorio, para que los filtros de la
@@ -71,12 +71,11 @@ def record(
     problema se ve en el log del servidor, no en el celular del operario.
     """
     try:
-        AuditLog.create(
+        AuditService().record(
             user=(user or None),
             module=module,
             action=action,
             record_ref=record_ref,
-            old_value=None,
             new_value=new_value,
             observation=observation,
             workstation=client_station(),

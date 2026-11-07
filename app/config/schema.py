@@ -206,6 +206,7 @@ def ensure_runtime_schema(database) -> None:
         _normalize_legacy_pallet_rows(database)
         _consolidate_shared_client_addresses(database)
         _repair_payment_movement_amounts(database)
+        _backfill_audit_user_ids(database)
     if hasattr(database, "get_indexes"):
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
@@ -213,7 +214,20 @@ def ensure_runtime_schema(database) -> None:
         _ensure_client_payment_idempotency_index(database)
         _ensure_budget_timing_index(database)
         _ensure_return_line_timing_index(database)
+        _ensure_audit_user_index(database)
     _ensure_sqlite_index_integrity(database)
+
+
+def _backfill_audit_user_ids(database) -> None:
+    """Asocia los eventos históricos con la identidad estable del usuario.
+
+    El nombre original se conserva en `AuditLog.user`; sólo se completa la
+    referencia `user_id` para los alias que se pueden resolver con seguridad.
+    """
+    from app.services.audit_identity_service import backfill_audit_user_ids
+
+    with database.atomic():
+        backfill_audit_user_ids()
 
 
 def _line_for_content(order_id: int, destination_id: int, product_id: int):
@@ -521,6 +535,17 @@ def _ensure_client_salesperson_index(database) -> None:
         return
     _execute_schema_statement(
         database, "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    )
+
+
+def _ensure_audit_user_index(database) -> None:
+    table_name = "auditlog"
+    expected_columns = {"user_id"}
+    indexes = database.get_indexes(table_name)
+    if any(set(index.columns) == expected_columns for index in indexes):
+        return
+    _execute_schema_statement(
+        database, "CREATE INDEX `auditlog_user_id` ON `auditlog` (`user_id`)"
     )
 
 
