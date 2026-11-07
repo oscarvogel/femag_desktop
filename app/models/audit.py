@@ -1,6 +1,6 @@
 import json
 
-from peewee import CharField, DateTimeField, TextField
+from peewee import CharField, DateTimeField, IntegerField, TextField
 
 from app.models.base import BaseModel, utc_now
 
@@ -21,6 +21,7 @@ class JSONTextField(TextField):
 
 class AuditLog(BaseModel):
     user = CharField(null=True)
+    user_id = IntegerField(null=True, index=True)
     occurred_at = DateTimeField(default=utc_now)
     module = CharField()
     action = CharField()

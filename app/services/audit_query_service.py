@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
+from peewee import fn
+
 from app.models.audit import AuditLog
 
 
@@ -19,11 +21,26 @@ class AuditQueryService:
     """Consulta de solo lectura sobre AuditLog para la pantalla general."""
 
     def filter_options(self) -> dict[str, list[str]]:
+        from app.models.security import User
+        from app.services.audit_identity_service import SYSTEM_LABEL, UNATTRIBUTED_LABEL
+
+        users = [user.username for user in User.select().order_by(User.username)]
+        if AuditLog.select().where(AuditLog.user.is_null(True)).exists():
+            users.append(SYSTEM_LABEL)
+        if AuditLog.select().where(
+            AuditLog.user_id.is_null(True), AuditLog.user.is_null(False)
+        ).exists():
+            users.append(UNATTRIBUTED_LABEL)
         return {
             "modules": self._distinct_values(AuditLog.module),
-            "users": self._distinct_values(AuditLog.user),
+            "users": users,
             "actions": self._distinct_values(AuditLog.action),
         }
+
+    def user_names(self) -> dict[int, str]:
+        from app.services.audit_identity_service import user_names
+
+        return user_names()
 
     def _base_query(
         self,
@@ -34,11 +51,33 @@ class AuditQueryService:
         date_from: date | None = None,
         date_to: date | None = None,
     ):
+        from app.services.audit_identity_service import (
+            SYSTEM_LABEL,
+            UNATTRIBUTED_LABEL,
+            audit_user_aliases,
+            resolve_audit_user_id,
+        )
+
         query = AuditLog.select()
         if module:
             query = query.where(AuditLog.module == module)
         if user:
-            query = query.where(AuditLog.user == user)
+            if user == UNATTRIBUTED_LABEL:
+                query = query.where(
+                    AuditLog.user_id.is_null(True), AuditLog.user.is_null(False)
+                )
+            elif user == SYSTEM_LABEL:
+                query = query.where(AuditLog.user.is_null(True))
+            else:
+                user_id = resolve_audit_user_id(user)
+                if user_id is None:
+                    query = query.where(AuditLog.user == user)
+                else:
+                    aliases = [alias.casefold() for alias in audit_user_aliases(user)]
+                    query = query.where(
+                        (AuditLog.user_id == user_id)
+                        | (fn.LOWER(AuditLog.user).in_(aliases))
+                    )
         if action:
             query = query.where(AuditLog.action == action)
         if date_from:
