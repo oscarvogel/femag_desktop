@@ -34,11 +34,12 @@ def run(*, as_of: date | None = None) -> dict[str, str]:
     """Ejecución diaria idempotente para Programador de tareas."""
     database = _open_database()
     try:
+        service = ManagerialSummaryService()
+        reconciled = service.reconcile_stale_deliveries()
         config = ManagerialDeliveryConfig.from_env()
         if not config.auto_enabled:
-            return {"status": "disabled"}
+            return {"status": "disabled", "reconciled": str(reconciled)}
 
-        service = ManagerialSummaryService()
         summary = service.build(as_of=as_of)
         results: dict[str, str] = {}
 
@@ -97,7 +98,10 @@ def run(*, as_of: date | None = None) -> dict[str, str]:
                     )
                     results["whatsapp"] = f"failed: {exc}"
 
-        return results or {"status": "no_channels"}
+        if not results:
+            results["status"] = "no_channels"
+        results["reconciled"] = str(reconciled)
+        return results
     finally:
         if not database.is_closed():
             database.close()
@@ -163,6 +167,18 @@ def send_now(*, as_of: date | None = None) -> dict[str, str]:
             database.close()
 
 
+def reconcile() -> dict[str, str]:
+    """Marca como unknown los envíos transitorios vencidos, sin borrar historial."""
+    database = _open_database()
+    try:
+        service = ManagerialSummaryService()
+        count = service.reconcile_stale_deliveries()
+        return {"reconciled": str(count)}
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
 def health_check() -> dict[str, str]:
     """Valida DB y configuración de canales sin enviar mensajes."""
     result: dict[str, str] = {}
@@ -171,6 +187,25 @@ def health_check() -> dict[str, str]:
         database = _open_database()
         database.execute_sql("SELECT 1")
         result["database"] = "ok"
+
+        try:
+            from app.services.managerial_summary_service import (
+                DELIVERY_HEALTH_MAX_AGE_HOURS,
+            )
+
+            delivery = ManagerialSummaryService().delivery_health()
+            result["delivery_state"] = delivery["state"]
+            result["last_success_at"] = delivery["last_success_at"] or "missing"
+            result["last_success_channel"] = delivery["last_channel"] or "-"
+            result["delivery_age_hours"] = (
+                str(delivery["age_hours"])
+                if delivery["age_hours"] is not None
+                else "unknown"
+            )
+            result["pending_deliveries"] = str(delivery["pending"])
+            result["delivery_max_age_hours"] = str(DELIVERY_HEALTH_MAX_AGE_HOURS)
+        except Exception as exc:
+            result["delivery_state"] = f"failed: {exc}"
 
         config = ManagerialDeliveryConfig.from_env()
         result["config_file"] = os.getenv("FEMAG_ENV_FILE", ".env")
@@ -248,6 +283,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ejecuta el envío diario idempotente para el Programador de tareas.",
     )
+    mode.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Marca como unknown los envíos transitorios vencidos, sin enviar nada.",
+    )
     return parser
 
 
@@ -258,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         result = health_check()
     elif args.send_now:
         result = send_now()
+    elif args.reconcile:
+        result = reconcile()
     else:
         # --daily y la ejecución sin argumentos hacen lo mismo para simplificar
         # el Programador de tareas.

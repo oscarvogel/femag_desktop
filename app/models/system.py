@@ -27,6 +27,7 @@ class ManagerialSummaryDelivery(BaseModel):
     channel = CharField()
     recipient = CharField()
     status = CharField(default="pending")
+    provider_status = CharField(null=True)
     provider_message_id = CharField(null=True)
     error = TextField(null=True)
     created_at = DateTimeField(default=utc_now)
