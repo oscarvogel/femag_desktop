@@ -182,3 +182,79 @@ def test_budget_prints_individual_files_and_bundle(db, tmp_path):
     assert bundle.name == f"presupuestos_OC-{order.order_number:06d}.pdf"
     assert bundle.stat().st_size > 0
     assert Budget.select().count() == 2
+
+
+def _remove_client_destination(order, client):
+    from app.models.load_orders import LoadOrderDestination, LoadOrderProduct
+
+    destination = LoadOrderDestination.get(
+        (LoadOrderDestination.order == order)
+        & (LoadOrderDestination.client == client)
+    )
+    LoadOrderProduct.delete().where(
+        LoadOrderProduct.destination == destination
+    ).execute()
+    LoadOrderDestination.delete().where(
+        LoadOrderDestination.id == destination.id
+    ).execute()
+
+
+def test_annuls_stale_budget_when_client_is_removed_from_pending_order(db):
+    from app.models.audit import AuditLog
+
+    order, _client_a, client_b, _product_a, _product_b = _make_multi_client_order()
+    service = BudgetService(current_user="admin")
+    service.ensure_for_load_order(order)
+    budget_b = Budget.get(Budget.client == client_b)
+
+    _remove_client_destination(order, client_b)
+
+    stale = service.find_stale_load_order_budgets(order)
+    assert [budget.id for budget in stale] == [budget_b.id]
+
+    annulled = service.annul_stale_load_order_budgets(order)
+
+    assert [budget.id for budget in annulled] == [budget_b.id]
+    budget_b = Budget.get_by_id(budget_b.id)
+    assert budget_b.status == Budget.STATUS_ANNULLED
+    assert budget_b.items.count() == 1
+    assert "ya no tiene mercadería" in (budget_b.observations or "")
+    assert (
+        AuditLog.select()
+        .where(
+            (AuditLog.record_ref == f"Budget:{budget_b.id}")
+            & (AuditLog.action == "anular_cliente_sin_mercaderia")
+        )
+        .exists()
+    )
+
+    assert service.annul_stale_load_order_budgets(order) == []
+
+
+def test_does_not_annul_stale_budget_with_account_movement(db):
+    order, _client_a, client_b, _product_a, _product_b = _make_multi_client_order()
+    service = BudgetService(current_user="admin")
+    service.ensure_for_load_order(order)
+    budget_b = Budget.get(Budget.client == client_b)
+    ClientAccountMovement.create(
+        client=client_b,
+        load_order=order,
+        budget=budget_b,
+        movement_type=ClientAccountMovement.TYPE_LOAD_ORDER_IMMEDIATE,
+        amount=0,
+        net_amount=budget_b.net_amount,
+        discount_amount=0,
+        vat_amount=budget_b.vat_amount,
+        total_amount=budget_b.total_amount,
+        currency="ARS",
+        description="Movimiento de prueba",
+        source_ref=f"Budget:{budget_b.id}",
+        is_reversal=False,
+        created_by="admin",
+        movement_date=order.date,
+    )
+
+    _remove_client_destination(order, client_b)
+
+    assert service.annul_stale_load_order_budgets(order) == []
+    assert Budget.get_by_id(budget_b.id).status == Budget.STATUS_ACTIVE
