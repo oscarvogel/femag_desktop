@@ -60,6 +60,70 @@ class BudgetService:
                     budgets.append(budget)
         return budgets
 
+    def find_stale_load_order_budgets(self, order: LoadOrder | None = None) -> list[Budget]:
+        """Presupuestos activos de clientes que ya no tienen mercadería en la orden."""
+        query = Budget.select().where(
+            (Budget.origin == Budget.ORIGIN_LOAD_ORDER)
+            & (Budget.status == Budget.STATUS_ACTIVE)
+            & (Budget.load_order.is_null(False))
+        )
+        if order is not None:
+            query = query.where(Budget.load_order == order)
+        stale = []
+        for budget in query.order_by(Budget.load_order_id, Budget.id):
+            clients = {client.id for client in self._clients_for_order(budget.load_order)}
+            if budget.client_id not in clients:
+                stale.append(budget)
+        return stale
+
+    def annul_stale_load_order_budgets(
+        self,
+        order: LoadOrder,
+        *,
+        allow_issued: bool = False,
+    ) -> list[Budget]:
+        """Anula los presupuestos de clientes que se quitaron de la orden.
+
+        Sólo actúa sobre órdenes pendientes (o con ``allow_issued`` explícito
+        para una reparación manual) y nunca toca un presupuesto con movimiento
+        contable o estado de aplicación. No borra: anula y deja auditoría.
+        """
+        from app.models.load_orders import LoadOrderBudgetStatus
+
+        order = LoadOrder.get_by_id(order.id)
+        if not allow_issued and not order.is_unissued:
+            return []
+        stale = []
+        for budget in self.find_stale_load_order_budgets(order):
+            if budget.account_movements.exists():
+                continue
+            applied = (
+                LoadOrderBudgetStatus.select()
+                .where(
+                    (LoadOrderBudgetStatus.order == order)
+                    & (LoadOrderBudgetStatus.client == budget.client)
+                    & (LoadOrderBudgetStatus.timing == budget.timing)
+                    & (
+                        LoadOrderBudgetStatus.status
+                        == LoadOrderBudgetStatus.STATUS_APPLIED
+                    )
+                )
+                .exists()
+            )
+            if applied:
+                continue
+            note = (
+                "Anulado automáticamente: el cliente ya no tiene mercadería en la orden."
+            )
+            budget.observations = (
+                f"{budget.observations} / {note}" if budget.observations else note
+            )
+            budget.status = Budget.STATUS_ANNULLED
+            budget.save()
+            self._record("anular_cliente_sin_mercaderia", budget, reason=note)
+            stale.append(budget)
+        return stale
+
     def _observations_for_order_client(
         self, order: LoadOrder, client: Client, timing: str = Budget.TIMING_IMMEDIATE
     ) -> str | None:
