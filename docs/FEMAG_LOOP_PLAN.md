@@ -4,6 +4,10 @@ Este documento ordena el avance de FEMAG Desktop en loops chicos, trazables y
 validables. Loop Engineering es metodologia de trabajo: no agrega funcionalidad
 productiva por si misma.
 
+## Documentos de referencia
+
+- `docs/INVENTARIO_TABLAS_SIN_USO.md`: estado y decisión de las 17 tablas vacías.
+
 ## Estado auditado
 
 - Repo: `oscarvogel/femag_desktop`.
