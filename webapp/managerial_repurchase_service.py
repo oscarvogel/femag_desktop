@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from datetime import date, timezone
 
+from app.config.database import database_proxy
 from app.models.sync import SyncProjection
 from app.utils.datetime_utils import as_datetime
 from webapp.managerial_dashboard_service import (
+    MONTHS_SHORT,
+    PERIOD_UID_PREFIX,
     ManagerialDashboardError,
+    _days_in_month,
     _money_full,
     _month_name,
     _number,
@@ -67,6 +71,14 @@ def _iso_date(value) -> str:
     if parsed is None:
         return ""
     return parsed.strftime("%Y-%m-%d")
+
+
+def _clean_client_name(value) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _client_key(value) -> str:
+    return _clean_client_name(value).casefold()
 
 
 class ManagerialRepurchaseService:
@@ -156,6 +168,180 @@ class ManagerialRepurchaseService:
         except (ManagerialDashboardError, TypeError, ValueError, KeyError) as exc:
             return {"empty": True, "error": str(exc)}
 
+    @classmethod
+    def client_history(
+        cls,
+        client_name: str,
+        period_start: str | None = None,
+        *,
+        months: int = 12,
+    ) -> dict:
+        """Compras mensuales de un cliente a partir de los cortes publicados."""
+        name = _clean_client_name(client_name)
+        if not name:
+            return {"empty": True, "error": "Falta el cliente."}
+        if database_proxy.obj is None:
+            return {
+                "empty": True,
+                "error": "La nube todavía no tiene datos de recompra.",
+            }
+        key = _client_key(name)
+        snapshots: dict[date, dict] = {}
+        rows = SyncProjection.select().where(
+            (SyncProjection.resource_type == SyncProjection.RESOURCE_REPURCHASE)
+            & (SyncProjection.resource_uid.startswith(PERIOD_UID_PREFIX))
+        )
+        for projection in rows:
+            payload = (
+                projection.payload
+                if isinstance(projection.payload, dict)
+                else {}
+            )
+            period = payload.get("period") or {}
+            try:
+                start = date.fromisoformat(str(period.get("start")))
+                end = date.fromisoformat(str(period.get("end")))
+            except (TypeError, ValueError):
+                continue
+            snapshots[start] = {
+                "end": end,
+                "rows": {
+                    _client_key(row.get("client_name")): row
+                    for row in (payload.get("rows") or [])
+                    if isinstance(row, dict)
+                },
+            }
+        if not snapshots:
+            return {
+                "empty": True,
+                "error": "Todavía no se publicaron meses de recompra.",
+            }
+        anchor = None
+        if period_start:
+            try:
+                anchor = date.fromisoformat(str(period_start))
+            except (TypeError, ValueError):
+                anchor = None
+        eligible = [
+            start for start in snapshots if anchor is None or start <= anchor
+        ]
+        if not eligible:
+            eligible = list(snapshots)
+        eligible.sort()
+        eligible = eligible[-max(1, int(months)) :]
+
+        points = []
+        previous_tonnes = None
+        last_seen = None
+        max_tonnes = 0.0
+        for index, start in enumerate(eligible):
+            info = snapshots[start]
+            end = info["end"]
+            row = info["rows"].get(key)
+            tonnes = float(row.get("current_tonnes") or 0) if row else 0.0
+            total = float(row.get("current_total") or 0) if row else 0.0
+            if row is not None:
+                last_seen = row
+            variation = None
+            if index > 0:
+                if (
+                    row is not None
+                    and row.get("variation_percent") is not None
+                ):
+                    variation = float(row["variation_percent"])
+                elif previous_tonnes is not None and previous_tonnes > 0.0005:
+                    variation = round(
+                        (tonnes - previous_tonnes) / previous_tonnes * 100, 1
+                    )
+            delta, direction = _variation(variation)
+            max_tonnes = max(max_tonnes, tonnes)
+            points.append(
+                {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "label": (
+                        f"{MONTHS_SHORT[start.month].capitalize()} {start.year}"
+                    ),
+                    "short": MONTHS_SHORT[start.month],
+                    "range": f"{start:%d/%m/%Y} – {end:%d/%m/%Y}",
+                    "tonnes": round(tonnes, 3),
+                    "tonnes_text": _number(tonnes, 2),
+                    "total": round(total, 2),
+                    "total_text": _money_full(total),
+                    "variation": variation,
+                    "variation_text": delta,
+                    "direction": direction,
+                    "partial": end.day < _days_in_month(end),
+                    "last_purchase": (
+                        _date_label(row.get("current_last_date"))
+                        if row
+                        else "—"
+                    ),
+                }
+            )
+            previous_tonnes = tonnes
+        for point in points:
+            point["bar"] = (
+                round(point["tonnes"] / max_tonnes * 100, 1)
+                if max_tonnes
+                else 0
+            )
+
+        with_purchase = [
+            point for point in points if point["tonnes"] > 0.0005
+        ]
+        if not with_purchase:
+            return {
+                "empty": True,
+                "client": name,
+                "error": (
+                    "El cliente no registra compras en los meses disponibles."
+                ),
+            }
+
+        total_tonnes = round(sum(point["tonnes"] for point in points), 3)
+        total_value = round(sum(point["total"] for point in points), 2)
+        best = max(points, key=lambda point: point["tonnes"])
+        worst = min(with_purchase, key=lambda point: point["tonnes"])
+        average = total_tonnes / len(points) if points else 0
+        salesperson = "—"
+        display_name = name
+        if last_seen is not None:
+            salesperson = (
+                _clean_client_name(last_seen.get("salesperson_name")) or "—"
+            )
+            display_name = (
+                _clean_client_name(last_seen.get("client_name")) or name
+            )
+        return {
+            "empty": False,
+            "client": display_name,
+            "salesperson": salesperson,
+            "range": f"{points[0]['label']} – {points[-1]['label']}",
+            "months_count": len(points),
+            "active_months": len(with_purchase),
+            "total_tonnes": total_tonnes,
+            "total_tonnes_text": _number(total_tonnes, 2),
+            "total_value": total_value,
+            "total_value_text": _money_full(total_value),
+            "average_tonnes": round(average, 3),
+            "average_tonnes_text": _number(average, 2),
+            "best": {
+                "label": best["label"],
+                "tonnes_text": best["tonnes_text"],
+            },
+            "worst": {
+                "label": worst["label"],
+                "tonnes_text": worst["tonnes_text"],
+            },
+            "latest": {
+                "label": points[-1]["label"],
+                "tonnes_text": points[-1]["tonnes_text"],
+                "partial": points[-1]["partial"],
+            },
+            "points": points,
+        }
+
 
 def _build_view(payload: dict) -> dict:
     current = payload["period"]
@@ -189,6 +375,7 @@ def _build_view(payload: dict) -> dict:
         rows.append(
             {
                 "client": str(row.get("client_name") or "Sin nombre"),
+                "client_raw": _clean_client_name(row.get("client_name")),
                 "salesperson": str(row.get("salesperson_name") or "—"),
                 "last_purchase": _date_label(
                     row.get("current_last_date")
@@ -230,6 +417,7 @@ def _build_view(payload: dict) -> dict:
     return {
         "empty": False,
         "snapshot_time": _time_label(payload.get("generated_at")),
+        "period_start": current_start.isoformat(),
         "current_label": _range_label(current_start, current_end),
         "previous_label": _range_label(previous_start, previous_end),
         "previous_range": f"{previous_start:%d/%m/%Y} – {previous_end:%d/%m/%Y}",

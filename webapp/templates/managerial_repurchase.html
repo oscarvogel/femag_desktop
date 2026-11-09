@@ -43,19 +43,44 @@
       <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="variation">Var. %<span class="sort-indicator" aria-hidden="true"></span></button></th>
       <th class="num" aria-sort="none"><button type="button" class="sort-button" data-sort="total">Val. actual<span class="sort-indicator" aria-hidden="true"></span></button></th>
       <th aria-sort="none"><button type="button" class="sort-button" data-sort="status">Situación<span class="sort-indicator" aria-hidden="true"></span></button></th>
+      <th class="row-action-head no-print">Meses</th>
     </tr></thead>
     <tbody>
       {% for row in dashboard.rows %}
       <tr class="status-{{ row.status }}" data-status="{{ row.status }}" data-client="{{ row.client|lower }}" data-salesperson="{{ row.salesperson|lower }}" data-last="{{ row.last_raw }}" data-prev="{{ row.previous_raw }}" data-current="{{ row.current_raw }}" data-diff="{{ row.diff_raw }}" data-variation="{{ row.variation_raw }}" data-total="{{ row.total_raw }}">
-        <td class="client">{{ row.client }}</td><td class="muted-cell">{{ row.salesperson }}</td><td>{{ row.last_purchase }}</td><td class="num">{{ row.previous_tonnes }}</td><td class="num">{{ row.current_tonnes }}</td><td class="num">{{ row.diff }}</td><td class="num variation {{ row.direction }}">{{ row.variation }}</td><td class="num">{{ row.current_total }}</td><td class="situation">{{ row.status_label }}</td>
+        <td class="client">{{ row.client }}</td><td class="muted-cell">{{ row.salesperson }}</td><td>{{ row.last_purchase }}</td><td class="num">{{ row.previous_tonnes }}</td><td class="num">{{ row.current_tonnes }}</td><td class="num">{{ row.diff }}</td><td class="num variation {{ row.direction }}">{{ row.variation }}</td><td class="num">{{ row.current_total }}</td><td class="situation">{{ row.status_label }}</td><td class="row-action no-print">{% if row.client_raw %}<button type="button" class="rep-history-button" data-history-client="{{ row.client_raw }}">Ver meses</button>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="muted-cell">Sin clientes en el período.</td></tr>
+      <tr><td colspan="10" class="muted-cell">Sin clientes en el período.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 <div class="rep-footer"><span>FEMAG · Recompra · {{ dashboard.previous_range }} vs. {{ dashboard.current_range }}</span><a href="{{ url_for('managerial_dashboard', period=selected_period) }}">Volver al resumen</a></div>
+
+<dialog class="rep-history-dialog no-print" id="historial-cliente" aria-labelledby="historial-cliente-nombre">
+  <div class="rep-history-head">
+    <div>
+      <span class="rep-history-tag">Historial de compras</span>
+      <h2 id="historial-cliente-nombre">Cliente</h2>
+      <p class="rep-history-meta" id="historial-cliente-meta"></p>
+    </div>
+    <form method="dialog"><button class="btn" type="submit">Cerrar</button></form>
+  </div>
+  <div class="rep-history-body">
+    <div class="rep-history-kpis" id="historial-cliente-kpis"></div>
+    <div class="rep-history-chart-wrap" id="historial-cliente-chart-wrap">
+      <div class="rep-history-chart" id="historial-cliente-chart" role="img" aria-label="Compras mensuales del cliente"></div>
+    </div>
+    <div class="rep-history-table-wrap" id="historial-cliente-tabla-wrap">
+      <table class="rep-history-table">
+        <thead><tr><th>Mes</th><th class="num">TN</th><th class="num">Facturación</th><th class="num">Var. vs mes ant.</th><th>Últ. compra</th></tr></thead>
+        <tbody id="historial-cliente-detalle"></tbody>
+      </table>
+    </div>
+    <p class="rep-history-empty" id="historial-cliente-empty" hidden></p>
+  </div>
+</dialog>
 {% endif %}
 {% endblock %}
 {% block scripts %}
@@ -134,6 +159,156 @@
   search.addEventListener("input", apply);
   reset.addEventListener("click", () => { status.value = ""; order.value = "default"; search.value = ""; sortKey = null; updateIndicators(); apply(); });
   apply();
+})();
+</script>
+<script>
+(() => {
+  const dialog = document.getElementById("historial-cliente");
+  if (!dialog) return;
+  const tableBody = document.querySelector("#tabla-recompra tbody");
+  const nameEl = document.getElementById("historial-cliente-nombre");
+  const metaEl = document.getElementById("historial-cliente-meta");
+  const kpisEl = document.getElementById("historial-cliente-kpis");
+  const chartEl = document.getElementById("historial-cliente-chart");
+  const chartWrap = document.getElementById("historial-cliente-chart-wrap");
+  const tableWrap = document.getElementById("historial-cliente-tabla-wrap");
+  const detailEl = document.getElementById("historial-cliente-detalle");
+  const emptyEl = document.getElementById("historial-cliente-empty");
+  const endpoint = {{ url_for("managerial_repurchase_client_history")|tojson }};
+  const period = {{ (dashboard.period_start or "")|tojson }};
+  let controller = null;
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  };
+
+  function openDialog() {
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "open");
+    }
+  }
+
+  function resetBody() {
+    kpisEl.replaceChildren();
+    chartEl.replaceChildren();
+    detailEl.replaceChildren();
+    emptyEl.textContent = "";
+    emptyEl.hidden = true;
+  }
+
+  function addKpi(label, value, sub) {
+    const card = el("article", "rep-history-kpi");
+    card.append(
+      el("span", "rep-history-kpi-label", label),
+      el("strong", "rep-history-kpi-value", value),
+      el("span", "rep-history-kpi-sub", sub)
+    );
+    kpisEl.appendChild(card);
+  }
+
+  function renderEmpty(message) {
+    metaEl.textContent = "";
+    kpisEl.hidden = true;
+    chartWrap.hidden = true;
+    tableWrap.hidden = true;
+    emptyEl.textContent = message;
+    emptyEl.hidden = false;
+  }
+
+  function render(data) {
+    resetBody();
+    nameEl.textContent = data.client || "Cliente";
+    kpisEl.hidden = false;
+    chartWrap.hidden = false;
+    tableWrap.hidden = false;
+    if (data.empty) {
+      renderEmpty(data.error || "Sin historial disponible.");
+      return;
+    }
+    metaEl.textContent = `${data.salesperson} · ${data.range} · ${data.active_months} de ${data.months_count} meses con compra`;
+    addKpi("Total período", `${data.total_tonnes_text} TN`, data.total_value_text);
+    addKpi("Promedio mensual", `${data.average_tonnes_text} TN`, `${data.months_count} meses`);
+    addKpi("Mejor mes", `${data.best.tonnes_text} TN`, data.best.label);
+    addKpi("Mes más bajo", `${data.worst.tonnes_text} TN`, data.worst.label);
+
+    const columns = data.points.map((point) => {
+      const hasTonnes = point.tonnes > 0.0005;
+      const column = el(
+        "div",
+        "rep-history-bar" +
+          (point.partial ? " is-partial" : "") +
+          (hasTonnes ? "" : " is-zero")
+      );
+      column.title = `${point.label}: ${point.tonnes_text} TN · ${point.total_text}`;
+      const track = el("div", "rep-history-bar-track");
+      const bar = el("i");
+      bar.style.height = `${Math.max(hasTonnes ? point.bar : 0, hasTonnes ? 4 : 1)}%`;
+      track.appendChild(bar);
+      column.append(
+        el("span", "rep-history-value", point.tonnes_text),
+        track,
+        el("span", "rep-history-month", point.short)
+      );
+      return column;
+    });
+    chartEl.replaceChildren(...columns);
+
+    const rows = [...data.points].reverse().map((point) => {
+      const tr = el("tr");
+      const monthCell = el("td", "rep-history-month-cell");
+      monthCell.appendChild(el("strong", "", point.label));
+      if (point.partial) monthCell.appendChild(el("span", "cell-sub", "Mes en curso"));
+      tr.appendChild(monthCell);
+      tr.appendChild(el("td", "num", `${point.tonnes_text} TN`));
+      tr.appendChild(el("td", "num", point.total_text));
+      const variationCell = el("td", "num");
+      variationCell.appendChild(
+        el("span", `badge-var ${point.direction}`, point.variation_text)
+      );
+      tr.appendChild(variationCell);
+      tr.appendChild(el("td", "", point.last_purchase));
+      return tr;
+    });
+    detailEl.replaceChildren(...rows);
+  }
+
+  async function load(client) {
+    if (controller) controller.abort();
+    controller = new AbortController();
+    nameEl.textContent = client;
+    metaEl.textContent = "Cargando historial...";
+    kpisEl.hidden = true;
+    chartWrap.hidden = true;
+    tableWrap.hidden = true;
+    resetBody();
+    openDialog();
+    const params = new URLSearchParams({ cliente: client });
+    if (period) params.set("period", period);
+    try {
+      const response = await fetch(`${endpoint}?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("bad_response");
+      render(await response.json());
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      resetBody();
+      renderEmpty("No se pudo cargar el historial del cliente.");
+    }
+  }
+
+  tableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-history-client]");
+    if (!button) return;
+    load(button.dataset.historyClient);
+  });
 })();
 </script>
 {% endif %}

@@ -754,6 +754,30 @@ self.addEventListener("fetch", event => {
             **GerenciaService.shell_context("recompra", selected_period),
         )
 
+    @app.get("/gerencia/recompra/cliente")
+    @login_required
+    def managerial_repurchase_client_history():
+        if not can_view_managerial_dashboard():
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "Solo Gerencia puede ver el análisis de recompra."
+                        )
+                    }
+                ),
+                403,
+            )
+        client_name = (request.args.get("cliente") or "").strip()
+        if not client_name:
+            return jsonify({"error": "Falta el cliente."}), 400
+        selected_period = (request.args.get("period") or "").strip() or None
+        return jsonify(
+            ManagerialRepurchaseService.client_history(
+                client_name, selected_period
+            )
+        )
+
     @app.get("/gerencia/vendedores")
     @login_required
     def managerial_salespeople():
