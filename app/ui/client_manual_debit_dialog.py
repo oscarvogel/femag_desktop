@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import QDate
+from app.services.account_date_rules import MAX_FUTURE_DAYS
 from PyQt5.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -60,6 +61,7 @@ class ClientManualDebitDialog(QDialog):
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setObjectName("clientManualDebitDateInput")
         self.date_input.setCalendarPopup(True)
+        self.date_input.setMaximumDate(QDate.currentDate().addDays(MAX_FUTURE_DAYS))
         form.addRow("Fecha", self.date_input)
 
         self.amount_input = QDoubleSpinBox()
