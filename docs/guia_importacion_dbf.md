@@ -67,6 +67,29 @@ Cada corrida crea un `ImportBatch` con estado y resumen.
   referencia explicita inexistente se informa como error y una referencia
   ausente deja al chofer sin asignar.
 
+## Advertencias y revisión manual
+
+Cada corrida guarda en `ImportBatch.summary` un bloque `warning_summary` con:
+
+- `total_warnings` y `total_errors`.
+- `by_code`: cantidad por código.
+- `by_classification`: `expected` (conflicto esperable del DBF), `review` (requiere revisión manual) y `bug`.
+- `manual_review`: lista de filas para revisar, con entidad, código, `source_id` y acción sugerida.
+
+| Código | Clasificación | Acción |
+|---|---|---|
+| `client_cuit_shared_by_two_rows` | esperada | El legacy repite CUIT; el importador absorbe una fila. |
+| `client_cuit_taken_by_another_row` | esperada | El CUIT ya pertenece a otro cliente; se conserva el original. |
+| `carrier_code_collision` | revisar | Asignar el transportista correcto desde Maestros. |
+| `carrier_not_found` | revisar | Asignar el transportista desde Maestros. |
+| `carrier_cuit_ambiguous` | revisar | Definir cuál transportista corresponde. |
+| `truck_trailer_conflict` | esperada | Se conservó el acoplado del operador; revisar sólo si cambió. |
+| `truck_carrier_conflict` | esperada | Se conservó el transportista del camión; revisar sólo si cambió. |
+| `habitual_truck_missing` | esperada | El chofer no trae patente habitual. |
+| Error de fila | revisar | Dato obligatorio faltante o choque de clave; corregir el origen. |
+
+La pantalla de Importación DBF muestra el total y separa “esperadas” de “para revisar”. El detalle por entidad y código sigue en el resumen y en el tooltip de la tabla.
+
 ## Entidades posteriores
 
 - #166 cubre remitos historicos desde DBF.

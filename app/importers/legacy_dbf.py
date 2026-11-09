@@ -23,6 +23,7 @@ from app.models.masters import (
     TipoIVA,
     Truck,
 )
+from app.importers.legacy_dbf_warnings import summarize_import_warnings
 from app.models.system import ImportBatch
 from app.services.client_service import ClientService
 from app.services.product_classification_service import analyze_legacy_product
@@ -162,6 +163,7 @@ class LegacyDbfMasterImporter:
                         }
                     )
 
+        summary["warning_summary"] = summarize_import_warnings(summary)
         batch.status = "success" if not any(summary[entity]["errors"] for entity in ENTITY_KEYS) else "partial"
         batch.finished_at = utc_now()
         batch.summary = json.dumps(summary, ensure_ascii=True, sort_keys=True)

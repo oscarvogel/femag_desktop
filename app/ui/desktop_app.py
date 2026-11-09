@@ -3002,10 +3002,21 @@ class FemagDesktopWindow(QMainWindow):
                 if isinstance(values, dict)
             )
             warning_label = "advertencia" if warning_count == 1 else "advertencias"
-            message = (
-                f"Importación finalizada con {warning_count} {warning_label}. "
-                "Revise el resumen, las advertencias y los errores por entidad."
-            )
+            warning_summary = summary.get("warning_summary", {})
+            if warning_summary:
+                expected = warning_summary.get("by_classification", {}).get("expected", 0)
+                review = warning_summary.get("by_classification", {}).get("review", 0)
+                error_count = warning_summary.get("total_errors", 0)
+                message = (
+                    f"Importación finalizada: {warning_count} {warning_label} "
+                    f"({expected} esperadas, {review} para revisar) y "
+                    f"{error_count} errores."
+                )
+            else:
+                message = (
+                    f"Importación finalizada con {warning_count} {warning_label}. "
+                    "Revise el resumen, las advertencias y los errores por entidad."
+                )
             if warning_count:
                 feedback.show_warning(message)
             else:
