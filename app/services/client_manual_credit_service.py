@@ -5,6 +5,7 @@ from math import isfinite
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
+from app.services.account_date_rules import AccountDateError, validate_movement_date
 from app.services.audit_service import AuditService
 
 
@@ -42,6 +43,10 @@ class ClientManualCreditService:
             raise ClientManualCreditError("El concepto del crédito es obligatorio.")
         normalized_reference = (reference or "").strip() or None
         normalized_observations = (observations or "").strip() or None
+        try:
+            normalized_date = validate_movement_date(credit_date or date.today())
+        except AccountDateError as exc:
+            raise ClientManualCreditError(str(exc)) from exc
         database = ClientAccountMovement._meta.database
 
         with database.atomic():
@@ -56,7 +61,7 @@ class ClientManualCreditService:
                 vat_amount=0.0,
                 total_amount=-normalized_amount,
                 currency=self.CURRENCY,
-                movement_date=credit_date or date.today(),
+                movement_date=normalized_date,
                 description=normalized_description,
                 observations=normalized_observations,
                 source_ref="ManualCredit:pending",
@@ -88,6 +93,10 @@ class ClientManualCreditService:
         reason = (reason or "").strip()
         if not reason:
             raise ClientManualCreditError("Debe indicar el motivo del reverso.")
+        try:
+            normalized_reversal_date = validate_movement_date(reversal_date or date.today())
+        except AccountDateError as exc:
+            raise ClientManualCreditError(str(exc)) from exc
         database = ClientAccountMovement._meta.database
 
         with database.atomic():
@@ -122,7 +131,7 @@ class ClientManualCreditService:
                 vat_amount=-original.vat_amount,
                 total_amount=-original.total_amount,
                 currency=original.currency,
-                movement_date=reversal_date or date.today(),
+                movement_date=normalized_reversal_date,
                 description=f"Reverso: {original.description}",
                 observations=original.observations,
                 source_ref=f"ManualCredit:{original.id}:reversal",

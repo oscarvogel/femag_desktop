@@ -19,6 +19,44 @@ class AccountLedgerService:
         self.audit_service = audit_service or AuditService()
         self.budget_service = BudgetService(current_user, self.audit_service)
 
+    def correct_movement_date(
+        self,
+        movement: ClientAccountMovement,
+        new_date,
+        *,
+        reason: str | None = None,
+    ) -> ClientAccountMovement:
+        """Corrige la fecha de un movimiento con trazabilidad en auditor?a."""
+        from app.services.account_date_rules import validate_movement_date
+
+        movement = ClientAccountMovement.get_by_id(movement.id)
+        normalized_date = validate_movement_date(new_date)
+        old_date = movement.movement_date
+        if old_date == normalized_date:
+            return movement
+        with ClientAccountMovement._meta.database.atomic():
+            movement.movement_date = normalized_date
+            movement.save(
+                only=[
+                    ClientAccountMovement.movement_date,
+                    ClientAccountMovement.updated_at,
+                ]
+            )
+            self.audit_service.record(
+                user=self.current_user,
+                module="Cuenta corriente",
+                action="corregir_fecha_movimiento",
+                record_ref=f"ClientAccountMovement:{movement.id}",
+                old_value={
+                    "movement_date": old_date.isoformat() if old_date else None,
+                    "client_id": movement.client_id,
+                    "total_amount": movement.total_amount,
+                },
+                new_value={"movement_date": normalized_date.isoformat()},
+                observation=reason,
+            )
+        return movement
+
     def generate_for_load_order(self, order: LoadOrder) -> list[ClientAccountMovement]:
         order = LoadOrder.get_by_id(order.id)
         movements = []

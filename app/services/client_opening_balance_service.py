@@ -6,6 +6,7 @@ from peewee import IntegrityError
 
 from app.models.accounting import ClientAccountMovement
 from app.models.masters import Client
+from app.services.account_date_rules import AccountDateError, validate_movement_date
 from app.services.audit_service import AuditService
 
 
@@ -67,6 +68,10 @@ class ClientOpeningBalanceService:
         type_label = "Débito" if normalized_type == self.TYPE_DEBIT else "Crédito"
         reference_type = "DEBITO" if normalized_type == self.TYPE_DEBIT else "CREDITO"
         normalized_currency = self.normalize_currency(currency)
+        try:
+            normalized_date = validate_movement_date(movement_date or date.today())
+        except AccountDateError as exc:
+            raise ClientOpeningBalanceError(str(exc)) from exc
         source_ref = f"OpeningBalance:{normalized_currency}"
         database = ClientAccountMovement._meta.database
 
@@ -87,7 +92,7 @@ class ClientOpeningBalanceService:
                     vat_amount=0.0,
                     total_amount=signed_amount,
                     currency=normalized_currency,
-                    movement_date=movement_date or date.today(),
+                    movement_date=normalized_date,
                     description=f"Saldo inicial de apertura - {type_label} ({normalized_currency})",
                     source_ref=source_ref,
                     reference=f"APERTURA-{reference_type}-{normalized_currency}",

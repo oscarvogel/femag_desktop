@@ -57,6 +57,7 @@ from app.services.client_service import ClientService
 from app.services.client_email_service import ClientEmailService
 from app.services.client_fiscal_service import ClientFiscalError, ClientFiscalService
 from app.services.dgr_validation import derive_city_province, is_missing_dgr_text
+from app.services.account_date_rules import MAX_FUTURE_DAYS
 from app.services.client_opening_balance_service import (
     ClientOpeningBalanceService,
 )
@@ -771,6 +772,7 @@ class ClientOpeningBalanceDialog(QDialog):
         self.date_input.setObjectName("clientOpeningBalanceDateInput")
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("dd/MM/yyyy")
+        self.date_input.setMaximumDate(QDate.currentDate().addDays(MAX_FUTURE_DAYS))
         form.addWidget(QLabel("Tipo"), 0, 0)
         form.addWidget(self.type_input, 0, 1)
         form.addWidget(QLabel("Importe"), 1, 0)
