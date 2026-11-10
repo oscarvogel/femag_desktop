@@ -368,8 +368,12 @@ class OperationalProductSalesDialog(QDialog):
                 f"No se pudo generar el archivo Excel:\n{exc}",
             )
             return
+        from app.reports.client_list_export import open_generated_file
+
+        opened = open_generated_file(exported)
         QMessageBox.information(
             self,
             "Exportar a Excel",
-            f"Archivo generado correctamente:\n{exported}",
+            f"Archivo generado correctamente:\n{exported}"
+            + (" Se abrió automáticamente." if opened else ""),
         )
