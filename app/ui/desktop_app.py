@@ -140,7 +140,7 @@ from app.services.load_order_ledger_repair_service import (
     LoadOrderLedgerRepairService,
 )
 from app.ui.dashboard import DashboardService, future_module_message
-from app.ui.load_orders import build_load_order_workspace_spec
+from app.ui.load_orders import ai_capture_url, build_load_order_workspace_spec
 from app.ui.load_order_closure_dialog import LoadOrderClosureDialog
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow as ShellBuilder
@@ -2188,6 +2188,9 @@ class FemagDesktopWindow(QMainWindow):
         traceability_button = _action_button(
             "editLoadOrderTraceabilityButton", "Lote / fecha", secondary=True
         )
+        capture_button = _action_button(
+            "aiCaptureLoadOrderButton", "Importar foto/PDF", secondary=True
+        )
         _set_button_icon(new_button, QStyle.SP_FileIcon)
         _set_button_icon(edit_button, QStyle.SP_FileDialogDetailedView)
         _set_button_icon(issue_button, QStyle.SP_DialogApplyButton)
@@ -2196,11 +2199,13 @@ class FemagDesktopWindow(QMainWindow):
         _set_button_icon(reprint_button, QStyle.SP_BrowserReload)
         _set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
         _set_button_icon(traceability_button, QStyle.SP_DialogSaveButton)
+        _set_button_icon(capture_button, QStyle.SP_FileDialogStart)
         _set_button_icon(annul_button, QStyle.SP_TrashIcon)
         can_reprint = _can_reprint_load_orders(self.user)
         reprint_button.setVisible(can_reprint)
         can_edit_traceability = _can_edit_load_order_traceability(self.user)
         traceability_button.setVisible(can_edit_traceability)
+        capture_button.setVisible(can_edit_traceability)
         search_input = QLineEdit()
         search_input.setObjectName("loadOrderSearchInput")
         search_input.setPlaceholderText("Buscar orden, cliente, destino, producto, chofer...")
@@ -2222,6 +2227,7 @@ class FemagDesktopWindow(QMainWindow):
             reprint_button,
             budget_button,
             traceability_button,
+            capture_button,
             annul_button,
         ):
             actions.addWidget(button)
@@ -2440,6 +2446,10 @@ class FemagDesktopWindow(QMainWindow):
             traceability_button.setToolTip(
                 "Seleccione una orden para corregir lote y fechas."
             )
+            capture_button.setEnabled(False)
+            capture_button.setToolTip(
+                "Seleccione una orden para importar lote y fechas desde una foto o PDF."
+            )
 
         def set_action_state(order: LoadOrder) -> None:
             is_pending = order.is_unissued
@@ -2453,13 +2463,20 @@ class FemagDesktopWindow(QMainWindow):
             has_original_print = _has_printed_load_order(order)
             reprint_button.setEnabled(can_reprint and has_original_print)
             traceability_button.setEnabled(can_edit_traceability and not is_annulled)
+            capture_button.setEnabled(can_edit_traceability and not is_annulled)
             if is_annulled:
                 traceability_button.setToolTip(
                     "No se puede editar la trazabilidad de una orden anulada."
                 )
+                capture_button.setToolTip(
+                    "No se puede importar lote y fechas en una orden anulada."
+                )
             else:
                 traceability_button.setToolTip(
                     "Corregir lote y fechas de cada contenido de la orden."
+                )
+                capture_button.setToolTip(
+                    "Importar lote y fechas desde una foto o PDF de la orden."
                 )
             if has_original_print:
                 reprint_button.setToolTip("Generar una copia marcada de la impresión original.")
@@ -2522,6 +2539,36 @@ class FemagDesktopWindow(QMainWindow):
             else:
                 feedback.show_info("No hubo cambios en lote o fechas.")
             refresh()
+
+        def open_capture() -> None:
+            order = selected_order()
+            if order is None:
+                feedback.show_warning(
+                    "Seleccione una orden para importar lote y fechas.",
+                    focus_widget=table,
+                )
+                return
+            if not can_edit_traceability:
+                feedback.show_error(
+                    "No tiene permiso para cargar lote y fechas en ordenes de carga.",
+                    focus_widget=table,
+                )
+                return
+            if order.status == LoadOrder.STATUS_ANNULLED:
+                feedback.show_warning(
+                    "No se puede importar lote y fechas en una orden anulada.",
+                    focus_widget=table,
+                )
+                return
+            url = ai_capture_url(order)
+            if not url:
+                feedback.show_warning(
+                    "Configure la URL del servidor web en Sistema > Servidor web "
+                    "antes de importar desde foto o PDF.",
+                    focus_widget=table,
+                )
+                return
+            webbrowser.open(url)
 
         def open_new_order_dialog() -> None:
             dialog = LoadOrderEntryDialog(service, self.shell.username, self)
@@ -2828,6 +2875,7 @@ class FemagDesktopWindow(QMainWindow):
         reprint_button.clicked.connect(reprint_order)
         budget_button.clicked.connect(print_budget)
         traceability_button.clicked.connect(open_traceability_dialog)
+        capture_button.clicked.connect(open_capture)
         repair_button.clicked.connect(repair_ledger)
         refresh()
         return page

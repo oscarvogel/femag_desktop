@@ -146,6 +146,84 @@ o buscar otra. Así el operario sabe que el guardado terminó y no repite el
 envío. El botón se deshabilita mientras se envía el formulario y un guardado
 sin cambios no genera otra fila de auditoría.
 
+## Precarga con IA desde foto o PDF (#913)
+
+En la ficha de la orden, el botón **Importar desde foto o PDF** permite subir
+una foto del papel o un PDF y obtener una **propuesta** de lote, fecha de
+elaboración y fecha de envasado. La IA no guarda nada: prellena el formulario
+que ya existe y el operador revisa y confirma con **Guardar lote y fechas**.
+
+- Funciona igual desde el celular y desde el navegador de la computadora.
+- En el escritorio hay dos accesos:
+  - el botón **Importar foto/PDF** de la pantalla de órdenes abre la ficha web
+    con el token de la orden seleccionada (si no hay URL configurada, avisa);
+  - el diálogo nativo **Lote / fecha** tiene un botón **Importar foto/PDF** que
+    lee el archivo, precarga la tabla por contenido y deja que el operador
+    revise antes de **Guardar cambios**. Usa el mismo servicio MiniMax y no
+    escribe nada hasta confirmar.
+- La computadora que use el diálogo nativo necesita la API key y salida a
+  internet, porque la llamada a MiniMax se hace desde el escritorio.
+- La propuesta muestra la confianza y las advertencias por línea. Los productos
+  que no coinciden con la orden, las líneas ambiguas y los totales del papel
+  **no se cargan como datos**.
+- La IA solo propone lote y fechas: no crea órdenes, clientes, productos ni
+  cantidades, y no modifica stock, precios, remitos ni F150.
+
+### Configuración de MiniMax
+
+El proveedor es **MiniMax**, con su API compatible con OpenAI
+(`POST https://api.minimax.io/v1/chat/completions`). El proveedor ya viene
+elegido: **alcanza con pegar la API key** y reiniciar el servidor. Sin clave,
+la función queda deshabilitada y no se llama a nadie:
+
+```text
+FEMAG_ORDER_CAPTURE_AI_PROVIDER=minimax
+FEMAG_ORDER_CAPTURE_AI_API_KEY=            # pegar aquí la clave de MiniMax
+FEMAG_ORDER_CAPTURE_AI_MODEL=MiniMax-M3.1-Flash
+FEMAG_ORDER_CAPTURE_AI_BASE_URL=https://api.minimax.io/v1
+```
+
+Dónde pegar la clave:
+
+- **Escritorio:** el instalador crea, si no existe,
+  `%LOCALAPPDATA%\FEMAG Desktop\.env` con
+  `FEMAG_ORDER_CAPTURE_AI_PROVIDER=minimax` y
+  `FEMAG_ORDER_CAPTURE_AI_API_KEY=`. Pegá la clave ahí y reiniciá FEMAG Desktop.
+- **Servidor web:** el instalador crea `C:\ProgramData\FEMAG\webapp.env` con
+  las mismas variables. Pegá la clave ahí y reiniciá el servicio.
+- Los dos archivos son de configuración local: no se versionan ni viajan en el
+  instalador.
+
+Para cuentas de China continental el endpoint es
+`https://api.minimaxi.com/v1`. Los modelos multimodales documentados son
+`MiniMax-M3.1-Flash` y `MiniMax-M3`.
+
+Límites y cuota (opcionales):
+
+```text
+FEMAG_ORDER_CAPTURE_AI_TIMEOUT_SECONDS=60
+FEMAG_ORDER_CAPTURE_AI_DETAIL=high
+FEMAG_ORDER_CAPTURE_MAX_MB=10
+FEMAG_ORDER_CAPTURE_MAX_PAGES=3
+FEMAG_ORDER_CAPTURE_RATE_LIMIT_PER_HOUR=10
+```
+
+Los PDFs se convierten a imágenes con `pypdfium2` (incluido en
+`requirements-web.txt`). La clave nunca se escribe en la base ni en los logs:
+va por entorno o por el archivo `webapp.env` del servidor.
+
+### Privacidad y seguridad
+
+- La ruta exige sesión iniciada y token CSRF.
+- El archivo no se persiste: se calcula su hash SHA-256 para auditoría y se
+  descarta después de la extracción.
+- No se registra el contenido de la imagen ni el texto extraído.
+- La pantalla avisa que la imagen se envía al proveedor externo.
+- Si el proveedor no está configurado, está caído o tarda demasiado, se muestra
+  un mensaje claro y la carga manual sigue funcionando.
+- Cada importación y cada guardado asistido quedan auditados en `Despachos`
+  con usuario, proveedor, modelo y hash del archivo.
+
 ## Registro de producción desde el celular
 
 En la planta embolsan varias personas y el dueño pidió que quedara registrado

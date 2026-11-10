@@ -1,4 +1,8 @@
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+)
 
 
 hiddenimports = collect_submodules("pyqt5libs")
@@ -6,11 +10,18 @@ datas = collect_data_files("pyqt5libs")
 datas += [("../app/ui/assets/branding", "app/ui/assets/branding")]
 datas += [("../app/build_demo_version.py", "app/build_demo_version.py")]
 
+# Precarga con IA (#913) desde foto o PDF.
+pdfium_datas, pdfium_binaries, pdfium_hidden = collect_all("pypdfium2")
+raw_datas, raw_binaries, raw_hidden = collect_all("pypdfium2_raw")
+datas += pdfium_datas + raw_datas
+binaries = pdfium_binaries + raw_binaries
+hiddenimports += pdfium_hidden + raw_hidden
+
 
 a = Analysis(
     ["../app/demo_entrypoint.py"],
     pathex=[".."],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

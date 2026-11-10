@@ -7,6 +7,9 @@ pyqt5libs @ git+https://github.com/oscarvogel/pyqt5libs.git@master
 Pillow>=10.4,<11
 reportlab>=4.0
 pypdf>=5.0
+# Render de PDFs para la precarga con IA desde el escritorio (#913). Rueda
+# autonoma, sin poppler ni binarios externos; se importa solo al elegir un PDF.
+pypdfium2>=4.30,<6
 dbfread>=2.0
 cryptography>=43.0
 openpyxl>=3.1

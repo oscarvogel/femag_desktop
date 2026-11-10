@@ -1,4 +1,8 @@
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+)
 
 
 hiddenimports = collect_submodules("pyqt5libs")
@@ -8,11 +12,18 @@ datas = collect_data_files("pyqt5libs")
 datas += collect_data_files("reportlab")
 datas += [("../app/ui/assets/branding", "app/ui/assets/branding")]
 
+# La precarga con IA (#913) puede leer PDFs y usa pypdfium2 desde el escritorio.
+pdfium_datas, pdfium_binaries, pdfium_hidden = collect_all("pypdfium2")
+raw_datas, raw_binaries, raw_hidden = collect_all("pypdfium2_raw")
+datas += pdfium_datas + raw_datas
+binaries = pdfium_binaries + raw_binaries
+hiddenimports += pdfium_hidden + raw_hidden
+
 
 a = Analysis(
     ["../app/production_entrypoint.py"],
     pathex=[".."],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     excludes=["pytest", "tkinter"],

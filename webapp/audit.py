@@ -35,6 +35,10 @@ ACTION_SALIDA = "salida"
 #: Carga de lote y fecha de elaboracion en ordenes de carga.
 ACTION_LOTE = "carga de lote"
 
+#: Lectura asistida por IA de una foto/PDF de la orden (#913). La escritura
+#: sigue siendo ACTION_LOTE: este evento solo registra la propuesta.
+ACTION_CAPTURA_IA = "importacion de orden por ia"
+
 #: Carga de partes desde el celular.
 ACTION_CARGA = "carga de parte"
 ACTION_CONFIRMACION = "confirmacion de parte"

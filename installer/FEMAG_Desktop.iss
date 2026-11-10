@@ -51,6 +51,32 @@ Name: "desktopicon"; Description: "Crear acceso directo de FEMAG Desktop en el e
 Filename: "{app}\FEMAG Desktop.exe"; Description: "Configurar y abrir FEMAG Desktop"; Flags: postinstall nowait skipifsilent unchecked
 
 [Code]
+procedure CreateAiCaptureConfig();
+var
+  ConfigDir: String;
+  ConfigPath: String;
+  Content: String;
+begin
+  { La precarga con IA (#913) lee la API key desde el .env del runtime del
+    puesto. Se crea solo la primera vez para no pisar la clave cargada. }
+  ConfigDir := ExpandConstant('{localappdata}\FEMAG Desktop');
+  ForceDirectories(ConfigDir);
+  ConfigPath := AddBackslash(ConfigDir) + '.env';
+  if FileExists(ConfigPath) then
+    exit;
+  Content :=
+    '# Precarga con IA (#913). Pegar la API key de MiniMax y reiniciar FEMAG Desktop.' + #13#10 +
+    'FEMAG_ORDER_CAPTURE_AI_PROVIDER=minimax' + #13#10 +
+    'FEMAG_ORDER_CAPTURE_AI_API_KEY=' + #13#10;
+  SaveStringToFile(ConfigPath, Content, False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    CreateAiCaptureConfig();
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   if WizardSilent then

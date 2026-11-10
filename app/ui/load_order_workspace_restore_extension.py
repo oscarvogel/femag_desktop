@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 
 from PyQt5.QtCore import QDate, Qt
@@ -29,6 +30,7 @@ from app.services.load_order_service import LoadOrderService
 from app.services.load_order_traceability_service import LoadOrderTraceabilityService
 from app.ui.combo_autocomplete import enable_combo_autocomplete
 from app.ui.form_feedback import FormFeedback
+from app.ui.load_orders import ai_capture_url
 from app.ui.load_order_stock_shortfall_dialog import emit_order_with_stock_check
 from app.ui.load_order_traceability_dialog import LoadOrderTraceabilityDialog
 import app.ui.desktop_app as desktop
@@ -144,6 +146,9 @@ def _restored_load_order_page(self):
     traceability_button = desktop._action_button(
         "editLoadOrderTraceabilityButton", "Lote / fecha", secondary=True
     )
+    capture_button = desktop._action_button(
+        "aiCaptureLoadOrderButton", "Importar foto/PDF", secondary=True
+    )
     annul_button = desktop._action_button("annulLoadOrderButton", "Anular", secondary=True)
     annul_button.setProperty("uiRole", "danger")
 
@@ -158,6 +163,7 @@ def _restored_load_order_page(self):
     desktop._set_button_icon(reprint_button, QStyle.SP_BrowserReload)
     desktop._set_button_icon(budget_button, QStyle.SP_FileDialogInfoView)
     desktop._set_button_icon(traceability_button, QStyle.SP_DialogSaveButton)
+    desktop._set_button_icon(capture_button, QStyle.SP_FileDialogStart)
     desktop._set_button_icon(annul_button, QStyle.SP_TrashIcon)
 
     can_reprint = desktop._can_reprint_load_orders(self.user)
@@ -183,6 +189,7 @@ def _restored_load_order_page(self):
         reprint_button,
         budget_button,
         traceability_button,
+        capture_button,
         annul_button,
     ):
         actions.addWidget(button)
@@ -414,10 +421,14 @@ def _restored_load_order_page(self):
             close_button,
             reprint_button,
             traceability_button,
+            capture_button,
         ):
             button.setEnabled(False)
         traceability_button.setToolTip(
             "Seleccione una orden para corregir lote y fechas."
+        )
+        capture_button.setToolTip(
+            "Seleccione una orden para importar lote y fechas desde una foto o PDF."
         )
 
     def set_action_state(order: LoadOrder) -> None:
@@ -433,13 +444,20 @@ def _restored_load_order_page(self):
         has_original_print = desktop._has_printed_load_order(order)
         reprint_button.setEnabled(can_reprint and has_original_print)
         traceability_button.setEnabled(can_edit_traceability and not is_annulled)
+        capture_button.setEnabled(can_edit_traceability and not is_annulled)
         if is_annulled:
             traceability_button.setToolTip(
                 "No se puede editar la trazabilidad de una orden anulada."
             )
+            capture_button.setToolTip(
+                "No se puede importar lote y fechas en una orden anulada."
+            )
         else:
             traceability_button.setToolTip(
                 "Corregir lote y fechas de cada contenido de la orden."
+            )
+            capture_button.setToolTip(
+                "Importar lote y fechas desde una foto o PDF de la orden."
             )
 
     def open_detail_dialog() -> None:
@@ -486,6 +504,36 @@ def _restored_load_order_page(self):
         else:
             feedback.show_info("No hubo cambios en lote o fechas.")
         refresh()
+
+    def open_capture() -> None:
+        order = selected_order()
+        if order is None:
+            feedback.show_warning(
+                "Seleccione una orden para importar lote y fechas.",
+                focus_widget=table,
+            )
+            return
+        if not can_edit_traceability:
+            feedback.show_error(
+                "No tiene permiso para cargar lote y fechas en ordenes de carga.",
+                focus_widget=table,
+            )
+            return
+        if order.status == LoadOrder.STATUS_ANNULLED:
+            feedback.show_warning(
+                "No se puede importar lote y fechas en una orden anulada.",
+                focus_widget=table,
+            )
+            return
+        url = ai_capture_url(order)
+        if not url:
+            feedback.show_warning(
+                "Configure la URL del servidor web en Sistema > Servidor web "
+                "antes de importar desde foto o PDF.",
+                focus_widget=table,
+            )
+            return
+        webbrowser.open(url)
 
     def open_new_order_dialog() -> None:
         dialog = desktop.LoadOrderEntryDialog(service, self.shell.username, self)
@@ -782,5 +830,6 @@ def _restored_load_order_page(self):
     reprint_button.clicked.connect(reprint_order)
     budget_button.clicked.connect(print_budget)
     traceability_button.clicked.connect(open_traceability_dialog)
+    capture_button.clicked.connect(open_capture)
     refresh()
     return page

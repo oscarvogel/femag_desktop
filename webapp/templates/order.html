@@ -20,8 +20,35 @@
   {% endif %}
 </div>
 {% endif %}
-<form method="post" id="lot-save-form">
+<div class="card capture-entry">
+  <a class="button secondary" href="{{ url_for('order_capture', token=order.ensure_qr_token()) }}">Importar desde foto o PDF</a>
+  <p class="muted">La IA lee el lote y las fechas de la orden impresa y los precarga para que los revises. No guarda nada por sí sola.</p>
+</div>
+{% if capture_review is defined %}
+{% set applied_count = capture_review.values() | selectattr('applied') | list | length %}
+{% set review_count = capture_review.values() | selectattr('status', 'in', ['ambiguo', 'sin_coincidencia']) | list | length %}
+<div class="card capture-summary">
+  <h2>Precarga desde IA</h2>
+  <p class="muted">
+    {% if applied_count %}{{ applied_count }} línea(s) precargada(s).{% else %}No se pudo precargar ninguna línea.{% endif %}
+    {% if review_count %} {{ review_count }} línea(s) necesitan revisión.{% endif %}
+    Nada se guarda hasta que presiones <strong>Guardar lote y fechas</strong>.
+  </p>
+  {% if capture_meta and capture_meta.warnings %}
+  <ul class="capture-global-warnings">
+    {% for warning in capture_meta.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+<form method="post" action="{{ url_for('order_detail', token=order.ensure_qr_token()) }}" id="lot-save-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if capture_meta is defined %}
+  <input type="hidden" name="capture_source" value="ia">
+  <input type="hidden" name="capture_file_sha256" value="{{ capture_meta.file_sha256 }}">
+  <input type="hidden" name="capture_provider" value="{{ capture_meta.provider }}">
+  <input type="hidden" name="capture_model" value="{{ capture_meta.model }}">
+  {% endif %}
   {% if load_lines %}
     <p class="muted">Cargá el lote y la fecha de elaboración una vez por grupo de pallets. La fecha pertenece al lote: no se repite en cada pallet.</p>
     {% for line in load_lines %}
@@ -35,6 +62,30 @@
         <div><span>Cliente</span><strong>{{ line.client }}</strong></div>
         <div><span>Lugar de entrega</span><strong>{{ line.destination }}</strong></div>
       </div>
+
+      {% set review = capture_review.get(line.key) if capture_review is defined else None %}
+      {% if review %}
+      {% set status_label = {
+        'aplicado': 'Precargado por IA',
+        'ambiguo': 'Revisar: línea ambigua',
+        'sin_coincidencia': 'Revisar: sin coincidencia',
+        'sin_datos': 'Sin datos detectados'
+      }.get(review.status, review.status) %}
+      <div class="capture-review {{ review.status }}">
+        <span class="capture-badge">{{ status_label }}{% if review.confidence %} · {{ (review.confidence * 100)|round|int }}%{% endif %}</span>
+        {% if review.detected %}
+        <span class="muted">
+          Detectado: {{ review.detected.producto or 'sin producto' }}
+          {% if review.detected.destino %} · {{ review.detected.destino }}{% endif %}
+        </span>
+        {% endif %}
+        {% if review.warnings %}
+        <ul>
+          {% for warning in review.warnings %}<li>{{ warning }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
 
       {% if line.contents %}
       <div class="load-slots" data-slots>
@@ -109,6 +160,15 @@
   .load-group legend { font-weight: 800; padding: 0 6px; }
   .group-slots { font-size: .82rem; margin: 0 0 8px; }
   .add-group-button { width: 100%; min-height: 44px; border-style: dashed; }
+  .capture-entry { display: grid; gap: 8px; }
+  .capture-entry .button { width: auto; justify-self: start; padding: 10px 16px; }
+  .capture-summary ul, .capture-review ul { margin: 4px 0 0 18px; padding: 0; font-size: .85rem; }
+  .capture-summary li, .capture-review li { margin: 2px 0; }
+  .capture-review { border: 1px solid #dbe3ea; border-radius: 10px; padding: 8px 10px; margin: 8px 0 12px; background: #f8fafc; display: grid; gap: 4px; }
+  .capture-review.aplicado { border-color: #9fd3b4; background: #f1fbf5; }
+  .capture-review.ambiguo, .capture-review.sin_coincidencia { border-color: #e6c27a; background: #fffaf0; }
+  .capture-review.sin_datos { border-color: #dbe3ea; background: #f8fafc; }
+  .capture-badge { font-weight: 800; font-size: .78rem; text-transform: uppercase; letter-spacing: .02em; }
   @media (max-width: 430px) {
     .lot-row { grid-template-columns: 1fr; }
     .scan-lot-button { width: 100%; }
