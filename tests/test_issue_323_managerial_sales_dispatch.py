@@ -9,7 +9,15 @@ from app.models.load_orders import (
     LoadOrderPalletAllocation,
     LoadOrderProduct,
 )
-from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
+from app.models.masters import (
+    Carrier,
+    Client,
+    ClientAddress,
+    Driver,
+    Product,
+    Salesperson,
+    Truck,
+)
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 from app.reports.managerial_sales_dispatch import (
     ManagerialSalesDispatchService,
@@ -225,6 +233,74 @@ def test_combined_filters_client_product_carrier_destination(db):
 
     assert [row["order_number"] for row in result.rows] == [32304]
     assert result.totals.total == 24200
+
+
+def test_filter_by_historical_salesperson_survives_client_reassignment(db):
+    seller_a = Salesperson.create(name="Luis 323")
+    seller_b = Salesperson.create(name="Pedro 323")
+    client = _client("Cliente Historico 323", "30700070323", "Posadas")
+    client.salesperson = seller_a
+    client.save()
+    product = Product.create(name="Producto Historico 323", unit="bolsa", peso_unitario_kg=25)
+    _order_number = 32306
+    _created_order, destination, _line, _carrier = _order(
+        number=_order_number,
+        order_date=date(2026, 8, 20),
+        client=client,
+        product=product,
+        quantity=10,
+        net=10000,
+        vat=2100,
+        total=12100,
+    )
+    destination.salesperson = seller_a
+    destination.save()
+
+    client.salesperson = seller_b
+    client.save()
+
+    period = (date(2026, 8, 1), date(2026, 8, 31))
+    historical = ManagerialSalesDispatchService().report(
+        SalesDispatchFilters(*period, salesperson_id=seller_a.id)
+    )
+    reassigned = ManagerialSalesDispatchService().report(
+        SalesDispatchFilters(*period, salesperson_id=seller_b.id)
+    )
+
+    assert [row["order_number"] for row in historical.rows] == [_order_number]
+    assert historical.rows[0]["salesperson_name"] == "Luis 323"
+    assert historical.rows[0]["salesperson_is_historical"] is True
+    assert reassigned.rows == ()
+
+
+def test_filter_by_salesperson_falls_back_to_current_assignment_for_legacy(db):
+    seller = Salesperson.create(name="Vendedor Legacy 323")
+    client = _client("Cliente Legacy 323", "30700080323", "Oberá")
+    client.salesperson = seller
+    client.save()
+    product = Product.create(name="Producto Legacy 323", unit="bolsa", peso_unitario_kg=25)
+    _order_number = 32307
+    _created_order, destination, _line, _carrier = _order(
+        number=_order_number,
+        order_date=date(2026, 8, 21),
+        client=client,
+        product=product,
+        quantity=10,
+        net=10000,
+        vat=2100,
+        total=12100,
+    )
+    assert destination.salesperson_id is None
+
+    result = ManagerialSalesDispatchService().report(
+        SalesDispatchFilters(
+            date(2026, 8, 1), date(2026, 8, 31), salesperson_id=seller.id
+        )
+    )
+
+    assert [row["order_number"] for row in result.rows] == [_order_number]
+    assert result.rows[0]["salesperson_name"] == "Vendedor Legacy 323"
+    assert result.rows[0]["salesperson_is_historical"] is False
 
 
 def test_annulled_rows_can_be_shown_but_do_not_enter_valid_totals(db):

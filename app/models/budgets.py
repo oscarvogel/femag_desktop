@@ -9,7 +9,7 @@ from app.models.load_orders import (
     LoadOrder,
     LoadOrderProduct,
 )
-from app.models.masters import Client, Product
+from app.models.masters import Client, Product, Salesperson
 
 
 class Budget(BaseModel):
@@ -25,6 +25,14 @@ class Budget(BaseModel):
     budget_number = IntegerField(unique=True)
     client = ForeignKeyField(Client, backref="budgets")
     load_order = ForeignKeyField(LoadOrder, backref="budgets", null=True)
+    # Snapshot del vendedor al emitir el documento (#546): no cambia si el
+    # cliente se reasigna despues.
+    salesperson = ForeignKeyField(
+        Salesperson,
+        backref="budgets",
+        null=True,
+        on_delete="SET NULL",
+    )
     origin = CharField()
     # Momento de facturación. Una orden puede emitir un presupuesto por
     # cliente para cada parte, y el índice único de abajo los distingue.

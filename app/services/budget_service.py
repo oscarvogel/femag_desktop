@@ -152,6 +152,22 @@ class BudgetService:
             base = f"{base} / {marca}" if base else marca
         return base
 
+    @staticmethod
+    def _salesperson_for_order_client(order: LoadOrder, client: Client):
+        """Vendedor snapshot del destino; fallback al actual en operaciones legacy."""
+        destination = (
+            LoadOrderDestination.select()
+            .where(
+                (LoadOrderDestination.order == order)
+                & (LoadOrderDestination.client == client)
+            )
+            .order_by(LoadOrderDestination.sequence)
+            .first()
+        )
+        if destination is not None and destination.salesperson_id is not None:
+            return destination.salesperson
+        return client.salesperson
+
     def ensure_for_load_order_client(
         self,
         order: LoadOrder,
@@ -215,6 +231,7 @@ class BudgetService:
                 budget_number=self._next_budget_number(),
                 client=client,
                 load_order=order,
+                salesperson=self._salesperson_for_order_client(order, client),
                 origin=Budget.ORIGIN_LOAD_ORDER,
                 timing=timing,
                 issue_date=order.date,
@@ -302,6 +319,7 @@ class BudgetService:
                 budget_number=self._next_budget_number(),
                 client=client,
                 load_order=None,
+                salesperson=client.salesperson,
                 origin=Budget.ORIGIN_MANUAL,
                 issue_date=movement_date,
                 observations=observations,

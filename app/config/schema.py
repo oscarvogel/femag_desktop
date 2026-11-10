@@ -211,6 +211,8 @@ def ensure_runtime_schema(database) -> None:
         _ensure_pallet_sequence_index(database)
         _ensure_account_movement_source_index(database)
         _ensure_client_salesperson_index(database)
+        _ensure_load_order_destination_salesperson_index(database)
+        _ensure_budget_salesperson_index(database)
         _ensure_client_payment_idempotency_index(database)
         _ensure_budget_timing_index(database)
         _ensure_return_line_timing_index(database)
@@ -535,6 +537,31 @@ def _ensure_client_salesperson_index(database) -> None:
         return
     _execute_schema_statement(
         database, "CREATE INDEX `client_salesperson_id` ON `client` (`salesperson_id`)"
+    )
+
+
+def _ensure_load_order_destination_salesperson_index(database) -> None:
+    table_name = "loadorderdestination"
+    expected_columns = {"salesperson_id"}
+    indexes = database.get_indexes(table_name)
+    if any(set(index.columns) == expected_columns for index in indexes):
+        return
+    _execute_schema_statement(
+        database,
+        "CREATE INDEX `loadorderdestination_salesperson_id` "
+        "ON `loadorderdestination` (`salesperson_id`)",
+    )
+
+
+def _ensure_budget_salesperson_index(database) -> None:
+    table_name = "budget"
+    expected_columns = {"salesperson_id"}
+    indexes = database.get_indexes(table_name)
+    if any(set(index.columns) == expected_columns for index in indexes):
+        return
+    _execute_schema_statement(
+        database,
+        "CREATE INDEX `budget_salesperson_id` ON `budget` (`salesperson_id`)",
     )
 
 

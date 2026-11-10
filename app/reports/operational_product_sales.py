@@ -160,6 +160,7 @@ class OperationalProductSalesService:
             "Fecha",
             "Orden",
             "Cliente",
+            "Vendedor",
             "Destino",
             "Producto",
             "Cantidad",
@@ -181,6 +182,7 @@ class OperationalProductSalesService:
                     row["date"],
                     row["order_number"],
                     row["client_name"],
+                    row["salesperson_name"],
                     row["destination"],
                     row["product_name"],
                     row["quantity"],
@@ -195,7 +197,7 @@ class OperationalProductSalesService:
                     row["carrier_name"],
                 )
             )
-        detail_ws.auto_filter.ref = f"A1:O{max(1, detail_ws.max_row)}"
+        detail_ws.auto_filter.ref = f"A1:P{max(1, detail_ws.max_row)}"
         detail_ws.freeze_panes = "A2"
         self._format_detail_sheet(detail_ws)
 
@@ -220,12 +222,12 @@ class OperationalProductSalesService:
 
     @staticmethod
     def _format_detail_sheet(ws) -> None:
-        widths = (13, 11, 28, 28, 34, 14, 12, 14, 12, 16, 16, 16, 16, 14, 28)
+        widths = (13, 11, 28, 28, 28, 34, 14, 12, 14, 12, 16, 16, 16, 16, 14, 28)
         for idx, width in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(idx)].width = width
         for row in range(2, ws.max_row + 1):
             ws.cell(row, 1).number_format = 'dd/mm/yyyy'
-            for col in (6, 8, 9):
+            for col in (7, 9, 10):
                 ws.cell(row, col).number_format = '#,##0.000'
-            for col in (10, 11, 12, 13):
+            for col in (11, 12, 13, 14):
                 ws.cell(row, col).number_format = '$ #,##0.00'

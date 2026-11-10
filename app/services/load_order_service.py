@@ -792,6 +792,14 @@ class LoadOrderService:
                 {
                     "client": client,
                     "delivery_address": delivery_address,
+                    # En alta se toma el vendedor actual del cliente. En edicion
+                    # llega desde `_merge_destination_traceability` para no
+                    # reescribir el snapshot historico (#546).
+                    "salesperson": (
+                        item["salesperson"]
+                        if "salesperson" in item
+                        else client.salesperson
+                    ),
                     "sequence": item.get("sequence") or index,
                     "observations": item.get("observations"),
                     "products": self._validate_products(products),
@@ -863,6 +871,10 @@ class LoadOrderService:
             for line in order.products
             if line.destination_id is not None
         }
+        existing_destinations = {
+            (destination.client_id, destination.delivery_address_id): destination
+            for destination in order.destinations
+        }
         merged: list[dict] = []
         for item in destinations:
             if not isinstance(item, dict):
@@ -870,6 +882,18 @@ class LoadOrderService:
                 continue
             client = item.get("client")
             address = item.get("delivery_address")
+            if (
+                client is not None
+                and address is not None
+                and hasattr(client, "id")
+                and hasattr(address, "id")
+                and "salesperson" not in item
+            ):
+                previous = existing_destinations.get((client.id, address.id))
+                if previous is not None:
+                    # Editar la orden no reasigna el vendedor historico: se
+                    # conserva el snapshot del destino original (#546).
+                    item = {**item, "salesperson": previous.salesperson}
             products: list[dict] = []
             for product_item in item.get("products") or []:
                 if not isinstance(product_item, dict):
@@ -1331,6 +1355,11 @@ class LoadOrderService:
                 order=order,
                 client=client,
                 delivery_address=item["delivery_address"],
+                salesperson=(
+                    item["salesperson"]
+                    if "salesperson" in item
+                    else client.salesperson
+                ),
                 sequence=item["sequence"],
                 observations=item.get("observations"),
             )
@@ -1514,6 +1543,9 @@ class LoadOrderService:
             "order_number": order.order_number,
             "status": order.status,
             "client_ids": [destination.client.id for destination in order.destinations],
+            "salesperson_ids": [
+                destination.salesperson_id for destination in order.destinations
+            ],
             "driver_id": order.driver.id,
             "truck_id": order.truck.id,
             "trailer_domain": order.trailer_domain,

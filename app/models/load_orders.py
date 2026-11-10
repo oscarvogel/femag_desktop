@@ -15,7 +15,17 @@ from peewee import (
 )
 
 from app.models.base import BaseModel, utc_now
-from app.models.masters import Carrier, Client, ClientAddress, Driver, PalletType, Product, TipoIVA, Truck
+from app.models.masters import (
+    Carrier,
+    Client,
+    ClientAddress,
+    Driver,
+    PalletType,
+    Product,
+    Salesperson,
+    TipoIVA,
+    Truck,
+)
 
 # Momento de facturación de una parte del renglón. Una orden puede repartir la
 # cantidad de un renglón entre las dos partes, y cada parte se factura como un
@@ -82,6 +92,15 @@ class LoadOrderDestination(BaseModel):
     order = ForeignKeyField(LoadOrder, backref="destinations", on_delete="CASCADE")
     client = ForeignKeyField(Client, backref="load_order_destinations")
     delivery_address = ForeignKeyField(ClientAddress, backref="load_order_destinations")
+    # Snapshot del vendedor al crear la operacion (#546). Se guarda por destino
+    # porque una orden puede tener clientes con vendedores distintos. Las
+    # operaciones legacy quedan en NULL y el reporte cae al vendedor actual.
+    salesperson = ForeignKeyField(
+        Salesperson,
+        backref="load_order_destinations",
+        null=True,
+        on_delete="SET NULL",
+    )
     sequence = IntegerField(default=1)
     observations = TextField(null=True)
 
