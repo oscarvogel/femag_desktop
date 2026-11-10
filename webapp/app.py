@@ -479,24 +479,23 @@ self.addEventListener("fetch", event => {
         except (InvalidQrPayloadError, OrderNotFoundError) as exc:
             return render_template("error.html", message=str(exc)), 404
 
+        if not current_username():
+            flash(
+                "Iniciá sesión para cargar el lote y las fechas de los pallets.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "login",
+                    next=url_for("order_detail", token=order.ensure_qr_token()),
+                )
+            )
+
         if is_projected:
             lines = projected_order_lines(order)
             load_lines = projected_load_lines(order)
             if request.method == "POST":
                 username = current_username()
-                if not username:
-                    flash(
-                        "Iniciá sesión para modificar el lote y las fechas de la orden.",
-                        "error",
-                    )
-                    return redirect(
-                        url_for(
-                            "login",
-                            next=url_for(
-                                "order_detail", token=order.ensure_qr_token()
-                            ),
-                        )
-                    )
                 if not csrf_token_is_valid():
                     return (
                         render_template(
@@ -557,14 +556,6 @@ self.addEventListener("fetch", event => {
         load_lines = build_load_lines(order)
         if request.method == "POST":
             username = current_username()
-            if not username:
-                flash("Iniciá sesión para modificar el lote y las fechas de la orden.", "error")
-                return redirect(
-                    url_for(
-                        "login",
-                        next=url_for("order_detail", token=order.ensure_qr_token()),
-                    )
-                )
             if not csrf_token_is_valid():
                 return (
                     render_template(

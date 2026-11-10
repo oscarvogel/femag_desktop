@@ -97,8 +97,10 @@ def test_mobile_order_page_shows_order_and_product(db):
     order, line = _order_with_line()
     app = create_app()
     app.config.update(TESTING=True)
+    client = app.test_client()
+    _login_operador(client)
 
-    response = app.test_client().get(f"/orden/{order.qr_token}")
+    response = client.get(f"/orden/{order.qr_token}")
 
     assert response.status_code == 200
     assert b"Orden #91001" in response.data
@@ -154,7 +156,9 @@ def test_mobile_order_line_shows_client_delivery_and_pallet_without_duplication(
 
     app = create_app()
     app.config.update(TESTING=True)
-    response = app.test_client().get(f"/orden/{order.qr_token}")
+    client = app.test_client()
+    _login_operador(client)
+    response = client.get(f"/orden/{order.qr_token}")
 
     assert response.status_code == 200
     assert data["client"].name.encode() in response.data

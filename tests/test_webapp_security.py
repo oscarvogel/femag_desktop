@@ -34,7 +34,8 @@ def test_https_sets_secure_cookie_session_lifetime_and_headers(db, monkeypatch):
         f"/orden/{order.qr_token}", base_url="https://femag.example"
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("/login")
     assert app.permanent_session_lifetime == SESSION_LIFETIME == timedelta(hours=12)
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
@@ -55,7 +56,8 @@ def test_http_does_not_force_secure_cookie_or_hsts(db, monkeypatch):
 
     response = app.test_client().get(f"/orden/{order.qr_token}")
 
-    assert response.status_code == 200
+    assert response.status_code == 302
+    assert response.headers["Location"].startswith("/login")
     cookie = response.headers["Set-Cookie"]
     assert "Secure" not in cookie
     assert "HttpOnly" in cookie
