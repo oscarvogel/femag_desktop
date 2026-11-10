@@ -846,6 +846,24 @@ def build_order_context(
     }
 
 
+def _provider_error_detail(detail: str) -> str:
+    """Extrae el mensaje util del JSON de error del proveedor."""
+
+    if not detail:
+        return ""
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        return detail.strip()
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"]).strip()
+        if payload.get("message"):
+            return str(payload["message"]).strip()
+    return detail.strip()
+
+
 def _post_json(url: str, headers: dict, payload: dict, timeout: float) -> dict:
     """POST JSON con la libreria estandar.
 
@@ -870,8 +888,9 @@ def _post_json(url: str, headers: dict, payload: dict, timeout: float) -> dict:
         except Exception:
             detail = ""
         message = f"El proveedor de IA respondió HTTP {exc.code}."
-        if detail:
-            message += f" {detail}"
+        clean_detail = _provider_error_detail(detail)
+        if clean_detail:
+            message = f"El proveedor de IA rechazó la solicitud: {clean_detail}"
         raise CaptureProviderError(message) from exc
     except (error.URLError, TimeoutError, OSError) as exc:
         raise CaptureProviderError(
@@ -896,7 +915,9 @@ def call_minimax(config: CaptureConfig, messages: list[dict]) -> tuple[str, dict
         "model": config.model,
         "messages": messages,
         "max_completion_tokens": 4000,
-        "thinking": {"type": "disabled"},
+        # MiniMax-M3.1-Flash exige pensamiento adaptativo: rechaza
+        # thinking.type=disabled con HTTP 400.
+        "thinking": {"type": "adaptive"},
         "stream": False,
     }
     headers = {
