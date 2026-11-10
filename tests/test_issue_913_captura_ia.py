@@ -1055,3 +1055,42 @@ def test_el_instalador_del_escritorio_crea_las_variables_de_ia():
     assert "CreateAiCaptureConfig" in content
     assert "FEMAG_ORDER_CAPTURE_AI_PROVIDER=minimax" in content
     assert "FEMAG_ORDER_CAPTURE_AI_API_KEY=" in content
+
+
+def test_minimax_pide_thinking_adaptive(monkeypatch):
+    config = _enable_capture(monkeypatch)
+    captured = {}
+
+    def fake_post(url, headers, payload, timeout):
+        captured.update(payload)
+        return {
+            "choices": [
+                {"message": {"content": '{"schema_version": 1, "lineas": []}'}}
+            ],
+            "base_resp": {"status_code": 0},
+        }
+
+    monkeypatch.setattr(order_capture_ai_service, "_post_json", fake_post)
+
+    content, _usage = order_capture_ai_service.call_minimax(
+        config, [{"role": "user", "content": "hola"}]
+    )
+
+    assert captured["thinking"]["type"] == "adaptive"
+    assert content.startswith("{")
+
+
+def test_el_error_del_proveedor_se_extrae_del_json():
+    detail = (
+        '{"type":"error","error":{"type":"bad_request_error",'
+        '"message":"invalid params, thinking.type=disabled is not allowed"}}'
+    )
+
+    assert (
+        order_capture_ai_service._provider_error_detail(detail)
+        == "invalid params, thinking.type=disabled is not allowed"
+    )
+    assert (
+        order_capture_ai_service._provider_error_detail("error simple")
+        == "error simple"
+    )
