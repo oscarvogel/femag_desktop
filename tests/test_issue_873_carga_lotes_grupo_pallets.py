@@ -172,8 +172,10 @@ def _apply_snapshot(order):
 
 def test_una_linea_con_tres_pallets_muestra_un_solo_formulario(db):
     _, order, _, line, _ = _order_with_pallets(pallet_count=3)
+    client = _app().test_client()
+    _login(client)
 
-    response = _app().test_client().get(f"/orden/{order.qr_token}")
+    response = client.get(f"/orden/{order.qr_token}")
 
     assert response.status_code == 200
     # Un unico formulario de lote para los tres pallets de la linea.
@@ -203,7 +205,10 @@ def test_la_linea_sin_pallets_mantiene_su_lote(db):
         fecha_elaboracion=date(2026, 10, 20),
     )
 
-    response = _app().test_client().get(f"/orden/{order.qr_token}")
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get(f"/orden/{order.qr_token}")
 
     assert response.status_code == 200
     assert b'value="LOTE-VIEJO"' in response.data
@@ -359,7 +364,10 @@ def test_la_nube_agrupa_por_linea_y_no_por_pallet(db):
     order = _projected_order(pallet_count=2)
     _apply_snapshot(order)
 
-    response = _app().test_client().get("/orden/token-873")
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/orden/token-873")
 
     assert response.status_code == 200
     # Un solo formulario para los pallets de la linea.

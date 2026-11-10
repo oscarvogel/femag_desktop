@@ -84,8 +84,10 @@ def _csrf(client, token):
 
 def test_projected_order_opens_by_qr_token(db):
     SyncSnapshotService.apply_snapshot(_snapshot(_order()))
+    client = _app().test_client()
+    _login(client)
 
-    response = _app().test_client().get("/orden/token-real-fabrica")
+    response = client.get("/orden/token-real-fabrica")
 
     assert response.status_code == 200
     assert b"Orden #500" in response.data
@@ -102,9 +104,21 @@ def test_projected_order_opens_by_qr_token(db):
     assert b"popstate" in response.data
 
 
+def test_projected_order_requires_login_before_showing_capture(db):
+    SyncSnapshotService.apply_snapshot(_snapshot(_order()))
+
+    response = _app().test_client().get("/orden/token-real-fabrica")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == (
+        "/login?next=/orden/token-real-fabrica"
+    )
+
+
 def test_home_scanner_opens_projected_order(db):
     SyncSnapshotService.apply_snapshot(_snapshot(_order()))
     client = _app().test_client()
+    _login(client)
 
     response = client.post(
         "/",
@@ -226,8 +240,10 @@ def test_annulled_projected_order_is_rejected(db):
 
 def test_closed_projected_order_opens_for_reprint(db):
     SyncSnapshotService.apply_snapshot(_snapshot(_order(status="Cerrada")))
+    client = _app().test_client()
+    _login(client)
 
-    response = _app().test_client().get("/orden/token-real-fabrica")
+    response = client.get("/orden/token-real-fabrica")
 
     assert response.status_code == 200
     assert b"Orden #500" in response.data
@@ -267,8 +283,10 @@ def _order_with_contents(status="Emitida", version=1, lote="LOTE-FABRICA-1"):
 def test_projected_order_shows_pallet_contents(db):
     order, content_uid, loose_uid = _order_with_contents()
     SyncSnapshotService.apply_snapshot(_snapshot(order))
+    client = _app().test_client()
+    _login(client)
 
-    response = _app().test_client().get("/orden/token-real-fabrica")
+    response = client.get("/orden/token-real-fabrica")
 
     assert response.status_code == 200
     # El pallet y la mercaderia suelta comparten linea: se cargan en la misma
