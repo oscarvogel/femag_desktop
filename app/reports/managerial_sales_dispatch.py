@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.models.load_orders import LoadOrder, LoadOrderDestination, LoadOrderProduct
-from app.models.masters import Carrier, ClientAddress
+from app.models.masters import Carrier, ClientAddress, Salesperson
 from app.reports.managerial_dashboard import ManagerialDashboardService, ReportPeriod
 
 
@@ -27,6 +27,7 @@ class SalesDispatchFilters:
     destination: str | None = None
     sort_by: str = "date"
     descending: bool = False
+    salesperson_id: int | None = None
 
     @property
     def period(self) -> ReportPeriod:
@@ -116,6 +117,21 @@ class ManagerialSalesDispatchService:
             address.id: address
             for address in ClientAddress.select().where(ClientAddress.id.in_(address_ids))
         }
+        salesperson_ids = {
+            int(row["order_salesperson_id"])
+            for row in breakdown
+            if row.get("order_salesperson_id")
+        }
+        salesperson_names = (
+            {
+                salesperson.id: salesperson.name
+                for salesperson in Salesperson.select().where(
+                    Salesperson.id.in_(salesperson_ids)
+                )
+            }
+            if salesperson_ids
+            else {}
+        )
 
         line_queues: dict[tuple[int, int, int], deque[LoadOrderProduct]] = defaultdict(deque)
         line_query = (
@@ -152,6 +168,15 @@ class ManagerialSalesDispatchService:
                 )
 
             kilos = round(float(source.get("kilos") or 0), 3)
+            historical_salesperson_id = (
+                int(source["order_salesperson_id"])
+                if source.get("order_salesperson_id")
+                else None
+            )
+            current_salesperson_id = (
+                int(source["salesperson_id"]) if source.get("salesperson_id") else None
+            )
+            salesperson_id = historical_salesperson_id or current_salesperson_id
             enriched.append(
                 {
                     "line_id": line.id,
@@ -163,6 +188,12 @@ class ManagerialSalesDispatchService:
                     "carrier_name": carriers.get(order.carrier_id, ""),
                     "client_id": int(source["client_id"]),
                     "client_name": source["client_name"],
+                    "salesperson_id": salesperson_id,
+                    "salesperson_name": salesperson_names.get(
+                        salesperson_id, source.get("salesperson_name") or ""
+                    ),
+                    "salesperson_is_historical": historical_salesperson_id
+                    is not None,
                     "destination_id": destination.id,
                     "destination": destination_label,
                     "product_id": int(source["product_id"]),
@@ -186,6 +217,11 @@ class ManagerialSalesDispatchService:
         if filters.product_id is not None and row["product_id"] != filters.product_id:
             return False
         if filters.carrier_id is not None and row["carrier_id"] != filters.carrier_id:
+            return False
+        if (
+            filters.salesperson_id is not None
+            and row["salesperson_id"] != filters.salesperson_id
+        ):
             return False
         if filters.statuses and row["status"] not in filters.statuses:
             return False

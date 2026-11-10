@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.models.load_orders import LoadOrder
-from app.models.masters import Client, Product
+from app.models.masters import Client, Product, Salesperson
 from app.reports.managerial_sales_dispatch import SalesDispatchFilters
 from app.reports.operational_product_sales import OperationalProductSalesService
 
@@ -57,6 +57,7 @@ class OperationalProductSalesDialog(QDialog):
         "Fecha",
         "Orden",
         "Cliente",
+        "Vendedor",
         "Destino",
         "Producto",
         "Cantidad",
@@ -101,6 +102,11 @@ class OperationalProductSalesDialog(QDialog):
         self.date_to.setDisplayFormat("dd/MM/yyyy")
         self.product_combo = QComboBox()
         self.client_combo = QComboBox()
+        self.salesperson_combo = QComboBox()
+        self.salesperson_combo.setToolTip(
+            "Filtra por el vendedor histórico de la operación. Si la orden es "
+            "legacy sin vendedor guardado, usa el vendedor actual del cliente."
+        )
         self.status_combo = QComboBox()
 
         for column, (label, widget) in enumerate(
@@ -109,6 +115,7 @@ class OperationalProductSalesDialog(QDialog):
                 ("Hasta", self.date_to),
                 ("Producto", self.product_combo),
                 ("Cliente", self.client_combo),
+                ("Vendedor", self.salesperson_combo),
                 ("Estado", self.status_combo),
             )
         ):
@@ -192,6 +199,16 @@ class OperationalProductSalesDialog(QDialog):
         for client in Client.select().order_by(Client.name):
             self.client_combo.addItem(client.name, client.id)
 
+        self.salesperson_combo.clear()
+        self.salesperson_combo.addItem("Todos", None)
+        for salesperson in Salesperson.select().order_by(Salesperson.name):
+            label = (
+                salesperson.name
+                if salesperson.active
+                else f"{salesperson.name} (Inactivo)"
+            )
+            self.salesperson_combo.addItem(label, salesperson.id)
+
         self.status_combo.clear()
         self.status_combo.addItem("Órdenes vigentes (Pendiente + Emitida + Cerrada)", None)
         self.status_combo.addItem("Pendiente", LoadOrder.STATUS_PENDING)
@@ -229,6 +246,7 @@ class OperationalProductSalesDialog(QDialog):
             end=self._py_date(self.date_to),
             client_id=self.client_combo.currentData(),
             product_id=self.product_combo.currentData(),
+            salesperson_id=self.salesperson_combo.currentData(),
             statuses=self._selected_statuses(),
             sort_by="product",
         )
@@ -237,6 +255,7 @@ class OperationalProductSalesDialog(QDialog):
         self._set_default_period()
         self.product_combo.setCurrentIndex(0)
         self.client_combo.setCurrentIndex(0)
+        self.salesperson_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
         self.refresh()
 
@@ -295,6 +314,7 @@ class OperationalProductSalesDialog(QDialog):
                 row["date"].strftime("%d/%m/%Y"),
                 row["order_number"],
                 row["client_name"],
+                row["salesperson_name"],
                 row["destination"],
                 row["product_name"],
                 row["quantity"],
@@ -311,9 +331,9 @@ class OperationalProductSalesDialog(QDialog):
             for column, value in enumerate(values):
                 if column == 1:
                     item = NumericTableItem(str(value), int(value))
-                elif column in {5, 7, 8, 9, 10, 11, 12}:
+                elif column in {6, 8, 9, 10, 11, 12, 13}:
                     number = float(value or 0)
-                    decimals = 3 if column in {5, 7, 8} else 2
+                    decimals = 3 if column in {6, 8, 9} else 2
                     item = NumericTableItem(f"{number:,.{decimals}f}", number)
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 else:

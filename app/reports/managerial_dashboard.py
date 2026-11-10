@@ -248,6 +248,7 @@ class ManagerialDashboardService:
                 Client.name.alias("client_name"),
                 Salesperson.id.alias("salesperson_id"),
                 Salesperson.name.alias("salesperson_name"),
+                LoadOrderDestination.salesperson.alias("order_salesperson_id"),
             )
             .join(LoadOrder)
             .switch(LoadOrderProduct)

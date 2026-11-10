@@ -23,6 +23,8 @@ class FakeSalesService:
                 "carrier_name": "Transportista A",
                 "client_id": 1,
                 "client_name": "Cliente A",
+                "salesperson_id": 1,
+                "salesperson_name": "Vendedor A",
                 "destination_id": 1,
                 "destination": "Posadas",
                 "product_id": 7,
@@ -46,6 +48,8 @@ class FakeSalesService:
                 "carrier_name": "Transportista A",
                 "client_id": 2,
                 "client_name": "Cliente B",
+                "salesperson_id": 2,
+                "salesperson_name": "Vendedor B",
                 "destination_id": 2,
                 "destination": "Eldorado",
                 "product_id": 7,
@@ -69,6 +73,8 @@ class FakeSalesService:
                 "carrier_name": "Transportista A",
                 "client_id": 2,
                 "client_name": "Cliente B",
+                "salesperson_id": 2,
+                "salesperson_name": "Vendedor B",
                 "destination_id": 2,
                 "destination": "Eldorado",
                 "product_id": 8,
@@ -139,5 +145,6 @@ def test_operational_sales_exports_two_sheet_xlsx(tmp_path):
     assert summary.cell(summary.max_row, 8).value == 48400
     assert detail["A1"].value == "Fecha"
     assert detail["B2"].value == 1001
-    assert detail["E2"].value == "Fécula A"
-    assert detail["M2"].value == 12100
+    assert detail["D2"].value == "Vendedor A"
+    assert detail["F2"].value == "Fécula A"
+    assert detail["N2"].value == 12100
