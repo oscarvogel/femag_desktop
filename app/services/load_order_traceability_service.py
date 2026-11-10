@@ -45,6 +45,7 @@ class LoadOrderTraceabilityService:
         items: list[dict] | None,
         *,
         reason: str | None = None,
+        source: str | None = None,
     ) -> int:
         order = LoadOrder.get_by_id(order.id)
         if order.status == LoadOrder.STATUS_ANNULLED:
@@ -58,6 +59,7 @@ class LoadOrderTraceabilityService:
                 "En una orden cerrada debe indicar el motivo del cambio."
             )
 
+        normalized_source = (source or "").strip() or None
         normalized_items = self._normalize_items(order, items)
         if not normalized_items:
             raise LoadOrderTraceabilityError("No hay contenidos para actualizar.")
@@ -65,7 +67,9 @@ class LoadOrderTraceabilityService:
         changed = 0
         with database_proxy.atomic():
             for item in normalized_items:
-                changed += self._apply_item(item, order, normalized_reason)
+                changed += self._apply_item(
+                    item, order, normalized_reason, normalized_source
+                )
             if changed:
                 entity = SyncService.ensure_entity_uid(
                     SyncEntityMap.ENTITY_ORDER, order.id
@@ -156,7 +160,13 @@ class LoadOrderTraceabilityService:
                 raise LoadOrderTraceabilityError(f"La {label} no es valida.") from exc
         raise LoadOrderTraceabilityError(f"La {label} no es valida.")
 
-    def _apply_item(self, item: dict, order: LoadOrder, reason: str | None) -> int:
+    def _apply_item(
+        self,
+        item: dict,
+        order: LoadOrder,
+        reason: str | None,
+        source: str | None = None,
+    ) -> int:
         target = item["target"]
         before = {field: getattr(target, field) for field in TRACEABILITY_FIELDS}
         after = {
@@ -188,7 +198,11 @@ class LoadOrderTraceabilityService:
                 "tipo": item["kind"],
                 **self._serialize(after),
             },
-            observation=reason,
+            observation=(
+                f"{source}. {reason}".strip()
+                if source and reason
+                else (source or reason)
+            ),
         )
         return 1
 

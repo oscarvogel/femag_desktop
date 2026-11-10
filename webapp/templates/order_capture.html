@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block page_title %}Órdenes{% endblock %}
+{% block page_context %}Importar foto o PDF{% endblock %}
+{% block title %}Importar orden {{ order.order_number }} · FEMAG{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Importar desde foto o PDF</h1>
+  <p class="muted">Orden #{{ order.order_number }} · {{ order.date.strftime('%d/%m/%Y') if order.date else '-' }} · {{ order.status }}</p>
+  <div class="summary">
+    <div><span>Cliente</span>{{ order.client.name if order.client else '-' }}</div>
+    <div><span>Camión</span>{{ order.truck.domain if order.truck else '-' }}</div>
+  </div>
+</div>
+
+{% if not capture_enabled %}
+<div class="card">
+  <h2>La importación con IA no está disponible</h2>
+  <p class="message error">{{ capture_disabled_reason }}</p>
+  <p class="muted">Mientras tanto podés cargar el lote y las fechas a mano en la ficha de la orden.</p>
+</div>
+{% else %}
+<form method="post" enctype="multipart/form-data" id="capture-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card">
+    <h2>Archivo de la orden</h2>
+    <label for="archivo">Foto o PDF de la orden de despacho</label>
+    <input
+      type="file"
+      id="archivo"
+      name="archivo"
+      accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,image/jpeg,image/png,image/webp,image/gif,application/pdf"
+      required
+    >
+    <p class="muted">
+      Formatos: JPG, PNG, WEBP, GIF o PDF. Hasta {{ capture_max_mb }} MB y
+      {{ capture_max_pages }} página(s) por PDF.
+    </p>
+    <button type="submit" id="capture-submit">Leer lote y fechas con IA</button>
+  </div>
+  <div class="card">
+    <p class="muted">
+      La imagen se envía a <strong>{{ capture_provider }}</strong>
+      ({{ capture_model }}) para leer el lote y las fechas.
+      El archivo no se guarda en FEMAG. La IA solo <strong>propone</strong>:
+      vas a poder revisar y corregir antes de guardar.
+    </p>
+    <p class="muted">
+      Si la letra no se entiende, la IA deja el campo vacío con una advertencia.
+      Nada se graba hasta que presiones <strong>Guardar lote y fechas</strong>
+      en la ficha de la orden.
+    </p>
+  </div>
+</form>
+{% endif %}
+
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+  <a class="button" href="{{ url_for('order_detail', token=order.ensure_qr_token()) }}">Volver a la orden</a>
+  <a class="button secondary" href="{{ url_for('home') }}">Buscar otra orden</a>
+</div>
+
+<style>
+  #capture-form input[type="file"] { display: block; width: 100%; min-height: 48px; padding: 10px; border: 1px dashed #c6d2dd; border-radius: 10px; background: #f8fafc; margin: 8px 0 10px; }
+  #capture-submit { margin-top: 8px; }
+</style>
+
+<script>
+(function () {
+  const form = document.getElementById('capture-form');
+  if (!form) return;
+  form.addEventListener('submit', function () {
+    const button = document.getElementById('capture-submit');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Leyendo la orden…';
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -209,6 +209,15 @@ FEMAG_WEB_PUBLIC_URL=$publicUrl
 # El secreto con el que se firman las cookies de sesion, fuera del perfil de
 # SYSTEM para que sobreviva a los reinicios.
 FEMAG_WEB_SECRET_FILE=$secretFile
+
+# Precarga asistida por IA de lotes/fechas desde foto o PDF (#913).
+# Alcanza con pegar la API key de MiniMax y reiniciar el servicio. Sin clave,
+# la funcion queda deshabilitada y la carga manual sigue funcionando.
+# Internacional: https://api.minimax.io/v1 | China: https://api.minimaxi.com/v1
+FEMAG_ORDER_CAPTURE_AI_PROVIDER=minimax
+FEMAG_ORDER_CAPTURE_AI_API_KEY=
+FEMAG_ORDER_CAPTURE_AI_MODEL=MiniMax-M3.1-Flash
+FEMAG_ORDER_CAPTURE_AI_BASE_URL=https://api.minimax.io/v1
 "@
     # UTF-8 con BOM: PowerShell 5.1 (el del Server 2019) lee los .ps1 sin BOM
     # como Windows-1252 y rompe el arranque.

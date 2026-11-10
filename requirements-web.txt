@@ -16,3 +16,6 @@ Pillow>=10.4,<11
 reportlab>=4.0
 Flask>=3.0,<4
 waitress>=3.0,<4
+# Render de PDFs para la precarga con IA (#913). Es una rueda autonoma, sin
+# poppler ni binarios externos, y solo se importa cuando se sube un PDF.
+pypdfium2>=4.30,<6

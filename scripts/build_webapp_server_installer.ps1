@@ -49,8 +49,10 @@ $Iscc = Resolve-InnoSetup @resolveParams
 Push-Location $RepoRoot
 try {
     if (-not $SkipInstallDependencies) {
+        # El servidor congelado necesita tambien las dependencias de la webapp
+        # (Flask, waitress, pypdfium2 para leer PDFs de la precarga con IA).
         Invoke-Native -Command $Python `
-            -Arguments @("-m", "pip", "install", "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org", "-r", "requirements-build.txt") `
+            -Arguments @("-m", "pip", "install", "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org", "-r", "requirements-build.txt", "-r", "requirements-web.txt") `
             -FailureMessage "No se pudieron instalar las dependencias de compilacion."
     }
 

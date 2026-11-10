@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import date, datetime
 from decimal import Decimal
@@ -23,8 +24,16 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app.config.database import database_proxy
 from app.services.audit_query_service import AuditQueryService
+from app.services.order_capture_ai_service import (
+    CaptureDisabledError,
+    CaptureError,
+    CaptureInputError,
+    extract_capture,
+    load_capture_config,
+)
 from app.utils.datetime_utils import utc_datetime_to_local
-from webapp import audit, production_service
+from webapp import audit, capture_rate_limit, production_service
+from webapp.capture_service import apply_capture_to_load_lines, summarize_capture
 from webapp.auth import (
     SESSION_LIFETIME,
     can_view_managerial_dashboard,
@@ -72,6 +81,23 @@ from webapp.projected_order_service import (
 )
 from webapp.qr_sheet import build_turno_sheet
 from webapp.sync_api import sync_api
+
+logger = logging.getLogger("femag.webapp.capture")
+
+
+def _capture_audit_detail(audit_value, form):
+    """Marca en la auditoria del guardado que hubo asistencia por IA (#913)."""
+
+    if (form.get("capture_source") or "").strip().lower() != "ia":
+        return audit_value
+    detail = dict(audit_value or {})
+    detail["captura"] = {
+        "origen": "ia",
+        "proveedor": (form.get("capture_provider") or "").strip() or None,
+        "modelo": (form.get("capture_model") or "").strip() or None,
+        "archivo_sha256": (form.get("capture_file_sha256") or "").strip() or None,
+    }
+    return detail
 
 
 def _production_target(value: str) -> str | None:
@@ -524,7 +550,9 @@ self.addEventListener("fetch", event => {
                                 module=audit.MODULE_DESPACHOS,
                                 action=audit.ACTION_LOTE,
                                 record_ref=f"SyncOrder:{order.order_uid}",
-                                new_value=audit_value,
+                                new_value=_capture_audit_detail(
+                                    audit_value, request.form
+                                ),
                             )
                             flash(
                                 "Lote y fechas guardados. Pendiente de sincronización "
@@ -586,7 +614,9 @@ self.addEventListener("fetch", event => {
                             module=audit.MODULE_DESPACHOS,
                             action=audit.ACTION_LOTE,
                             record_ref=f"LoadOrder:{order.id}",
-                            new_value=audit_value,
+                            new_value=_capture_audit_detail(
+                                audit_value, request.form
+                            ),
                         )
                         flash("Lote y fechas guardados.", "success")
                     else:
@@ -608,6 +638,184 @@ self.addEventListener("fetch", event => {
             load_lines=load_lines,
             line_context=order_line_context(order, lines),
             is_projected=False,
+        )
+
+    @app.route("/orden/<token>/importar", methods=["GET", "POST"])
+    def order_capture(token: str):
+        """Precarga con IA desde una foto/PDF. No escribe en la base (#913)."""
+
+        try:
+            order, is_projected = _load_order(token)
+        except OrderUnavailableError as exc:
+            return render_template("error.html", message=str(exc)), 409
+        except (InvalidQrPayloadError, OrderNotFoundError) as exc:
+            return render_template("error.html", message=str(exc)), 404
+
+        username = current_username()
+        if not username:
+            flash(
+                "Iniciá sesión para importar una foto o PDF de la orden.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "login",
+                    next=url_for("order_capture", token=order.ensure_qr_token()),
+                )
+            )
+
+        config = load_capture_config()
+        if request.method == "GET":
+            return render_template(
+                "order_capture.html",
+                order=order,
+                is_projected=is_projected,
+                capture_enabled=config.enabled,
+                capture_provider=config.provider,
+                capture_model=config.model,
+                capture_disabled_reason=config.disabled_reason(),
+                capture_max_mb=config.max_mb,
+                capture_max_pages=config.max_pages,
+            )
+
+        if not csrf_token_is_valid():
+            return (
+                render_template(
+                    "error.html",
+                    message=(
+                        "La sesión expiró o el formulario no es válido. "
+                        "Volvé a abrir la orden e intentá de nuevo."
+                    ),
+                ),
+                400,
+            )
+
+        if not config.enabled:
+            flash(
+                config.disabled_reason()
+                or "La importación con IA no está configurada.",
+                "error",
+            )
+            return redirect(
+                url_for("order_detail", token=order.ensure_qr_token())
+            )
+
+        if capture_rate_limit.is_rate_limited(
+            username, config.rate_limit_per_hour
+        ):
+            flash(
+                "Demasiadas importaciones en la última hora. Esperá un momento "
+                "o cargá los lotes a mano.",
+                "error",
+            )
+            return redirect(
+                url_for("order_detail", token=order.ensure_qr_token())
+            )
+
+        upload = request.files.get("archivo")
+        if upload is None or not upload.filename:
+            flash("Seleccioná una foto o un PDF de la orden.", "error")
+            return redirect(
+                url_for("order_capture", token=order.ensure_qr_token())
+            )
+
+        max_bytes = max(1, config.max_mb) * 1024 * 1024
+        if request.content_length and request.content_length > max_bytes + (
+            2 * 1024 * 1024
+        ):
+            flash(
+                f"El archivo supera el máximo de {config.max_mb} MB.",
+                "error",
+            )
+            return redirect(
+                url_for("order_capture", token=order.ensure_qr_token())
+            )
+
+        load_lines = (
+            projected_load_lines(order)
+            if is_projected
+            else build_load_lines(order)
+        )
+        client_name = getattr(getattr(order, "client", None), "name", None)
+        capture_rate_limit.register_attempt(username)
+        try:
+            proposal = extract_capture(
+                upload.read(max_bytes + 1),
+                upload.filename,
+                upload.mimetype,
+                load_lines=load_lines,
+                order_number=order.order_number,
+                order_date=order.date,
+                client_name=client_name,
+                config=config,
+            )
+        except CaptureInputError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("order_capture", token=order.ensure_qr_token())
+            )
+        except CaptureDisabledError as exc:
+            flash(str(exc), "error")
+            return redirect(
+                url_for("order_detail", token=order.ensure_qr_token())
+            )
+        except CaptureError as exc:
+            logger.warning(
+                "Captura IA falló para la orden %s: %s",
+                order.order_number,
+                exc,
+            )
+            flash(
+                "No se pudo leer la imagen de la orden. Probá de nuevo o cargá "
+                "los lotes a mano.",
+                "error",
+            )
+            return redirect(
+                url_for("order_detail", token=order.ensure_qr_token())
+            )
+
+        prefill_lines, review = apply_capture_to_load_lines(load_lines, proposal)
+        lines = (
+            projected_order_lines(order)
+            if is_projected
+            else order_lines(order)
+        )
+        audit.record(
+            user=username,
+            module=audit.MODULE_DESPACHOS,
+            action=audit.ACTION_CAPTURA_IA,
+            record_ref=(
+                f"SyncOrder:{order.order_uid}"
+                if is_projected
+                else f"LoadOrder:{order.id}"
+            ),
+            new_value={
+                "orden": order.order_number,
+                "proveedor": proposal.provider,
+                "modelo": proposal.model,
+                "archivo_sha256": proposal.file_sha256,
+                "resumen": summarize_capture(proposal, review),
+                "advertencias": list(proposal.warnings),
+            },
+        )
+        return render_template(
+            "order.html",
+            order=order,
+            lines=lines,
+            load_lines=prefill_lines,
+            line_context=(
+                projected_line_context(order, lines)
+                if is_projected
+                else order_line_context(order, lines)
+            ),
+            is_projected=is_projected,
+            capture_review=review,
+            capture_meta={
+                "file_sha256": proposal.file_sha256,
+                "provider": proposal.provider,
+                "model": proposal.model,
+                "warnings": list(proposal.warnings),
+            },
         )
 
     @app.get("/orden/<token>/guardado")

@@ -1,10 +1,23 @@
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+)
 
 
 # La hoja de QR por turno usa reportlab.graphics.barcode.qr: sin estos
 # hiddenimports y datas, el congelado no encuentra el codigo QR.
 hiddenimports = collect_submodules("reportlab.graphics.barcode")
 datas = collect_data_files("reportlab")
+
+# La precarga con IA convierte PDFs a imagenes con pypdfium2 (#913). Se importa
+# de forma diferida para no cargarlo en cada arranque, asi que PyInstaller no lo
+# detecta solo: hay que declararlo con su binario pdfium.
+pdfium_datas, pdfium_binaries, pdfium_hidden = collect_all("pypdfium2")
+raw_datas, raw_binaries, raw_hidden = collect_all("pypdfium2_raw")
+datas += pdfium_datas + raw_datas
+binaries = pdfium_binaries + raw_binaries
+hiddenimports += pdfium_hidden + raw_hidden
 
 # Las plantillas de Flask (base, login, production, order, home, error) tienen
 # que viajar como datos: en un congelado, el paquete webapp queda dentro del
@@ -14,7 +27,7 @@ datas += collect_data_files("webapp", includes=["templates/*.html"])
 a = Analysis(
     ["../webapp/server_entrypoint.py"],
     pathex=[".."],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     # El servidor no usa PyQt: la webapp no importa app.ui (medido: create_app

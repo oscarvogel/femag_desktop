@@ -4,7 +4,22 @@ from datetime import date
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.services.load_order_service import LoadOrderService
+from app.services.webapp_configuration_service import WebappConfigurationService
 from app.ui.abm import ABMViewSpec, build_abm_spec
+
+
+def ai_capture_url(order: LoadOrder) -> str:
+    """URL de la ficha web que importa lote/fechas desde una foto o PDF (#913).
+
+    Devuelve vacío si el servidor web no está configurado o la orden no tiene
+    token: en ese caso la pantalla debe avisar en vez de abrir una URL rota.
+    """
+
+    token = (order.qr_token or "").strip()
+    if not token:
+        return ""
+    order_url = WebappConfigurationService.order_url(token)
+    return f"{order_url}/importar" if order_url else ""
 
 
 @dataclass(frozen=True)
