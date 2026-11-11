@@ -907,15 +907,21 @@ def test_el_dialogo_precarga_una_orden_legacy_sin_pallets(db):
     assert updates[0]["lote"] == "08"
 
 
-def test_el_dialogo_tiene_el_boton_de_importar_y_precarga_la_tabla(db):
+def test_el_dialogo_tiene_el_boton_de_importar_y_precarga_la_tabla(
+    db, monkeypatch
+):
     from PyQt5.QtWidgets import QApplication, QPushButton
 
     from app.services.load_order_traceability_service import (
         LoadOrderTraceabilityService,
     )
+    from app.ui import load_order_traceability_dialog as dialog_module
     from app.ui.load_order_traceability_dialog import (
         LoadOrderTraceabilityDialog,
     )
+    from app.ui.theme import Theme
+
+    monkeypatch.setattr(dialog_module, "load_theme", lambda: Theme.LIGHT)
 
     _, order, _, _line, allocations = _order_with_line(pallet_count=2)
     app = QApplication.instance() or QApplication([])
@@ -946,6 +952,46 @@ def test_el_dialogo_tiene_el_boton_de_importar_y_precarga_la_tabla(db):
     other = dialog._editors_by_key[("pallet_content", allocations[1].id)]
     assert "color: #1f2937" in other["lote"].styleSheet()
     assert "background-color: #ffffff" in other["lote"].styleSheet()
+    dialog.close()
+
+
+def test_el_dialogo_usa_colores_oscuros_en_tema_oscuro(db, monkeypatch):
+    from PyQt5.QtWidgets import QApplication
+
+    from app.services.load_order_traceability_service import (
+        LoadOrderTraceabilityService,
+    )
+    from app.ui import load_order_traceability_dialog as dialog_module
+    from app.ui.load_order_traceability_dialog import (
+        LoadOrderTraceabilityDialog,
+    )
+    from app.ui.theme import Theme
+
+    monkeypatch.setattr(dialog_module, "load_theme", lambda: Theme.DARK)
+    _, order, _, _line, allocations = _order_with_line(pallet_count=1)
+    app = QApplication.instance() or QApplication([])
+    dialog = LoadOrderTraceabilityDialog(
+        LoadOrderTraceabilityService(current_user="test"), order
+    )
+    app.processEvents()
+
+    editor = dialog._editors_by_key[("pallet_content", allocations[0].id)]
+    assert "background-color: #161c24" in editor["lote"].styleSheet()
+    assert "color: #e5edf6" in editor["lote"].styleSheet()
+
+    dialog._apply_capture_updates(
+        [
+            {
+                "kind": "pallet_content",
+                "id": allocations[0].id,
+                "lote": "56",
+                "fecha_elaboracion": date(2026, 10, 30),
+                "fecha_envasado": None,
+            }
+        ]
+    )
+    assert "background-color: #173a2a" in editor["lote"].styleSheet()
+    assert "color: #d9fbe8" in editor["lote"].styleSheet()
     dialog.close()
 
 

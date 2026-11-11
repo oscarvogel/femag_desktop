@@ -47,22 +47,38 @@ from app.services.order_capture_ai_service import (
     extract_capture,
     load_capture_config,
 )
+from app.ui.theme import Theme, load_theme
 
 logger = logging.getLogger("femag.ui.captura_ia")
 
 NO_DATE = QDate(1900, 1, 1)
 
-#: Los editores de la tabla usan fondo claro; el texto tiene que ser oscuro
-#: para que se lea tambien en el tema oscuro. Sin esto, el color de texto del
-#: tema claro/oscuro se hereda y queda casi invisible sobre el fondo claro.
-_EDITOR_STYLE = (
+#: Los editores de la tabla no heredan bien el estilo del QDialog cuando
+#: viven dentro de un QTableWidget. Se les fija el par fondo/texto del tema
+#: activo para que el lote y las fechas se lean siempre.
+_LIGHT_EDITOR_STYLE = (
     "background-color: #ffffff; color: #1f2937; "
     "border: 1px solid #cbd9e8; border-radius: 6px; padding: 2px 6px;"
 )
-_EDITOR_PREFILLED_STYLE = (
+_LIGHT_PREFILLED_STYLE = (
     "background-color: #eaf7ef; color: #1f2937; "
     "border: 1px solid #9fd3b4; border-radius: 6px; padding: 2px 6px;"
 )
+_DARK_EDITOR_STYLE = (
+    "background-color: #161c24; color: #e5edf6; "
+    "border: 1px solid #3a4656; border-radius: 6px; padding: 2px 6px;"
+)
+_DARK_PREFILLED_STYLE = (
+    "background-color: #173a2a; color: #d9fbe8; "
+    "border: 1px solid #3fae74; border-radius: 6px; padding: 2px 6px;"
+)
+
+
+def _editor_styles(theme: Theme | None = None) -> tuple[str, str]:
+    current = theme if theme is not None else load_theme()
+    if current is Theme.DARK:
+        return _DARK_EDITOR_STYLE, _DARK_PREFILLED_STYLE
+    return _LIGHT_EDITOR_STYLE, _LIGHT_PREFILLED_STYLE
 
 
 def _line_index(order: LoadOrder):
@@ -413,6 +429,7 @@ class LoadOrderTraceabilityDialog(QDialog):
         self.service = service
         self.order = LoadOrder.get_by_id(order.id)
         self.updated_count = 0
+        self._editor_style, self._prefilled_style = _editor_styles()
         self.setObjectName("loadOrderTraceabilityDialog")
         self.setWindowTitle(
             f"Lote / fecha OC-{self.order.order_number:06d}"
@@ -545,7 +562,7 @@ class LoadOrderTraceabilityDialog(QDialog):
 
             lote_edit = QLineEdit(row["lote"] or "")
             lote_edit.setObjectName(f"loadOrderTraceabilityLote_{index}")
-            lote_edit.setStyleSheet(_EDITOR_STYLE)
+            lote_edit.setStyleSheet(self._editor_style)
             self.table.setCellWidget(index, 5, lote_edit)
 
             elab_edit = self._date_edit(row["fecha_elaboracion"])
@@ -570,14 +587,13 @@ class LoadOrderTraceabilityDialog(QDialog):
             for row, editor in zip(self._rows, self._editors)
         }
 
-    @staticmethod
-    def _date_edit(value) -> QDateEdit:
+    def _date_edit(self, value) -> QDateEdit:
         edit = QDateEdit()
         edit.setCalendarPopup(True)
         edit.setDisplayFormat("dd/MM/yyyy")
         edit.setMinimumDate(NO_DATE)
         edit.setSpecialValueText("-")
-        edit.setStyleSheet(_EDITOR_STYLE)
+        edit.setStyleSheet(self._editor_style)
         if value is None:
             edit.setDate(NO_DATE)
         else:
@@ -736,7 +752,7 @@ class LoadOrderTraceabilityDialog(QDialog):
                 editor["elaboracion"],
                 editor["envasado"],
             ):
-                widget.setStyleSheet(_EDITOR_PREFILLED_STYLE)
+                widget.setStyleSheet(self._prefilled_style)
 
     def done(self, result: int) -> None:
         if self._capture_busy:
