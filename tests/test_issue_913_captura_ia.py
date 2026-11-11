@@ -1077,6 +1077,8 @@ def test_minimax_pide_thinking_adaptive(monkeypatch):
     )
 
     assert captured["thinking"]["type"] == "adaptive"
+    assert captured["reasoning_effort"] == "low"
+    assert captured["max_completion_tokens"] >= 32768
     assert content.startswith("{")
 
 
@@ -1094,3 +1096,51 @@ def test_el_error_del_proveedor_se_extrae_del_json():
         order_capture_ai_service._provider_error_detail("error simple")
         == "error simple"
     )
+
+
+def test_minimax_respuesta_vacia_informa_finish_reason(monkeypatch):
+    config = _enable_capture(monkeypatch)
+    monkeypatch.setattr(
+        order_capture_ai_service,
+        "_post_json",
+        lambda *args, **kwargs: {
+            "choices": [
+                {"message": {"content": ""}, "finish_reason": "length"}
+            ],
+            "base_resp": {"status_code": 0},
+        },
+    )
+
+    with pytest.raises(order_capture_ai_service.CaptureProviderError) as excinfo:
+        order_capture_ai_service.call_minimax(
+            config, [{"role": "user", "content": "x"}]
+        )
+
+    assert "finish_reason=length" in str(excinfo.value)
+
+
+def test_minimax_usa_reasoning_si_content_viene_vacio(monkeypatch):
+    config = _enable_capture(monkeypatch)
+    reasoning = '{"schema_version": 1, "lineas": []}'
+    monkeypatch.setattr(
+        order_capture_ai_service,
+        "_post_json",
+        lambda *args, **kwargs: {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": reasoning,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        },
+    )
+
+    content, _usage = order_capture_ai_service.call_minimax(
+        config, [{"role": "user", "content": "x"}]
+    )
+
+    assert content == reasoning

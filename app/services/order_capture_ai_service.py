@@ -914,7 +914,10 @@ def call_minimax(config: CaptureConfig, messages: list[dict]) -> tuple[str, dict
     payload = {
         "model": config.model,
         "messages": messages,
-        "max_completion_tokens": 4000,
+        # El pensamiento adaptativo consume parte del presupuesto de salida.
+        # Con 4000 el modelo podía gastarlo pensando y devolver content vacío.
+        "max_completion_tokens": 32768,
+        "reasoning_effort": "low",
         # MiniMax-M3.1-Flash exige pensamiento adaptativo: rechaza
         # thinking.type=disabled con HTTP 400.
         "thinking": {"type": "adaptive"},
@@ -935,7 +938,8 @@ def call_minimax(config: CaptureConfig, messages: list[dict]) -> tuple[str, dict
             raise CaptureProviderError(f"MiniMax rechazó la solicitud: {message}")
 
     try:
-        message = response["choices"][0]["message"]
+        choice = response["choices"][0]
+        message = choice["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise CaptureProviderError(
             "El proveedor de IA no devolvió una respuesta utilizable."
@@ -948,8 +952,21 @@ def call_minimax(config: CaptureConfig, messages: list[dict]) -> tuple[str, dict
             for part in content
             if isinstance(part, dict) and part.get("type") == "text"
         )
+    # Con pensamiento adaptativo el modelo puede dejar content vacío y volcar
+    # el JSON en reasoning_content. Se usa solo si parece el JSON esperado.
     if not isinstance(content, str) or not content.strip():
-        raise CaptureProviderError("El proveedor de IA devolvió una respuesta vacía.")
+        reasoning = message.get("reasoning_content")
+        if isinstance(reasoning, str) and '"lineas"' in reasoning:
+            content = reasoning
+    if not isinstance(content, str) or not content.strip():
+        finish_reason = (
+            choice.get("finish_reason") if isinstance(choice, dict) else None
+        )
+        detail = f" (finish_reason={finish_reason})" if finish_reason else ""
+        raise CaptureProviderError(
+            f"El proveedor de IA devolvió una respuesta vacía{detail}. "
+            "Probá con una foto más chica o reportá el problema."
+        )
     usage = response.get("usage") if isinstance(response, dict) else None
     return content, usage if isinstance(usage, dict) else {}
 
