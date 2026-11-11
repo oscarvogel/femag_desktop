@@ -941,6 +941,11 @@ def test_el_dialogo_tiene_el_boton_de_importar_y_precarga_la_tabla(db):
     editor = dialog._editors_by_key[("pallet_content", allocations[0].id)]
     assert editor["lote"].text() == "08"
     assert editor["elaboracion"].date().toPyDate() == date(2026, 10, 19)
+    assert "color: #1f2937" in editor["lote"].styleSheet()
+    assert "background-color: #eaf7ef" in editor["lote"].styleSheet()
+    other = dialog._editors_by_key[("pallet_content", allocations[1].id)]
+    assert "color: #1f2937" in other["lote"].styleSheet()
+    assert "background-color: #ffffff" in other["lote"].styleSheet()
     dialog.close()
 
 

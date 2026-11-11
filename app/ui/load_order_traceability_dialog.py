@@ -52,6 +52,18 @@ logger = logging.getLogger("femag.ui.captura_ia")
 
 NO_DATE = QDate(1900, 1, 1)
 
+#: Los editores de la tabla usan fondo claro; el texto tiene que ser oscuro
+#: para que se lea tambien en el tema oscuro. Sin esto, el color de texto del
+#: tema claro/oscuro se hereda y queda casi invisible sobre el fondo claro.
+_EDITOR_STYLE = (
+    "background-color: #ffffff; color: #1f2937; "
+    "border: 1px solid #cbd9e8; border-radius: 6px; padding: 2px 6px;"
+)
+_EDITOR_PREFILLED_STYLE = (
+    "background-color: #eaf7ef; color: #1f2937; "
+    "border: 1px solid #9fd3b4; border-radius: 6px; padding: 2px 6px;"
+)
+
 
 def _line_index(order: LoadOrder):
     lines = list(
@@ -474,6 +486,12 @@ class LoadOrderTraceabilityDialog(QDialog):
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(5, QHeaderView.Interactive)
         self.table.setColumnWidth(5, 190)
+        # Las fechas necesitan ancho para mostrar dd/MM/yyyy completo y no
+        # quedar cortadas por el boton del calendario.
+        header.setSectionResizeMode(6, QHeaderView.Interactive)
+        header.setSectionResizeMode(7, QHeaderView.Interactive)
+        self.table.setColumnWidth(6, 125)
+        self.table.setColumnWidth(7, 115)
         header.setStretchLastSection(False)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(30)
@@ -527,6 +545,7 @@ class LoadOrderTraceabilityDialog(QDialog):
 
             lote_edit = QLineEdit(row["lote"] or "")
             lote_edit.setObjectName(f"loadOrderTraceabilityLote_{index}")
+            lote_edit.setStyleSheet(_EDITOR_STYLE)
             self.table.setCellWidget(index, 5, lote_edit)
 
             elab_edit = self._date_edit(row["fecha_elaboracion"])
@@ -558,6 +577,7 @@ class LoadOrderTraceabilityDialog(QDialog):
         edit.setDisplayFormat("dd/MM/yyyy")
         edit.setMinimumDate(NO_DATE)
         edit.setSpecialValueText("-")
+        edit.setStyleSheet(_EDITOR_STYLE)
         if value is None:
             edit.setDate(NO_DATE)
         else:
@@ -716,7 +736,7 @@ class LoadOrderTraceabilityDialog(QDialog):
                 editor["elaboracion"],
                 editor["envasado"],
             ):
-                widget.setStyleSheet("background: #eaf7ef;")
+                widget.setStyleSheet(_EDITOR_PREFILLED_STYLE)
 
     def done(self, result: int) -> None:
         if self._capture_busy:
