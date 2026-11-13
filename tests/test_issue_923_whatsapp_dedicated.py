@@ -384,3 +384,20 @@ def test_un_valor_guardado_con_espacios_se_renormaliza(db):
     assert registro is not None
     assert registro.old_value == {"whatsapp_phone": " 5491153088679 "}
     assert registro.new_value == {"whatsapp_phone": "5491153088679"}
+
+
+# -------------------------------------------------------------------- flag
+
+
+def test_el_flag_esta_apagado_por_default(monkeypatch):
+    from app.config.settings import load_settings
+
+    monkeypatch.delenv("FEMAG_WHATSAPP_DEDICADO", raising=False)
+    assert load_settings().whatsapp_contact_dedicado is False
+
+
+def test_el_flag_se_enciende_con_la_variable(monkeypatch):
+    from app.config.settings import load_settings
+
+    monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", "1")
+    assert load_settings().whatsapp_contact_dedicado is True

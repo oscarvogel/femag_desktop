@@ -28,6 +28,7 @@ class Settings:
     whatsapp_api_key: str = ""
     whatsapp_instance_id: str = "default"
     whatsapp_api_timeout: float = 15.0
+    whatsapp_contact_dedicado: bool = False
 
 
 def _optional_path(value: str | None) -> Path | None:
@@ -128,4 +129,7 @@ def load_settings() -> Settings:
         whatsapp_api_key=os.getenv("WHATSAPP_API_KEY", "").strip(),
         whatsapp_instance_id=os.getenv("WHATSAPP_INSTANCE_ID", "default").strip(),
         whatsapp_api_timeout=float(os.getenv("WHATSAPP_API_TIMEOUT", "15")),
+        whatsapp_contact_dedicado=_flag_enabled(
+            os.getenv("FEMAG_WHATSAPP_DEDICADO", "false")
+        ),
     )
