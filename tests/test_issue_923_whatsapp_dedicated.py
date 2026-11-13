@@ -71,3 +71,96 @@ def test_el_esquema_existente_gana_la_columna(db):
     # Y las filas viejas quedan sin numero de WhatsApp: no se inventa un valor.
     assert cliente.whatsapp_phone is None
     assert vendedor.whatsapp_phone is None
+
+
+# ------------------------------------------------------------------ resolver
+
+
+def test_el_whatsapp_dedicado_manda_sobre_el_telefono():
+    from app.services.whatsapp_contact_resolver import (
+        ORIGEN_DEDICADO,
+        resolver_contacto,
+    )
+
+    contacto = resolver_contacto(
+        whatsapp_phone="+5491153088679", phone="011 4441-2835"
+    )
+    assert contacto.enviable
+    assert contacto.numero == "5491153088679"
+    assert contacto.origen == ORIGEN_DEDICADO
+
+
+def test_sin_whatsapp_dedicado_cae_al_telefono_si_es_celular():
+    from app.services.whatsapp_contact_resolver import (
+        ORIGEN_TELEFONO,
+        resolver_contacto,
+    )
+
+    contacto = resolver_contacto(whatsapp_phone="", phone="011 15 53088679")
+    assert contacto.enviable
+    assert contacto.numero == "5491153088679"
+    assert contacto.origen == ORIGEN_TELEFONO
+
+
+def test_un_telefono_dudoso_no_es_destino():
+    from app.services.whatsapp_contact_resolver import resolver_contacto
+
+    contacto = resolver_contacto(whatsapp_phone="", phone="011 4441-2835")
+    assert not contacto.enviable
+    assert contacto.numero == ""
+    assert "dudoso" in contacto.mensaje
+
+
+def test_un_whatsapp_cargado_que_no_es_celular_no_cae_al_telefono():
+    """Si el operador cargo un WhatsApp roto, no se manda a otro numero."""
+    from app.services.whatsapp_contact_resolver import (
+        ORIGEN_DEDICADO,
+        resolver_contacto,
+    )
+
+    contacto = resolver_contacto(
+        whatsapp_phone="011 4441-2835", phone="011 15 53088679"
+    )
+    assert not contacto.enviable
+    assert contacto.origen == ORIGEN_DEDICADO
+
+
+def test_sin_telefono_no_hay_destino():
+    from app.services.whatsapp_contact_resolver import (
+        ORIGEN_NINGUNO,
+        resolver_contacto,
+    )
+
+    contacto = resolver_contacto(whatsapp_phone="", phone="")
+    assert not contacto.enviable
+    assert contacto.origen == ORIGEN_NINGUNO
+
+
+def test_con_el_flag_apagado_se_ignora_el_campo_nuevo():
+    from app.services.whatsapp_contact_resolver import (
+        ORIGEN_TELEFONO,
+        resolver_contacto,
+    )
+
+    contacto = resolver_contacto(
+        whatsapp_phone="+5491153088679",
+        phone="011 15 53088679",
+        preferir_dedicado=False,
+    )
+    assert contacto.numero == "5491153088679"
+    assert contacto.origen == ORIGEN_TELEFONO
+
+
+def test_el_mensaje_es_el_mismo_que_el_de_hoy():
+    """El texto de error no cambia: el operador ve lo mismo que siempre."""
+    from app.services.account_statement_share_service import normalize_whatsapp_phone
+    from app.services.whatsapp_contact_resolver import resolver_contacto
+
+    for numero in ("011 4441-2835", "01148975105//01157357632", ""):
+        try:
+            normalize_whatsapp_phone(numero)
+            esperado = None
+        except ValueError as exc:
+            esperado = str(exc)
+        contacto = resolver_contacto(whatsapp_phone="", phone=numero)
+        assert contacto.mensaje == esperado
