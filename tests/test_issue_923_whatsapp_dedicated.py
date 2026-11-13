@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -389,15 +391,55 @@ def test_un_valor_guardado_con_espacios_se_renormaliza(db):
 # -------------------------------------------------------------------- flag
 
 
-def test_el_flag_esta_apagado_por_default(monkeypatch):
+def _sin_env_real(monkeypatch, tmp_path):
+    """Apunta ``FEMAG_ENV_FILE`` a un archivo inexistente (#923).
+
+    Asi el test no depende de la fixture autouse de ``conftest.py``: si esa
+    fixture cambia, el ``.env`` real del developer tampoco puede encender el
+    flag. Es el mismo patron que usa ``tests/test_config.py``.
+    """
+    monkeypatch.setenv("FEMAG_ENV_FILE", str(tmp_path / "missing.env"))
+
+
+def test_el_flag_esta_apagado_por_default(monkeypatch, tmp_path):
     from app.config.settings import load_settings
 
+    _sin_env_real(monkeypatch, tmp_path)
     monkeypatch.delenv("FEMAG_WHATSAPP_DEDICADO", raising=False)
     assert load_settings().whatsapp_contact_dedicado is False
 
 
-def test_el_flag_se_enciende_con_la_variable(monkeypatch):
+def test_el_flag_se_enciende_con_la_variable(monkeypatch, tmp_path):
     from app.config.settings import load_settings
 
+    _sin_env_real(monkeypatch, tmp_path)
     monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", "1")
     assert load_settings().whatsapp_contact_dedicado is True
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["1", "true", "yes", "si", "sí", "on"],
+)
+def test_el_flag_enciende_con_cualquier_valor_aceptado(monkeypatch, tmp_path, valor):
+    """El contrato del flag acepta todos los valores truthy declarados (#923).
+
+    No se prueba el helper ``_flag_enabled`` en general: lo que importa es que
+    este flag se encienda con cualquiera de las formas que el administrador
+    puede escribir en el ``.env`` del puesto.
+    """
+    from app.config.settings import load_settings
+
+    _sin_env_real(monkeypatch, tmp_path)
+    monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", valor)
+    assert load_settings().whatsapp_contact_dedicado is True
+
+
+@pytest.mark.parametrize("valor", ["0", "false", "no", ""])
+def test_el_flag_queda_apagado_con_un_valor_no_aceptado(monkeypatch, tmp_path, valor):
+    """Los valores que no son truthy dejan el flag apagado (#923)."""
+    from app.config.settings import load_settings
+
+    _sin_env_real(monkeypatch, tmp_path)
+    monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", valor)
+    assert load_settings().whatsapp_contact_dedicado is False
