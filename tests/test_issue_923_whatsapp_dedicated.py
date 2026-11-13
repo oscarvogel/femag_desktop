@@ -615,3 +615,134 @@ def test_el_dialogo_audita_el_cambio(db, app):
     assert len(filas) == 2
     assert {fila.action for fila in filas} == {"actualizar WhatsApp"}
     assert {fila.user_id for fila in filas} == {usuario.id}
+
+
+# ------------------------------------------------------- grilla de clientes
+
+
+def test_la_grilla_de_clientes_muestra_el_whatsapp(db):
+    from app.models.masters import Client
+    from app.ui.master_abm import master_abm_configs
+
+    cliente = Client.create(
+        name="Cliente Grilla",
+        cuit="30923000011",
+        iva_condition="RI",
+        whatsapp_phone="5491153088679",
+    )
+    config = master_abm_configs()["clients"]
+    assert "WhatsApp" in config.columns
+    filas = config.rows_fn()
+    fila = [f for f in filas if f[0] == cliente.id][0]
+
+    # La fila arranca con el id, que no es una columna visible: los valores
+    # que se pintan en la grilla son ``fila[1:]`` y van en el orden de
+    # ``config.columns``.
+    visibles = fila[1:]
+    assert dict(zip(config.columns, visibles))["WhatsApp"] == "5491153088679"
+    assert fila[config.columns.index("WhatsApp") + 1] == "5491153088679"
+
+
+def _pagina_de_clientes(app, usuario):
+    """Arma la pantalla real de Clientes, como la que ve el operador."""
+    from app.ui.master_abm import build_client_abm_page
+
+    pagina = build_client_abm_page(
+        user=usuario,
+        current_user=usuario.username,
+        view_ledger_callback=lambda _client: None,
+    )
+    app.processEvents()
+    return pagina
+
+
+def test_el_boton_de_whatsapp_abre_el_dialogo_del_cliente(db, app):
+    """El boton tiene que abrir el dialogo de verdad (#923).
+
+    Un boton visible sin accion real no cierra el PR: por eso el test abre el
+    dialogo de verdad y mira que sea el del cliente seleccionado.
+    """
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.models.masters import Client
+    from app.services.permission_service import PermissionService
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    PermissionService().seed_defaults()
+    usuario = _usuario("admin923-boton")
+    cliente = Client.create(name="Cliente Boton", cuit="30923000037", iva_condition="RI")
+    pagina = _pagina_de_clientes(app, usuario)
+
+    boton = pagina.findChild(QPushButton, "editClientWhatsappButton")
+    assert boton is not None
+    assert boton.text() == "WhatsApp"
+    assert boton.toolTip() == (
+        "Carga el numero de WhatsApp del cliente. Solo se aceptan celulares: "
+        "el telefono general queda aparte."
+    )
+
+    errores = []
+
+    def revisar() -> None:
+        dialogo = app.activeModalWidget()
+        try:
+            assert isinstance(dialogo, ClientWhatsappEditDialog)
+            assert dialogo.client.id == cliente.id
+        except BaseException as exc:  # noqa: BLE001 - el error se re-lanza abajo
+            errores.append(exc)
+        finally:
+            if dialogo is not None:
+                dialogo.reject()
+
+    QTimer.singleShot(0, revisar)
+    boton.click()
+    app.processEvents()
+
+    if errores:
+        raise errores[0]
+
+
+def test_el_boton_de_whatsapp_sin_cliente_seleccionado_no_abre_nada(db, app):
+    """Sin cliente elegido el boton avisa, no abre el dialogo (#923)."""
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.services.permission_service import PermissionService
+
+    PermissionService().seed_defaults()
+    usuario = _usuario("admin923-sin-cliente")
+    pagina = _pagina_de_clientes(app, usuario)
+
+    boton = pagina.findChild(QPushButton, "editClientWhatsappButton")
+    assert boton is not None
+
+    errores = []
+
+    def revisar() -> None:
+        dialogo = app.activeModalWidget()
+        if dialogo is not None:
+            errores.append(AssertionError("Se abrio el dialogo sin cliente elegido"))
+            dialogo.reject()
+
+    QTimer.singleShot(0, revisar)
+    boton.click()
+    app.processEvents()
+
+    if errores:
+        raise errores[0]
+
+    # El aviso vive suelto en la app (no esta en el layout de la pagina),
+    # asi que se busca por objectName entre los widgets vivos.
+    from app.ui.form_feedback import FormFeedback
+
+    mensajes = [
+        widget.message
+        for widget in app.allWidgets()
+        if isinstance(widget, FormFeedback)
+        and widget.objectName() == "clientAbmFeedback"
+    ]
+    assert any(
+        "Seleccione un cliente para cargarle el WhatsApp." in mensaje
+        for mensaje in mensajes
+    ), f"El boton no aviso que falta elegir un cliente: {mensajes}"
