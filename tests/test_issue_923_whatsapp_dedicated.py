@@ -746,3 +746,120 @@ def test_el_boton_de_whatsapp_sin_cliente_seleccionado_no_abre_nada(db, app):
         "Seleccione un cliente para cargarle el WhatsApp." in mensaje
         for mensaje in mensajes
     ), f"El boton no aviso que falta elegir un cliente: {mensajes}"
+
+
+# ----------------------------------------------------------------- vendedores
+
+
+def test_actualizar_vendedor_no_borra_el_whatsapp_si_no_se_pasa(db):
+    """Un llamador que no conoce el campo no puede vaciarlo por accidente."""
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(name="Vendedor Master", whatsapp_phone="5491153088679")
+    MasterService("admin923").update_salesperson(vendedor, "Vendedor Master")
+    assert vendedor.whatsapp_phone == "5491153088679"
+
+
+def test_actualizar_vendedor_guarda_el_whatsapp(db):
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(name="Vendedor Master2")
+    MasterService("admin923").update_salesperson(
+        vendedor, "Vendedor Master2", whatsapp_phone="011 15 53088679"
+    )
+    assert vendedor.whatsapp_phone == "5491153088679"
+
+
+def test_crear_vendedor_rechaza_un_whatsapp_dudoso(db):
+    from app.services.master_service import MasterService
+
+    with pytest.raises(ValueError):
+        MasterService("admin923").create_salesperson(
+            "Vendedor Mal", whatsapp_phone="011 4441-2835"
+        )
+
+
+def test_la_grilla_de_vendedores_muestra_el_whatsapp(db):
+    from app.models.masters import Salesperson
+    from app.ui.master_abm import master_abm_configs
+
+    vendedor = Salesperson.create(name="Vendedor Grilla", whatsapp_phone="5491153088679")
+    config = master_abm_configs()["salespeople"]
+    assert "WhatsApp" in config.columns
+    filas = config.rows_fn()
+    fila = [f for f in filas if f[0] == vendedor.id][0]
+
+    # La fila arranca con el id, que no es una columna visible: los valores que
+    # se pintan en la grilla son ``fila[1:]``.
+    visibles = fila[1:]
+    assert dict(zip(config.columns, visibles))["WhatsApp"] == "5491153088679"
+    assert fila[config.columns.index("WhatsApp") + 1] == "5491153088679"
+
+
+def test_el_dialogo_del_vendedor_reabre_un_whatsapp_guardado(db, app):
+    """Un vendedor con WhatsApp guardado se tiene que poder reabrir y guardar.
+
+    Lo que se guarda es el normalizado **sin** "+" ("5491153088679"). Si el
+    dialogo lo precarga tal cual, el clasificador no lo reconoce (solo entiende
+    el formato internacional si el texto empieza con "+") y guardar falla: el
+    vendedor no se puede editar. Precargando la forma internacional, guardar no
+    cambia nada.
+    """
+    from PyQt5.QtWidgets import QDialog, QLineEdit, QPushButton
+
+    from app.models.masters import Salesperson
+    from app.ui.master_abm import SalespersonEntryDialog
+
+    vendedor = Salesperson.create(
+        name="Vendedor Reabierto", whatsapp_phone="5491153088679"
+    )
+    dialogo = SalespersonEntryDialog(current_user="admin923", record_id=vendedor.id)
+
+    campo = dialogo.findChild(QLineEdit, "salespersonWhatsappInput")
+    assert campo is not None
+    assert campo.text() == "+5491153088679"
+
+    dialogo.findChild(QPushButton, "saveSalespersonButton").click()
+
+    # El dialogo acepto: se pudo guardar.
+    assert dialogo.result() == QDialog.Accepted
+    # Y el valor guardado sigue siendo el mismo, sin el "+".
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone == "5491153088679"
+
+
+def test_el_dialogo_del_vendedor_no_guarda_un_numero_dudoso(db, app):
+    """Un numero dudoso no se guarda y el dialogo sigue abierto (#923)."""
+    from PyQt5.QtWidgets import QDialog, QLineEdit, QPushButton
+
+    from app.models.masters import Salesperson
+    from app.ui.master_abm import SalespersonEntryDialog
+
+    vendedor = Salesperson.create(name="Vendedor Dudoso")
+    dialogo = SalespersonEntryDialog(current_user="admin923", record_id=vendedor.id)
+
+    dialogo.findChild(QLineEdit, "salespersonWhatsappInput").setText("011 4441-2835")
+    dialogo.findChild(QPushButton, "saveSalespersonButton").click()
+
+    assert dialogo.result() != QDialog.Accepted
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone is None
+    assert "no se puede usar para WhatsApp" in dialogo.feedback.message
+
+
+def test_el_dialogo_del_vendedor_borra_el_whatsapp_si_se_vacia(db, app):
+    """Un campo vacio borra el WhatsApp: no es un error (#923)."""
+    from PyQt5.QtWidgets import QLineEdit, QPushButton
+
+    from app.models.masters import Salesperson
+    from app.ui.master_abm import SalespersonEntryDialog
+
+    vendedor = Salesperson.create(
+        name="Vendedor Borrado", whatsapp_phone="5491153088679"
+    )
+    dialogo = SalespersonEntryDialog(current_user="admin923", record_id=vendedor.id)
+
+    dialogo.findChild(QLineEdit, "salespersonWhatsappInput").setText("")
+    dialogo.findChild(QPushButton, "saveSalespersonButton").click()
+
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone is None

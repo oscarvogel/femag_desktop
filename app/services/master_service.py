@@ -21,6 +21,30 @@ from app.services.client_email_service import ClientEmailService
 from app.services.permission_service import PermissionService
 
 
+class _Unset:
+    """Marca un valor que el llamador no pasa (para no pisar lo cargado)."""
+
+    def __repr__(self) -> str:  # pragma: no cover - solo ayuda al debug
+        return "<UNSET>"
+
+
+UNSET = _Unset()
+
+
+def _normalizar_whatsapp(numero: str | None) -> str | None:
+    """Valida el numero de WhatsApp con la misma regla del servicio (#923).
+
+    Solo entra un celular sin ambiguedad. Un numero vacio borra el WhatsApp
+    y queda en ``None``.
+    """
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    if numero is None:
+        return None
+    normalizado = WhatsAppContactService.normalizar(numero)
+    return normalizado or None
+
+
 class MasterService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
@@ -244,6 +268,7 @@ class MasterService:
         name: str,
         *,
         phone: str | None = None,
+        whatsapp_phone: str | None = None,
         email: str | None = None,
         observations: str | None = None,
         active: bool = True,
@@ -256,6 +281,7 @@ class MasterService:
         row = Salesperson.create(
             name=name,
             phone=(phone or "").strip() or None,
+            whatsapp_phone=_normalizar_whatsapp(whatsapp_phone),
             email=self._normalize_salesperson_email(email),
             observations=(observations or "").strip() or None,
             active=bool(active),
@@ -263,7 +289,13 @@ class MasterService:
         self._record(
             "Salesperson",
             row,
-            {"name": name, "phone": row.phone, "email": row.email, "active": row.active},
+            {
+                "name": name,
+                "phone": row.phone,
+                "whatsapp_phone": row.whatsapp_phone,
+                "email": row.email,
+                "active": row.active,
+            },
         )
         return row
 
@@ -273,6 +305,7 @@ class MasterService:
         name: str,
         *,
         phone: str | None = None,
+        whatsapp_phone: str | None | _Unset = UNSET,
         email: str | None = None,
         observations: str | None = None,
         active: bool = True,
@@ -289,12 +322,16 @@ class MasterService:
         old_value = {
             "name": salesperson.name,
             "phone": salesperson.phone,
+            "whatsapp_phone": salesperson.whatsapp_phone,
             "email": salesperson.email,
             "observations": salesperson.observations,
             "active": salesperson.active,
         }
         salesperson.name = name
         salesperson.phone = (phone or "").strip() or None
+        # Si el llamador no pasa el campo, no se toca lo que ya estaba cargado.
+        if not isinstance(whatsapp_phone, _Unset):
+            salesperson.whatsapp_phone = _normalizar_whatsapp(whatsapp_phone)
         salesperson.email = self._normalize_salesperson_email(email)
         salesperson.observations = (observations or "").strip() or None
         salesperson.active = bool(active)
@@ -308,6 +345,7 @@ class MasterService:
             new_value={
                 "name": salesperson.name,
                 "phone": salesperson.phone,
+                "whatsapp_phone": salesperson.whatsapp_phone,
                 "email": salesperson.email,
                 "observations": salesperson.observations,
                 "active": salesperson.active,

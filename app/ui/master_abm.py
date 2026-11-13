@@ -74,6 +74,7 @@ from app.ui.master_detail_dialogs import (
 )
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
+from app.ui.whatsapp_phone_edit_widgets import prefill_whatsapp
 from app.utils.datetime_utils import as_datetime
 
 
@@ -465,7 +466,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "salespeople": MasterAbmConfig(
             "Vendedores",
-            ["Nombre", "Teléfono", "Email", "Estado"],
+            ["Nombre", "Teléfono", "WhatsApp", "Email", "Estado"],
             _salesperson_rows,
             SalespersonEntryDialog,
             "newSalespersonButton",
@@ -1120,6 +1121,9 @@ class SalespersonEntryDialog(QDialog):
         self.name_input.setObjectName("salespersonNameInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("salespersonPhoneInput")
+        self.whatsapp_input = QLineEdit()
+        self.whatsapp_input.setObjectName("salespersonWhatsappInput")
+        self.whatsapp_input.setPlaceholderText("Ej.: 011 15 53088679")
         self.email_input = QLineEdit()
         self.email_input.setObjectName("salespersonEmailInput")
         self.email_input.setPlaceholderText("correo@ejemplo.com")
@@ -1134,12 +1138,14 @@ class SalespersonEntryDialog(QDialog):
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Teléfono"), 1, 0)
         form.addWidget(self.phone_input, 1, 1)
-        form.addWidget(QLabel("Email"), 2, 0)
-        form.addWidget(self.email_input, 2, 1)
-        form.addWidget(QLabel("Observaciones"), 3, 0)
-        form.addWidget(self.observations_input, 3, 1)
-        form.addWidget(QLabel("Estado"), 4, 0)
-        form.addWidget(self.active_combo, 4, 1)
+        form.addWidget(QLabel("WhatsApp"), 2, 0)
+        form.addWidget(self.whatsapp_input, 2, 1)
+        form.addWidget(QLabel("Email"), 3, 0)
+        form.addWidget(self.email_input, 3, 1)
+        form.addWidget(QLabel("Observaciones"), 4, 0)
+        form.addWidget(self.observations_input, 4, 1)
+        form.addWidget(QLabel("Estado"), 5, 0)
+        form.addWidget(self.active_combo, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveSalespersonButton", self._save)
@@ -1151,6 +1157,9 @@ class SalespersonEntryDialog(QDialog):
         salesperson = Salesperson.get_by_id(self.record_id)
         self.name_input.setText(salesperson.name)
         self.phone_input.setText(salesperson.phone or "")
+        # Se precarga la forma internacional: el valor guardado no tiene "+" y
+        # el clasificador solo lo reconoce si el texto empieza con "+".
+        self.whatsapp_input.setText(prefill_whatsapp(salesperson.whatsapp_phone))
         self.email_input.setText(salesperson.email or "")
         self.observations_input.setText(salesperson.observations or "")
         _set_combo(self.active_combo, bool(salesperson.active))
@@ -1160,6 +1169,7 @@ class SalespersonEntryDialog(QDialog):
             service = MasterService(self.current_user)
             values = {
                 "phone": self.phone_input.text(),
+                "whatsapp_phone": self.whatsapp_input.text(),
                 "email": self.email_input.text(),
                 "observations": self.observations_input.text(),
                 "active": bool(self.active_combo.currentData()),
@@ -1965,6 +1975,7 @@ def _salesperson_rows() -> list[list[object]]:
                 salesperson.id,
                 salesperson.name,
                 salesperson.phone or "",
+                salesperson.whatsapp_phone or "",
                 salesperson.email or "",
                 "Activo" if salesperson.active else "Inactivo",
             ]

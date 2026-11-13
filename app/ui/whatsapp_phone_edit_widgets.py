@@ -27,6 +27,21 @@ ESTILOS_CLASIFICACION = {
 }
 
 
+def prefill_whatsapp(valor: str | None) -> str:
+    """Como se precarga el numero de WhatsApp que ya estaba guardado.
+
+    Lo que se guarda es el normalizado **sin** "+" ("5491153088679"), pero el
+    clasificador solo reconoce el formato internacional si el texto empieza con
+    "+". Precargando la forma internacional, el numero guardado se vuelve a
+    clasificar como celular (asi se ve al reabrir el dialogo) y guardar no
+    cambia nada: el servicio sigue guardando el valor sin "+".
+    """
+    valor = (valor or "").strip()
+    if not valor:
+        return ""
+    return valor if valor.startswith("+") else f"+{valor}"
+
+
 class ClasificacionLabel(QLabel):
     """Muestra en vivo si el numero es un celular, dudoso o invalido."""
 

@@ -93,5 +93,8 @@ def test_salesperson_rows_expose_email_column(db):
 
     rows = _salesperson_rows()
 
+    # La fila arranca con el id, que no es una columna visible: los valores que
+    # se pintan en la grilla son ``fila[1:]``. El email va despues del
+    # telefono y del WhatsApp (#923).
     assert rows[0][1] == "Luis"
-    assert rows[0][3] == "luis@example.com"
+    assert rows[0][4] == "luis@example.com"
