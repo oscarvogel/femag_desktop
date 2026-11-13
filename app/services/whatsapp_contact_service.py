@@ -12,6 +12,8 @@ general y puede guardar un segundo numero.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from app.models.masters import Client, Salesperson
 from app.services.audit_service import AuditService
 from app.services.whatsapp_phone_classifier import (
@@ -28,6 +30,19 @@ CONSEJO_POR_ESTADO = {
     ESTADO_POSIBLE: "Cargue el celular con el 15 o en formato internacional con el 9.",
     ESTADO_INVALIDO: "Revise el numero y cargue un solo numero.",
 }
+
+
+@dataclass(frozen=True)
+class ClientePendiente:
+    """Un cliente al que todavia no se le puede mandar nada por WhatsApp."""
+
+    client_id: int
+    nombre: str
+    vendedor: str
+    telefono: str
+    whatsapp_phone: str
+    estado_telefono: str
+    ultima_orden: str
 
 
 class WhatsAppContactService:
@@ -97,3 +112,74 @@ class WhatsAppContactService:
             new_value={"whatsapp_phone": normalizado or None},
         )
         return salesperson
+
+    def listar_clientes_pendientes(
+        self, *, solo_con_orden: bool = True
+    ) -> list[ClientePendiente]:
+        """Clientes sin WhatsApp cargado, ordenados por la ultima orden.
+
+        Vienen primero los que mas duelen: los que tienen movimiento reciente.
+        """
+        consulta = (
+            Client.select()
+            .where(
+                (Client.active == True)  # noqa: E712 - el filtro es explicito
+                & (
+                    (Client.whatsapp_phone.is_null(True))
+                    | (Client.whatsapp_phone == "")
+                )
+            )
+            .order_by(Client.name)
+        )
+        ultima_orden_por_cliente = self._ultimas_ordenes()
+        nombre_por_vendedor = {
+            vendedor.id: vendedor.name
+            for vendedor in Salesperson.select(Salesperson.id, Salesperson.name)
+        }
+        pendientes = []
+        for cliente in consulta:
+            ultima_orden = ultima_orden_por_cliente.get(cliente.id, "")
+            if solo_con_orden and not ultima_orden:
+                continue
+            clasificacion = clasificar_telefono(cliente.phone)
+            pendientes.append(
+                ClientePendiente(
+                    client_id=cliente.id,
+                    nombre=cliente.name,
+                    vendedor=nombre_por_vendedor.get(cliente.salesperson_id, ""),
+                    telefono=cliente.phone or "",
+                    whatsapp_phone=cliente.whatsapp_phone or "",
+                    estado_telefono=clasificacion.estado,
+                    ultima_orden=ultima_orden,
+                )
+            )
+        # Los que no tienen orden van al final: no son los que mas duelen.
+        pendientes.sort(
+            key=lambda pendiente: (
+                pendiente.ultima_orden == "",
+                pendiente.ultima_orden,
+            ),
+            reverse=True,
+        )
+        return pendientes
+
+    @staticmethod
+    def _ultimas_ordenes() -> dict[int, str]:
+        """La fecha de la ultima orden vigente de cada cliente.
+
+        Es una sola consulta para toda la pantalla: la carga se hace sobre la
+        base real, donde hay miles de clientes y miles de ordenes.
+        """
+        from app.models.load_orders import LoadOrder
+
+        ultimas: dict[int, str] = {}
+        consulta = (
+            LoadOrder.select(LoadOrder.client, LoadOrder.date)
+            .where(LoadOrder.status != LoadOrder.STATUS_ANNULLED)
+            .order_by(LoadOrder.date.desc(), LoadOrder.id.desc())
+        )
+        for cliente_id, fecha in consulta.tuples():
+            if cliente_id is None or cliente_id in ultimas:
+                continue
+            ultimas[cliente_id] = str(fecha)
+        return ultimas

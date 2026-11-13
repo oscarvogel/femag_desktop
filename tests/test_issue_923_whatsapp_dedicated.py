@@ -1033,3 +1033,326 @@ def test_los_dos_dialogos_precargan_el_whatsapp_igual(db, app):
     assert campo_cliente is not None
     assert campo_vendedor is not None
     assert campo_cliente.text() == campo_vendedor.text() == "+5491153088679"
+
+
+# ------------------------------------------------- pantalla de carga (Tarea 8)
+
+
+def _transporte_de_carga(nombre):
+    """Transportista, chofer y camion para poder armar ordenes de prueba."""
+    from app.models.masters import Carrier, Driver, Truck
+
+    transportista = Carrier.create(name=f"Transportista {nombre}")
+    chofer = Driver.create(name=f"Chofer {nombre}", carrier=transportista, document="1")
+    camion = Truck.create(domain=f"AB{nombre}CD", carrier=transportista)
+    return transportista, chofer, camion
+
+
+def _orden_de_carga(cliente, transporte, numero, fecha, estado):
+    """Crea una orden de carga para el cliente."""
+    from app.models.load_orders import LoadOrder
+
+    transportista, chofer, camion = transporte
+    return LoadOrder.create(
+        order_number=numero,
+        client=cliente,
+        carrier=transportista,
+        driver=chofer,
+        truck=camion,
+        status=estado,
+        date=fecha,
+    )
+
+
+def test_lista_los_clientes_con_orden_y_sin_whatsapp(db):
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("923")
+
+    con_orden = Client.create(
+        name="Con Orden", cuit="30923000012", iva_condition="RI", phone="011 15 53088679"
+    )
+    sin_orden = Client.create(
+        name="Sin Orden", cuit="30923000013", iva_condition="RI", phone="011 15 53088679"
+    )
+    ya_cargado = Client.create(
+        name="Ya Cargado",
+        cuit="30923000014",
+        iva_condition="RI",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    _orden_de_carga(con_orden, transporte, 901, date(2026, 11, 1), LoadOrder.STATUS_ISSUED)
+    _orden_de_carga(ya_cargado, transporte, 902, date(2026, 11, 2), LoadOrder.STATUS_ISSUED)
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+    nombres = [p.nombre for p in pendientes]
+    assert "Con Orden" in nombres
+    assert "Ya Cargado" not in nombres
+    assert "Sin Orden" not in nombres
+
+    todos = WhatsAppContactService("admin923").listar_clientes_pendientes(
+        solo_con_orden=False
+    )
+    assert "Sin Orden" in [p.nombre for p in todos]
+
+
+def test_los_pendientes_vienen_por_ultima_orden_mas_reciente(db):
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("924")
+
+    viejo = Client.create(name="Viejo", cuit="30923000023", iva_condition="RI")
+    nuevo = Client.create(name="Nuevo", cuit="30923000024", iva_condition="RI")
+    _orden_de_carga(viejo, transporte, 911, date(2026, 1, 5), LoadOrder.STATUS_ISSUED)
+    _orden_de_carga(nuevo, transporte, 912, date(2026, 11, 5), LoadOrder.STATUS_ISSUED)
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+    assert [p.nombre for p in pendientes] == ["Nuevo", "Viejo"]
+    assert [p.ultima_orden for p in pendientes] == ["2026-11-05", "2026-01-05"]
+
+
+def test_una_orden_anulada_no_cuenta_como_movimiento(db):
+    """Una orden anulada no es movimiento: el cliente sigue pendiente (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("925")
+    anulada = Client.create(name="Orden Anulada", cuit="30923000025", iva_condition="RI")
+    _orden_de_carga(anulada, transporte, 921, date(2026, 11, 1), LoadOrder.STATUS_ANNULLED)
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+    assert "Orden Anulada" not in [p.nombre for p in pendientes]
+
+    todos = WhatsAppContactService("admin923").listar_clientes_pendientes(
+        solo_con_orden=False
+    )
+    pendiente = [p for p in todos if p.nombre == "Orden Anulada"][0]
+    assert pendiente.ultima_orden == ""
+
+
+def test_el_estado_del_telefono_sale_del_clasificador(db):
+    """Cada fila dice si el telefono se puede usar para WhatsApp (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("926")
+    dudoso = Client.create(
+        name="Dudoso", cuit="30923000026", iva_condition="RI", phone="011 4441-2835"
+    )
+    sin_telefono = Client.create(name="Sin Telefono", cuit="30923000027", iva_condition="RI")
+    celular = Client.create(
+        name="Celular", cuit="30923000036", iva_condition="RI", phone="011 15 53088679"
+    )
+    for numero, cliente in enumerate((dudoso, sin_telefono, celular), start=930):
+        _orden_de_carga(
+            cliente, transporte, numero, date(2026, 11, 1), LoadOrder.STATUS_ISSUED
+        )
+
+    pendientes = {
+        p.nombre: p for p in WhatsAppContactService("admin923").listar_clientes_pendientes()
+    }
+    assert pendientes["Dudoso"].estado_telefono == "posible"
+    assert pendientes["Sin Telefono"].estado_telefono == "vacio"
+    assert pendientes["Celular"].estado_telefono == "celular"
+    assert pendientes["Celular"].telefono == "011 15 53088679"
+
+
+def test_el_pendiente_trae_el_vendedor_del_cliente(db):
+    """La fila dice a quien hay que avisarle por el cliente (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client, Salesperson
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("927")
+    vendedor = Salesperson.create(name="Vendedor Carga")
+    con_vendedor = Client.create(
+        name="Con Vendedor",
+        cuit="30923000039",
+        iva_condition="RI",
+        salesperson=vendedor,
+    )
+    sin_vendedor = Client.create(name="Sin Vendedor", cuit="30923000040", iva_condition="RI")
+    _orden_de_carga(con_vendedor, transporte, 951, date(2026, 11, 1), LoadOrder.STATUS_ISSUED)
+    _orden_de_carga(sin_vendedor, transporte, 952, date(2026, 11, 2), LoadOrder.STATUS_ISSUED)
+
+    pendientes = {
+        p.nombre: p for p in WhatsAppContactService("admin923").listar_clientes_pendientes()
+    }
+    assert pendientes["Con Vendedor"].vendedor == "Vendedor Carga"
+    assert pendientes["Sin Vendedor"].vendedor == ""
+
+
+def test_el_dialogo_de_carga_lista_los_pendientes(db, app):
+    """La pantalla muestra los clientes a los que hay que cargarle el numero."""
+    from datetime import date
+
+    from PyQt5.QtCore import Qt
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.whatsapp_contact_load_dialog import (
+        COLUMNA_CLIENTE,
+        COLUMNA_ESTADO,
+        COLUMNA_VENDEDOR,
+        COLUMNA_WHATSAPP,
+        WhatsAppContactLoadDialog,
+    )
+
+    transporte = _transporte_de_carga("928")
+    cliente = Client.create(
+        name="Cliente Carga",
+        cuit="30923000041",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    _orden_de_carga(cliente, transporte, 961, date(2026, 11, 1), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    assert dialogo.table.rowCount() == 1
+    assert dialogo.table.item(0, COLUMNA_CLIENTE).text() == "Cliente Carga"
+    assert dialogo.table.item(0, COLUMNA_VENDEDOR).text() == ""
+    assert dialogo.table.item(0, COLUMNA_ESTADO).text() == "Celular"
+    assert dialogo.table.item(0, COLUMNA_ESTADO).data(Qt.UserRole) == "celular"
+    assert dialogo.table.item(0, COLUMNA_WHATSAPP).text() == ""
+
+    # El dialogo deja claro que es una carga masiva de numeros.
+    assert "masiva" in dialogo.intro_label.text()
+
+
+def test_el_boton_de_cargar_whatsapp_guarda_el_numero_normalizado(db, app):
+    """El boton de la fila abre el dialogo del cliente y guarda el numero (#923)."""
+    from datetime import date
+
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+    from app.ui.whatsapp_contact_load_dialog import (
+        COLUMNA_WHATSAPP,
+        WhatsAppContactLoadDialog,
+    )
+
+    _usuario("admin923-carga")
+    transporte = _transporte_de_carga("929")
+    cliente = Client.create(
+        name="Cliente Boton Carga",
+        cuit="30923000042",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    _orden_de_carga(cliente, transporte, 962, date(2026, 11, 1), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923-carga")
+    boton = dialogo.findChild(QPushButton, f"whatsappLoadRowButton_{cliente.id}")
+    assert boton is not None
+    assert boton.text() == "Cargar WhatsApp"
+
+    errores = []
+
+    def revisar() -> None:
+        modal = app.activeModalWidget()
+        try:
+            assert isinstance(modal, ClientWhatsappEditDialog)
+            modal.whatsapp_input.setText("011 15 53088679")
+            modal._guardar()
+        except BaseException as exc:  # noqa: BLE001 - el error se re-lanza abajo
+            errores.append(exc)
+        finally:
+            if modal is not None and modal.isVisible():
+                modal.reject()
+
+    QTimer.singleShot(0, revisar)
+    boton.click()
+    app.processEvents()
+
+    if errores:
+        raise errores[0]
+
+    # Se guardo el numero normalizado, sin el "+".
+    # El dialogo de carga trabaja sobre su propia instancia del cliente: lo
+    # que importa es lo que quedo guardado en la base.
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+    # Y la fila muestra el numero que quedo cargado.
+    assert dialogo.table.item(0, COLUMNA_WHATSAPP).text() == "5491153088679"
+    # El cambio queda auditado como el del resto de las cargas.
+    from app.models.audit import AuditLog
+
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Client:{cliente.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro is not None
+    assert registro.action == "actualizar WhatsApp"
+
+
+def test_el_filtro_muestra_los_clientes_sin_orden(db, app):
+    """El filtro "solo con orden emitida" se puede aflojar (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    transporte = _transporte_de_carga("930")
+    con_orden = Client.create(name="Filtro Con Orden", cuit="30923000043", iva_condition="RI")
+    sin_orden = Client.create(name="Filtro Sin Orden", cuit="30923000044", iva_condition="RI")
+    _orden_de_carga(con_orden, transporte, 971, date(2026, 11, 1), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    assert dialogo.only_with_order.isChecked() is True
+    assert dialogo.table.rowCount() == 1
+
+    dialogo.only_with_order.setChecked(False)
+    app.processEvents()
+
+    assert dialogo.table.rowCount() == 2
+    nombres = [dialogo.table.item(fila, 0).text() for fila in range(dialogo.table.rowCount())]
+    assert "Filtro Sin Orden" in nombres
+
+
+def test_guardar_y_cerrar_cierra_el_dialogo(db, app):
+    """El boton "Guardar y cerrar" termina la carga (#923)."""
+    from PyQt5.QtWidgets import QDialog
+
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    dialogo.save_button.click()
+
+    assert dialogo.result() == QDialog.Accepted
+
+
+def test_el_dialogo_entra_en_una_pantalla_chica(db, app):
+    """La pantalla tiene que entrar en 1366x768 (#923)."""
+    from PyQt5.QtWidgets import QScrollArea
+
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    assert dialogo.maximumHeight() <= 720
+    assert dialogo.findChild(QScrollArea) is not None
