@@ -26,6 +26,21 @@ from app.ui.form_feedback import FormFeedback
 from app.ui.whatsapp_phone_edit_widgets import BotonPropuesta, ClasificacionLabel
 
 
+def _prefill(valor: str) -> str:
+    """Como se precarga el numero que ya estaba guardado.
+
+    Lo que se guarda es el normalizado **sin** "+" ("5491153088679"), pero el
+    clasificador solo reconoce el formato internacional si el texto empieza con
+    "+". Precargando la forma internacional, el numero guardado se vuelve a
+    clasificar como celular (asi se ve al reabrir el dialogo) y guardar no
+    cambia nada: el servicio sigue guardando el valor sin "+".
+    """
+    valor = (valor or "").strip()
+    if not valor:
+        return ""
+    return valor if valor.startswith("+") else f"+{valor}"
+
+
 class ClientWhatsappEditDialog(QDialog):
     """Cambia el numero de WhatsApp de un cliente y avisa como va a quedar."""
 
@@ -42,7 +57,7 @@ class ClientWhatsappEditDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(QLabel(f"Cliente: {client.name}"))
 
-        self.whatsapp_input = QLineEdit(client.whatsapp_phone or "")
+        self.whatsapp_input = QLineEdit(_prefill(client.whatsapp_phone))
         self.whatsapp_input.setObjectName("clientWhatsappInput")
         self.whatsapp_input.setPlaceholderText("Ej.: 011 15 53088679")
         root.addWidget(self.whatsapp_input)

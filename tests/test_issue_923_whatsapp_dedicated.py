@@ -473,6 +473,8 @@ def test_el_dialogo_guarda_el_whatsapp(db, app):
 
 
 def test_el_dialogo_no_guarda_un_numero_dudoso(db, app):
+    from PyQt5.QtWidgets import QDialog
+
     from app.models.masters import Client
     from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
 
@@ -481,6 +483,12 @@ def test_el_dialogo_no_guarda_un_numero_dudoso(db, app):
     dialogo.whatsapp_input.setText("011 4441-2835")
     dialogo._guardar()
     assert cliente.whatsapp_phone is None
+
+    # El operador recibe el motivo: el mensaje del servicio dice que hacer.
+    assert "no se puede usar para WhatsApp" in dialogo.feedback.message
+    assert "Cargue el celular con el 15" in dialogo.feedback.message
+    # Y el dialogo sigue abierto: no se guardo nada.
+    assert dialogo.result() != QDialog.Accepted
 
 
 def test_el_dialogo_muestra_el_estado_de_la_clasificacion(db, app):
@@ -493,3 +501,117 @@ def test_el_dialogo_muestra_el_estado_de_la_clasificacion(db, app):
     assert "Celular" in dialogo.classification_label.text()
     dialogo.whatsapp_input.setText("011 4441-2835")
     assert "Revisar" in dialogo.classification_label.text()
+
+
+def test_el_dialogo_reabre_un_cliente_con_whatsapp(db, app):
+    """Un WhatsApp ya guardado se tiene que poder reabrir y guardar (#923).
+
+    El valor guardado es el normalizado sin "+" ("5491153088679"). Si el
+    dialogo lo precarga tal cual, el clasificador no lo reconoce (solo
+    entiende el formato internacional si el texto empieza con "+"), el label
+    dice "No valido" y "Guardar" falla. Precargando la forma internacional,
+    el numero se ve como celular y guardar no cambia nada.
+    """
+    from PyQt5.QtWidgets import QDialog
+
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(
+        name="Cliente Reabierto",
+        cuit="30923000033",
+        iva_condition="RI",
+        whatsapp_phone="5491153088679",
+    )
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+
+    assert "Celular" in dialogo.classification_label.text()
+
+    dialogo._guardar()
+
+    # El dialogo cierra y el valor guardado sigue siendo el mismo.
+    assert dialogo.result() == QDialog.Accepted
+    assert cliente.whatsapp_phone == "5491153088679"
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+    # Como el valor no cambio, no hay nada que auditar.
+    assert (
+        AuditLog.select().where(AuditLog.record_ref == f"Client:{cliente.id}").count() == 0
+    )
+
+
+def test_el_dialogo_vacio_borra_el_whatsapp(db, app):
+    """Un numero vacio borra el WhatsApp: no es un error (#923)."""
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(
+        name="Cliente Borrado",
+        cuit="30923000034",
+        iva_condition="RI",
+        whatsapp_phone="5491153088679",
+    )
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("")
+    dialogo._guardar()
+
+    assert cliente.whatsapp_phone is None
+    assert Client.get_by_id(cliente.id).whatsapp_phone is None
+
+
+def test_el_dialogo_no_toca_el_telefono_general(db, app):
+    """El ``phone`` del cliente no se toca ni al guardar ni al borrar (#923)."""
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(
+        name="Cliente Telefono",
+        cuit="30923000035",
+        iva_condition="RI",
+        phone="011 4441-2835",
+        whatsapp_phone="5491153088679",
+    )
+
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("011 15 59133141")
+    dialogo._guardar()
+    assert cliente.whatsapp_phone == "5491159133141"
+    assert cliente.phone == "011 4441-2835"
+
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("")
+    dialogo._guardar()
+    assert cliente.whatsapp_phone is None
+    assert cliente.phone == "011 4441-2835"
+    assert Client.get_by_id(cliente.id).phone == "011 4441-2835"
+
+
+def test_el_dialogo_audita_el_cambio(db, app):
+    """Todo cambio real escribe la fila de auditoria (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    usuario = _usuario("admin923")
+    cliente = Client.create(
+        name="Cliente Auditoria",
+        cuit="30923000036",
+        iva_condition="RI",
+        whatsapp_phone="5491153088679",
+    )
+
+    # Un cambio real: guardar un celular distinto.
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("011 15 59133141")
+    dialogo._guardar()
+    # Y un borrado: tambien es un cambio real.
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("")
+    dialogo._guardar()
+
+    filas = list(
+        AuditLog.select().where(AuditLog.record_ref == f"Client:{cliente.id}")
+    )
+    assert len(filas) == 2
+    assert {fila.action for fila in filas} == {"actualizar WhatsApp"}
+    assert {fila.user_id for fila in filas} == {usuario.id}
