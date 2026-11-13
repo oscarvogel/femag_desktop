@@ -541,6 +541,15 @@ Expected: FAIL con `ModuleNotFoundError: No module named 'app.services.whatsapp_
 
 Crear `app/services/whatsapp_contact_service.py`:
 
+> **Nota (13/11/2026, commit `3db8837`):** el código que quedó realmente es una versión
+> corregida de este bloque. La revisión detectó tres defectos y los corrigió: (a) el consejo
+> "Cargue el celular con el 15" se concatenaba a todos los motivos, incluso a los que no
+> aplican — ahora hay un `CONSEJO_POR_ESTADO`; (b) `None` **borraba** el WhatsApp en silencio —
+> ahora `None` es un `ValueError` explícito y solo `""` borra; (c) la comparación contra el
+> valor anterior usaba el valor *stripped*, así que un valor guardado con espacios nunca se
+> renormalizaba — ahora se compara contra el valor crudo y se guarda el normalizado.
+> El código real manda: `app/services/whatsapp_contact_service.py`.
+
 ```python
 """Guarda y audita el numero de WhatsApp de clientes y vendedores (#923).
 
@@ -1016,11 +1025,11 @@ def test_la_grilla_de_clientes_muestra_el_whatsapp(db):
         iva_condition="RI",
         whatsapp_phone="5491153088679",
     )
-    config = master_abm_configs()["clients"]
-    assert "WhatsApp" in config.columns
-    filas = config.rows_fn()
+    columnas = master_abm_configs()["clients"].columns
+    assert "WhatsApp" in columnas
+    filas = master_abm_configs()["clients"].rows()
     fila = [f for f in filas if f[0] == cliente.id][0]
-    assert fila[config.columns.index("WhatsApp")] == "5491153088679"
+    assert fila[columnas.index("WhatsApp")] == "5491153088679"
 ```
 
 - [ ] **Paso 2: correr el test y ver que falla**
@@ -1150,6 +1159,15 @@ def test_la_grilla_de_vendedores_muestra_el_whatsapp(db):
     fila = [f for f in filas if f[0] == vendedor.id][0]
     assert fila[config.columns.index("WhatsApp")] == "5491153088679"
 ```
+
+> **Corrección (13/11/2026, commit `2923821`):** el assert de esta tabla tiene un
+> **off-by-one**. La fila arranca con el `id` y la grilla pinta `row[1:]`, así que la
+> columna visible de índice `i` está en la fila en el índice `i + 1`. El índice correcto es
+> `fila[config.columns.index("WhatsApp") + 1]`. Con el índice sin el offset, el assert lee la
+> celda del **vendedor** y pasa por casualidad si los dos valores coinciden.
+>
+> Ojo con esto en cualquier test de grilla: el `id` ocupa la posición 0 de la fila y **no**
+> es una columna visible.
 
 - [ ] **Paso 2: correr el test y ver que falla**
 
