@@ -156,11 +156,133 @@ def test_el_mensaje_es_el_mismo_que_el_de_hoy():
     from app.services.account_statement_share_service import normalize_whatsapp_phone
     from app.services.whatsapp_contact_resolver import resolver_contacto
 
-    for numero in ("011 4441-2835", "01148975105//01157357632", ""):
+    # El caso valido entra tambien: cuando el numero se puede mandar, el
+    # mensaje es "" (no hay error que mostrar). El centinela es "" y no None
+    # porque el resolver devuelve "" en el caso enviable.
+    for numero in ("011 4441-2835", "01148975105//01157357632", "", "011 15 53088679"):
         try:
             normalize_whatsapp_phone(numero)
-            esperado = None
+            esperado = ""
         except ValueError as exc:
             esperado = str(exc)
         contacto = resolver_contacto(whatsapp_phone="", phone=numero)
         assert contacto.mensaje == esperado
+
+
+# ------------------------------------------------------------------ servicio
+
+
+def _usuario(nombre="admin923"):
+    from app.models.security import User, UserProfile
+
+    perfil, _ = UserProfile.get_or_create(name="Administrador")
+    return User.create(username=nombre, password_hash="x", profile=perfil, active=True)
+
+
+def test_guarda_el_whatsapp_normalizado(db):
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS", cuit="30923000002", iva_condition="RI")
+    WhatsAppContactService("admin923").set_client_whatsapp_phone(
+        cliente, "011 15 53088679"
+    )
+    assert cliente.whatsapp_phone == "5491153088679"
+
+
+def test_no_toca_el_telefono(db):
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente WS2", cuit="30923000003", iva_condition="RI", phone="011 4441-2835"
+    )
+    WhatsAppContactService("admin923").set_client_whatsapp_phone(
+        cliente, "+5491153088679"
+    )
+    assert cliente.phone == "011 4441-2835"
+
+
+def test_rechaza_un_telefono_dudoso(db):
+    import pytest
+
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS3", cuit="30923000004", iva_condition="RI")
+    with pytest.raises(ValueError):
+        WhatsAppContactService("admin923").set_client_whatsapp_phone(
+            cliente, "011 4441-2835"
+        )
+    assert cliente.whatsapp_phone is None
+
+
+def test_rechaza_un_numero_invalido(db):
+    import pytest
+
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS4", cuit="30923000005", iva_condition="RI")
+    with pytest.raises(ValueError):
+        WhatsAppContactService("admin923").set_client_whatsapp_phone(
+            cliente, "01148975105//01157357632"
+        )
+
+
+def test_audita_el_cambio(db):
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    usuario = _usuario("admin923")
+    cliente = Client.create(name="Cliente WS5", cuit="30923000006", iva_condition="RI")
+    WhatsAppContactService("admin923").set_client_whatsapp_phone(
+        cliente, "+5491153088679"
+    )
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Client:{cliente.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro is not None
+    assert registro.action == "actualizar WhatsApp"
+    assert registro.user_id == usuario.id
+
+
+def test_si_no_cambia_no_escribe_ni_audita(db):
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS6", cuit="30923000007", iva_condition="RI")
+    servicio = WhatsAppContactService("admin923")
+    servicio.set_client_whatsapp_phone(cliente, "+5491153088679")
+    antes = AuditLog.select().where(AuditLog.record_ref == f"Client:{cliente.id}").count()
+    servicio.set_client_whatsapp_phone(cliente, "011 15 53088679")
+    despues = AuditLog.select().where(AuditLog.record_ref == f"Client:{cliente.id}").count()
+    assert antes == despues
+
+
+def test_guarda_el_whatsapp_del_vendedor(db):
+    from app.models.masters import Salesperson
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    vendedor = Salesperson.create(name="Vendedor WS", phone="2236800402")
+    WhatsAppContactService("admin923").set_salesperson_whatsapp_phone(
+        vendedor, "+5491153088679"
+    )
+    assert vendedor.whatsapp_phone == "5491153088679"
+    assert vendedor.phone == "2236800402"
+
+
+def test_un_numero_vacio_borra_el_whatsapp(db):
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente WS7", cuit="30923000028", iva_condition="RI", whatsapp_phone="5491153088679"
+    )
+    WhatsAppContactService("admin923").set_client_whatsapp_phone(cliente, "")
+    assert cliente.whatsapp_phone is None
