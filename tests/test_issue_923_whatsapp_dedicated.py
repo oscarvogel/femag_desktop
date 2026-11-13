@@ -443,3 +443,53 @@ def test_el_flag_queda_apagado_con_un_valor_no_aceptado(monkeypatch, tmp_path, v
     _sin_env_real(monkeypatch, tmp_path)
     monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", valor)
     assert load_settings().whatsapp_contact_dedicado is False
+
+
+# ----------------------------------------------------------------- interfaz
+
+
+@pytest.fixture(scope="module")
+def app():
+    """La app de Qt para poder instanciar los dialogos (#923).
+
+    Se crea una sola vez por modulo y se mantiene viva: si se perdiera al
+    terminar cada test, el dialogo del test siguiente encontraria widgets
+    destruidos.
+    """
+    from PyQt5.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def test_el_dialogo_guarda_el_whatsapp(db, app):
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(name="Cliente Dialogo", cuit="30923000008", iva_condition="RI")
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("011 15 53088679")
+    dialogo._guardar()
+    assert cliente.whatsapp_phone == "5491153088679"
+
+
+def test_el_dialogo_no_guarda_un_numero_dudoso(db, app):
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(name="Cliente Dialogo2", cuit="30923000009", iva_condition="RI")
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("011 4441-2835")
+    dialogo._guardar()
+    assert cliente.whatsapp_phone is None
+
+
+def test_el_dialogo_muestra_el_estado_de_la_clasificacion(db, app):
+    from app.models.masters import Client
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+    cliente = Client.create(name="Cliente Dialogo3", cuit="30923000010", iva_condition="RI")
+    dialogo = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo.whatsapp_input.setText("011 15 53088679")
+    assert "Celular" in dialogo.classification_label.text()
+    dialogo.whatsapp_input.setText("011 4441-2835")
+    assert "Revisar" in dialogo.classification_label.text()
