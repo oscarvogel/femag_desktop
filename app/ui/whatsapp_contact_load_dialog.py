@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTableWidget,
@@ -51,6 +52,12 @@ COLUMNAS = ("Cliente", "Vendedor", "Telefono", "Estado", "WhatsApp")
 #: Alto maximo del dialogo: tiene que entrar en 1366x768.
 ALTO_MAXIMO = 720
 
+#: Tamano por defecto. La pantalla del cliente es 1638x969 y la de referencia
+#: 1366x768: con el minimo (980x520) la columna "Cliente" queda angosta y los
+#: nombres largos se eliden. Este tamano aprovecha la pantalla del cliente y
+#: todavia entra en la pantalla chica.
+TAMANO_POR_DEFECTO = (1320, 680)
+
 
 class WhatsAppContactLoadDialog(QDialog):
     """Lista los clientes pendientes de WhatsApp y deja cargar sus numeros."""
@@ -64,6 +71,7 @@ class WhatsAppContactLoadDialog(QDialog):
 
         self.setMinimumSize(980, 520)
         self.setMaximumSize(1600, ALTO_MAXIMO)
+        self.resize(*TAMANO_POR_DEFECTO)
 
         self.intro_label = QLabel(
             "Carga masiva de numeros de WhatsApp: se listan los clientes que todavia "
@@ -76,6 +84,10 @@ class WhatsAppContactLoadDialog(QDialog):
 
         self.only_with_order = QCheckBox("Solo con orden emitida")
         self.only_with_order.setObjectName("whatsappLoadOnlyWithOrderCheck")
+        self.only_with_order.setToolTip(
+            "Muestra solo los clientes con una orden que salio (emitida o cerrada). "
+            "Las ordenes en borrador todavia no salieron y no cuentan."
+        )
         self.only_with_order.setChecked(True)
         self.only_with_order.toggled.connect(self._recargar)
 
@@ -112,9 +124,12 @@ class WhatsAppContactLoadDialog(QDialog):
         self.status_label = QLabel()
         self.status_label.setObjectName("whatsappLoadStatus")
 
-        self.save_button = QPushButton("Guardar y cerrar")
-        self.save_button.setObjectName("whatsappLoadSaveButton")
-        self.save_button.clicked.connect(self._guardar_y_cerrar)
+        self.close_button = QPushButton("Cerrar")
+        self.close_button.setObjectName("whatsappLoadCloseButton")
+        self.close_button.setToolTip(
+            "Cierra la pantalla. Los numeros ya cargados quedaron guardados."
+        )
+        self.close_button.clicked.connect(self._cerrar)
 
         filtros = QHBoxLayout()
         filtros.addWidget(self.only_with_order)
@@ -124,7 +139,7 @@ class WhatsAppContactLoadDialog(QDialog):
         acciones = QHBoxLayout()
         acciones.addWidget(self.status_label, 1)
         acciones.addStretch(1)
-        acciones.addWidget(self.save_button)
+        acciones.addWidget(self.close_button)
 
         root = QVBoxLayout(self)
         root.addWidget(self.intro_label)
@@ -193,7 +208,18 @@ class WhatsAppContactLoadDialog(QDialog):
 
     def _cargar_whatsapp(self, pendiente: ClientePendiente) -> None:
         """Abre el dialogo del cliente y deja el numero cargado en la fila."""
-        cliente = Client.get_by_id(pendiente.client_id)
+        try:
+            cliente = Client.get_by_id(pendiente.client_id)
+        except Client.DoesNotExist:
+            # El cliente se borro entre que se armo la lista y que el operador
+            # aprieto el boton: no es un error del sistema, se avisa y se sigue.
+            QMessageBox.warning(
+                self,
+                "Cargar WhatsApp",
+                "El cliente ya no existe en la base. "
+                'Apriete "Recargar" para actualizar la lista.',
+            )
+            return
         dialogo = ClientWhatsappEditDialog(
             client=cliente,
             current_user=self.current_user,
@@ -224,7 +250,7 @@ class WhatsAppContactLoadDialog(QDialog):
                 return fila
         return None
 
-    def _guardar_y_cerrar(self) -> None:
+    def _cerrar(self) -> None:
         """Cierra la carga. Los numeros ya quedaron guardados al confirmarlos."""
         self._recargar()
         self.accept()

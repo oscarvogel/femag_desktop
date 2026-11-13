@@ -119,6 +119,10 @@ class WhatsAppContactService:
         """Clientes sin WhatsApp cargado, ordenados por la ultima orden.
 
         Vienen primero los que mas duelen: los que tienen movimiento reciente.
+
+        Con ``solo_con_orden`` prendido solo entran los clientes con una orden
+        que **salio** (emitida o cerrada): una orden en borrador todavia no
+        salio, asi que no cuenta como movimiento.
         """
         consulta = (
             Client.select()
@@ -131,7 +135,7 @@ class WhatsAppContactService:
             )
             .order_by(Client.name)
         )
-        ultima_orden_por_cliente = self._ultimas_ordenes()
+        ultima_orden_por_cliente = self._ultimas_ordenes(solo_emitidas=solo_con_orden)
         nombre_por_vendedor = {
             vendedor.id: vendedor.name
             for vendedor in Salesperson.select(Salesperson.id, Salesperson.name)
@@ -164,22 +168,55 @@ class WhatsAppContactService:
         return pendientes
 
     @staticmethod
-    def _ultimas_ordenes() -> dict[int, str]:
-        """La fecha de la ultima orden vigente de cada cliente.
+    def _ultimas_ordenes(*, solo_emitidas: bool = True) -> dict[int, str]:
+        """La fecha de la ultima orden de cada cliente.
 
-        Es una sola consulta para toda la pantalla: la carga se hace sobre la
-        base real, donde hay miles de clientes y miles de ordenes.
+        En la app real el cliente de una orden vive en ``LoadOrderDestination``:
+        las ordenes se crean con ``client=None`` y cada destino es un cliente de
+        la orden (``app/services/load_order_service.py:79-91`` y ``:1354``).
+        Por eso un cliente "tiene orden" si es **destino** de alguna orden o,
+        en el camino legacy, si es el cliente de la orden: el mismo criterio
+        que usa ``LoadOrderService.list_orders``.
+
+        El agregado se hace en SQL (``GROUP BY`` + ``MAX(date)``): la base real
+        crece y la pantalla no puede recorrer todas las ordenes en memoria.
+
+        Con ``solo_emitidas`` solo cuentan las ordenes que salieron (emitida o
+        cerrada). Si se pide la lista completa, cuentan tambien las que estan
+        en borrador; las anuladas no cuentan nunca.
         """
-        from app.models.load_orders import LoadOrder
+        from peewee import fn
+
+        from app.models.load_orders import LoadOrder, LoadOrderDestination
+
+        if solo_emitidas:
+            estados = (LoadOrder.STATUS_ISSUED, LoadOrder.STATUS_CLOSED)
+        else:
+            estados = (*LoadOrder.ACTIVE_STATUSES, LoadOrder.STATUS_CLOSED)
 
         ultimas: dict[int, str] = {}
-        consulta = (
-            LoadOrder.select(LoadOrder.client, LoadOrder.date)
-            .where(LoadOrder.status != LoadOrder.STATUS_ANNULLED)
-            .order_by(LoadOrder.date.desc(), LoadOrder.id.desc())
+        por_destino = (
+            LoadOrderDestination.select(
+                LoadOrderDestination.client,
+                fn.MAX(LoadOrder.date),
+            )
+            .join(LoadOrder, on=(LoadOrderDestination.order == LoadOrder.id))
+            .where(LoadOrder.status.in_(estados))
+            .group_by(LoadOrderDestination.client)
+            .tuples()
         )
-        for cliente_id, fecha in consulta.tuples():
-            if cliente_id is None or cliente_id in ultimas:
-                continue
+        for cliente_id, fecha in por_destino:
             ultimas[cliente_id] = str(fecha)
+        # Camino legacy: el cliente de la orden. En la base real esta siempre
+        # en NULL, pero no se tira.
+        por_cliente = (
+            LoadOrder.select(LoadOrder.client, fn.MAX(LoadOrder.date))
+            .where(LoadOrder.status.in_(estados), LoadOrder.client.is_null(False))
+            .group_by(LoadOrder.client)
+            .tuples()
+        )
+        for cliente_id, fecha in por_cliente:
+            valor = str(fecha)
+            if valor > ultimas.get(cliente_id, ""):
+                ultimas[cliente_id] = valor
         return ultimas

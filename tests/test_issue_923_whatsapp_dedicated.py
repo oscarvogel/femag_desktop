@@ -1048,19 +1048,66 @@ def _transporte_de_carga(nombre):
     return transportista, chofer, camion
 
 
+def _direccion_de(cliente):
+    """Una direccion de entrega del cliente (la necesita el destino)."""
+    from app.models.masters import ClientAddress
+
+    direccion = cliente.addresses.first()
+    if direccion is None:
+        direccion = ClientAddress.create(
+            client=cliente,
+            address_type="entrega",
+            province="Misiones",
+            city="Posadas",
+            address="Ruta 12",
+            is_primary=True,
+        )
+    return direccion
+
+
 def _orden_de_carga(cliente, transporte, numero, fecha, estado):
-    """Crea una orden de carga para el cliente."""
+    """Crea una orden de carga como la crea la app real.
+
+    En la app las ordenes se guardan con ``client=None`` y el cliente vive en
+    el **destino** (``LoadOrderDestination``). La pantalla de carga tiene que
+    ver esa orden, asi que el test arma el mismo camino (#923).
+    """
+    from app.models.load_orders import LoadOrder, LoadOrderDestination
+
+    transportista, chofer, camion = transporte
+    orden = LoadOrder.create(
+        order_number=numero,
+        date=fecha,
+        client=None,
+        delivery_address=None,
+        carrier=transportista,
+        driver=chofer,
+        truck=camion,
+        status=estado,
+    )
+    LoadOrderDestination.create(
+        order=orden,
+        client=cliente,
+        delivery_address=_direccion_de(cliente),
+        sequence=1,
+    )
+    return orden
+
+
+def _orden_legacy_de_carga(cliente, transporte, numero, fecha, estado):
+    """Crea una orden con el cliente en el campo legacy ``LoadOrder.client``."""
     from app.models.load_orders import LoadOrder
 
     transportista, chofer, camion = transporte
     return LoadOrder.create(
         order_number=numero,
+        date=fecha,
         client=cliente,
+        delivery_address=_direccion_de(cliente),
         carrier=transportista,
         driver=chofer,
         truck=camion,
         status=estado,
-        date=fecha,
     )
 
 
@@ -1333,15 +1380,21 @@ def test_el_filtro_muestra_los_clientes_sin_orden(db, app):
     assert "Filtro Sin Orden" in nombres
 
 
-def test_guardar_y_cerrar_cierra_el_dialogo(db, app):
-    """El boton "Guardar y cerrar" termina la carga (#923)."""
+def test_el_boton_cerra_el_dialogo(db, app):
+    """El boton "Cerrar" termina la carga (#923).
+
+    El boton se llama "Cerrar" y no "Guardar y cerrar": el guardado pasa por el
+    dialogo del cliente, fila por fila.
+    """
     from PyQt5.QtWidgets import QDialog
 
     from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
 
     dialogo = WhatsAppContactLoadDialog(current_user="admin923")
 
-    dialogo.save_button.click()
+    assert dialogo.close_button.text() == "Cerrar"
+
+    dialogo.close_button.click()
 
     assert dialogo.result() == QDialog.Accepted
 
@@ -1356,3 +1409,290 @@ def test_el_dialogo_entra_en_una_pantalla_chica(db, app):
 
     assert dialogo.maximumHeight() <= 720
     assert dialogo.findChild(QScrollArea) is not None
+
+
+# ------------------------------------------- correccion 1: el destino de la orden
+
+
+def test_lista_los_clientes_que_son_destino_de_una_orden(db):
+    """El cliente de una orden cuenta por su DESTINO, no por ``LoadOrder.client``.
+
+    En la app real las ordenes se crean con ``client=None`` y el cliente vive
+    en ``LoadOrderDestination``. Antes de la correccion la pantalla listaba 0
+    clientes contra la base real (#923).
+    """
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder, LoadOrderDestination
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("931")
+    transportista, chofer, camion = transporte
+    cliente = Client.create(name="Cliente Destino", cuit="30923000045", iva_condition="RI")
+
+    orden = LoadOrder.create(
+        order_number=981,
+        date=date(2026, 11, 3),
+        client=None,  # en la app real el cliente no va en la orden
+        delivery_address=None,
+        carrier=transportista,
+        driver=chofer,
+        truck=camion,
+        status=LoadOrder.STATUS_ISSUED,
+    )
+    LoadOrderDestination.create(
+        order=orden,
+        client=cliente,
+        delivery_address=_direccion_de(cliente),
+        sequence=1,
+    )
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+
+    assert "Cliente Destino" in [p.nombre for p in pendientes]
+
+
+def test_una_orden_legacy_con_cliente_tambien_cuenta(db):
+    """El camino legacy (``LoadOrder.client``) se sigue soportando (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("932")
+    cliente = Client.create(name="Cliente Legacy", cuit="30923000051", iva_condition="RI")
+    _orden_legacy_de_carga(
+        cliente, transporte, 982, date(2026, 11, 4), LoadOrder.STATUS_ISSUED
+    )
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+
+    assert "Cliente Legacy" in [p.nombre for p in pendientes]
+
+
+def test_la_ultima_orden_toma_la_mas_reciente_entre_destino_y_legacy(db):
+    """La fecha que se muestra es la de la orden mas reciente del cliente (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("933")
+    cliente = Client.create(name="Cliente Fechas", cuit="30923000052", iva_condition="RI")
+    _orden_legacy_de_carga(cliente, transporte, 983, date(2026, 11, 9), LoadOrder.STATUS_ISSUED)
+    _orden_de_carga(cliente, transporte, 984, date(2026, 11, 10), LoadOrder.STATUS_ISSUED)
+
+    pendientes = WhatsAppContactService("admin923").listar_clientes_pendientes()
+
+    pendiente = [p for p in pendientes if p.nombre == "Cliente Fechas"][0]
+    assert pendiente.ultima_orden == "2026-11-10"
+
+
+# ------------------------------------- correccion 2: "orden emitida" de verdad
+
+
+def test_el_filtro_exige_una_orden_que_haya_salido(db):
+    """Con el filtro prendido, una orden en borrador no cuenta (#923).
+
+    "Orden emitida" es la orden que salio: emitida o cerrada. Una orden en
+    borrador todavia no salio, asi que el cliente no aparece con el filtro
+    prendido (pero si aparece cuando se afloja).
+    """
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    transporte = _transporte_de_carga("934")
+    borrador = Client.create(name="Solo Borrador", cuit="30923000053", iva_condition="RI")
+    emitida = Client.create(name="Orden Emitida", cuit="30923000054", iva_condition="RI")
+    cerrada = Client.create(name="Orden Cerrada", cuit="30923000055", iva_condition="RI")
+    anulada = Client.create(name="Orden Anulada Filtro", cuit="30923000056", iva_condition="RI")
+
+    _orden_de_carga(borrador, transporte, 991, date(2026, 11, 1), LoadOrder.STATUS_PENDING)
+    _orden_de_carga(emitida, transporte, 992, date(2026, 11, 2), LoadOrder.STATUS_ISSUED)
+    _orden_de_carga(cerrada, transporte, 993, date(2026, 11, 3), LoadOrder.STATUS_CLOSED)
+    _orden_de_carga(anulada, transporte, 994, date(2026, 11, 4), LoadOrder.STATUS_ANNULLED)
+
+    service = WhatsAppContactService("admin923")
+
+    con_filtro = [p.nombre for p in service.listar_clientes_pendientes(solo_con_orden=True)]
+    assert "Orden Emitida" in con_filtro
+    assert "Orden Cerrada" in con_filtro
+    assert "Solo Borrador" not in con_filtro
+    assert "Orden Anulada Filtro" not in con_filtro
+
+    sin_filtro = [p.nombre for p in service.listar_clientes_pendientes(solo_con_orden=False)]
+    assert "Solo Borrador" in sin_filtro
+    assert "Orden Anulada Filtro" in sin_filtro
+
+
+def test_el_borrador_no_aparece_en_la_grilla_con_el_filtro_prendido(db, app):
+    """Lo mismo, pero en la pantalla: el filtro tiene que filtrar de verdad (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    transporte = _transporte_de_carga("935")
+    borrador = Client.create(name="Borrador En Grilla", cuit="30923000057", iva_condition="RI")
+    emitida = Client.create(name="Emitida En Grilla", cuit="30923000058", iva_condition="RI")
+    _orden_de_carga(borrador, transporte, 995, date(2026, 11, 1), LoadOrder.STATUS_PENDING)
+    _orden_de_carga(emitida, transporte, 996, date(2026, 11, 2), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    nombres = [dialogo.table.item(fila, 0).text() for fila in range(dialogo.table.rowCount())]
+    assert "Emitida En Grilla" in nombres
+    assert "Borrador En Grilla" not in nombres
+
+
+# --------------------------------------- correccion 3: la pantalla tiene que abrir
+
+
+def test_el_menu_otros_abre_la_carga_de_whatsapp(db, app):
+    """La pantalla de carga tiene punto de entrada: el menu "Otros" (#923).
+
+    Sin esto la pantalla queda inalcanzable: solo se abre por codigo.
+    """
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.ui.desktop_app import FemagDesktopWindow
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    admin = _usuario("admin923-menu")
+    ventana = FemagDesktopWindow(user=admin, demo_mode=True)
+    boton = ventana.findChild(QPushButton, "topbarMoreButton")
+    assert boton is not None
+
+    menu = ventana._abrir_opciones(boton)
+    textos = [accion.text() for accion in menu.actions()]
+    assert "Cargar WhatsApp de clientes" in textos
+
+    accion = [a for a in menu.actions() if a.text() == "Cargar WhatsApp de clientes"][0]
+    errores = []
+
+    def revisar() -> None:
+        modal = app.activeModalWidget()
+        try:
+            assert isinstance(modal, WhatsAppContactLoadDialog)
+        except BaseException as exc:  # noqa: BLE001 - el error se re-lanza abajo
+            errores.append(exc)
+        finally:
+            if modal is not None and modal.isVisible():
+                modal.reject()
+
+    QTimer.singleShot(0, revisar)
+    accion.trigger()
+    app.processEvents()
+
+    if errores:
+        raise errores[0]
+
+    ventana.close()
+
+
+def test_un_usuario_sin_administrador_no_ve_la_carga_de_whatsapp(db, app):
+    """La carga masiva es solo del administrador, como "Reparar cta. corriente" (#923)."""
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.models.security import User, UserProfile
+    from app.ui.desktop_app import FemagDesktopWindow
+
+    perfil, _ = UserProfile.get_or_create(name="Solo consulta")
+    consulta = User.create(
+        username="consulta923-carga", password_hash="x", profile=perfil, active=True
+    )
+
+    ventana = FemagDesktopWindow(user=consulta, demo_mode=True)
+    boton = ventana.findChild(QPushButton, "topbarMoreButton")
+    assert boton is not None
+
+    menu = ventana._abrir_opciones(boton)
+    textos = [accion.text() for accion in menu.actions()]
+
+    assert "Cargar WhatsApp de clientes" not in textos
+    ventana.close()
+
+
+# --------------------------------------------- correcciones menores de la pantalla
+
+
+def test_el_boton_recargar_vuelve_a_leer_la_lista(db, app):
+    """El boton "Recargar" relee los pendientes desde la base (#923)."""
+    from datetime import date
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    transporte = _transporte_de_carga("936")
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+    assert dialogo.table.rowCount() == 0
+
+    # El cliente y su orden aparecen despues de abrir la pantalla: solo la
+    # recarga los puede ver.
+    cliente = Client.create(name="Cliente Recarga", cuit="30923000059", iva_condition="RI")
+    _orden_de_carga(cliente, transporte, 997, date(2026, 11, 5), LoadOrder.STATUS_ISSUED)
+
+    dialogo.refresh_button.click()
+    app.processEvents()
+
+    nombres = [dialogo.table.item(fila, 0).text() for fila in range(dialogo.table.rowCount())]
+    assert nombres == ["Cliente Recarga"]
+
+
+def test_el_dialogo_abre_con_un_tamano_util(db, app):
+    """El dialogo no abre en su minimo: aprovecha la pantalla del cliente (#923)."""
+    from app.ui.whatsapp_contact_load_dialog import (
+        TAMANO_POR_DEFECTO,
+        WhatsAppContactLoadDialog,
+    )
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+
+    assert dialogo.width() == TAMANO_POR_DEFECTO[0]
+    assert dialogo.height() == TAMANO_POR_DEFECTO[1]
+    # Y sigue entrando en la pantalla chica de referencia.
+    assert dialogo.width() <= 1366
+    assert dialogo.height() <= 768
+
+
+def test_un_cliente_borrado_no_rompe_la_pantalla(db, app, monkeypatch):
+    """Si el cliente se borro entre la lista y el click, se avisa y se sigue (#923)."""
+    from datetime import date
+
+    from PyQt5.QtWidgets import QMessageBox, QPushButton
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
+
+    transporte = _transporte_de_carga("937")
+    cliente = Client.create(name="Cliente Borrado", cuit="30923000060", iva_condition="RI")
+    _orden_de_carga(cliente, transporte, 998, date(2026, 11, 6), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923")
+    boton = dialogo.findChild(QPushButton, f"whatsappLoadRowButton_{cliente.id}")
+    assert boton is not None
+
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args, **kwargs: avisos.append(args[2])
+    )
+
+    # El cliente se borro entre que se armo la lista y el click.
+    Client.delete().where(Client.id == cliente.id).execute()
+    assert Client.get_or_none(cliente.id) is None
+
+    boton.click()
+    app.processEvents()
+
+    assert avisos, "El operador tiene que enterarse de que el cliente ya no esta"
+    assert dialogo.table.rowCount() == 1

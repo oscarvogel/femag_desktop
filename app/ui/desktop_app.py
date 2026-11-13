@@ -156,6 +156,7 @@ from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
+from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
 from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
 from app.ui.raw_material_intake import RawMaterialIntakePage
 from app.ui.production_parts import ProductionPartPage
@@ -843,6 +844,11 @@ class FemagDesktopWindow(QMainWindow):
                 f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
             )
             accion.triggered.connect(self._abrir_reparacion_cuenta_corriente)
+            # La carga de los numeros de WhatsApp pendientes es una herramienta
+            # de administracion, como la reparacion: no es una accion de la
+            # pantalla principal (#923).
+            carga = menu.addAction("Cargar WhatsApp de clientes")
+            carga.triggered.connect(self._abrir_carga_whatsapp_clientes)
             menu.addSeparator()
         centro = menu.addAction("Centro de Avisos")
         centro.triggered.connect(lambda: self._navigate_to_route("avisos"))
@@ -877,6 +883,22 @@ class FemagDesktopWindow(QMainWindow):
             self._refresh_customer_ledger()
             self._navigate_to_route("load_orders")
             self._refresh_aviso_badge()
+
+    def _abrir_carga_whatsapp_clientes(self) -> None:
+        """Abre la pantalla de carga de los numeros de WhatsApp pendientes.
+
+        Vive en el menu "Otros" y es solo del administrador: es una carga
+        masiva de datos, como "Reparar cta. corriente".
+
+        **No esta gateada por ``FEMAG_WHATSAPP_DEDICADO``**: esta pantalla es de
+        **carga de datos**, no de envio (no manda ningun mensaje). El admin la
+        necesita para dejar los numeros cargados *antes* de encender el flag
+        (#923).
+        """
+        if not PermissionService.is_administrator(self.user):
+            return
+        dialogo = WhatsAppContactLoadDialog(current_user=self.shell.username, parent=self)
+        dialogo.exec_()
 
     def _open_change_password(self) -> None:
         dialog = ChangePasswordDialog(title="Cambiar mi contraseña", parent=self)
