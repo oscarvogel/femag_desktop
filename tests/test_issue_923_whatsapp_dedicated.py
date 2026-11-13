@@ -286,3 +286,101 @@ def test_un_numero_vacio_borra_el_whatsapp(db):
     )
     WhatsAppContactService("admin923").set_client_whatsapp_phone(cliente, "")
     assert cliente.whatsapp_phone is None
+
+
+# ------------------------------------------------------- correccion 1: mensaje
+
+
+def test_el_mensaje_de_dos_telefonos_no_manda_a_cargar_el_15(db):
+    """Con dos telefonos en el campo, el "15" no es el consejo (#923).
+
+    El consejo tiene que decir que hacer: cargar el "15" no arregla un campo
+    con dos numeros.
+    """
+    import pytest
+
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS8", cuit="30923000029", iva_condition="RI")
+    with pytest.raises(ValueError) as exc:
+        WhatsAppContactService("admin923").set_client_whatsapp_phone(
+            cliente, "01148975105//01157357632"
+        )
+    mensaje = str(exc.value)
+    assert "15" not in mensaje
+    assert "un solo numero" in mensaje
+
+
+def test_el_mensaje_del_numero_sin_el_9_dice_que_agregue_el_9(db):
+    """Un internacional sin el 9 se arregla con el 9, no con el "15" (#923)."""
+    import pytest
+
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(name="Cliente WS9", cuit="30923000030", iva_condition="RI")
+    with pytest.raises(ValueError) as exc:
+        WhatsAppContactService("admin923").set_client_whatsapp_phone(
+            cliente, "+54 11 53088679"
+        )
+    mensaje = str(exc.value)
+    assert "internacional" in mensaje
+    assert "con el 9" in mensaje
+
+
+# --------------------------------------------- correccion 2: None es un error
+
+
+def test_un_none_no_borra_el_whatsapp(db):
+    """``None`` es un error del que lo llama, no un borrado (#923)."""
+    import pytest
+
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente WS10", cuit="30923000031", iva_condition="RI", whatsapp_phone="5491153088679"
+    )
+    with pytest.raises(ValueError):
+        WhatsAppContactService("admin923").set_client_whatsapp_phone(cliente, None)
+
+    # El numero que estaba cargado sigue cargado: no se borro por error.
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+    assert (
+        AuditLog.select().where(AuditLog.record_ref == f"Client:{cliente.id}").count() == 0
+    )
+
+
+# --------------------------------------- correccion 3: renormalizar lo guardado
+
+
+def test_un_valor_guardado_con_espacios_se_renormaliza(db):
+    """Un valor con espacios se corrige y queda auditado el antes real (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente WS11",
+        cuit="30923000032",
+        iva_condition="RI",
+        whatsapp_phone=" 5491153088679 ",
+    )
+    WhatsAppContactService("admin923").set_client_whatsapp_phone(
+        cliente, "011 15 53088679"
+    )
+
+    assert cliente.whatsapp_phone == "5491153088679"
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Client:{cliente.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro is not None
+    assert registro.old_value == {"whatsapp_phone": " 5491153088679 "}
+    assert registro.new_value == {"whatsapp_phone": "5491153088679"}

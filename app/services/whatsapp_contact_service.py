@@ -14,7 +14,20 @@ from __future__ import annotations
 
 from app.models.masters import Client, Salesperson
 from app.services.audit_service import AuditService
-from app.services.whatsapp_phone_classifier import ESTADO_CELULAR, clasificar_telefono
+from app.services.whatsapp_phone_classifier import (
+    ESTADO_CELULAR,
+    ESTADO_INVALIDO,
+    ESTADO_POSIBLE,
+    clasificar_telefono,
+)
+
+#: Que hacer segun el estado del numero. El consejo tiene que corresponder al
+#: motivo: cargar el "15" no arregla un campo con dos telefonos, y un
+#: internacional sin el 9 no se arregla volviendo a cargarlo como estaba.
+CONSEJO_POR_ESTADO = {
+    ESTADO_POSIBLE: "Cargue el celular con el 15 o en formato internacional con el 9.",
+    ESTADO_INVALIDO: "Revise el numero y cargue un solo numero.",
+}
 
 
 class WhatsAppContactService:
@@ -26,22 +39,32 @@ class WhatsAppContactService:
     def normalizar(numero: str) -> str:
         """Devuelve el numero en formato internacional, o explica por que no sirve.
 
-        Un numero vacio no es un error: es "borrar el WhatsApp".
+        Un numero vacio no es un error: es "borrar el WhatsApp". Un ``None`` si
+        lo es: es un error de quien lo llama, y borraria un numero que estaba
+        cargado.
         """
-        texto = (numero or "").strip()
+        if numero is None:
+            raise ValueError(
+                "No se puede guardar un WhatsApp vacio: se paso None. "
+                "Pase un numero o una cadena vacia para borrarlo."
+            )
+        texto = str(numero).strip()
         if not texto:
             return ""
         clasificacion = clasificar_telefono(texto)
         if clasificacion.estado != ESTADO_CELULAR:
-            raise ValueError(
-                "Ese numero no se puede usar para WhatsApp: "
-                f"{clasificacion.motivo}. Cargue el celular con el 15 o en formato internacional."
-            )
+            mensaje = f"Ese numero no se puede usar para WhatsApp: {clasificacion.motivo}."
+            consejo = CONSEJO_POR_ESTADO.get(clasificacion.estado, "")
+            if consejo:
+                mensaje = f"{mensaje} {consejo}"
+            raise ValueError(mensaje)
         return clasificacion.normalizado
 
     def set_client_whatsapp_phone(self, client: Client, numero: str) -> Client:
         normalizado = self.normalizar(numero)
-        anterior = (client.whatsapp_phone or "").strip()
+        # La comparacion es contra el valor guardado **sin limpiar**: si en la
+        # base quedo un numero con espacios, hay que corregirlo y auditarlo.
+        anterior = client.whatsapp_phone or ""
         if anterior == normalizado:
             return client
         client.whatsapp_phone = normalizado or None
@@ -60,7 +83,7 @@ class WhatsAppContactService:
         self, salesperson: Salesperson, numero: str
     ) -> Salesperson:
         normalizado = self.normalizar(numero)
-        anterior = (salesperson.whatsapp_phone or "").strip()
+        anterior = salesperson.whatsapp_phone or ""
         if anterior == normalizado:
             return salesperson
         salesperson.whatsapp_phone = normalizado or None
