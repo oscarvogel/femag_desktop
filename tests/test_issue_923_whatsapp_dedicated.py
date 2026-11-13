@@ -863,3 +863,173 @@ def test_el_dialogo_del_vendedor_borra_el_whatsapp_si_se_vacia(db, app):
     dialogo.findChild(QPushButton, "saveSalespersonButton").click()
 
     assert Salesperson.get_by_id(vendedor.id).whatsapp_phone is None
+
+
+# ------------------------------------------- correccion 1: auditoria del campo
+
+
+def test_el_cambio_de_whatsapp_del_vendedor_se_audita(db):
+    """El WhatsApp se audita con su propia accion (#923).
+
+    El cambio de un campo que tiene un solo proposito no se esconde dentro de
+    la edicion del maestro: se audita con ``action="actualizar WhatsApp"`` y
+    ``record_ref="Salesperson:<id>"``, como el del cliente.
+    """
+    from app.models.audit import AuditLog
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(
+        name="Vendedor Auditoria", whatsapp_phone="5491153088679"
+    )
+    MasterService("admin923").update_salesperson(
+        vendedor, "Vendedor Auditoria", whatsapp_phone="011 15 59133141"
+    )
+
+    fila = (
+        AuditLog.select()
+        .where(
+            (AuditLog.record_ref == f"Salesperson:{vendedor.id}")
+            & (AuditLog.action == "actualizar WhatsApp")
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert fila is not None
+    assert fila.old_value == {"whatsapp_phone": "5491153088679"}
+    assert fila.new_value == {"whatsapp_phone": "5491159133141"}
+
+
+def test_la_edicion_del_vendedor_se_audita_tambien_como_modificar(db):
+    """La auditoria del maestro no se pierde (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(name="Vendedor Maestro")
+    MasterService("admin923").update_salesperson(
+        vendedor, "Vendedor Maestro Renombrado", whatsapp_phone="011 15 59133141"
+    )
+
+    fila = (
+        AuditLog.select()
+        .where(
+            (AuditLog.record_ref == f"Salesperson:{vendedor.id}")
+            & (AuditLog.action == "modificar")
+        )
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert fila is not None
+    assert fila.new_value["name"] == "Vendedor Maestro Renombrado"
+
+
+def test_el_alta_del_vendedor_no_audita_el_whatsapp_como_actualizacion(db):
+    """En el alta, la creacion del maestro ya cubre el WhatsApp (#923)."""
+    from app.models.audit import AuditLog
+    from app.services.master_service import MasterService
+
+    MasterService("admin923").create_salesperson(
+        "Vendedor Alta", whatsapp_phone="011 15 59133141"
+    )
+
+    assert (
+        AuditLog.select().where(AuditLog.action == "actualizar WhatsApp").count() == 0
+    )
+
+
+def test_el_cambio_de_whatsapp_no_rompe_el_resto_de_la_edicion(db):
+    """Los demas campos del vendedor se siguen guardando bien (#923)."""
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(name="Vendedor Resto", phone="011 4441-2835")
+    MasterService("admin923").update_salesperson(
+        vendedor,
+        "Vendedor Renombrado",
+        phone="011 4441-2836",
+        email="nuevo@example.com",
+        whatsapp_phone="011 15 59133141",
+    )
+
+    guardado = Salesperson.get_by_id(vendedor.id)
+    assert guardado.name == "Vendedor Renombrado"
+    assert guardado.phone == "011 4441-2836"
+    assert guardado.email == "nuevo@example.com"
+    assert guardado.whatsapp_phone == "5491159133141"
+    # La fila se actualizó: el ``updated_at`` no es el de la creación.
+    assert guardado.updated_at is not None
+    assert guardado.updated_at != vendedor.updated_at
+
+
+# ------------------------------------- correccion 2: None explicito es error
+
+
+def test_un_none_explicito_no_borra_el_whatsapp_del_vendedor(db):
+    """``None`` explicito es un error, no un borrado (#923).
+
+    El centinela existe para distinguir "no lo paso" de "lo paso vacio": un
+    ``None`` explicito viene de un llamador que se equivoco, y no puede
+    vaciar un numero que estaba cargado.
+    """
+    from app.models.masters import Salesperson
+    from app.services.master_service import MasterService
+
+    vendedor = Salesperson.create(
+        name="Vendedor None", whatsapp_phone="5491153088679"
+    )
+    with pytest.raises(ValueError):
+        MasterService("admin923").update_salesperson(
+            vendedor, "Vendedor None", whatsapp_phone=None
+        )
+
+    # El numero que estaba cargado sigue cargado.
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone == "5491153088679"
+
+
+def test_el_alta_sin_whatsapp_no_es_un_error(db):
+    """En el alta, ``None`` es el default: vendedor sin WhatsApp (#923)."""
+    from app.services.master_service import MasterService
+
+    vendedor = MasterService("admin923").create_salesperson("Vendedor Sin Ws")
+    assert vendedor.whatsapp_phone is None
+
+
+def test_los_dos_dialogos_precargan_el_whatsapp_igual(db, app):
+    """Cliente y vendedor precargan el numero guardado de la misma forma (#923).
+
+    El pre-fill vive en un solo helper compartido: si el dialogo del cliente
+    tuviera su propia copia, cambiar la forma de precargar podria hacer que
+    uno de los dos mostrara el numero de otra manera.
+    """
+    from PyQt5.QtWidgets import QLineEdit
+
+    from app.models.masters import Client, Salesperson
+    from app.ui import client_whatsapp_edit_dialog
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+    from app.ui.master_abm import SalespersonEntryDialog
+
+    # No hay dos copias del pre-fill: el dialogo del cliente usa el helper
+    # compartido del modulo de piezas.
+    assert not hasattr(client_whatsapp_edit_dialog, "_prefill")
+
+    cliente = Client.create(
+        name="Cliente Prefill",
+        cuit="30923000038",
+        iva_condition="RI",
+        whatsapp_phone="5491153088679",
+    )
+    vendedor = Salesperson.create(
+        name="Vendedor Prefill", whatsapp_phone="5491153088679"
+    )
+
+    dialogo_cliente = ClientWhatsappEditDialog(client=cliente, current_user="admin923")
+    dialogo_vendedor = SalespersonEntryDialog(
+        current_user="admin923", record_id=vendedor.id
+    )
+
+    campo_cliente = dialogo_cliente.findChild(QLineEdit, "clientWhatsappInput")
+    campo_vendedor = dialogo_vendedor.findChild(QLineEdit, "salespersonWhatsappInput")
+    assert campo_cliente is not None
+    assert campo_vendedor is not None
+    assert campo_cliente.text() == campo_vendedor.text() == "+5491153088679"
