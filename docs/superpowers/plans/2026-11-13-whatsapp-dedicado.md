@@ -395,7 +395,8 @@ git commit -m "feat(#923): modulo resolver del destino de WhatsApp"
 - Test: `tests/test_issue_923_whatsapp_dedicated.py`
 
 **Interfaces:**
-- Consume: `resolver_contacto` de la Tarea 2, `AuditService.record(user, module, action, record_ref, old_value, new_value)` de `app/services/audit_service.py`.
+- Consume: `clasificar_telefono(texto) -> PhoneClassification` de `app/services/whatsapp_phone_classifier.py` (misma fuente de verdad que el resolver), `ESTADO_CELULAR`, y `AuditService.record(user, module, action, record_ref, old_value, new_value)` de `app/services/audit_service.py`.
+- **No** consume `resolver_contacto`: el resolver decide *a quién* se manda (leer `phone` o `whatsapp_phone`), y esa decisión se implementa en la Tarea 10, no acá. Este servicio **guarda, normaliza y audita**.
 - Produce:
   ```python
   class WhatsAppContactService:
@@ -1535,7 +1536,11 @@ Expected: FAIL (`AttributeError: 'WhatsAppContactService' object has no attribut
 
 - [ ] **Paso 3: implementación mínima**
 
-En `app/services/whatsapp_contact_service.py`:
+En `app/services/whatsapp_contact_service.py`, agregar el import y el dataclass:
+
+```python
+from dataclasses import dataclass, field
+```
 
 ```python
 @dataclass(frozen=True)
