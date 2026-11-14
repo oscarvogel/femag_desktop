@@ -32,6 +32,7 @@ from app.models.masters import (
 from app.services import ledger_query_service
 from app.services.permission_service import PermissionService
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.services.whatsapp_contact_service import prefill_cliente
 from app.ui.whatsapp_send import WhatsAppTextDialog, WhatsAppTextWorker
 
 DETAIL_MODELS = {
@@ -561,7 +562,11 @@ class MasterDetailDialog(QDialog):
             self._whatsapp_button(
                 kind="client",
                 recipient_name=client.name,
-                phone=client.phone,
+                # Con el flag apagado es el telefono de siempre; con el flag
+                # encendido es el WhatsApp dedicado del cliente (#923). El
+                # boton se habilita con este mismo numero: un cliente con
+                # WhatsApp dedicado y sin telefono general tambien envia.
+                phone=prefill_cliente(client),
                 object_name="clientDetailWhatsAppButton",
             )
         ]

@@ -19,21 +19,9 @@ from PyQt5.QtWidgets import (
 )
 
 from app.services.client_service import ClientService
-from app.services.whatsapp_phone_classifier import (
-    ESTADO_CELULAR,
-    ESTADO_POSIBLE,
-    PhoneClassification,
-    clasificar_telefono,
-)
+from app.services.whatsapp_phone_classifier import clasificar_telefono
 from app.ui.form_feedback import FormFeedback
-
-
-_ESTILOS = {
-    ESTADO_CELULAR: ("#166534", "#ecfdf3", "#4ade80"),
-    ESTADO_POSIBLE: ("#92400e", "#fffbeb", "#f6c453"),
-    "invalido": ("#991b1b", "#fef2f2", "#f87171"),
-    "vacio": ("#374151", "#f3f4f6", "#d1d5db"),
-}
+from app.ui.whatsapp_phone_edit_widgets import BotonPropuesta, ClasificacionLabel
 
 
 class ClientPhoneEditDialog(QDialog):
@@ -57,14 +45,12 @@ class ClientPhoneEditDialog(QDialog):
         self.phone_input.setPlaceholderText("Ej.: 011 15 53088679")
         root.addWidget(self.phone_input)
 
-        self.classification_label = QLabel("")
+        self.classification_label = ClasificacionLabel()
         self.classification_label.setObjectName("clientPhoneClassificationLabel")
-        self.classification_label.setWordWrap(True)
         root.addWidget(self.classification_label)
 
-        self.proposal_btn = QPushButton("Usar el primer número")
+        self.proposal_btn = BotonPropuesta("Usar el primer número")
         self.proposal_btn.setObjectName("clientPhoneProposalButton")
-        self.proposal_btn.setVisible(False)
         root.addWidget(self.proposal_btn)
 
         self.feedback = FormFeedback("clientPhoneEditFeedback")
@@ -94,29 +80,14 @@ class ClientPhoneEditDialog(QDialog):
 
     def _reclasificar(self) -> None:
         clasificacion = clasificar_telefono(self.phone_input.text())
-        self._pintar(clasificacion)
-        self.proposal_btn.setVisible(bool(clasificacion.propuesta))
-
-    def _pintar(self, clasificacion: PhoneClassification) -> None:
-        color, fondo, borde = _ESTILOS.get(clasificacion.estado, _ESTILOS["vacio"])
-        self.classification_label.setText(clasificacion.detalle)
-        self.classification_label.setStyleSheet(
-            f"QLabel {{"
-            f"background-color: {fondo};"
-            f"border: 1px solid {borde};"
-            f"border-left: 4px solid {borde};"
-            f"border-radius: 7px;"
-            f"color: {color};"
-            "font-size: 13px;"
-            "font-weight: 600;"
-            "padding: 9px 11px;"
-            "}"
-        )
+        self.classification_label.mostrar(clasificacion)
+        self.proposal_btn.mostrar(clasificacion)
 
     def _usar_propuesta(self) -> None:
         clasificacion = clasificar_telefono(self.phone_input.text())
-        if clasificacion.propuesta:
-            self.phone_input.setText(clasificacion.propuesta)
+        propuesta = self.proposal_btn.aplicar(clasificacion)
+        if propuesta:
+            self.phone_input.setText(propuesta)
 
     def _limpiar(self) -> None:
         self.phone_input.setText("")

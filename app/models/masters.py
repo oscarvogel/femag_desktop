@@ -93,6 +93,10 @@ class TipoIVA(BaseModel):
 class Salesperson(BaseModel):
     name = CharField(unique=True)
     phone = CharField(null=True)
+    # Numero de WhatsApp verificado (#923). Es distinto de ``phone``:
+    # ``phone`` guarda el telefono general (puede ser fijo o un segundo
+    # celular) y este guarda el numero al que se le puede mandar WhatsApp.
+    whatsapp_phone = CharField(null=True)
     email = CharField(null=True)
     observations = TextField(null=True)
     active = BooleanField(default=True)
@@ -107,6 +111,10 @@ class Client(BaseModel):
     cuit = CharField(unique=True, null=True)
     iva_condition = CharField()
     phone = CharField(null=True)
+    # Numero de WhatsApp verificado (#923). Es distinto de ``phone``:
+    # ``phone`` guarda el telefono general (puede ser fijo o un segundo
+    # celular) y este guarda el numero al que se le puede mandar WhatsApp.
+    whatsapp_phone = CharField(null=True)
     email = CharField(null=True)
     contact = CharField(null=True)
     salesperson = ForeignKeyField(

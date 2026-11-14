@@ -102,6 +102,7 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services import salesperson_portfolio_print_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.services.whatsapp_contact_service import prefill_cliente, prefill_vendedor
 from app.ui.connection_dialog import ConnectionDialog
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
@@ -156,6 +157,7 @@ from app.ui.pallet_composition import PalletCompositionWidget
 from app.ui.product_price_bulk import build_product_price_bulk_page
 from app.ui.user_management import ChangePasswordDialog, UserManagementPage
 from app.ui.whatsapp_send import WhatsAppSendDialog, WhatsAppSendWorker
+from app.ui.whatsapp_contact_load_dialog import WhatsAppContactLoadDialog
 from app.ui.raw_material_receipt_import import RawMaterialReceiptImportPage
 from app.ui.raw_material_intake import RawMaterialIntakePage
 from app.ui.production_parts import ProductionPartPage
@@ -292,9 +294,17 @@ def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
 
 
 def _current_client_phone(client) -> str:
+    """El numero que se precarga en el dialogo de envio (#923).
+
+    Con el flag apagado es el telefono de siempre, tal cual esta escrito: el
+    dialogo lo muestra y avisa si no sirve, como pasa hoy. Con el flag
+    encendido es el numero de WhatsApp dedicado, en forma internacional.
+
+    El prefill no valida: la validacion sigue en el dialogo, al confirmar.
+    """
     client_id = getattr(client, "id", None)
     current_client = Client.get_or_none(Client.id == client_id) if client_id is not None else None
-    return (getattr(current_client or client, "phone", None) or "").strip()
+    return prefill_cliente(current_client or client)
 
 
 class SchemaTooNewAtStartup(RuntimeError):
@@ -843,6 +853,11 @@ class FemagDesktopWindow(QMainWindow):
                 f"Reparar cta. corriente ({rotas})" if rotas else "Reparar cta. corriente"
             )
             accion.triggered.connect(self._abrir_reparacion_cuenta_corriente)
+            # La carga de los numeros de WhatsApp pendientes es una herramienta
+            # de administracion, como la reparacion: no es una accion de la
+            # pantalla principal (#923).
+            carga = menu.addAction("Cargar WhatsApp de clientes")
+            carga.triggered.connect(self._abrir_carga_whatsapp_clientes)
             menu.addSeparator()
         centro = menu.addAction("Centro de Avisos")
         centro.triggered.connect(lambda: self._navigate_to_route("avisos"))
@@ -877,6 +892,22 @@ class FemagDesktopWindow(QMainWindow):
             self._refresh_customer_ledger()
             self._navigate_to_route("load_orders")
             self._refresh_aviso_badge()
+
+    def _abrir_carga_whatsapp_clientes(self) -> None:
+        """Abre la pantalla de carga de los numeros de WhatsApp pendientes.
+
+        Vive en el menu "Otros" y es solo del administrador: es una carga
+        masiva de datos, como "Reparar cta. corriente".
+
+        **No esta gateada por ``FEMAG_WHATSAPP_DEDICADO``**: esta pantalla es de
+        **carga de datos**, no de envio (no manda ningun mensaje). El admin la
+        necesita para dejar los numeros cargados *antes* de encender el flag
+        (#923).
+        """
+        if not PermissionService.is_administrator(self.user):
+            return
+        dialogo = WhatsAppContactLoadDialog(current_user=self.shell.username, parent=self)
+        dialogo.exec_()
 
     def _open_change_password(self) -> None:
         dialog = ChangePasswordDialog(title="Cambiar mi contraseña", parent=self)
@@ -1308,7 +1339,10 @@ class FemagDesktopWindow(QMainWindow):
         salesperson = summary.get("salesperson")
         if salesperson is None:
             return
-        if not (salesperson.phone or "").strip():
+        # Con el flag apagado es el telefono de siempre; con el flag encendido
+        # es el WhatsApp dedicado del vendedor (#923).
+        telefono_destino = prefill_vendedor(salesperson)
+        if not telefono_destino:
             QMessageBox.warning(
                 self,
                 "WhatsApp",
@@ -1319,7 +1353,7 @@ class FemagDesktopWindow(QMainWindow):
 
         dialog = WhatsAppSendDialog(
             client_name=salesperson.name,
-            phone=salesperson.phone,
+            phone=telefono_destino,
             parent=self,
         )
         if dialog.exec_() != QDialog.Accepted:

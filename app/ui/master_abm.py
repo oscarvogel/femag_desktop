@@ -74,6 +74,7 @@ from app.ui.master_detail_dialogs import (
 )
 from app.ui.money import configure_money_input
 from app.ui.form_feedback import FormFeedback
+from app.ui.whatsapp_phone_edit_widgets import prefill_whatsapp
 from app.utils.datetime_utils import as_datetime
 
 
@@ -455,7 +456,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
     return {
         "clients": MasterAbmConfig(
             "Clientes",
-            ["Nombre", "CUIT", "Vendedor", "Lista", "Estado"],
+            ["Nombre", "CUIT", "Vendedor", "WhatsApp", "Lista", "Estado"],
             _client_rows,
             ClientEntryDialog,
             "newClientButton",
@@ -465,7 +466,7 @@ def master_abm_configs() -> dict[str, MasterAbmConfig]:
         ),
         "salespeople": MasterAbmConfig(
             "Vendedores",
-            ["Nombre", "Teléfono", "Email", "Estado"],
+            ["Nombre", "Teléfono", "WhatsApp", "Email", "Estado"],
             _salesperson_rows,
             SalespersonEntryDialog,
             "newSalespersonButton",
@@ -1120,6 +1121,9 @@ class SalespersonEntryDialog(QDialog):
         self.name_input.setObjectName("salespersonNameInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("salespersonPhoneInput")
+        self.whatsapp_input = QLineEdit()
+        self.whatsapp_input.setObjectName("salespersonWhatsappInput")
+        self.whatsapp_input.setPlaceholderText("Ej.: 011 15 53088679")
         self.email_input = QLineEdit()
         self.email_input.setObjectName("salespersonEmailInput")
         self.email_input.setPlaceholderText("correo@ejemplo.com")
@@ -1134,12 +1138,14 @@ class SalespersonEntryDialog(QDialog):
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("Teléfono"), 1, 0)
         form.addWidget(self.phone_input, 1, 1)
-        form.addWidget(QLabel("Email"), 2, 0)
-        form.addWidget(self.email_input, 2, 1)
-        form.addWidget(QLabel("Observaciones"), 3, 0)
-        form.addWidget(self.observations_input, 3, 1)
-        form.addWidget(QLabel("Estado"), 4, 0)
-        form.addWidget(self.active_combo, 4, 1)
+        form.addWidget(QLabel("WhatsApp"), 2, 0)
+        form.addWidget(self.whatsapp_input, 2, 1)
+        form.addWidget(QLabel("Email"), 3, 0)
+        form.addWidget(self.email_input, 3, 1)
+        form.addWidget(QLabel("Observaciones"), 4, 0)
+        form.addWidget(self.observations_input, 4, 1)
+        form.addWidget(QLabel("Estado"), 5, 0)
+        form.addWidget(self.active_combo, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveSalespersonButton", self._save)
@@ -1151,6 +1157,9 @@ class SalespersonEntryDialog(QDialog):
         salesperson = Salesperson.get_by_id(self.record_id)
         self.name_input.setText(salesperson.name)
         self.phone_input.setText(salesperson.phone or "")
+        # Se precarga la forma internacional: el valor guardado no tiene "+" y
+        # el clasificador solo lo reconoce si el texto empieza con "+".
+        self.whatsapp_input.setText(prefill_whatsapp(salesperson.whatsapp_phone))
         self.email_input.setText(salesperson.email or "")
         self.observations_input.setText(salesperson.observations or "")
         _set_combo(self.active_combo, bool(salesperson.active))
@@ -1160,6 +1169,7 @@ class SalespersonEntryDialog(QDialog):
             service = MasterService(self.current_user)
             values = {
                 "phone": self.phone_input.text(),
+                "whatsapp_phone": self.whatsapp_input.text(),
                 "email": self.email_input.text(),
                 "observations": self.observations_input.text(),
                 "active": bool(self.active_combo.currentData()),
@@ -1948,6 +1958,7 @@ def _client_rows(salesperson_filter: object = None) -> list[list[object]]:
                     client.name,
                     client.cuit,
                     salesperson_name,
+                    client.whatsapp_phone or "",
                     f"Lista {client.lista_precios}",
                     "Activo" if client.active else "Inactivo",
                 ]
@@ -1964,6 +1975,7 @@ def _salesperson_rows() -> list[list[object]]:
                 salesperson.id,
                 salesperson.name,
                 salesperson.phone or "",
+                salesperson.whatsapp_phone or "",
                 salesperson.email or "",
                 "Activo" if salesperson.active else "Inactivo",
             ]
@@ -2162,6 +2174,11 @@ def build_client_abm_page(
         "Corrige el teléfono del cliente y te dice si es un celular (se puede "
         "mandar WhatsApp), una línea fija o un número dudoso."
     )
+    whatsapp_client_btn = _action_button("editClientWhatsappButton", "WhatsApp", secondary=True)
+    whatsapp_client_btn.setToolTip(
+        "Carga el numero de WhatsApp del cliente. Solo se aceptan celulares: "
+        "el telefono general queda aparte."
+    )
     emails_btn = _action_button("clientEmailsButton", "Emails", secondary=True)
     view_ledger_btn = _action_button(
         "viewClientLedgerButton", "Ver cuenta corriente", secondary=True
@@ -2202,6 +2219,7 @@ def build_client_abm_page(
     client_actions.addWidget(new_client_btn)
     client_actions.addWidget(edit_client_btn)
     client_actions.addWidget(phone_client_btn)
+    client_actions.addWidget(whatsapp_client_btn)
     client_actions.addWidget(emails_btn)
     client_actions.addWidget(view_ledger_btn)
     client_actions.addWidget(agenda_client_btn)
@@ -2212,10 +2230,10 @@ def build_client_abm_page(
     client_actions.addStretch(1)
     layout.addLayout(client_actions)
 
-    client_table = QTableWidget(0, 5)
+    client_table = QTableWidget(0, 6)
     client_table.setObjectName("clientTable")
     client_table.setHorizontalHeaderLabels(
-        ["Nombre", "CUIT", "Vendedor", "Lista", "Estado"]
+        ["Nombre", "CUIT", "Vendedor", "WhatsApp", "Lista", "Estado"]
     )
     client_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
     client_table.verticalHeader().setVisible(False)
@@ -2423,6 +2441,28 @@ def build_client_abm_page(
             refresh_clients()
             client_feedback.show_success("Teléfono actualizado.")
 
+    def edit_client_whatsapp() -> None:
+        """Cambia solo el numero de WhatsApp del cliente seleccionado (#923)."""
+        from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+
+        if not can_modify:
+            client_feedback.show_warning("El perfil actual no permite modificar este maestro.")
+            return
+        cid = selected_client_id()
+        if cid is None:
+            client_feedback.show_warning(
+                "Seleccione un cliente para cargarle el WhatsApp.", focus_widget=client_table
+            )
+            return
+        dialogo = ClientWhatsappEditDialog(
+            client=Client.get_by_id(cid),
+            current_user=current_user,
+            parent=parent,
+        )
+        if dialogo.exec_() == QDialog.Accepted:
+            refresh_clients()
+            client_feedback.show_success("WhatsApp actualizado.")
+
     def open_client_emails() -> None:
         cid = selected_client_id()
         if cid is None:
@@ -2585,6 +2625,7 @@ def build_client_abm_page(
     new_client_btn.clicked.connect(open_new_client)
     edit_client_btn.clicked.connect(open_edit_client)
     phone_client_btn.clicked.connect(edit_client_phone)
+    whatsapp_client_btn.clicked.connect(edit_client_whatsapp)
     emails_btn.clicked.connect(open_client_emails)
     view_ledger_btn.clicked.connect(open_client_ledger)
     agenda_client_btn.clicked.connect(open_client_agenda)

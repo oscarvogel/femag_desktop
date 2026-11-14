@@ -35,6 +35,7 @@ from app.services.repurchase_followup_service import (
     period_phrase,
 )
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.services.whatsapp_contact_service import prefill_cliente
 from app.ui.whatsapp_send import WhatsAppTextDialog, WhatsAppTextWorker
 
 
@@ -699,7 +700,9 @@ class ManagerialRepurchaseDialog(QDialog):
         current, _ = self._current_periods()
         dialog = WhatsAppTextDialog(
             recipient_name=client.name,
-            phone=client.phone or "",
+            # Con el flag apagado es el telefono de siempre; con el flag
+            # encendido es el WhatsApp dedicado del cliente (#923).
+            phone=prefill_cliente(client),
             default_message=self._followup_message_for_row(
                 row, client_name=greeting_name
             ),

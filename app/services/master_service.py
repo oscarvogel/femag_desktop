@@ -19,6 +19,12 @@ from app.models.masters import (
 from app.services.audit_service import AuditService
 from app.services.client_email_service import ClientEmailService
 from app.services.permission_service import PermissionService
+from app.services.whatsapp_contact_service import WhatsAppContactService
+
+#: Marca un valor que el llamador no pasa (para no pisar lo cargado). Es el
+#: mismo centinela de ``client_service``: "no lo paso" es distinto de "lo
+#: paso vacio" (#923).
+_UNSET = object()
 
 
 class MasterService:
@@ -244,6 +250,7 @@ class MasterService:
         name: str,
         *,
         phone: str | None = None,
+        whatsapp_phone: str | None = None,
         email: str | None = None,
         observations: str | None = None,
         active: bool = True,
@@ -253,9 +260,15 @@ class MasterService:
             raise ValueError("Complete el nombre del vendedor.")
         if Salesperson.select().where(fn.LOWER(Salesperson.name) == name.lower()).exists():
             raise ValueError("Ya existe un vendedor con ese nombre.")
+        # En el alta, ``None`` es el default normal: vendedor sin WhatsApp. Un
+        # numero dudoso, en cambio, no crea al vendedor (#923).
+        whatsapp = None
+        if whatsapp_phone is not None:
+            whatsapp = WhatsAppContactService.normalizar(whatsapp_phone) or None
         row = Salesperson.create(
             name=name,
             phone=(phone or "").strip() or None,
+            whatsapp_phone=whatsapp,
             email=self._normalize_salesperson_email(email),
             observations=(observations or "").strip() or None,
             active=bool(active),
@@ -263,7 +276,13 @@ class MasterService:
         self._record(
             "Salesperson",
             row,
-            {"name": name, "phone": row.phone, "email": row.email, "active": row.active},
+            {
+                "name": name,
+                "phone": row.phone,
+                "whatsapp_phone": row.whatsapp_phone,
+                "email": row.email,
+                "active": row.active,
+            },
         )
         return row
 
@@ -273,6 +292,7 @@ class MasterService:
         name: str,
         *,
         phone: str | None = None,
+        whatsapp_phone: str | None | object = _UNSET,
         email: str | None = None,
         observations: str | None = None,
         active: bool = True,
@@ -286,6 +306,11 @@ class MasterService:
         )
         if duplicate.exists():
             raise ValueError("Ya existe un vendedor con ese nombre.")
+        # El WhatsApp se valida antes de tocar la fila: un numero dudoso (o un
+        # ``None`` explicito, que es un error de quien lo llama) no deja al
+        # vendedor a medio guardar (#923).
+        if whatsapp_phone is not _UNSET:
+            WhatsAppContactService.normalizar(whatsapp_phone)
         old_value = {
             "name": salesperson.name,
             "phone": salesperson.phone,
@@ -313,6 +338,12 @@ class MasterService:
                 "active": salesperson.active,
             },
         )
+        # El WhatsApp se escribe y se audita con su propia accion ("actualizar
+        # WhatsApp"), no escondido dentro de la edicion del maestro (#923).
+        if whatsapp_phone is not _UNSET:
+            WhatsAppContactService(
+                self.current_user, self.audit_service
+            ).set_salesperson_whatsapp_phone(salesperson, whatsapp_phone)
         return salesperson
 
     def create_driver(
