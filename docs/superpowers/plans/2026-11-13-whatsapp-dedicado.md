@@ -1856,6 +1856,8 @@ wsl -e bash -lc "nohup mysqld --defaults-file=/home/oscar/mysql_an/my.cnf --user
 
 - [ ] **Paso 3: aplicar la columna con el camino oficial**
 
+> **Nota (14/11/2026): en esta copia de la base el paso ya es un no-op.** Las dos columnas `whatsapp_phone` (en `client` y en `salesperson`) **ya existen**: las agrego `ensure_runtime_schema` cuando se corrio la vista previa del backfill (la vista previa no escribe datos, pero si prepara el esquema). No hace falta volver a aplicar la columna sobre esta base. Si se restaura la base desde el dump limpio (paso 7), el paso vuelve a tener efecto y hay que correrlo antes del paso 4.
+
 ```bash
 python scripts/init_db.py
 ```
@@ -1872,7 +1874,9 @@ wsl -e bash -lc "mysql --socket=/home/oscar/mysql_an/run/mysql.sock -u root -e \
 python scripts/backfill_whatsapp_phones.py
 ```
 
-Expected: informa 26 clientes y 8 vendedores con celular, y deja los demas sin destino. **Comparar con los numeros de la auditoria** (26 celular de 904 clientes, 8 de 9 vendedores). Si no coinciden, **no seguir**: el dump cambio.
+Expected: informa 27 clientes y 8 vendedores con celular, y deja los demas sin destino. **Comparar con los numeros de la auditoria** (27 celular de 907 clientes, 8 de 9 vendedores). Si no coinciden, **no seguir**: el dump cambio.
+
+> Numero corregido el 14/11/2026: la base real de hoy tiene **907 clientes** (904 activos + 3 inactivos) y da **27 clientes + 8 vendedores**. El 26 del plan venia de una medicion anterior sobre una base de 904 clientes. El resto de los numeros (185 posible, 34 invalido, 661 vacio, 881 omitidos) no cambio.
 
 - [ ] **Paso 5: respaldar y aplicar**
 
@@ -1894,7 +1898,7 @@ python scripts/backfill_whatsapp_phones.py --aplicar
 wsl -e bash -lc "mysql --socket=/home/oscar/mysql_an/run/mysql.sock -u root -e \"SELECT COUNT(*) AS con_whatsapp FROM femag_desktop.client WHERE whatsapp_phone IS NOT NULL; SELECT COUNT(*) AS clientes FROM femag_desktop.client WHERE active = 1;\""
 ```
 
-Expected: 26 clientes con WhatsApp (de 904 activos). Verificar tambien que `phone` **no** cambio: comparar el conteo de `phone` no nulos antes y despues.
+Expected: 27 clientes con WhatsApp (de 904 activos). Verificar tambien que `phone` **no** cambio: comparar el conteo de `phone` no nulos antes y despues.
 
 - [ ] **Paso 7: restaurar la base con el dump limpio**
 
@@ -1905,7 +1909,7 @@ Como el backfill escribe en la base de prueba, restaurar la base con el dump ori
 En `docs/issue-923-whatsapp-dedicado.md`, agregar a la tabla de bitácora:
 
 ```
-| 13/11/2026 | Implementado en `feat/issue-923-whatsapp-dedicado`: campo, resolver, servicio, UI, backfill. Backfill validado contra la base real: 26 clientes + 8 vendedores, resto sin destino. |
+| 13/11/2026 | Implementado en `feat/issue-923-whatsapp-dedicado`: campo, resolver, servicio, UI, backfill. Backfill validado contra la base real: 27 clientes + 8 vendedores, resto sin destino. |
 ```
 
 Y actualizar la seccion de pendientes.

@@ -33,8 +33,10 @@ from app.services.whatsapp_contact_service import (
     WhatsAppContactService,
 )
 
-#: Cuantos omitidos se listan en la salida humana. Con la base real son 219:
-# imprimirlos todos en la consola no sirve para nada.
+#: Cuantos omitidos se listan en la salida humana. Con la base real son 881
+# omitidos (880 clientes y 1 vendedor; el total incluye los que no tienen
+# ningun telefono cargado): imprimirlos todos en la consola no sirve para
+# nada.
 MAXIMO_DE_OMITIDOS = 20
 
 
@@ -70,6 +72,14 @@ def _considerados(informe: BackfillInforme) -> dict[str, int]:
     }
 
 
+def _copiados_por_tipo(informe: BackfillInforme) -> dict[str, int]:
+    """Cuantos contactos reciben el WhatsApp, por tipo (#923)."""
+    return {
+        "cliente": informe.copiados_clientes,
+        "vendedor": informe.copiados_vendedores,
+    }
+
+
 def _informe_json(informe: BackfillInforme, *, aplicar: bool) -> dict:
     """El informe completo, para consumirlo con otra herramienta."""
     return {
@@ -96,6 +106,7 @@ def _resumen_humano(informe: BackfillInforme, *, aplicar: bool) -> str:
     """El resumen para la consola: cuantos se copian y cuantos quedan sin destino."""
     considerados = _considerados(informe)
     por_estado = _por_estado(informe)
+    copiados_por_tipo = _copiados_por_tipo(informe)
     lineas = []
     if aplicar:
         lineas.append("Backfill de los WhatsApp (#923) - APLICADO")
@@ -122,13 +133,30 @@ def _resumen_humano(informe: BackfillInforme, *, aplicar: bool) -> str:
     lineas.append("")
 
     for tipo, plural in (("cliente", "Clientes"), ("vendedor", "Vendedores")):
-        lineas.append(
-            f"{plural} sin WhatsApp cargado: {considerados.get(tipo, 0)}"
-        )
+        considerados_tipo = considerados.get(tipo, 0)
+        copiados_tipo = copiados_por_tipo.get(tipo, 0)
+        sin_destino_tipo = considerados_tipo - copiados_tipo
+        # El encabezado dice cuantos contactos se miraron, no cuantos
+        # quedan sin WhatsApp: son numeros distintos (#923).
+        lineas.append(f"{plural} considerados: {considerados_tipo}")
         for estado in ESTADOS_DE_TELEFONO:
             cantidad = por_estado.get(tipo, {}).get(estado, 0)
             nota = " (se copian)" if estado == "celular" else ""
             lineas.append(f"   {estado}: {cantidad}{nota}")
+        if aplicar:
+            lineas.append(
+                f"   de los considerados se les copio el WhatsApp: {copiados_tipo}"
+            )
+            lineas.append(
+                f"   de los considerados quedan sin WhatsApp: {sin_destino_tipo}"
+            )
+        else:
+            lineas.append(
+                f"   de los considerados se les copiaria el WhatsApp: {copiados_tipo}"
+            )
+            lineas.append(
+                f"   de los considerados quedarian sin WhatsApp: {sin_destino_tipo}"
+            )
         lineas.append("")
 
     if informe.omitidos:

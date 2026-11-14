@@ -1762,7 +1762,10 @@ def test_el_backfill_no_pisa_un_whatsapp_cargado(db):
     )
     informe = WhatsAppContactService("admin923").backfill()
 
-    assert cliente.whatsapp_phone == "5491153000000"
+    # Se relee de la base: la instancia del test es la que se creo, no
+    # la que dejo el backfill (peewee devuelve una instancia nueva por
+    # consulta).
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153000000"
     assert informe.copiados_clientes == 0
 
 
@@ -1897,6 +1900,41 @@ def test_la_vista_previa_del_backfill_no_escribe_nada(db):
     assert AuditLog.select().where(AuditLog.action == "actualizar WhatsApp").count() == 0
 
 
+def test_el_backfill_no_cambia_el_telefono_general(db):
+    """El backfill copia al WhatsApp, pero el ``phone`` queda igual (#923)."""
+    from app.models.masters import Client, Salesperson
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    celular = Client.create(
+        name="Cliente Telefono Celular",
+        cuit="30923000031",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    dudoso = Client.create(
+        name="Cliente Telefono Dudoso",
+        cuit="30923000032",
+        iva_condition="RI",
+        phone="011 4441-2835",
+    )
+    vendedor = Salesperson.create(name="Vendedor Telefono", phone="+5493758650849")
+
+    telefono_celular = celular.phone
+    telefono_dudoso = dudoso.phone
+    telefono_vendedor = vendedor.phone
+
+    WhatsAppContactService("admin923").backfill()
+
+    # El WhatsApp si se cargo...
+    assert Client.get_by_id(celular.id).whatsapp_phone == "5491153088679"
+    assert Client.get_by_id(dudoso.id).whatsapp_phone is None
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone == "5493758650849"
+    # ... pero el telefono general quedo exactamente igual.
+    assert Client.get_by_id(celular.id).phone == telefono_celular
+    assert Client.get_by_id(dudoso.id).phone == telefono_dudoso
+    assert Salesperson.get_by_id(vendedor.id).phone == telefono_vendedor
+
+
 def test_el_informe_agrupa_los_omitidos_por_estado(db):
     """El informe dice cuantos quedaron sin destino y por que (#923)."""
     from app.models.masters import Client, Salesperson
@@ -2019,3 +2057,29 @@ def test_el_script_resume_los_omitidos_por_estado(db, capsys):
     assert "vacio" in salida
     # Con muchos omitidos no se imprime uno por linea: el detalle va en el JSON.
     assert "detalle completo" in salida
+
+
+def test_la_salida_del_script_tope_los_omitidos(db, capsys):
+    """Con mas de 20 omitidos se listan los primeros 20 y el resto se cuenta (#923)."""
+    from app.models.masters import Client
+
+    script = _modulo_backfill()
+    for numero in range(25):
+        Client.create(
+            name=f"Cliente Tope {numero}",
+            cuit=f"30923001{numero:03d}",
+            iva_condition="RI",
+            phone="011 4441-2835",
+        )
+
+    codigo = script.main([], database=db)
+    salida = capsys.readouterr().out
+
+    assert codigo == 0
+    # Se listan 20 de los 25 omitidos...
+    lineas_omitidos = [
+        linea for linea in salida.splitlines() if linea.startswith("   cliente | ")
+    ]
+    assert len(lineas_omitidos) == 20
+    # ... y el resto se avisa con el numero que falta.
+    assert "... y 5 mas." in salida
