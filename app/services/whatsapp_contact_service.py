@@ -16,6 +16,11 @@ from dataclasses import dataclass, field
 
 from app.models.masters import Client, Salesperson
 from app.services.audit_service import AuditService
+from app.services.whatsapp_contact_resolver import (
+    prefill_contacto,
+    resolver_contacto,
+)
+from app.services.whatsapp_envio_service import normalize_phone
 from app.services.whatsapp_phone_classifier import (
     ESTADO_CELULAR,
     ESTADO_INVALIDO,
@@ -34,6 +39,47 @@ CONSEJO_POR_ESTADO = {
     ESTADO_POSIBLE: "Cargue el celular con el 15 o en formato internacional con el 9.",
     ESTADO_INVALIDO: "Revise el numero y cargue un solo numero.",
 }
+
+
+def flag_dedicado(override: bool | None = None) -> bool:
+    """Si el destino sale del numero dedicado o del telefono general (#923).
+
+    El flag se lee en el momento de la llamada (``FEMAG_WHATSAPP_DEDICADO``):
+    el administrador lo cambia en el ``.env`` del puesto y no hace falta
+    tocar el codigo. Por default esta **apagado**: el comportamiento es
+    exactamente el de antes de este issue.
+    """
+    if override is not None:
+        return bool(override)
+    from app.config.settings import load_settings
+
+    try:
+        return bool(load_settings().whatsapp_contact_dedicado)
+    except Exception:  # noqa: BLE001 - si no se puede leer la config, sigue el comportamiento de hoy
+        return False
+
+
+def prefill_cliente(client, *, preferir_dedicado: bool | None = None) -> str:
+    """El numero que se precarga en el dialogo de envio de este cliente.
+
+    El prefill decide **que se muestra**, no si el envio se puede hacer: la
+    validacion sigue en el dialogo, al confirmar. Con el flag apagado es el
+    telefono de siempre, tal cual esta escrito.
+    """
+    return prefill_contacto(
+        whatsapp_phone=getattr(client, "whatsapp_phone", None),
+        phone=getattr(client, "phone", None),
+        preferir_dedicado=flag_dedicado(preferir_dedicado),
+    )
+
+
+def prefill_vendedor(salesperson, *, preferir_dedicado: bool | None = None) -> str:
+    """El numero que se precarga en el dialogo de envio de este vendedor."""
+    return prefill_contacto(
+        whatsapp_phone=getattr(salesperson, "whatsapp_phone", None),
+        phone=getattr(salesperson, "phone", None),
+        preferir_dedicado=flag_dedicado(preferir_dedicado),
+    )
 
 
 @dataclass(frozen=True)
@@ -72,6 +118,48 @@ class WhatsAppContactService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
         self.audit_service = audit_service or AuditService()
+
+    def destino_cliente(self, client: Client, *, preferir_dedicado: bool | None = None) -> str:
+        """El numero al que se le puede mandar WhatsApp a este cliente.
+
+        Con el flag apagado es **exactamente** el numero que usa el envio de
+        hoy: el telefono general, normalizado. Con el flag encendido manda el
+        numero dedicado, si hay uno.
+
+        Si no hay un numero que se pueda mandar, levanta ``ValueError`` con el
+        mismo mensaje que ve hoy el operador.
+        """
+        return self._destino(
+            whatsapp_phone=getattr(client, "whatsapp_phone", None),
+            phone=getattr(client, "phone", None),
+            preferir_dedicado=preferir_dedicado,
+        )
+
+    def destino_vendedor(
+        self, salesperson: Salesperson, *, preferir_dedicado: bool | None = None
+    ) -> str:
+        """El numero al que se le puede mandar WhatsApp a este vendedor."""
+        return self._destino(
+            whatsapp_phone=getattr(salesperson, "whatsapp_phone", None),
+            phone=getattr(salesperson, "phone", None),
+            preferir_dedicado=preferir_dedicado,
+        )
+
+    @staticmethod
+    def _destino(
+        *, whatsapp_phone, phone, preferir_dedicado: bool | None
+    ) -> str:
+        """El destino validado: el numero normalizado, sin el "+"."""
+        contacto = resolver_contacto(
+            whatsapp_phone=whatsapp_phone,
+            phone=phone,
+            preferir_dedicado=flag_dedicado(preferir_dedicado),
+        )
+        if not contacto.enviable:
+            raise ValueError(contacto.mensaje)
+        # El numero del resolver es el canonico sin "+": se valida en forma
+        # internacional, que es como lo acepta el envio.
+        return normalize_phone(f"+{contacto.numero}")
 
     @staticmethod
     def normalizar(numero: str) -> str:

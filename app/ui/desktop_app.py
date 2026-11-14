@@ -102,6 +102,7 @@ from app.services import account_statement_share_service
 from app.services import global_search_service
 from app.services import salesperson_portfolio_print_service
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
+from app.services.whatsapp_contact_service import prefill_cliente, prefill_vendedor
 from app.ui.connection_dialog import ConnectionDialog
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
@@ -293,9 +294,17 @@ def _active_client_email_options(client) -> list[tuple[str, str, bool]]:
 
 
 def _current_client_phone(client) -> str:
+    """El numero que se precarga en el dialogo de envio (#923).
+
+    Con el flag apagado es el telefono de siempre, tal cual esta escrito: el
+    dialogo lo muestra y avisa si no sirve, como pasa hoy. Con el flag
+    encendido es el numero de WhatsApp dedicado, en forma internacional.
+
+    El prefill no valida: la validacion sigue en el dialogo, al confirmar.
+    """
     client_id = getattr(client, "id", None)
     current_client = Client.get_or_none(Client.id == client_id) if client_id is not None else None
-    return (getattr(current_client or client, "phone", None) or "").strip()
+    return prefill_cliente(current_client or client)
 
 
 class SchemaTooNewAtStartup(RuntimeError):
@@ -1330,7 +1339,10 @@ class FemagDesktopWindow(QMainWindow):
         salesperson = summary.get("salesperson")
         if salesperson is None:
             return
-        if not (salesperson.phone or "").strip():
+        # Con el flag apagado es el telefono de siempre; con el flag encendido
+        # es el WhatsApp dedicado del vendedor (#923).
+        telefono_destino = prefill_vendedor(salesperson)
+        if not telefono_destino:
             QMessageBox.warning(
                 self,
                 "WhatsApp",
@@ -1341,7 +1353,7 @@ class FemagDesktopWindow(QMainWindow):
 
         dialog = WhatsAppSendDialog(
             client_name=salesperson.name,
-            phone=salesperson.phone,
+            phone=telefono_destino,
             parent=self,
         )
         if dialog.exec_() != QDialog.Accepted:

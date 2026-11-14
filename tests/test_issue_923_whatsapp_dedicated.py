@@ -2083,3 +2083,753 @@ def test_la_salida_del_script_tope_los_omitidos(db, capsys):
     assert len(lineas_omitidos) == 20
     # ... y el resto se avisa con el numero que falta.
     assert "... y 5 mas." in salida
+
+
+# =========================================================== Tarea 10: envios
+#
+# Los envios toman el destino del resolver. Con el flag apagado el
+# comportamiento es **exactamente** el de hoy; con el flag prendido manda el
+# numero dedicado.
+#
+# Dos reglas que la Tarea 10 respeta:
+#
+# 1. El prefill decide **que se muestra**, no si el envio se puede hacer. Con
+#    el flag apagado, un telefono "posible" se precarga tal cual: el dialogo
+#    de envio es el que avisa al operador, como pasa hoy.
+# 2. La validacion sigue en el dialogo, al confirmar. Por eso el prefill
+#    lleva el numero en forma internacional ("+5491153088679"): es lo que el
+#    ``normalize_phone`` de hoy acepta sin cambios.
+
+
+def _flag(monkeypatch, tmp_path, valor):
+    """Pone el flag ``FEMAG_WHATSAPP_DEDICADO`` en el estado pedido (#923).
+
+    Con ``valor=None`` lo borra: el flag queda apagado y el ``.env`` real
+    del developer no puede encenderlo.
+    """
+    _sin_env_real(monkeypatch, tmp_path)
+    if valor is None:
+        monkeypatch.delenv("FEMAG_WHATSAPP_DEDICADO", raising=False)
+    else:
+        monkeypatch.setenv("FEMAG_WHATSAPP_DEDICADO", valor)
+
+
+def _cliente_923(nombre, cuit, **campos):
+    from app.models.masters import Client
+
+    return Client.create(name=nombre, cuit=cuit, iva_condition="RI", **campos)
+
+
+def _vendedor_923(nombre, **campos):
+    from app.models.masters import Salesperson
+
+    return Salesperson.create(name=nombre, **campos)
+
+
+# ------------------------------------------------------------- el prefill
+
+
+def test_con_el_flag_apagado_el_prefill_es_el_telefono_crudo(monkeypatch, tmp_path, db):
+    """Con el flag apagado no cambia nada: el telefono tal cual (#923).
+
+    Este es el caso de la regresion: un telefono "posible" se precarga igual
+    que hoy y el dialogo de envio es el que avisa. Si el prefill devolviera
+    "" (porque el numero "no se puede mandar"), el operador perderia el dato
+    y el mensaje seria otro.
+    """
+    from app.services.whatsapp_contact_service import prefill_cliente
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Posible 10",
+        "30923000061",
+        phone="011 4441-2835",
+        whatsapp_phone="5491153088679",
+    )
+
+    assert prefill_cliente(cliente) == "011 4441-2835"
+
+
+def test_con_el_flag_apagado_el_prefill_no_toca_un_telefono_con_espacios(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag apagado el prefill es el telefono de siempre (#923)."""
+    from app.services.whatsapp_contact_service import prefill_cliente
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Telefono 10", "30923000062", phone="011 15 53088679"
+    )
+
+    assert prefill_cliente(cliente) == "011 15 53088679"
+
+
+def test_con_el_flag_encendido_el_prefill_toma_el_numero_dedicado(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag prendido el prefill es el WhatsApp dedicado (#923)."""
+    from app.services.whatsapp_contact_service import prefill_cliente
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Dedicado 10",
+        "30923000063",
+        phone="011 4441-2835",
+        whatsapp_phone="5491153088679",
+    )
+
+    assert prefill_cliente(cliente) == "+5491153088679"
+
+
+def test_con_el_flag_encendido_sin_dedicado_cae_al_telefono(monkeypatch, tmp_path, db):
+    """Sin numero dedicado cargado se usa el telefono de siempre (#923)."""
+    from app.services.whatsapp_contact_service import prefill_cliente
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Sin Dedicado 10", "30923000064", phone="011 15 53088679"
+    )
+
+    assert prefill_cliente(cliente) == "011 15 53088679"
+
+
+def test_con_el_flag_encendido_un_dedicado_roto_no_cae_al_telefono(
+    monkeypatch, tmp_path, db
+):
+    """Un WhatsApp dedicado que no es celular no se reemplaza (#923).
+
+    No se adivina: el prefill muestra el valor dedicado y el dialogo de
+    envio bloquea el envio con su mensaje.
+    """
+    from app.services.whatsapp_contact_service import prefill_cliente
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Dedicado Roto",
+        "30923000065",
+        phone="011 15 53088679",
+        whatsapp_phone="01144412835",
+    )
+
+    assert prefill_cliente(cliente) == "01144412835"
+
+
+# ------------------------------------------------------------- el destino
+
+
+def test_con_el_flag_apagado_el_destino_es_el_telefono_normalizado(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag apagado el destino es el telefono de hoy (#923)."""
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Destino 10",
+        "30923000066",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153000000",
+    )
+
+    destino = WhatsAppContactService("admin923").destino_cliente(cliente)
+    assert destino == "5491153088679"
+
+
+def test_con_el_flag_encendido_el_destino_es_el_numero_dedicado(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag prendido el destino es el WhatsApp dedicado (#923)."""
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Destino Dedicado",
+        "30923000067",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153000000",
+    )
+
+    servicio = WhatsAppContactService("admin923")
+    assert servicio.destino_cliente(cliente) == "5491153000000"
+
+
+def test_con_el_flag_encendido_sin_dedicado_el_destino_cae_al_telefono(
+    monkeypatch, tmp_path, db
+):
+    """Sin numero dedicado el destino sale del telefono (#923)."""
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Destino Sin Dedicado", "30923000068", phone="011 15 53088679"
+    )
+
+    destino = WhatsAppContactService("admin923").destino_cliente(cliente)
+    assert destino == "5491153088679"
+
+
+def test_con_el_flag_encendido_un_dedicado_roto_no_da_destino(
+    monkeypatch, tmp_path, db
+):
+    """Un dedicado que no es celular no se cambia por el telefono (#923)."""
+    import pytest
+
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Destino Roto",
+        "30923000069",
+        phone="011 15 53088679",
+        whatsapp_phone="01144412835",
+    )
+
+    with pytest.raises(ValueError):
+        WhatsAppContactService("admin923").destino_cliente(cliente)
+
+
+def test_el_destino_sin_numero_levanta_el_error_de_hoy(monkeypatch, tmp_path, db):
+    """Sin numero no hay destino: el mensaje es el de hoy (#923)."""
+    import pytest
+
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923("Cliente Destino Vacio", "30923000070")
+
+    with pytest.raises(ValueError) as exc:
+        WhatsAppContactService("admin923").destino_cliente(cliente)
+    assert "no tiene un telefono valido para WhatsApp" in str(exc.value)
+
+
+def test_el_destino_del_vendedor_usa_el_dedicado(monkeypatch, tmp_path, db):
+    """El vendedor tambien tiene destino propio (#923)."""
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _flag(monkeypatch, tmp_path, "1")
+    vendedor = _vendedor_923(
+        "Vendedor Destino 10", phone="011 15 53088679", whatsapp_phone="5491153000000"
+    )
+
+    destino = WhatsAppContactService("admin923").destino_vendedor(vendedor)
+    assert destino == "5491153000000"
+
+
+def test_el_destino_con_el_flag_apagado_es_identico_al_de_hoy(monkeypatch, tmp_path, db):
+    """Con el flag apagado el destino es ``normalize_phone(telefono)`` (#923).
+
+    Se comparan los dos caminos en todos los casos: mismo numero y mismo
+    mensaje de error.
+    """
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+    from app.services.whatsapp_envio_service import normalize_phone
+
+    _flag(monkeypatch, tmp_path, None)
+    servicio = WhatsAppContactService("admin923")
+
+    for numero in (
+        "011 15 53088679",
+        "+5491153088679",
+        "+54 9 376 4555000",
+        "011 4441-2835",
+        "01148975105//01157357632",
+        "",
+        None,
+    ):
+        cliente = _cliente_923(
+            f"Cliente Igual {numero}", f"3092300{abs(hash(numero)) % 10000:04d}",
+            phone=numero,
+        )
+        try:
+            esperado = normalize_phone(numero)
+            error_esperado = None
+        except ValueError as exc:
+            esperado = None
+            error_esperado = str(exc)
+        try:
+            obtenido = servicio.destino_cliente(cliente)
+            error_obtenido = None
+        except ValueError as exc:
+            obtenido = None
+            error_obtenido = str(exc)
+        assert (obtenido, error_obtenido) == (esperado, error_esperado), numero
+
+
+# --------------------------------------------------------------- la trampa
+
+
+def test_el_resolver_reconoce_el_numero_canonico_sin_mas():
+    """La forma que se guarda en la base es valida (#923).
+
+    Lo que se guarda es "5491153088679" (sin el "+"). El clasificador solo
+    reconoce el formato internacional con el "+", asi que el resolver tiene
+    que bridgear esa diferencia.
+    """
+    from app.services.whatsapp_phone_classifier import clasificar_telefono
+    from app.services.whatsapp_contact_resolver import resolver_contacto
+
+    # Sin el "+" el clasificador no lo reconoce: por eso hace falta el puente.
+    assert clasificar_telefono("5491153088679").es_celular is False
+
+    contacto = resolver_contacto(
+        whatsapp_phone="5491153088679", phone="011 4441-2835"
+    )
+    assert contacto.enviable
+    assert contacto.numero == "5491153088679"
+
+
+def test_el_prefill_dedicado_pasa_el_normalize_phone_de_hoy():
+    """El numero que se muestra es el que el dialogo de envio acepta (#923)."""
+    from app.services.whatsapp_contact_resolver import prefill_contacto
+    from app.services.whatsapp_envio_service import normalize_phone
+
+    prefill = prefill_contacto(whatsapp_phone="5491153088679", phone="011 4441-2835")
+    assert prefill == "+5491153088679"
+    # El ``normalize_phone`` de hoy lo acepta sin cambios.
+    assert normalize_phone(prefill) == "5491153088679"
+
+
+def test_el_prefill_dedicado_lo_acepta_el_dialogo_de_envio(db, app):
+    """El dialogo de envio muestra el numero y lo da por bueno (#923)."""
+    from app.ui.whatsapp_send import WhatsAppSendDialog
+
+    dialogo = WhatsAppSendDialog(
+        client_name="Cliente Trampa",
+        phone="+5491153088679",
+    )
+    assert dialogo.phone() == "+5491153088679"
+    assert "Número final: +5491153088679" in dialogo.normalized_label.text()
+    dialogo.close()
+
+
+# ------------------------------------------------- los 2 minors del resolver
+
+
+def test_el_docstring_del_resolver_describe_el_default_real():
+    """El docstring tiene que decir la verdad (#923).
+
+    Antes decia que el flag apagado era el default, cuando el default del
+    parametro es ``preferir_dedicado=True`` (manda el campo dedicado).
+    """
+    import inspect
+
+    from app.services.whatsapp_contact_resolver import resolver_contacto
+
+    default = inspect.signature(resolver_contacto).parameters["preferir_dedicado"].default
+    assert default is True
+
+    doc = resolver_contacto.__doc__ or ""
+    assert "preferir_dedicado" in doc
+    assert "True" in doc
+    assert "False" in doc
+    # El default real es "manda el campo dedicado": el docstring lo dice.
+    assert "whatsapp_phone" in doc
+
+
+def test_el_resolver_aguanta_un_valor_que_no_es_texto():
+    """Un valor que no es texto no rompe el resolver (#923)."""
+    from app.services.whatsapp_contact_resolver import resolver_contacto
+
+    contacto = resolver_contacto(whatsapp_phone=12345, phone=678)
+    assert contacto.enviable is False
+    assert contacto.mensaje
+
+    contacto = resolver_contacto(whatsapp_phone=12345, phone=678, preferir_dedicado=False)
+    assert contacto.enviable is False
+    assert contacto.mensaje
+
+
+# ------------------------------------------------------------- los 5 flujos
+
+
+def _dialogo_capturador(monkeypatch, modulo, nombre_clase, capturado):
+    """Reemplaza el dialogo de envio por uno que anota el numero (#923)."""
+    from PyQt5.QtWidgets import QDialog
+
+    class _DialogoFalso:
+        def __init__(self, **kwargs):
+            capturado.update(kwargs)
+
+        def exec_(self):
+            return QDialog.Rejected
+
+    monkeypatch.setattr(modulo, nombre_clase, _DialogoFalso)
+    return capturado
+
+
+def test_flujo_1_y_2_el_prefill_del_cliente(monkeypatch, tmp_path, db):
+    """Los flujos 1 y 2 (extracto y presupuesto) toman el prefill (#923).
+
+    Los dos usan ``_current_client_phone``: con el flag prendido precargan
+    el numero dedicado y con el flag apagado, el telefono de siempre.
+    """
+    from app.ui.desktop_app import _current_client_phone
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Flujo 1",
+        "30923000071",
+        phone="011 4441-2835",
+        whatsapp_phone="5491153088679",
+    )
+    assert _current_client_phone(cliente) == "+5491153088679"
+
+    _flag(monkeypatch, tmp_path, None)
+    assert _current_client_phone(cliente) == "011 4441-2835"
+
+
+def test_flujo_2_el_presupuesto_precarga_el_numero_dedicado(
+    monkeypatch, tmp_path, db
+):
+    """El flujo 2 (presupuesto por WhatsApp) precarga el dedicado (#923)."""
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Product
+    from app.services.budget_service import BudgetService
+    from app.ui import desktop_app
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Presupuesto 10",
+        "30923000072",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    producto = Product.create(name="Producto Presupuesto 10", unit="bolsa")
+    presupuesto = BudgetService(current_user="admin").create_manual(
+        client=cliente,
+        items=[
+            {
+                "product": producto,
+                "quantity": 2,
+                "unit": "bolsa",
+                "unit_price": 1500,
+                "vat_percentage": 21,
+            }
+        ],
+    )
+    movimiento = ClientAccountMovement.get(ClientAccountMovement.budget == presupuesto)
+
+    capturado = _dialogo_capturador(
+        monkeypatch, desktop_app, "WhatsAppSendDialog", {}
+    )
+
+    class _Ventana:
+        user = "admin"
+
+        @staticmethod
+        def _budget_for_movement(movimiento):
+            return movimiento.budget
+
+    desktop_app.FemagDesktopWindow._share_budget_whatsapp(_Ventana(), movimiento)
+
+    assert capturado["phone"] == "+5491153088679"
+    assert capturado["client_name"] == "Cliente Presupuesto 10"
+
+
+def test_flujo_2_con_el_flag_apagado_precarga_el_telefono_de_hoy(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag apagado el presupuesto precarga el telefono (#923)."""
+    from app.models.accounting import ClientAccountMovement
+    from app.models.masters import Product
+    from app.services.budget_service import BudgetService
+    from app.ui import desktop_app
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Presupuesto 11",
+        "30923000073",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    producto = Product.create(name="Producto Presupuesto 11", unit="bolsa")
+    presupuesto = BudgetService(current_user="admin").create_manual(
+        client=cliente,
+        items=[
+            {
+                "product": producto,
+                "quantity": 1,
+                "unit": "bolsa",
+                "unit_price": 100,
+                "vat_percentage": 21,
+            }
+        ],
+    )
+    movimiento = ClientAccountMovement.get(ClientAccountMovement.budget == presupuesto)
+
+    capturado = _dialogo_capturador(
+        monkeypatch, desktop_app, "WhatsAppSendDialog", {}
+    )
+
+    class _Ventana:
+        user = "admin"
+
+        @staticmethod
+        def _budget_for_movement(movimiento):
+            return movimiento.budget
+
+    desktop_app.FemagDesktopWindow._share_budget_whatsapp(_Ventana(), movimiento)
+
+    assert capturado["phone"] == "011 15 53088679"
+
+
+def test_flujo_3_el_resumen_del_vendedor_usa_el_destino(monkeypatch, tmp_path, db):
+    """El flujo 3 (resumen de cartera) usa el destino del vendedor (#923)."""
+    from app.ui import desktop_app
+
+    _flag(monkeypatch, tmp_path, "1")
+    vendedor = _vendedor_923(
+        "Vendedor Flujo 3", phone="011 15 53088679", whatsapp_phone="5491153088679"
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, desktop_app, "WhatsAppSendDialog", {}
+    )
+
+    desktop_app.FemagDesktopWindow._share_salesperson_portfolio_whatsapp(
+        None, {"salesperson": vendedor}
+    )
+
+    assert capturado["phone"] == "+5491153088679"
+    assert capturado["client_name"] == "Vendedor Flujo 3"
+
+
+def test_flujo_3_con_el_flag_apagado_es_exactamente_el_de_hoy(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag apagado el vendedor sigue como hoy (#923).
+
+    Sin telefono: el aviso es el mismo texto de siempre y no se abre el
+    dialogo. Con telefono: se precarga ese telefono.
+    """
+    from PyQt5.QtWidgets import QMessageBox
+
+    from app.ui import desktop_app
+
+    _flag(monkeypatch, tmp_path, None)
+
+    # Sin telefono: el aviso es el de hoy, palabra por palabra.
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args, **kwargs: avisos.append(args[2])
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, desktop_app, "WhatsAppSendDialog", {}
+    )
+    vendedor = _vendedor_923("Vendedor Sin Telefono 3")
+
+    desktop_app.FemagDesktopWindow._share_salesperson_portfolio_whatsapp(
+        None, {"salesperson": vendedor}
+    )
+
+    assert capturado == {}
+    assert avisos == [
+        "El vendedor Vendedor Sin Telefono 3 no tiene un telefono cargado. "
+        "Completelo en Maestros > Vendedores."
+    ]
+
+    # Con telefono: se precarga ese telefono, como hoy.
+    vendedor = _vendedor_923(
+        "Vendedor Con Telefono 3", phone="011 15 53088679"
+    )
+    desktop_app.FemagDesktopWindow._share_salesperson_portfolio_whatsapp(
+        None, {"salesperson": vendedor}
+    )
+    assert capturado["phone"] == "011 15 53088679"
+
+
+def test_flujo_3_con_el_flag_encendido_sin_telefono_no_avisa(
+    monkeypatch, tmp_path, db
+):
+    """Con WhatsApp dedicado el vendedor no queda afuera (#923)."""
+    from PyQt5.QtWidgets import QMessageBox
+
+    from app.ui import desktop_app
+
+    _flag(monkeypatch, tmp_path, "1")
+    avisos = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *args, **kwargs: avisos.append(args[2])
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, desktop_app, "WhatsAppSendDialog", {}
+    )
+    vendedor = _vendedor_923(
+        "Vendedor Solo Dedicado 3", whatsapp_phone="5491153088679"
+    )
+
+    desktop_app.FemagDesktopWindow._share_salesperson_portfolio_whatsapp(
+        None, {"salesperson": vendedor}
+    )
+
+    assert avisos == []
+    assert capturado["phone"] == "+5491153088679"
+
+
+def test_flujo_4_el_seguimiento_de_recompra_usa_el_dedicado(
+    monkeypatch, tmp_path, db
+):
+    """El flujo 4 (seguimiento de recompra) precarga el dedicado (#923)."""
+    from app.ui import managerial_repurchase_dialog
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Recompra 10",
+        "30923000074",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, managerial_repurchase_dialog, "WhatsAppTextDialog", {}
+    )
+
+    dialogo = managerial_repurchase_dialog.ManagerialRepurchaseDialog.__new__(
+        managerial_repurchase_dialog.ManagerialRepurchaseDialog
+    )
+    dialogo._selected_row = lambda: {"client_id": cliente.id}
+    dialogo._current_periods = lambda: (None, None)
+    dialogo._followup_message_for_row = lambda row, client_name="": "mensaje"
+    dialogo.send_whatsapp()
+
+    assert capturado["phone"] == "+5491153088679"
+    assert capturado["recipient_name"] == "Cliente Recompra 10"
+
+
+def test_flujo_4_con_el_flag_apagado_es_exactamente_el_de_hoy(
+    monkeypatch, tmp_path, db
+):
+    """Con el flag apagado la recompra precarga el telefono (#923)."""
+    from app.ui import managerial_repurchase_dialog
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Recompra 11",
+        "30923000075",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, managerial_repurchase_dialog, "WhatsAppTextDialog", {}
+    )
+
+    dialogo = managerial_repurchase_dialog.ManagerialRepurchaseDialog.__new__(
+        managerial_repurchase_dialog.ManagerialRepurchaseDialog
+    )
+    dialogo._selected_row = lambda: {"client_id": cliente.id}
+    dialogo._current_periods = lambda: (None, None)
+    dialogo._followup_message_for_row = lambda row, client_name="": "mensaje"
+    dialogo.send_whatsapp()
+
+    assert capturado["phone"] == "011 15 53088679"
+
+
+def _ficha_de_cliente(db, app, cliente):
+    """La ficha real del cliente, como la que ve el operador (#923)."""
+    from app.models.security import User, UserProfile
+    from app.services.permission_service import PermissionService
+    from app.ui.master_detail_dialogs import ClientDetailDialog
+
+    PermissionService().seed_defaults()
+    perfil, _ = UserProfile.get_or_create(name="Administrador")
+    usuario = User.create(
+        username="admin923-ficha", password_hash="x", profile=perfil, active=True
+    )
+    return ClientDetailDialog(record_id=cliente.id, current_user="admin923", user=usuario)
+
+
+def test_flujo_5_el_boton_de_whatsapp_usa_el_numero_dedicado(
+    monkeypatch, tmp_path, db, app
+):
+    """El flujo 5 (ficha del cliente) precarga el dedicado (#923)."""
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.ui import master_detail_dialogs
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Ficha 10",
+        "30923000076",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, master_detail_dialogs, "WhatsAppTextDialog", {}
+    )
+
+    ficha = _ficha_de_cliente(db, app, cliente)
+    boton = ficha.findChild(QPushButton, "clientDetailWhatsAppButton")
+    assert boton is not None
+    assert boton.isEnabled()
+
+    boton.click()
+    app.processEvents()
+
+    assert capturado["phone"] == "+5491153088679"
+    ficha.close()
+
+
+def test_flujo_5_con_el_flag_apagado_es_exactamente_el_de_hoy(
+    monkeypatch, tmp_path, db, app
+):
+    """Con el flag apagado la ficha precarga el telefono (#923)."""
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.ui import master_detail_dialogs
+
+    _flag(monkeypatch, tmp_path, None)
+    cliente = _cliente_923(
+        "Cliente Ficha 11",
+        "30923000077",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153088679",
+    )
+    capturado = _dialogo_capturador(
+        monkeypatch, master_detail_dialogs, "WhatsAppTextDialog", {}
+    )
+
+    ficha = _ficha_de_cliente(db, app, cliente)
+    boton = ficha.findChild(QPushButton, "clientDetailWhatsAppButton")
+    assert boton is not None
+    assert boton.isEnabled()
+
+    boton.click()
+    app.processEvents()
+
+    assert capturado["phone"] == "011 15 53088679"
+    ficha.close()
+
+
+def test_flujo_5_un_cliente_sin_telefono_no_habilita_el_boton(
+    monkeypatch, tmp_path, db, app
+):
+    """Sin ningun numero el boton queda deshabilitado (#923)."""
+    from PyQt5.QtWidgets import QPushButton
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923("Cliente Ficha Sin Numero", "30923000078")
+
+    ficha = _ficha_de_cliente(db, app, cliente)
+    boton = ficha.findChild(QPushButton, "clientDetailWhatsAppButton")
+    assert boton is not None
+    assert not boton.isEnabled()
+    assert boton.toolTip() == "El registro no tiene teléfono guardado."
+    ficha.close()
+
+
+def test_flujo_5_un_cliente_con_dedicado_y_sin_telefono_habilita_el_boton(
+    monkeypatch, tmp_path, db, app
+):
+    """Con WhatsApp dedicado el boton tiene que quedar habilitado (#923)."""
+    from PyQt5.QtWidgets import QPushButton
+
+    _flag(monkeypatch, tmp_path, "1")
+    cliente = _cliente_923(
+        "Cliente Ficha Solo Dedicado",
+        "30923000079",
+        whatsapp_phone="5491153088679",
+    )
+
+    ficha = _ficha_de_cliente(db, app, cliente)
+    boton = ficha.findChild(QPushButton, "clientDetailWhatsAppButton")
+    assert boton is not None
+    assert boton.isEnabled()
+    ficha.close()
