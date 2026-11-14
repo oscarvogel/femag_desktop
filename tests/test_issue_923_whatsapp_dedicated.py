@@ -1284,6 +1284,69 @@ def test_el_dialogo_de_carga_lista_los_pendientes(db, app):
     assert "masiva" in dialogo.intro_label.text()
 
 
+def test_si_el_operador_vacia_el_numero_el_boton_no_dice_cargado(db, app):
+    """Volver a dejar el numero vacio no puede marcar la fila como cargada (#923).
+
+    El boton de la fila dice "Cargado" y se deshabilita recien cuando el numero
+    quedo cargado de verdad. Si el operador vacia el campo y lo guarda, el
+    cliente sigue sin WhatsApp: el boton tiene que quedar habilitado.
+    """
+    from datetime import date
+
+    from PyQt5.QtCore import QTimer
+    from PyQt5.QtWidgets import QPushButton
+
+    from app.models.masters import Client
+    from app.models.load_orders import LoadOrder
+    from app.ui.client_whatsapp_edit_dialog import ClientWhatsappEditDialog
+    from app.ui.whatsapp_contact_load_dialog import (
+        COLUMNA_WHATSAPP,
+        WhatsAppContactLoadDialog,
+    )
+
+    _usuario("admin923-vacio")
+    transporte = _transporte_de_carga("940")
+    cliente = Client.create(
+        name="Cliente Vacio",
+        cuit="30923000071",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    _orden_de_carga(cliente, transporte, 997, date(2026, 11, 3), LoadOrder.STATUS_ISSUED)
+
+    dialogo = WhatsAppContactLoadDialog(current_user="admin923-vacio")
+    boton = dialogo.findChild(QPushButton, f"whatsappLoadRowButton_{cliente.id}")
+    assert boton is not None
+    assert boton.text() == "Cargar WhatsApp"
+
+    errores = []
+
+    def revisar() -> None:
+        modal = app.activeModalWidget()
+        try:
+            assert isinstance(modal, ClientWhatsappEditDialog)
+            modal.whatsapp_input.setText("")
+            modal._guardar()
+        except BaseException as exc:  # noqa: BLE001 - el error se re-lanza abajo
+            errores.append(exc)
+        finally:
+            if modal is not None and modal.isVisible():
+                modal.reject()
+
+    QTimer.singleShot(0, revisar)
+    boton.click()
+    app.processEvents()
+
+    if errores:
+        raise errores[0]
+
+    # El numero sigue vacio: la fila no puede decir "Cargado".
+    assert Client.get_by_id(cliente.id).whatsapp_phone is None
+    assert dialogo.table.item(0, COLUMNA_WHATSAPP).text() == ""
+    assert boton.text() == "Cargar WhatsApp"
+    assert boton.isEnabled() is True
+
+
 def test_el_boton_de_cargar_whatsapp_guarda_el_numero_normalizado(db, app):
     """El boton de la fila abre el dialogo del cliente y guarda el numero (#923)."""
     from datetime import date

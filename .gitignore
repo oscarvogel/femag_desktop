@@ -44,6 +44,10 @@ orden_carga_*.pdf
 /auditoria.txt
 /log_test*.txt
 /pytest_release.txt
+# Borradores del cuerpo del issue y del PR (se arman en la raiz para subirlos
+# con gh). No son versionables: un "git add -A" no los tiene que arrastrar.
+.issue_body_tmp.md
+.pr_body_tmp.md
 
 # Muestras fiscales reales: traen CUIT, DNI y domicilios, nunca se versionan.
 # Para validar contra ellas usar scripts/compare_f150_golden_master.py con una

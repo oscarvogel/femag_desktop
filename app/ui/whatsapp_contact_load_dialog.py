@@ -237,9 +237,16 @@ class WhatsAppContactLoadDialog(QDialog):
                 celda.setText(numero)
             boton = self.table.cellWidget(fila, COLUMNA_ACCION)
             if boton is not None:
-                boton.setText("Cargado")
-                boton.setEnabled(False)
-        if pendiente.client_id not in self._cargados:
+                # Si el operador vacio el numero y lo guardo, el cliente sigue
+                # sin WhatsApp: el boton tiene que quedar habilitado para poder
+                # cargarlo, y no puede decir "Cargado" (#923).
+                if numero:
+                    boton.setText("Cargado")
+                    boton.setEnabled(False)
+                else:
+                    boton.setText("Cargar WhatsApp")
+                    boton.setEnabled(True)
+        if numero and pendiente.client_id not in self._cargados:
             self._cargados.append(pendiente.client_id)
         self._actualizar_estado()
 
