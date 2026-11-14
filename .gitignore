@@ -48,6 +48,8 @@ orden_carga_*.pdf
 # con gh). No son versionables: un "git add -A" no los tiene que arrastrar.
 .issue_body_tmp.md
 .pr_body_tmp.md
+.issue_*_tmp.md
+.pr_*_tmp.md
 
 # Muestras fiscales reales: traen CUIT, DNI y domicilios, nunca se versionan.
 # Para validar contra ellas usar scripts/compare_f150_golden_master.py con una
