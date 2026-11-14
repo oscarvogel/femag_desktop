@@ -258,8 +258,15 @@ python -m app.main --smoke
 
 ## 8. Pendientes
 
-- [ ] Verificar contra la base real que el backfill copia 26 + 8 y nada más.
+- [x] Verificar contra la base real que el backfill copia lo que corresponde y nada más (14/11/2026: 28 clientes + 8 vendedores; el teléfono general quedó intacto; la corrida es idempotente).
 - [ ] Cuando el admin active el flag, avisar en el #706 (que es quien consume el resolver).
+- [ ] En la planta: aplicar la columna por el camino oficial (`scripts/init_db.py`) y correr el backfill
+      con vista previa antes de `--aplicar`.
+- [ ] Issue aparte: el clasificador no acepta un internacional escrito **sin** el `+` (por ejemplo
+      `5491153088679`). Hoy el backfill y la edición guardan la forma canónica sin `+` y la pantalla de
+      envío muestra la forma internacional; el que escribe a mano ese formato sin `+` recibe un rechazo.
+- [ ] Issue de UX aparte: la grilla de Clientes ya excedía el ancho de la pantalla del cliente
+      (1638x969) antes de este cambio, y el botón nuevo suma 142 px a una fila que ya tenía 11 botones.
 
 **Decisiones menores tomadas al escribir esta especificación** (no requieren consulta):
 
@@ -279,3 +286,9 @@ python -m app.main --smoke
 | 13/11/2026 | Auditoría de la base real: 26 celular / 183 posible / 34 inválido / 661 vacío en 904 clientes; 8 de 9 vendedores con celular. El canal de correo no tiene ningún destinatario posible. |
 | 13/11/2026 | Decisiones tomadas con Oscar: campo dedicado, `phone` libre, backfill solo de celulares confirmados, fallback a `phone` si es celular, botón "WhatsApp" aparte, pantalla de carga en la app, preferencia apagada por defecto. |
 | 13/11/2026 | Diseño aprobado. Rama `feat/issue-923-whatsapp-dedicado` creada desde `main`. |
+| 14/11/2026 | Implementado en `feat/issue-923-whatsapp-dedicado`: campo, resolver, servicio, flag, diálogos, grilla, pantalla de carga, backfill con script y los envíos tomados del resolver. 11 tareas, cada una con revisión propia. |
+| 14/11/2026 | **La forma canónica:** lo que se guarda es el normalizado **sin `+`** (`5491153088679`), y ni el resolver ni el diálogo de envío aceptaban esa forma. El resolver ahora clasifica la forma canónica como si estuviera escrita con `+`, y el prefill de la pantalla muestra la forma internacional (`+549...`), que es la única que acepta el envío de hoy. Sin tocar el clasificador. |
+| 14/11/2026 | **El prefill decide qué número se muestra, no si se puede enviar:** con el flag apagado es exactamente el teléfono de siempre, y la validación sigue en el diálogo, como hoy. Los 5 flujos de envío (extracto, presupuesto, resumen de cartera del vendedor, seguimiento de recompra, ficha de cliente) toman el destino del resolver. |
+| 14/11/2026 | **Validación contra la base real** (MariaDB de WSL, `127.0.0.1:3308`, base `femag_desktop`): `scripts/init_db.py` (el camino oficial del administrador) creó las dos columnas `whatsapp_phone`. El backfill aplicó **28 clientes + 8 vendedores** (903 clientes, 8 vendedores); 875 contactos quedan sin destino a propósito para que los confirme el operador. El teléfono general no cambió (mismo conteo y mismo CRC32), quedaron 36 filas de auditoría `actualizar WhatsApp` y la segunda corrida copió 0. Al final la base se restauró con el dump limpio. |
+| 14/11/2026 | La copia local de la base se restauró desde el dump del 7/11, que es anterior al import del 13/11: eso revirtió en la **copia local** el resultado de ese import (4 clientes, 1 vendedor, 21 órdenes, 60 destinos y 1096 filas de auditoría). El origen del import (`/home/oscar/cb_restore/cyberbrain.bak`) quedó intacto y el importador se re-ejecuta por `legacy_id`. La base de producción del cliente no se tocó. |
+
