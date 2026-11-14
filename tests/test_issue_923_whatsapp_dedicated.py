@@ -1696,3 +1696,326 @@ def test_un_cliente_borrado_no_rompe_la_pantalla(db, app, monkeypatch):
 
     assert avisos, "El operador tiene que enterarse de que el cliente ya no esta"
     assert dialogo.table.rowCount() == 1
+
+
+# ------------------------------------------------------------------ backfill
+
+
+def test_el_backfill_solo_copia_celulares(db):
+    """Lo dudoso se deja vacio a proposito: que lo confirme el operador (#923)."""
+    from app.models.masters import Client, Salesperson
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    celular = Client.create(
+        name="Cliente Celular",
+        cuit="30923000015",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    dudoso = Client.create(
+        name="Cliente Dudoso",
+        cuit="30923000016",
+        iva_condition="RI",
+        phone="011 4441-2835",
+    )
+    vendedor = Salesperson.create(name="Vendedor Celular", phone="+5493758650849")
+
+    informe = WhatsAppContactService("admin923").backfill()
+
+    assert Client.get_by_id(celular.id).whatsapp_phone == "5491153088679"
+    assert Client.get_by_id(dudoso.id).whatsapp_phone is None
+    assert Salesperson.get_by_id(vendedor.id).whatsapp_phone == "5493758650849"
+    assert informe.copiados_clientes == 1
+    assert informe.copiados_vendedores == 1
+
+
+def test_el_backfill_es_idempotente(db):
+    """La segunda corrida no copia nada: el numero ya esta cargado (#923)."""
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente Idempotente",
+        cuit="30923000017",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    WhatsAppContactService("admin923").backfill()
+    segundo = WhatsAppContactService("admin923").backfill()
+
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+    assert segundo.copiados_clientes == 0
+    assert segundo.copiados_vendedores == 0
+
+
+def test_el_backfill_no_pisa_un_whatsapp_cargado(db):
+    """Lo que cargo el operador a mano no se toca (#923)."""
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente Manual",
+        cuit="30923000018",
+        iva_condition="RI",
+        phone="011 15 53088679",
+        whatsapp_phone="5491153000000",
+    )
+    informe = WhatsAppContactService("admin923").backfill()
+
+    assert cliente.whatsapp_phone == "5491153000000"
+    assert informe.copiados_clientes == 0
+
+
+def test_el_backfill_toma_el_whatsapp_vacio_como_vacio(db):
+    """Un campo vacio es un campo sin cargar: tambien entra (#923)."""
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente Vacio",
+        cuit="30923000019",
+        iva_condition="RI",
+        phone="011 15 53088679",
+        whatsapp_phone="",
+    )
+    informe = WhatsAppContactService("admin923").backfill()
+
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+    assert informe.copiados_clientes == 1
+
+
+def test_el_backfill_copia_tambien_a_los_clientes_inactivos(db):
+    """La copia es un hecho sobre el telefono, no sobre la actividad (#923)."""
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    inactivo = Client.create(
+        name="Cliente Inactivo",
+        cuit="30923000020",
+        iva_condition="RI",
+        phone="011 15 53088679",
+        active=False,
+    )
+    activo = Client.create(
+        name="Cliente Activo",
+        cuit="30923000021",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    informe = WhatsAppContactService("admin923").backfill()
+
+    assert Client.get_by_id(inactivo.id).whatsapp_phone == "5491153088679"
+    assert Client.get_by_id(activo.id).whatsapp_phone == "5491153088679"
+    assert informe.copiados_clientes == 2
+    # Y el informe dice cuantos de los copiados son inactivos.
+    assert informe.copiados_clientes_inactivos == 1
+
+
+def test_el_backfill_audita_cada_copia(db):
+    """Cada copia queda auditada como un cambio de WhatsApp (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client, Salesperson
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    usuario = _usuario("admin923")
+    cliente = Client.create(
+        name="Cliente Backfill",
+        cuit="30923000022",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    vendedor = Salesperson.create(name="Vendedor Backfill", phone="+5493758650849")
+
+    WhatsAppContactService("admin923").backfill()
+
+    registro_cliente = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Client:{cliente.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro_cliente is not None
+    assert registro_cliente.action == "actualizar WhatsApp"
+    assert registro_cliente.new_value == {"whatsapp_phone": "5491153088679"}
+    assert registro_cliente.user_id == usuario.id
+
+    registro_vendedor = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Salesperson:{vendedor.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro_vendedor is not None
+    assert registro_vendedor.action == "actualizar WhatsApp"
+    assert registro_vendedor.new_value == {"whatsapp_phone": "5493758650849"}
+
+
+def test_el_backfill_usa_el_usuario_del_argumento(db):
+    """El ``usuario`` del argumento pisa al del servicio (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    _usuario("admin923")
+    usuario_backfill = _usuario("backfill923")
+    cliente = Client.create(
+        name="Cliente Usuario",
+        cuit="30923000023",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+
+    WhatsAppContactService("admin923").backfill(usuario="backfill923")
+
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == f"Client:{cliente.id}")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro is not None
+    assert registro.user == "backfill923"
+    assert registro.user_id == usuario_backfill.id
+
+
+def test_la_vista_previa_del_backfill_no_escribe_nada(db):
+    """Con ``aplicar=False`` el recorrido es el mismo, pero no se escribe (#923)."""
+    from app.models.audit import AuditLog
+    from app.models.masters import Client
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    cliente = Client.create(
+        name="Cliente Vista Previa",
+        cuit="30923000024",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+    informe = WhatsAppContactService("admin923").backfill(aplicar=False)
+
+    assert Client.get_by_id(cliente.id).whatsapp_phone is None
+    assert informe.copiados_clientes == 1
+    assert AuditLog.select().where(AuditLog.action == "actualizar WhatsApp").count() == 0
+
+
+def test_el_informe_agrupa_los_omitidos_por_estado(db):
+    """El informe dice cuantos quedaron sin destino y por que (#923)."""
+    from app.models.masters import Client, Salesperson
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+
+    Client.create(
+        name="Cliente Posible",
+        cuit="30923000025",
+        iva_condition="RI",
+        phone="011 4441-2835",
+    )
+    Client.create(
+        name="Cliente Sin Telefono", cuit="30923000026", iva_condition="RI"
+    )
+    Salesperson.create(name="Vendedor Sin Telefono")
+
+    informe = WhatsAppContactService("admin923").backfill()
+
+    assert informe.omitidos_por_estado["cliente"]["posible"] == 1
+    assert informe.omitidos_por_estado["cliente"]["vacio"] == 1
+    assert informe.omitidos_por_estado["cliente"]["celular"] == 0
+    assert informe.omitidos_por_estado["vendedor"]["vacio"] == 1
+
+    # Cada omitido dice que tipo de contacto es, como se llama y por que quedo.
+    tipos = {omitido[0] for omitido in informe.omitidos}
+    assert tipos == {"cliente", "vendedor"}
+    dudoso = [omitido for omitido in informe.omitidos if omitido[1] == "Cliente Posible"][0]
+    assert dudoso[2].startswith("posible")
+
+
+# ------------------------------------------------------------------- script
+
+
+def _modulo_backfill():
+    """Carga el script del backfill como modulo, para probarlo en proceso."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    ruta = Path(__file__).parents[1] / "scripts" / "backfill_whatsapp_phones.py"
+    spec = importlib.util.spec_from_file_location("backfill_whatsapp_phones", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    sys.modules[spec.name] = modulo
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def test_el_script_sin_aplicar_no_escribe_nada(db, capsys):
+    """La vista previa del script no toca la base (#923)."""
+    import json
+
+    from app.models.masters import Client
+
+    script = _modulo_backfill()
+    cliente = Client.create(
+        name="Cliente Script",
+        cuit="30923000027",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+
+    codigo = script.main(["--json"], database=db)
+    salida = json.loads(capsys.readouterr().out)
+
+    assert codigo == 0
+    assert salida["modo"] == "vista_previa"
+    assert salida["copiados_clientes"] == 1
+    # Y el numero sigue sin cargarse: la vista previa no escribe.
+    assert Client.get_by_id(cliente.id).whatsapp_phone is None
+
+
+def test_el_script_con_aplicar_copia_y_es_idempotente(db, capsys):
+    """Con ``--aplicar`` el script copia, y la segunda vez no copia mas (#923)."""
+    import json
+
+    from app.models.masters import Client
+
+    script = _modulo_backfill()
+    cliente = Client.create(
+        name="Cliente Script Aplicado",
+        cuit="30923000028",
+        iva_condition="RI",
+        phone="011 15 53088679",
+    )
+
+    codigo = script.main(["--aplicar", "--json"], database=db)
+    salida = json.loads(capsys.readouterr().out)
+
+    assert codigo == 0
+    assert salida["modo"] == "aplicado"
+    assert salida["copiados_clientes"] == 1
+    assert Client.get_by_id(cliente.id).whatsapp_phone == "5491153088679"
+
+    codigo = script.main(["--aplicar", "--json"], database=db)
+    salida = json.loads(capsys.readouterr().out)
+
+    assert codigo == 0
+    assert salida["copiados_clientes"] == 0
+
+
+def test_el_script_resume_los_omitidos_por_estado(db, capsys):
+    """El resumen humano agrupa lo que queda sin destino (#923)."""
+    from app.models.masters import Client
+
+    script = _modulo_backfill()
+    Client.create(
+        name="Cliente Resumen",
+        cuit="30923000029",
+        iva_condition="RI",
+        phone="011 4441-2835",
+    )
+    Client.create(name="Cliente Sin Telefono", cuit="30923000030", iva_condition="RI")
+
+    codigo = script.main([], database=db)
+    salida = capsys.readouterr().out
+
+    assert codigo == 0
+    assert "posible" in salida
+    assert "vacio" in salida
+    # Con muchos omitidos no se imprime uno por linea: el detalle va en el JSON.
+    assert "detalle completo" in salida

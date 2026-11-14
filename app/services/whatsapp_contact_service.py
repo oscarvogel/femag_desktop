@@ -12,7 +12,7 @@ general y puede guardar un segundo numero.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.models.masters import Client, Salesperson
 from app.services.audit_service import AuditService
@@ -20,8 +20,12 @@ from app.services.whatsapp_phone_classifier import (
     ESTADO_CELULAR,
     ESTADO_INVALIDO,
     ESTADO_POSIBLE,
+    ESTADO_VACIO,
     clasificar_telefono,
 )
+
+#: Los estados del telefono, en el orden en que se los muestra al operador.
+ESTADOS_DE_TELEFONO = (ESTADO_CELULAR, ESTADO_POSIBLE, ESTADO_INVALIDO, ESTADO_VACIO)
 
 #: Que hacer segun el estado del numero. El consejo tiene que corresponder al
 #: motivo: cargar el "15" no arregla un campo con dos telefonos, y un
@@ -43,6 +47,25 @@ class ClientePendiente:
     whatsapp_phone: str
     estado_telefono: str
     ultima_orden: str
+
+
+@dataclass(frozen=True)
+class BackfillInforme:
+    """Que copio el backfill y que dejo sin destino (#923).
+
+    ``omitidos`` es una lista de ``(tipo, nombre, motivo)``. El motivo lleva
+    el estado del telefono adelante ("posible: ..."), asi el resumen puede
+    agrupar por estado sin volver a clasificar.
+
+    ``omitidos_por_estado`` cuenta los omitidos por tipo de contacto y por
+    estado del telefono: ``{"cliente": {"posible": 3, ...}, ...}``.
+    """
+
+    copiados_clientes: int = 0
+    copiados_vendedores: int = 0
+    copiados_clientes_inactivos: int = 0
+    omitidos: list = field(default_factory=list)
+    omitidos_por_estado: dict = field(default_factory=dict)
 
 
 class WhatsAppContactService:
@@ -166,6 +189,92 @@ class WhatsAppContactService:
             reverse=True,
         )
         return pendientes
+
+    def backfill(
+        self, *, usuario: str | None = None, aplicar: bool = True
+    ) -> BackfillInforme:
+        """Copia al campo nuevo los celulares que ya estan cargados (#923).
+
+        Solo copia lo que el clasificador da como **celular**: un numero dudoso
+        se deja vacio a proposito, para que el operador lo confirme.
+
+        Es idempotente: no pisa un WhatsApp ya cargado, asi que la segunda
+        corrida copia 0.
+
+        Se copian **todos** los clientes, tambien los inactivos: la copia es un
+        hecho sobre el telefono, no sobre la actividad del cliente. Si manana
+        el cliente se reactiva, ya tiene el numero cargado.
+
+        Con ``aplicar=False`` no se escribe nada: el recorrido es el mismo y el
+        informe dice que se copiaria. Eso es lo que usa la vista previa del
+        script.
+
+        El ``usuario`` pisa el usuario de auditoria del servicio (si viene
+        ``None`` se usa ``self.current_user``): el backfill corre desde la
+        terminal, donde no hay nadie logueado.
+        """
+        servicio = self
+        if usuario and usuario.strip():
+            servicio = WhatsAppContactService(
+                usuario.strip(), audit_service=self.audit_service
+            )
+
+        omitidos: list[tuple[str, str, str]] = []
+        por_estado: dict[str, dict[str, int]] = {
+            "cliente": {estado: 0 for estado in ESTADOS_DE_TELEFONO},
+            "vendedor": {estado: 0 for estado in ESTADOS_DE_TELEFONO},
+        }
+
+        copiados_clientes = 0
+        copiados_clientes_inactivos = 0
+        for cliente in Client.select().where(self._sin_whatsapp(Client)):
+            clasificacion = clasificar_telefono(cliente.phone)
+            if clasificacion.estado != ESTADO_CELULAR:
+                omitidos.append(("cliente", cliente.name, self._motivo(clasificacion)))
+                por_estado["cliente"][clasificacion.estado] += 1
+                continue
+            if aplicar:
+                servicio.set_client_whatsapp_phone(cliente, cliente.phone)
+            copiados_clientes += 1
+            if not cliente.active:
+                copiados_clientes_inactivos += 1
+
+        copiados_vendedores = 0
+        for vendedor in Salesperson.select().where(self._sin_whatsapp(Salesperson)):
+            clasificacion = clasificar_telefono(vendedor.phone)
+            if clasificacion.estado != ESTADO_CELULAR:
+                omitidos.append(("vendedor", vendedor.name, self._motivo(clasificacion)))
+                por_estado["vendedor"][clasificacion.estado] += 1
+                continue
+            if aplicar:
+                servicio.set_salesperson_whatsapp_phone(vendedor, vendedor.phone)
+            copiados_vendedores += 1
+
+        return BackfillInforme(
+            copiados_clientes=copiados_clientes,
+            copiados_vendedores=copiados_vendedores,
+            copiados_clientes_inactivos=copiados_clientes_inactivos,
+            omitidos=omitidos,
+            omitidos_por_estado=por_estado,
+        )
+
+    @staticmethod
+    def _sin_whatsapp(modelo):
+        """Los contactos que todavia no tienen WhatsApp: vacio o NULL (#923).
+
+        Un campo vacio es lo mismo que un campo sin cargar: los dos se
+        completan. Es el mismo criterio que usa la pantalla de pendientes.
+        """
+        return (modelo.whatsapp_phone.is_null(True)) | (modelo.whatsapp_phone == "")
+
+    @staticmethod
+    def _motivo(clasificacion) -> str:
+        """El motivo con el estado adelante: "posible: ..." (#923).
+
+        Asi el resumen puede agrupar los omitidos por estado sin tener que
+        volver a clasificar los telefonos.
+        """
+        return f"{clasificacion.estado}: {clasificacion.motivo}".strip()
 
     @staticmethod
     def _ultimas_ordenes(*, solo_emitidas: bool = True) -> dict[int, str]:
