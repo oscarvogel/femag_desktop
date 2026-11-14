@@ -24,6 +24,20 @@ formato internacional cuando el texto empieza con "+". Por eso el resolver
 clasifica el numero dedicado como si estuviera escrito con el "+": asi el
 mismo valor sirve para decidir (es un celular) y para mostrar (se precarga
 "+5491153088679", que el dialogo de envio acepta sin cambios).
+
+Lo que el puente no puede distinguir
+------------------------------------
+
+El puente no puede distinguir un movil escrito con el "15" de un fijo escrito
+sin el: "011 15 4441-2835" y "011 4441-2835" dan los mismos digitos en la
+forma canonica ("5491144412835"). El puente resuelve ese caso como **celular**
+(el movil), porque es el unico caso en que el numero dedicado se puede mandar.
+
+Por eso el servicio solo deja guardar numeros que el clasificador ya dio como
+celular **antes** de normalizar: "011 4441-2835" se rechaza como dudoso y no
+llega a la base. El riesgo real es una fila editada a mano en la base: si
+alguien escribe a mano "5491144412835", el puente lo va a tratar como celular,
+puede que sea un fijo.
 """
 
 from __future__ import annotations

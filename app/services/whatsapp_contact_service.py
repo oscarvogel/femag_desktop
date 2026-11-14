@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from app.models.masters import Client, Salesperson
 from app.services.audit_service import AuditService
 from app.services.whatsapp_contact_resolver import (
+    forma_internacional,
     prefill_contacto,
     resolver_contacto,
 )
@@ -122,9 +123,22 @@ class WhatsAppContactService:
     def destino_cliente(self, client: Client, *, preferir_dedicado: bool | None = None) -> str:
         """El numero al que se le puede mandar WhatsApp a este cliente.
 
+        Devuelve el numero en **forma internacional con el "+"**
+        ("+5491153088679"). Es la unica forma que aceptan los consumidores
+        reales del destino: ``normalize_phone`` (la que usan ``create_attempt``
+        y ``create_text_attempt``), ``build_whatsapp_url`` y
+        ``WhatsAppSendDialog``.
+
+        Ojo con la trampa: la forma **sin** el "+" ("5491153088679") es la que
+        queda **guardada** en ``whatsapp_envios.destinatario``, porque el envio
+        normaliza por dentro. Son dos formas del mismo numero, no dos numeros
+        distintos: lo que se devuelve es la forma enviable, lo que se guarda es
+        la forma canonica.
+
         Con el flag apagado es **exactamente** el numero que usa el envio de
-        hoy: el telefono general, normalizado. Con el flag encendido manda el
-        numero dedicado, si hay uno.
+        hoy: el telefono general. Lo que cambia es solo la forma en que se
+        devuelve (con el "+"), no el numero al que se manda. Con el flag
+        encendido manda el numero dedicado, si hay uno.
 
         Si no hay un numero que se pueda mandar, levanta ``ValueError`` con el
         mismo mensaje que ve hoy el operador.
@@ -138,7 +152,11 @@ class WhatsAppContactService:
     def destino_vendedor(
         self, salesperson: Salesperson, *, preferir_dedicado: bool | None = None
     ) -> str:
-        """El numero al que se le puede mandar WhatsApp a este vendedor."""
+        """El numero al que se le puede mandar WhatsApp a este vendedor.
+
+        Mismo contrato que ``destino_cliente``: se devuelve en forma
+        internacional con el "+", que es la que aceptan el envio y el dialogo.
+        """
         return self._destino(
             whatsapp_phone=getattr(salesperson, "whatsapp_phone", None),
             phone=getattr(salesperson, "phone", None),
@@ -149,7 +167,17 @@ class WhatsAppContactService:
     def _destino(
         *, whatsapp_phone, phone, preferir_dedicado: bool | None
     ) -> str:
-        """El destino validado: el numero normalizado, sin el "+"."""
+        """El destino validado: el numero en forma internacional con el "+".
+
+        El numero del resolver es el canonico sin el "+" ("5491153088679").
+        Se devuelve con el "+" porque es la forma que aceptan
+        ``normalize_phone``, ``build_whatsapp_url`` y el dialogo de envio: la
+        forma sin el "+" no la acepta ninguno de los dos y el error parece un
+        numero malo sobre un numero que el propio sistema dio por valido.
+
+        Lo que queda **guardado** en ``whatsapp_envios.destinatario`` sigue
+        siendo la forma sin el "+", porque el envio normaliza por dentro.
+        """
         contacto = resolver_contacto(
             whatsapp_phone=whatsapp_phone,
             phone=phone,
@@ -157,9 +185,11 @@ class WhatsAppContactService:
         )
         if not contacto.enviable:
             raise ValueError(contacto.mensaje)
-        # El numero del resolver es el canonico sin "+": se valida en forma
-        # internacional, que es como lo acepta el envio.
-        return normalize_phone(f"+{contacto.numero}")
+        numero = forma_internacional(contacto.numero)
+        # Se sigue validando antes de devolver (formato internacional y chequeo
+        # de 8 a 20 digitos).
+        normalize_phone(numero)
+        return numero
 
     @staticmethod
     def normalizar(numero: str) -> str:

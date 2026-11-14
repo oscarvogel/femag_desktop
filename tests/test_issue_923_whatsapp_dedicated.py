@@ -2232,7 +2232,7 @@ def test_con_el_flag_apagado_el_destino_es_el_telefono_normalizado(
     )
 
     destino = WhatsAppContactService("admin923").destino_cliente(cliente)
-    assert destino == "5491153088679"
+    assert destino == "+5491153088679"
 
 
 def test_con_el_flag_encendido_el_destino_es_el_numero_dedicado(
@@ -2250,7 +2250,7 @@ def test_con_el_flag_encendido_el_destino_es_el_numero_dedicado(
     )
 
     servicio = WhatsAppContactService("admin923")
-    assert servicio.destino_cliente(cliente) == "5491153000000"
+    assert servicio.destino_cliente(cliente) == "+5491153000000"
 
 
 def test_con_el_flag_encendido_sin_dedicado_el_destino_cae_al_telefono(
@@ -2265,7 +2265,7 @@ def test_con_el_flag_encendido_sin_dedicado_el_destino_cae_al_telefono(
     )
 
     destino = WhatsAppContactService("admin923").destino_cliente(cliente)
-    assert destino == "5491153088679"
+    assert destino == "+5491153088679"
 
 
 def test_con_el_flag_encendido_un_dedicado_roto_no_da_destino(
@@ -2312,14 +2312,15 @@ def test_el_destino_del_vendedor_usa_el_dedicado(monkeypatch, tmp_path, db):
     )
 
     destino = WhatsAppContactService("admin923").destino_vendedor(vendedor)
-    assert destino == "5491153000000"
+    assert destino == "+5491153000000"
 
 
 def test_el_destino_con_el_flag_apagado_es_identico_al_de_hoy(monkeypatch, tmp_path, db):
-    """Con el flag apagado el destino es ``normalize_phone(telefono)`` (#923).
+    """Con el flag apagado el destino es el telefono de siempre (#923).
 
     Se comparan los dos caminos en todos los casos: mismo numero y mismo
-    mensaje de error.
+    mensaje de error. El destino se devuelve en forma internacional (con el
+    "+"), asi que el numero se compara en esa forma.
     """
     from app.services.whatsapp_contact_service import WhatsAppContactService
     from app.services.whatsapp_envio_service import normalize_phone
@@ -2352,7 +2353,49 @@ def test_el_destino_con_el_flag_apagado_es_identico_al_de_hoy(monkeypatch, tmp_p
         except ValueError as exc:
             obtenido = None
             error_obtenido = str(exc)
+        if esperado is not None:
+            # El destino se devuelve en la forma enviable (con el "+").
+            esperado = f"+{esperado}"
         assert (obtenido, error_obtenido) == (esperado, error_esperado), numero
+
+
+def test_el_destino_devuelto_se_puede_mandar(monkeypatch, tmp_path, db):
+    """El destino que devuelve el servicio se puede mandar (#923).
+
+    Este es el contrato: el valor devuelto tiene que pasar ``normalize_phone``
+    y ``build_whatsapp_url`` sin error. Con la forma sin el "+" (la que se
+    guarda en la base) ninguno de los dos lo acepta, y el error parece un
+    numero malo sobre un numero que el propio sistema dio por valido.
+    """
+    from app.services.account_statement_share_service import build_whatsapp_url
+    from app.services.whatsapp_contact_service import WhatsAppContactService
+    from app.services.whatsapp_envio_service import normalize_phone
+
+    servicio = WhatsAppContactService("admin923")
+
+    for indice, (flag, digitos) in enumerate(
+        ((None, "5491153088679"), ("1", "5491153000000"))
+    ):
+        _flag(monkeypatch, tmp_path, flag)
+        cliente = _cliente_923(
+            "Cliente Destino Enviable",
+            f"3092300007{indice}",
+            phone="011 15 53088679",
+            whatsapp_phone="5491153000000",
+        )
+
+        destino = servicio.destino_cliente(cliente)
+
+        assert destino.startswith("+"), destino
+        # El envio real: create_attempt normaliza por dentro y guarda los
+        # digitos, asi que el numero al que se manda no cambia.
+        assert normalize_phone(destino) == digitos
+        # El otro consumidor real del destino.
+        assert (
+            build_whatsapp_url("Cliente Destino Enviable", destino)
+            == f"https://wa.me/{digitos}?text=Hola+Cliente+Destino+Enviable%2C+"
+            "le+compartimos+su+extracto+de+cuenta+corriente."
+        )
 
 
 # --------------------------------------------------------------- la trampa
