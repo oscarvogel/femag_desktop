@@ -203,11 +203,13 @@ def test_set_phone_no_toca_la_lista_ni_el_resto(db):
 # --------------------------------------------------------------------- UI
 
 
-def test_clientes_page_has_phone_button(db):
-    from PyQt5.QtWidgets import QApplication, QPushButton
+def test_el_telefono_se_edita_en_la_ficha_del_cliente(db):
+    """#928: el telefono se edita en Editar, no en un boton aparte de la grilla."""
+    from PyQt5.QtWidgets import QApplication, QLineEdit, QPushButton
 
+    from app.models.masters import Client
     from app.services.permission_service import PermissionService
-    from app.ui.master_abm import build_client_abm_page
+    from app.ui.master_abm import ClientEntryDialog, build_client_abm_page
 
     PermissionService().seed_defaults()
     app = QApplication.instance() or QApplication([])
@@ -219,9 +221,16 @@ def test_clientes_page_has_phone_button(db):
     )
     app.processEvents()
 
-    button = page.findChild(QPushButton, "editClientPhoneButton")
-    assert button is not None
-    assert button.text() == "Teléfono"
+    assert page.findChild(QPushButton, "editClientPhoneButton") is None
+    assert page.findChild(QPushButton, "editClientWhatsappButton") is None
+
+    cliente = Client.create(name="Cliente 705", cuit="30705000001", iva_condition="RI")
+    dialog = ClientEntryDialog(
+        current_user=admin.username, record_id=cliente.id
+    )
+    app.processEvents()
+    assert dialog.findChild(QLineEdit, "clientPhoneInput") is not None
+    assert dialog.findChild(QLineEdit, "clientWhatsappInput") is not None
 
 
 def test_dialog_muestra_la_clasificacion_en_vivo(db):

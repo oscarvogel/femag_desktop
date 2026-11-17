@@ -33,6 +33,7 @@ from app.services import ledger_query_service
 from app.services.permission_service import PermissionService
 from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.services.whatsapp_contact_service import prefill_cliente
+from app.ui.whatsapp_phone_edit_widgets import prefill_whatsapp
 from app.ui.whatsapp_send import WhatsAppTextDialog, WhatsAppTextWorker
 
 DETAIL_MODELS = {
@@ -529,6 +530,11 @@ class MasterDetailDialog(QDialog):
             ("CUIT", client.cuit or "Sin CUIT", "clientDetailCuitValue"),
             ("Condición IVA", client.iva_condition, "clientDetailIvaValue"),
             ("Teléfono", client.phone or "Sin teléfono", "clientDetailPhoneValue"),
+            (
+                "WhatsApp",
+                prefill_whatsapp(client.whatsapp_phone) or "Sin WhatsApp",
+                "clientDetailWhatsappValue",
+            ),
             ("Email", client.email or "Sin email", "clientDetailEmailValue"),
             ("Contacto", client.contact or "Sin contacto", "clientDetailContactValue"),
             ("Vendedor", salesperson, "clientDetailSalespersonValue"),
