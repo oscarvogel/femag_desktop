@@ -67,6 +67,65 @@ def default_account_statement_body(client_name: str) -> str:
     )
 
 
+def build_document_message(
+    *,
+    recipient: str | None = None,
+    recipients: Iterable[str] | None = None,
+    sender: str,
+    pdf_path: str | Path,
+    subject: str,
+    body: str,
+) -> EmailMessage:
+    """Arma un correo con un PDF adjunto (#706).
+
+    Es el mismo armado que usa el extracto de cuenta corriente, pero con
+    asunto y cuerpo propios: el presupuesto automatico no es un extracto y no
+    puede llevar el texto del extracto.
+    """
+    addresses = _normalize_recipients(recipient=recipient, recipients=recipients)
+    if not addresses:
+        raise ValueError("El destinatario no tiene un correo electronico configurado.")
+    path = Path(pdf_path)
+    if not path.is_file():
+        raise ValueError("No se encontro el PDF para adjuntar.")
+
+    message = EmailMessage()
+    message["Subject"] = subject.strip()
+    message["From"] = sender
+    message["To"] = ", ".join(addresses)
+    message.set_content(body.strip())
+    message.add_attachment(
+        path.read_bytes(),
+        maintype="application",
+        subtype="pdf",
+        filename=path.name,
+    )
+    return message
+
+
+def send_document(
+    *,
+    recipient: str | None = None,
+    recipients: Iterable[str] | None = None,
+    pdf_path: str | Path,
+    subject: str,
+    body: str,
+    settings: SmtpSettings | None = None,
+    smtp_factory=smtplib.SMTP,
+) -> None:
+    """Envia por correo un PDF ya generado, con asunto y cuerpo propios (#706)."""
+    config = settings or SmtpSettings.from_env()
+    message = build_document_message(
+        recipient=recipient,
+        recipients=recipients,
+        sender=config.sender,
+        pdf_path=pdf_path,
+        subject=subject,
+        body=body,
+    )
+    _send_message(message, config, smtp_factory)
+
+
 def build_account_statement_message(
     *,
     client_name: str,
@@ -121,6 +180,10 @@ def send_account_statement(
         subject=subject,
         body=body,
     )
+    _send_message(message, config, smtp_factory)
+
+
+def _send_message(message: EmailMessage, config: SmtpSettings, smtp_factory) -> None:
     try:
         with smtp_factory(config.host, config.port, timeout=20) as smtp:
             if config.use_tls:
