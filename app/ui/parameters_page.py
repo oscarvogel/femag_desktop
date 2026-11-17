@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PyQt5.QtWidgets import QLabel, QTabWidget, QVBoxLayout, QWidget
 
+from app.ui.budget_auto_send_configuration import BudgetAutoSendConfigurationPage
 from app.ui.fiscal_configuration import FiscalConfigurationPage
 from app.ui.remittances import RemittanceSeriesPage
 from app.ui.webapp_configuration import WebappConfigurationPage
@@ -33,13 +34,17 @@ class ParametersPage(QWidget):
         self.pages = [
             RemittanceSeriesPage(current_user=current_user, parent=self),
             WhatsAppConfigurationPage(user=user, current_user=current_user, parent=self),
+            BudgetAutoSendConfigurationPage(
+                user=user, current_user=current_user, parent=self
+            ),
             WebappConfigurationPage(user=user, current_user=current_user, parent=self),
             FiscalConfigurationPage(user=user, current_user=current_user, parent=self),
         ]
         self.tabs.addTab(self.pages[0], "Numeración")
         self.tabs.addTab(self.pages[1], "WhatsApp")
-        self.tabs.addTab(self.pages[2], "Servidor web")
-        self.tabs.addTab(self.pages[3], "Documentos fiscales")
+        self.tabs.addTab(self.pages[2], "Presupuestos")
+        self.tabs.addTab(self.pages[3], "Servidor web")
+        self.tabs.addTab(self.pages[4], "Documentos fiscales")
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
