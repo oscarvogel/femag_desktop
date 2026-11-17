@@ -159,9 +159,28 @@ def emit_order_with_stock_check(operation_service, order, *, parent=None):
     from app.services.load_order_operation_service import LoadOrderStockShortfallError
 
     try:
-        return operation_service.issue(order)
+        issued = operation_service.issue(order)
     except LoadOrderStockShortfallError as exc:
         dialog = LoadOrderStockShortfallDialog(order, exc.faltantes, parent=parent)
         if dialog.exec_() != QDialog.Accepted:
             return None
-        return operation_service.issue(order, stock_override_reason=dialog.reason())
+        issued = operation_service.issue(order, stock_override_reason=dialog.reason())
+
+    _start_budget_auto_send(issued, operation_service, parent=parent)
+    return issued
+
+
+def _start_budget_auto_send(issued, operation_service, *, parent=None) -> None:
+    """Dispara el envio automatico, fuera de la emision y sin bloquearla (#706).
+
+    El flag lo decide el puesto: con ``FEMAG_PRESUPUESTOS_AUTOENVIO`` apagado
+    (el default) no se hace nada y emitir se comporta como siempre.
+    """
+    from app.ui.load_order_budget_auto_send import start_budget_auto_send
+
+    start_budget_auto_send(
+        issued,
+        current_user=operation_service.current_user,
+        prints_dir=operation_service.prints_dir,
+        parent=parent,
+    )

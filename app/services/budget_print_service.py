@@ -122,7 +122,13 @@ class BudgetPrintService:
         )
         return target
 
-    def export_pdf(self, budget: Budget, output_dir: str | Path) -> Path:
+    def export_pdf(
+        self,
+        budget: Budget,
+        output_dir: str | Path,
+        *,
+        audit_action: str = "imprimir",
+    ) -> Path:
         budget = Budget.get_by_id(budget.id)
         # Un histórico inconsistente no bloquea la impresión: se avisa por
         # auditoría y el PDF se arma con los totales de su propio detalle.
@@ -135,7 +141,7 @@ class BudgetPrintService:
         self.audit_service.record(
             user=self.current_user,
             module="Presupuestos",
-            action="imprimir",
+            action=audit_action,
             record_ref=f"Budget:{budget.id}",
             new_value={
                 "budget_number": budget.budget_number,
