@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -28,7 +29,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.models.dgr import DgrLocality
-from app.models.f150 import F150Batch
+from app.models.f150 import F150Batch, F150BatchRemittance
 from app.models.masters import Client
 from app.models.remittances import Remittance
 from app.services.dgr_validation import (
@@ -310,11 +311,20 @@ class F150Page(QWidget):
         title = QLabel("Generación F150 por lote de remitos")
         title.setObjectName("f150PageTitle")
         root.addWidget(title)
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("f150Tabs")
+        root.addWidget(self.tabs, 1)
+        pending_tab = QWidget()
+        pending_layout = QVBoxLayout(pending_tab)
+        self.tabs.addTab(pending_tab, "Remitos sin generar")
+        history_tab = QWidget()
+        self.tabs.addTab(history_tab, "Historial")
+
         help_text = QLabel(
             "Seleccione remitos emitidos. Los incluidos en un lote anterior no pueden volver a generarse."
         )
         help_text.setWordWrap(True)
-        root.addWidget(help_text)
+        pending_layout.addWidget(help_text)
 
         filters = QGroupBox("Filtros")
         grid = QGridLayout(filters)
@@ -329,10 +339,6 @@ class F150Page(QWidget):
         self.status.addItem("Todos", None)
         for status in Remittance.STATUSES:
             self.status.addItem(status, status)
-        self.inclusion = QComboBox()
-        self.inclusion.addItem("No incluidos", False)
-        self.inclusion.addItem("Todos", None)
-        self.inclusion.addItem("Incluidos", True)
         apply_button = QPushButton("Aplicar filtros")
         grid.addWidget(QLabel("Desde"), 0, 0)
         grid.addWidget(self.date_from, 0, 1)
@@ -344,10 +350,8 @@ class F150Page(QWidget):
         grid.addWidget(self.number, 1, 3)
         grid.addWidget(QLabel("Estado"), 2, 0)
         grid.addWidget(self.status, 2, 1)
-        grid.addWidget(QLabel("Inclusión"), 2, 2)
-        grid.addWidget(self.inclusion, 2, 3)
         grid.addWidget(apply_button, 3, 3)
-        root.addWidget(filters)
+        pending_layout.addWidget(filters)
 
         # Resumen de pendientes: al emitir se genera el F150 solo, pero si
         # falta un dato del formato el remito queda esperando. Conviene que el
@@ -358,7 +362,7 @@ class F150Page(QWidget):
         #: Ultimo resumen calculado. Se guarda aparte del widget para poder
         #: verificarlo sin depender del ciclo de vida de Qt.
         self.pending_summary = ""
-        root.addWidget(self.pending_label)
+        pending_layout.addWidget(self.pending_label)
 
         actions = QHBoxLayout()
         generate = QPushButton("Generar archivo F150")
@@ -373,27 +377,57 @@ class F150Page(QWidget):
         self.configure_origin_button = QPushButton("Configurar origen DGR")
         self.configure_origin_button.setObjectName("configureF150OriginButton")
         actions.addWidget(self.configure_origin_button)
-        root.addLayout(actions)
+        pending_layout.addLayout(actions)
 
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
             ["Generar", "Formulario", "Fecha", "Cliente", "Transportista", "Camión", "Chofer", "Estado", "Validación"]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        root.addWidget(self.table, 2)
+        pending_layout.addWidget(self.table, 1)
 
-        history_group = QGroupBox("Historial de lotes")
-        history_layout = QVBoxLayout(history_group)
-        self.history = QTableWidget(0, 6)
+        history_layout = QVBoxLayout(history_tab)
+        history_filters = QGroupBox("Filtros del historial")
+        history_grid = QGridLayout(history_filters)
+        self.history_use_dates = QCheckBox("Filtrar por fecha")
+        self.history_date_from = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.history_date_to = QDateEdit(QDate.currentDate())
+        for date_edit in (self.history_date_from, self.history_date_to):
+            date_edit.setCalendarPopup(True)
+            date_edit.setEnabled(False)
+            self.history_use_dates.toggled.connect(date_edit.setEnabled)
+        self.history_user = QComboBox()
+        self.history_user.addItem("Todos", None)
+        history_apply = QPushButton("Aplicar filtros")
+        history_apply.setObjectName("applyF150HistoryFiltersButton")
+        history_apply.clicked.connect(self._refresh_history)
+        history_grid.addWidget(self.history_use_dates, 0, 0)
+        history_grid.addWidget(QLabel("Desde"), 0, 1)
+        history_grid.addWidget(self.history_date_from, 0, 2)
+        history_grid.addWidget(QLabel("Hasta"), 0, 3)
+        history_grid.addWidget(self.history_date_to, 0, 4)
+        history_grid.addWidget(QLabel("Usuario"), 1, 1)
+        history_grid.addWidget(self.history_user, 1, 2, 1, 3)
+        history_grid.addWidget(history_apply, 1, 5)
+        history_layout.addWidget(history_filters)
+        self.history_summary = QLabel()
+        self.history_summary.setObjectName("f150HistorySummary")
+        history_layout.addWidget(self.history_summary)
+        self.history = QTableWidget(0, 7)
+        self.history.setObjectName("f150HistoryTable")
+        self.history.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.history.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.history.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.history.setWordWrap(False)
         self.history.setHorizontalHeaderLabels(
-            ["Lote", "Fecha", "Archivo", "Remitos", "Renglones", "Usuario"]
+            ["Lote", "Fecha", "Archivo", "Remitos", "Renglones", "Usuario", "Formularios"]
         )
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        history_layout.addWidget(self.history)
+        history_layout.addWidget(self.history, 1)
         self.recover_button = QPushButton("Recuperar TXT del lote seleccionado")
         self.recover_button.setObjectName("recoverF150Button")
         history_layout.addWidget(self.recover_button)
-        root.addWidget(history_group, 1)
+        self.tabs.currentChanged.connect(self._tab_changed)
 
         apply_button.clicked.connect(self.refresh)
         generate.clicked.connect(self._generate)
@@ -409,7 +443,18 @@ class F150Page(QWidget):
         for client in Client.select().where(Client.active == True).order_by(Client.name):  # noqa: E712
             self.client.addItem(client.name, client.id)
 
+    def _tab_changed(self, _index: int) -> None:
+        self.refresh()
+
     def refresh(self) -> None:
+        if self.tabs.currentIndex() == 1:
+            self._refresh_history()
+            return
+        selected_ids = set()
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None and item.checkState() == Qt.Checked:
+                selected_ids.add(item.data(Qt.UserRole))
         self._refresh_origin()
         rows = self.service.eligible_remittances(
             date_from=self.date_from.date().toPyDate(),
@@ -417,7 +462,7 @@ class F150Page(QWidget):
             client_id=self.client.currentData(),
             number=self.number.text(),
             status=self.status.currentData(),
-            included=self.inclusion.currentData(),
+            included=False,
         )
         self.table.setRowCount(len(rows))
         pendientes = 0
@@ -436,7 +481,9 @@ class F150Page(QWidget):
             # lo rechaza nombrando el campo. Antes el checkbox quedaba
             # deshabilitado y el operador no podia avanzar sin saber por que.
             select_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
-            select_item.setCheckState(Qt.Unchecked)
+            select_item.setCheckState(
+                Qt.Checked if remittance.id in selected_ids else Qt.Unchecked
+            )
             detail = "Listo" if not issues else "; ".join(issues)
             select_item.setToolTip(detail)
             select_item.setBackground(
@@ -458,7 +505,6 @@ class F150Page(QWidget):
                 item.setToolTip(str(value))
                 self.table.setItem(row_index, column, item)
         self._refresh_pending_summary(len(rows), pendientes)
-        self._refresh_history()
 
     def _refresh_pending_summary(self, total: int, pendientes: int) -> None:
         """Pone en pantalla cuantos remitos del rango estan listos y cuantos parados."""
@@ -543,7 +589,35 @@ class F150Page(QWidget):
 
 
     def _refresh_history(self) -> None:
-        batches = list(F150Batch.select().order_by(F150Batch.id.desc()))
+        # Los filtros de pendientes nunca intervienen en el historial.
+        selected_user = self.history_user.currentData()
+        users = F150Batch.select(F150Batch.created_by).distinct().order_by(F150Batch.created_by)
+        self.history_user.clear()
+        self.history_user.addItem("Todos", None)
+        for batch in users:
+            if batch.created_by:
+                self.history_user.addItem(batch.created_by, batch.created_by)
+        index = self.history_user.findData(selected_user)
+        self.history_user.setCurrentIndex(max(index, 0))
+        query = F150Batch.select().order_by(F150Batch.id.desc())
+        if self.history_use_dates.isChecked():
+            query = query.where(
+                F150Batch.process_date >= self.history_date_from.date().toPyDate(),
+                F150Batch.process_date <= self.history_date_to.date().toPyDate(),
+            )
+        if self.history_user.currentData() is not None:
+            query = query.where(F150Batch.created_by == self.history_user.currentData())
+        batches = list(query)
+        forms = {batch.id: [] for batch in batches}
+        if forms:
+            for inclusion in F150BatchRemittance.select().where(F150BatchRemittance.batch.in_(list(forms))):
+                forms[inclusion.batch_id].append(
+                    f"{inclusion.point_of_sale}-{inclusion.physical_number}"
+                )
+        self.history_summary.setText(
+            f"{len(batches)} lote(s) generado(s). Seleccione uno para recuperar el TXT."
+            if batches else "No hay lotes para los filtros del historial."
+        )
         self.history.setRowCount(len(batches))
         for row, batch in enumerate(batches):
             values = [
@@ -553,9 +627,12 @@ class F150Page(QWidget):
                 batch.remittance_count,
                 batch.detail_count,
                 batch.created_by or "",
+                ", ".join(forms[batch.id]),
             ]
             for column, value in enumerate(values):
-                self.history.setItem(row, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                self.history.setItem(row, column, item)
             self.history.item(row, 0).setData(Qt.UserRole, batch.id)
 
     def _selected_remittances(self) -> list[Remittance]:
