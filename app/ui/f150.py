@@ -450,6 +450,11 @@ class F150Page(QWidget):
         if self.tabs.currentIndex() == 1:
             self._refresh_history()
             return
+        selected_ids = set()
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None and item.checkState() == Qt.Checked:
+                selected_ids.add(item.data(Qt.UserRole))
         self._refresh_origin()
         rows = self.service.eligible_remittances(
             date_from=self.date_from.date().toPyDate(),
@@ -476,7 +481,9 @@ class F150Page(QWidget):
             # lo rechaza nombrando el campo. Antes el checkbox quedaba
             # deshabilitado y el operador no podia avanzar sin saber por que.
             select_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
-            select_item.setCheckState(Qt.Unchecked)
+            select_item.setCheckState(
+                Qt.Checked if remittance.id in selected_ids else Qt.Unchecked
+            )
             detail = "Listo" if not issues else "; ".join(issues)
             select_item.setToolTip(detail)
             select_item.setBackground(

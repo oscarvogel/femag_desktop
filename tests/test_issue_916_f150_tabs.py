@@ -77,6 +77,17 @@ def test_historial_filtra_fecha_y_usuario_sin_cambiar_pendientes(page):
     assert page.history.rowCount() == 2
 
 
+def test_consultar_historial_conserva_remitos_marcados(page):
+    _issued_remittance()
+    page.date_from.setDate(QDate(2026, 1, 1))
+    page.date_to.setDate(QDate(2026, 12, 31))
+    page.refresh()
+    page.table.item(0, 0).setCheckState(Qt.Checked)
+    page.tabs.setCurrentIndex(1)
+    page.tabs.setCurrentIndex(0)
+    assert page.table.item(0, 0).checkState() == Qt.Checked
+
+
 def test_generar_ver_en_historial_y_recuperar_mismos_bytes(
     page, tmp_path, monkeypatch,
 ):
