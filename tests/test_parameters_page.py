@@ -27,12 +27,14 @@ def test_parameters_page_groups_current_and_future_settings(db):
         assert labels == [
             "Numeración",
             "WhatsApp",
+            "Presupuestos",
             "Servidor web",
             "Documentos fiscales",
         ]
         assert tabs.widget(0) is not None
         assert tabs.widget(1).objectName() == "whatsappConfigurationPage"
-        assert tabs.widget(2).objectName() == "webappConfigurationPage"
-        assert tabs.widget(3).objectName() == "fiscalConfigurationPage"
+        assert tabs.widget(2).objectName() == "budgetAutoSendConfigurationPage"
+        assert tabs.widget(3).objectName() == "webappConfigurationPage"
+        assert tabs.widget(4).objectName() == "fiscalConfigurationPage"
     finally:
         window.close()
