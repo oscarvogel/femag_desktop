@@ -16,7 +16,7 @@ de dump y su contenido:
 
 **La cuenta corriente de los productores/colonos vive en `femagfab`.** La base
 comercial no tiene `movi`, ni `documentos`, ni `proveedo`: no tiene de dónde
-sacar esa deuda, y su histórico está parado en 2019.
+sacar esa posición, y su histórico está parado en 2019.
 
 Ojo con la trampa: los dos archivos se llaman parecido y una copia "actualizada"
 puede pisar la buena. Para saber cuál es cuál, mirá el esquema y la fecha
@@ -49,19 +49,42 @@ es de **Misiones, Argentina**. Evidencia verificada:
 - FEMAG Desktop usa `ARS` por defecto en la cuenta corriente de clientes
   (`app/models/accounting.py`).
 
-## Qué se debe y qué no se sabe
+## La posición con los productores tiene dos lados
 
-Medido sobre el dump del 20/11/2026:
+El legacy **no guarda el signo de la deuda**: guarda un `SALDO` en el ticket y
+otro en el pagaré, y los suma. Pero no son la misma cosa:
+
+- El **ticket** (`movi`) con saldo pendiente es lo que **la empresa le debe al
+  productor**: la materia prima entró y todavía no se le pagó.
+- El **pagaré** (`documentos`) con saldo pendiente es lo que **el productor le
+  debe a la empresa**: un anticipo que se descuenta del pago de los tickets.
+
+Sumarlos sin signo —lo que hace el ERP, que muestra 777.463.536,77 ARS— da un
+número que no significa nada. Medido sobre el dump del 20/11/2026:
+
+| | Legacy (suma de saldos) | Importado en FEMAG Desktop | Productores |
+|---|---:|---:|---:|
+| **A pagar** (tickets de materia prima impagos) | 746.092.698,72 | 754.559.253,72 | 31 personas (32 códigos) |
+| **A cobrar** (anticipos en pagarés) | 31.370.838,05 | 30.029.752,60 | 40 personas (43 códigos) |
+| **Neto a pagar** | 714.721.860,67 | 724.529.501,12 | 68 personas |
+| Excluido por falta de datos (queda registrado) | — | 1.696.085,45 | 2 tickets + 4 pagarés |
+
+La diferencia entre el legacy y lo importado está explicada: 6 tickets con el
+saldo corregido (+8.821.555) menos 6 documentos excluidos.
+
+Otros números del mismo corte:
 
 | | Monto (ARS) |
 |---|---:|
-| Deuda viva con productores (71 de 1.142 del maestro) | 777.463.536,77 |
-| Deuda importada en FEMAG Desktop (277 documentos) | 784.589.006,32 |
-| Deuda de 2026 | 750.579.121 (96%) |
-| Deuda de las dos cooperativas más grandes | 560.535.342 (72%) |
+| Todo lo que la empresa debe es de 2026 | 754.559.253,72 (100%) |
+| Las dos cooperativas más grandes | 562.881.842,24 (74,6% de lo que se debe) |
+| Tickets pendientes **sin ningún egreso de caja** que los cancele | 750.429.590,57 (224 de 228 tickets) |
 
-La diferencia (+7.125.469,55) está explicada: 6 tickets con el saldo corregido
-menos 6 documentos excluidos.
+El cruce con la caja es el dato más fuerte: de los 228 tickets que el legacy
+marca impagos, **224 no tienen ningún pago registrado en `movcaja`** —ni por
+número de ticket ni por fecha e importe. Eso no prueba que no se hayan pagado:
+prueba que el legacy no lo registró. Las dos cooperativas, que concentran el
+74,6% de lo que la empresa debe, son justo las que no tienen ese registro.
 
 ## Los siete problemas del legacy
 
@@ -87,13 +110,18 @@ menos 6 documentos excluidos.
 Se importa **solo lo confiable**, y lo que queda afuera **queda registrado**
 en `supplier_document_exclusion` con su monto, su motivo y su detalle.
 
+Los tickets y los pagarés se importan en la misma tabla pero **no significan lo
+mismo**: el ticket pendiente es lo que la empresa debe, el pagaré pendiente es lo
+que el productor debe. `SupplierDocument.kind` es lo que separa los dos, y todo
+el que arma la posición tiene que sumarlos con signo.
+
 | Documento | Regla | Filas |
 |---|---|---:|
 | Ticket (`movi`) | `SALDO != 0` y `TOTALK > 0` y `PRECIO > 0` | 228 |
 | Ticket | saldo corregido (`SALDO == PRECIO`) → entra con el importe calculado | 6 de las 228 |
 | Ticket | sin kilos o precio utilizable → **fuera** | 2 |
 | Ticket | `SALDO = 0` → ya pagado, no es deuda | 5.084 |
-| Pagaré (`documentos`) | `0 < SALDO <= IMPORTE` | 49 |
+| Pagaré (`documentos`) | `0 < SALDO <= IMPORTE` → anticipo a favor de la empresa | 49 |
 | Pagaré | `SALDO < 0` (sobrepago) o `SALDO > IMPORTE` → **fuera** | 4 |
 | Pagaré | `SALDO = 0` → ya pagado | 86 |
 
@@ -108,9 +136,9 @@ importados quedan con `date_inferred = True` y con la ventana guardada.
 |---|---|
 | Issue de tracking | #937 |
 | Maestro de proveedores (etapa 1) | #938 · PR #942 |
-| Documentos de deuda (etapa 2) | #939 · PR #943 |
+| Documentos de la cuenta corriente (etapa 2) | #939 · PR #943 |
 | Libro de movimientos (etapa 3) | #940 |
-| Pantalla de deuda (etapa 4) | #941 |
+| Pantalla de posición con el productor (etapa 4) | #941 |
 | Importador de receipts que ya existía | `app/importers/femagfab.py` |
 | Servicio de importación de documentos | `app/services/supplier_document_import_service.py` |
 | Modelos | `app/models/suppliers.py` |
