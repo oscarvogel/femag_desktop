@@ -141,6 +141,73 @@ class LegacySupplier:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class LegacySupplierTicket:
+    """Ticket de ingreso de materia prima (`femagfab.movi`).
+
+    `payable_kg` es el TOTALK (kilos netos a pagar) y `price_per_ton` el
+    PRECIO del legacy, que esta expresado **por tonelada**: el importe del
+    ticket es `kilos x precio / 1000`. `legacy_balance` es el SALDO que tiene
+    guardado el legacy, que a veces no coincide con ese calculo (#939).
+    """
+
+    comp: str
+    received_at: datetime | None
+    supplier_code: str
+    product_code: str
+    payable_kg: Decimal
+    price_per_ton: Decimal
+    legacy_balance: Decimal
+
+    def payload(self) -> dict:
+        return {
+            "comp": self.comp,
+            "received_at": str(self.received_at)[:19],
+            "supplier_code": self.supplier_code,
+            "product_code": self.product_code,
+            "payable_kg": str(self.payable_kg),
+            "price_per_ton": str(self.price_per_ton),
+            "legacy_balance": str(self.legacy_balance),
+        }
+
+    @property
+    def source_hash(self) -> str:
+        raw = json.dumps(self.payload(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class LegacySupplierPromissoryNote:
+    """Pagare emitido a un proveedor (`femagfab.documentos`).
+
+    El legacy guarda `IMPORTE` (lo emitido) y `SALDO` (lo pendiente). Cuando
+    se edita un pagare, el legacy copia el importe al saldo, asi que el saldo
+    deja de ser el pendiente real (#939).
+    """
+
+    code: str
+    supplier_code: str
+    issued_on: date | None
+    amount: Decimal
+    balance: Decimal
+    concept: str
+
+    def payload(self) -> dict:
+        return {
+            "code": self.code,
+            "supplier_code": self.supplier_code,
+            "issued_on": str(self.issued_on)[:10],
+            "amount": str(self.amount),
+            "balance": str(self.balance),
+            "concept": self.concept,
+        }
+
+    @property
+    def source_hash(self) -> str:
+        raw = json.dumps(self.payload(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 class FemagFabSource:
     """Consulta femagfab exclusivamente con sentencias SELECT."""
 
@@ -202,6 +269,67 @@ class FemagFabSource:
             cursorclass=pymysql.cursors.DictCursor, autocommit=True,
             read_timeout=15, write_timeout=15,
         )
+
+    def fetch_supplier_tickets(self) -> list[LegacySupplierTicket]:
+        """Trae los tickets de materia prima (`movi`) con su saldo.
+
+        Trae todos, no solo los que tienen saldo: la deduplicacion de fechas
+        (#939) necesita conocer el orden completo por `COMP`.
+        """
+        sql = """
+            SELECT COMP comp, FECHA received_at, PROVEEDOR supplier_code,
+                   COALESCE(PRODUCTO, '') product_code,
+                   COALESCE(TOTALK, 0) payable_kg,
+                   COALESCE(PRECIO, 0) price_per_ton,
+                   COALESCE(SALDO, 0) legacy_balance
+              FROM movi
+             ORDER BY COMP
+        """
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                return [
+                    LegacySupplierTicket(
+                        comp=str(row["comp"] or "").strip(),
+                        received_at=row["received_at"],
+                        supplier_code=str(row["supplier_code"] or "").strip(),
+                        product_code=str(row["product_code"] or "").strip(),
+                        payable_kg=self._decimal(row["payable_kg"]),
+                        price_per_ton=self._decimal(row["price_per_ton"]),
+                        legacy_balance=self._decimal(row["legacy_balance"]),
+                    )
+                    for row in cur.fetchall()
+                ]
+        finally:
+            conn.close()
+
+    def fetch_supplier_promissory_notes(self) -> list[LegacySupplierPromissoryNote]:
+        """Trae los pagares (`documentos`) con su importe y su saldo."""
+        sql = """
+            SELECT CODIGO code, PROVEEDOR supplier_code, FECHA issued_on,
+                   COALESCE(IMPORTE, 0) amount, COALESCE(SALDO, 0) balance,
+                   COALESCE(CONCEPTO, '') concept
+              FROM documentos
+             ORDER BY CODIGO
+        """
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                return [
+                    LegacySupplierPromissoryNote(
+                        code=str(row["code"] or "").strip(),
+                        supplier_code=str(row["supplier_code"] or "").strip(),
+                        issued_on=row["issued_on"],
+                        amount=self._decimal(row["amount"]),
+                        balance=self._decimal(row["balance"]),
+                        concept=str(row["concept"] or "").strip(),
+                    )
+                    for row in cur.fetchall()
+                ]
+        finally:
+            conn.close()
 
     def fetch_day(self, day: date) -> list[LegacyReceipt]:
         return self.fetch_range(day, day)
