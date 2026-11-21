@@ -1,4 +1,12 @@
-from peewee import BooleanField, CharField, DateTimeField, ForeignKeyField, TextField
+from peewee import (
+    BooleanField,
+    CharField,
+    DateField,
+    DateTimeField,
+    DecimalField,
+    ForeignKeyField,
+    TextField,
+)
 
 from app.models.base import BaseModel, utc_now
 
@@ -9,7 +17,7 @@ class Supplier(BaseModel):
     El legacy `femagfab.proveedo` identifica al productor con un `CODIGO` de
     cuatro caracteres, sin DNI ni CUIT, y **repite nombres**: 23 grupos donde la
     misma persona aparece con dos codigos y su deuda queda partida entre los
-    dos (TERESCHUK ALBERTO CESAR 0993 + 1025 = 1.233.645 Gs).
+    dos (TERESCHUK ALBERTO CESAR 0993 + 1025 = 1.233.645 ARS).
 
     Por eso el maestro de FEMAG Desktop separa las dos cosas:
 
@@ -72,3 +80,100 @@ class SupplierLegacyCode(BaseModel):
     class Meta:
         table_name = "supplier_legacy_code"
         indexes = ((("code",), False),)
+
+
+class SupplierDocument(BaseModel):
+    """Documento que genera deuda con un proveedor (#939).
+
+    Son los dos documentos del legacy: el **ticket de materia prima**
+    (`femagfab.movi`) y el **pagare** (`femagfab.documentos`). Cada uno se
+    importa con su importe original y con el saldo que el legacy tiene
+    pendiente.
+
+    El legacy no tiene libro de movimientos: descuenta el `SALDO` del documento
+    cuando alguien paga, sin dejar rastro. Por eso este modelo guarda el saldo
+    **como estaba al importar**, y a partir de ahi la imputacion de pagos es
+    cosa de FEMAG Desktop (#940).
+
+    Las marcas de la fila cuentan que se le hizo al dato de origen:
+
+    - ``balance_corrected``: el legacy guardaba el precio por tonelada en vez
+      del total. El saldo importado es el recalculado con la misma formula del
+      legacy (``kilos x precio / 1000``).
+    - ``date_inferred``: la fecha del legacy no era confiable (bloque con
+      ``FECHA = 2002-01-01``) y se dedujo de los tickets vecinos por numero de
+      ``COMP``.
+    """
+
+    KIND_TICKET = "raw_material_ticket"
+    KIND_PROMISSORY_NOTE = "promissory_note"
+    KINDS = (KIND_TICKET, KIND_PROMISSORY_NOTE)
+
+    supplier = ForeignKeyField(
+        Supplier, backref="documents", on_delete="CASCADE"
+    )
+    kind = CharField(max_length=32)
+    source_key = CharField(max_length=180, unique=True)
+    source_instance = CharField(max_length=80, default="femagfab")
+    # `COMP` del ticket o codigo del pagare, tal como en el legacy.
+    source_code = CharField(max_length=12)
+    issued_at = DateField(null=True)
+    date_inferred = BooleanField(default=False)
+    # Ventana dentro de la cual se puede afirmar la fecha, cuando se dedujo.
+    date_bracket_from = DateField(null=True)
+    date_bracket_to = DateField(null=True)
+    product_code = CharField(max_length=2, null=True)
+    quantity_kg = DecimalField(max_digits=14, decimal_places=2, null=True)
+    price_per_ton = DecimalField(max_digits=12, decimal_places=2, null=True)
+    # Importe original: lo que se le debia cuando se emitio el documento.
+    amount = DecimalField(max_digits=14, decimal_places=2)
+    # Saldo pendiente al momento de la importacion.
+    balance = DecimalField(max_digits=14, decimal_places=2)
+    # El legacy no tiene columna de moneda: es una sola moneda, la de la
+    # empresa (pesos argentinos). Se deja explicito para que el documento no
+    # dependa de esa suposicion, igual que en la cuenta corriente de clientes.
+    currency = CharField(max_length=8, default="ARS")
+    balance_corrected = BooleanField(default=False)
+    description = CharField(max_length=120, null=True)
+    source_hash = CharField(max_length=64)
+    imported_at = DateTimeField(default=utc_now)
+
+    class Meta:
+        table_name = "supplier_document"
+        indexes = (
+            (("supplier", "issued_at"), False),
+            (("kind",), False),
+        )
+
+    @property
+    def kind_label(self) -> str:
+        if self.kind == self.KIND_TICKET:
+            return "Ticket de materia prima"
+        return "Pagare"
+
+
+class SupplierDocumentExclusion(BaseModel):
+    """Documento del legacy que **no** se importo, con el motivo (#939).
+
+    Excluir es esconder: cada exclusion es deuda que la pantalla no va a
+    mostrar. Por eso queda guardada, con su monto y su motivo, para poder
+    publicarla y revisarla.
+    """
+
+    REASON_NO_QUANTITY = "sin_kilos_o_precio"
+    REASON_BALANCE_OUT_OF_RANGE = "saldo_fuera_de_rango"
+    REASON_WITHOUT_SUPPLIER = "sin_proveedor"
+    REASON_ALREADY_IMPORTED = "ya_importado"
+
+    kind = CharField(max_length=32)
+    source_key = CharField(max_length=180, unique=True)
+    source_code = CharField(max_length=12)
+    supplier_code = CharField(max_length=4, null=True)
+    amount = DecimalField(max_digits=14, decimal_places=2)
+    reason = CharField(max_length=64)
+    detail = TextField(null=True)
+    detected_at = DateTimeField(default=utc_now)
+
+    class Meta:
+        table_name = "supplier_document_exclusion"
+        indexes = ((("reason",), False),)
