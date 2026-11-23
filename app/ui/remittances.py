@@ -1114,6 +1114,17 @@ class RemittancesPage(QWidget):
         if not remittance.physical_point_of_sale or not remittance.physical_number:
             return
         identity = f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+        # Aviso antes de pedir la ruta: si falta un dato (por ejemplo la
+        # localidad DGR del chofer) se dice que falta y donde se corrige, en
+        # lugar de abrir el dialogo de guardado y fallar despues (#946).
+        issues = F150BatchService(self.current_user).validation_issues(remittance)
+        if issues:
+            QMessageBox.warning(
+                self,
+                "F150 pendiente",
+                F150BatchService.pending_message(identity, issues),
+            )
+            return
         file_name = f"F150-{remittance.physical_point_of_sale}-{remittance.physical_number}.txt"
         suggested = (self.f150_output_dir / file_name).resolve()
         selected, _ = QFileDialog.getSaveFileName(
