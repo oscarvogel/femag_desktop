@@ -179,4 +179,3 @@ repo y la suite aborta en la recolección (`ModuleNotFoundError: No module named
 $env:QT_QPA_PLATFORM="offscreen"
 .\.venv\Scripts\python.exe -m pytest -q
 ```
-
