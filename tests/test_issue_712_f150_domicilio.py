@@ -120,8 +120,10 @@ def test_generacion_escribe_domicilio_en_campo_13_y_31(db, tmp_path):
 def test_validacion_reporta_falta_de_domicilio(db):
     remittance = _escenario(db, carrier_address=None, driver_address=None)
     issues = F150BatchService.validation_issues(remittance)
-    assert "transportista: falta domicilio" in issues
-    assert "chofer: falta domicilio" in issues
+    # Desde #946 el mensaje dice que falta el domicilio fiscal (Rentas) y que
+    # tampoco hay un domicilio de respaldo, y nombra al registro.
+    assert any(issue.startswith("transportista: falta domicilio") for issue in issues)
+    assert any(issue.startswith("chofer: falta domicilio") for issue in issues)
 
 
 def test_generacion_bloquea_sin_domicilio(db, tmp_path):

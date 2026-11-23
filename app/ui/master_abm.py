@@ -1263,17 +1263,31 @@ class CarrierEntryDialog(QDialog):
         self.cuit_input.setObjectName("carrierCuitInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("carrierPhoneInput")
+        self.locality_combo = create_locality_combo(
+            object_name="carrierLocalityInput", include_empty=True
+        )
+        self.fiscal_address_input = QLineEdit()
+        self.fiscal_address_input.setObjectName("carrierFiscalAddressInput")
+        self.fiscal_address_input.setPlaceholderText(
+            "El que figura en Rentas: es el que va al F150"
+        )
         self.address_input = QLineEdit()
         self.address_input.setObjectName("carrierAddressInput")
-        self.address_input.setPlaceholderText("Lo que va al F150")
+        self.address_input.setPlaceholderText(
+            "Respaldo: se usa en el F150 si no hay domicilio fiscal (Rentas)"
+        )
         form.addWidget(QLabel("Nombre"), 0, 0)
         form.addWidget(self.name_input, 0, 1)
         form.addWidget(QLabel("CUIT"), 1, 0)
         form.addWidget(self.cuit_input, 1, 1)
         form.addWidget(QLabel("Telefono"), 2, 0)
         form.addWidget(self.phone_input, 2, 1)
-        form.addWidget(QLabel("Domicilio"), 3, 0)
-        form.addWidget(self.address_input, 3, 1)
+        form.addWidget(QLabel("Localidad DGR"), 3, 0)
+        form.addWidget(self.locality_combo, 3, 1)
+        form.addWidget(QLabel("Domicilio fiscal (Rentas)"), 4, 0)
+        form.addWidget(self.fiscal_address_input, 4, 1)
+        form.addWidget(QLabel("Domicilio"), 5, 0)
+        form.addWidget(self.address_input, 5, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveCarrierButton", self._save)
@@ -1285,6 +1299,9 @@ class CarrierEntryDialog(QDialog):
         self.name_input.setText(carrier.name)
         self.cuit_input.setText(carrier.cuit or "")
         self.phone_input.setText(carrier.phone or "")
+        if carrier.locality_id is not None:
+            _set_combo(self.locality_combo, carrier.locality_id)
+        self.fiscal_address_input.setText(carrier.fiscal_address or "")
         self.address_input.setText(carrier.address or "")
 
     def _save(self) -> None:
@@ -1294,6 +1311,18 @@ class CarrierEntryDialog(QDialog):
                 "Complete el nombre del transportista.", focus_widget=self.name_input
             )
             return
+        locality_id = selected_locality_id(self.locality_combo)
+        locality = (
+            DgrLocality.get_or_none(DgrLocality.id == locality_id)
+            if locality_id is not None
+            else None
+        )
+        if locality_id is not None and locality is None:
+            self.feedback.show_warning(
+                "La localidad DGR seleccionada ya no existe.",
+                focus_widget=self.locality_combo,
+            )
+            return
         try:
             if self.record_id is None:
                 self.saved_record = MasterService(self.current_user).create_carrier(
@@ -1301,6 +1330,8 @@ class CarrierEntryDialog(QDialog):
                     cuit=self.cuit_input.text().strip() or None,
                     phone=self.phone_input.text().strip() or None,
                     address=self.address_input.text().strip() or None,
+                    fiscal_address=self.fiscal_address_input.text().strip() or None,
+                    locality=locality,
                 )
             else:
                 carrier = Carrier.get_by_id(self.record_id)
@@ -1308,6 +1339,8 @@ class CarrierEntryDialog(QDialog):
                 carrier.cuit = self.cuit_input.text().strip() or None
                 carrier.phone = self.phone_input.text().strip() or None
                 carrier.address = self.address_input.text().strip() or None
+                carrier.fiscal_address = self.fiscal_address_input.text().strip() or None
+                carrier.locality = locality
                 carrier.save()
                 self.saved_record = carrier
             self.accept()
@@ -1337,9 +1370,19 @@ class DriverEntryDialog(QDialog):
         self.document_input.setObjectName("driverDocumentInput")
         self.phone_input = QLineEdit()
         self.phone_input.setObjectName("driverPhoneInput")
+        self.locality_combo = create_locality_combo(
+            object_name="driverLocalityInput", include_empty=True
+        )
+        self.fiscal_address_input = QLineEdit()
+        self.fiscal_address_input.setObjectName("driverFiscalAddressInput")
+        self.fiscal_address_input.setPlaceholderText(
+            "El que figura en Rentas: es el que va al F150"
+        )
         self.address_input = QLineEdit()
         self.address_input.setObjectName("driverAddressInput")
-        self.address_input.setPlaceholderText("Lo que va al F150")
+        self.address_input.setPlaceholderText(
+            "Respaldo: se usa en el F150 si no hay domicilio fiscal (Rentas)"
+        )
         form.addWidget(QLabel("Transportista"), 0, 0)
         form.addWidget(self.carrier_combo, 0, 1)
         form.addWidget(QLabel("Nombre"), 1, 0)
@@ -1350,8 +1393,12 @@ class DriverEntryDialog(QDialog):
         form.addWidget(self.document_input, 3, 1)
         form.addWidget(QLabel("Telefono"), 4, 0)
         form.addWidget(self.phone_input, 4, 1)
-        form.addWidget(QLabel("Domicilio"), 5, 0)
-        form.addWidget(self.address_input, 5, 1)
+        form.addWidget(QLabel("Localidad DGR"), 5, 0)
+        form.addWidget(self.locality_combo, 5, 1)
+        form.addWidget(QLabel("Domicilio fiscal (Rentas)"), 6, 0)
+        form.addWidget(self.fiscal_address_input, 6, 1)
+        form.addWidget(QLabel("Domicilio"), 7, 0)
+        form.addWidget(self.address_input, 7, 1)
         layout.addLayout(form)
         self.feedback = _entry_feedback(layout)
         _entry_footer(layout, self, "saveDriverButton", self._save)
@@ -1380,6 +1427,9 @@ class DriverEntryDialog(QDialog):
         self.name_input.setText(driver.name)
         self.document_input.setText(driver.document or "")
         self.phone_input.setText(driver.phone or "")
+        if driver.locality_id is not None:
+            _set_combo(self.locality_combo, driver.locality_id)
+        self.fiscal_address_input.setText(driver.fiscal_address or "")
         self.address_input.setText(driver.address or "")
 
     def _save(self) -> None:
@@ -1389,6 +1439,18 @@ class DriverEntryDialog(QDialog):
             focus_widget = self.carrier_combo if carrier_id is None else self.name_input
             self.feedback.show_warning(
                 "Complete transportista y nombre del chofer.", focus_widget=focus_widget
+            )
+            return
+        locality_id = selected_locality_id(self.locality_combo)
+        locality = (
+            DgrLocality.get_or_none(DgrLocality.id == locality_id)
+            if locality_id is not None
+            else None
+        )
+        if locality_id is not None and locality is None:
+            self.feedback.show_warning(
+                "La localidad DGR seleccionada ya no existe.",
+                focus_widget=self.locality_combo,
             )
             return
         try:
@@ -1409,6 +1471,8 @@ class DriverEntryDialog(QDialog):
                     document=self.document_input.text().strip() or None,
                     phone=self.phone_input.text().strip() or None,
                     address=self.address_input.text().strip() or None,
+                    fiscal_address=self.fiscal_address_input.text().strip() or None,
+                    locality=locality,
                 )
             else:
                 driver = Driver.get_by_id(self.record_id)
@@ -1418,6 +1482,8 @@ class DriverEntryDialog(QDialog):
                 driver.document = self.document_input.text().strip() or None
                 driver.phone = self.phone_input.text().strip() or None
                 driver.address = self.address_input.text().strip() or None
+                driver.fiscal_address = self.fiscal_address_input.text().strip() or None
+                driver.locality = locality
                 driver.save()
                 self.saved_record = driver
             self.accept()

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from peewee import fn
 
+from app.models.dgr import DgrLocality
 from app.models.masters import (
     PRODUCT_KIND_LABELS,
     STOCK_ROLE_FINISHED,
@@ -355,6 +356,8 @@ class MasterService:
         document: str | None = None,
         phone: str | None = None,
         address: str | None = None,
+        fiscal_address: str | None = None,
+        locality: DgrLocality | None = None,
     ) -> Driver:
         if carrier is None:
             raise ValueError("El chofer debe estar asociado a un transportista.")
@@ -365,6 +368,8 @@ class MasterService:
             document=document,
             phone=phone,
             address=address,
+            fiscal_address=fiscal_address,
+            locality=locality,
         )
         self._record(
             "Driver",
@@ -373,6 +378,7 @@ class MasterService:
                 "name": name,
                 "carrier_id": carrier.id,
                 "usual_truck_id": usual_truck.id if usual_truck is not None else None,
+                "locality_id": locality.id if locality is not None else None,
             },
         )
         return row
@@ -383,9 +389,26 @@ class MasterService:
         cuit: str | None = None,
         phone: str | None = None,
         address: str | None = None,
+        fiscal_address: str | None = None,
+        locality: DgrLocality | None = None,
     ) -> Carrier:
-        row = Carrier.create(name=name, cuit=cuit, phone=phone, address=address)
-        self._record("Carrier", row, {"name": name, "cuit": cuit})
+        row = Carrier.create(
+            name=name,
+            cuit=cuit,
+            phone=phone,
+            address=address,
+            fiscal_address=fiscal_address,
+            locality=locality,
+        )
+        self._record(
+            "Carrier",
+            row,
+            {
+                "name": name,
+                "cuit": cuit,
+                "locality_id": locality.id if locality is not None else None,
+            },
+        )
         return row
 
     def create_truck(

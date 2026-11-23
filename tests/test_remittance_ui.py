@@ -193,12 +193,21 @@ def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
         QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2])
     )
 
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: (str(tmp_path / "elegido" / "rentas.txt"), ""))
+    asked_paths = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *_a, **_k: (asked_paths.append(True) or str(tmp_path / "elegido" / "rentas.txt"), ""),
+    )
     page._generate_f150_after_emit(remittance)
 
     assert len(warnings) == 1
-    assert "no se genero" in warnings[0]
+    # Desde #946 el aviso sale **antes** de pedir donde guardar: el operador
+    # sabe que falta sin haber elegido una carpeta.
+    assert asked_paths == []
+    assert "todavia no se puede generar su F150" in warnings[0]
     assert "transportista: falta domicilio" in warnings[0]
+    assert "Maestros" in warnings[0]
     assert list(tmp_path.glob("F150-*")) == []
     # El remito sigue emitido y pendiente: se genera desde la pantalla de F150.
     assert F150BatchService.is_included(remittance) is False
