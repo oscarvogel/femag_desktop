@@ -32,11 +32,11 @@ class BudgetAutoSendConfigurationPage(QWidget):
         self.user = user
         self.current_user = current_user
 
-        title = QLabel("Envio automatico de presupuestos")
+        title = QLabel("Envío automático de presupuestos")
         title.setObjectName("pageTitle")
         subtitle = QLabel(
             "Al emitir una orden de carga, enviar el presupuesto a cada cliente por "
-            "WhatsApp y correo. Es una configuracion central: la comparten todos los "
+            "WhatsApp y correo. Es una configuración central: la comparten todos los "
             "puestos."
         )
         subtitle.setWordWrap(True)
@@ -53,7 +53,7 @@ class BudgetAutoSendConfigurationPage(QWidget):
         self.save_button = QPushButton("Guardar")
         self.save_button.setObjectName("budgetAutoSendSaveButton")
         self.save_button.clicked.connect(self._save)
-        self.clear_button = QPushButton("Usar la configuracion del puesto")
+        self.clear_button = QPushButton("Usar la configuración del puesto")
         self.clear_button.setObjectName("budgetAutoSendClearButton")
         self.clear_button.clicked.connect(self._clear)
 
@@ -72,7 +72,7 @@ class BudgetAutoSendConfigurationPage(QWidget):
             "Cada presupuesto tiene un solo destinatario: el vendedor del cliente si "
             "lo tiene, si no el cliente. Si falta el WhatsApp o el correo, ese canal "
             "queda omitido con el motivo y la orden se emite igual. El correo "
-            "empezara a salir cuando haya direcciones cargadas."
+            "empezará a salir cuando haya direcciones cargadas."
         )
         help_text.setWordWrap(True)
 
@@ -98,7 +98,7 @@ class BudgetAutoSendConfigurationPage(QWidget):
         self.clear_button.setEnabled(allowed)
         if not allowed:
             self.save_button.setToolTip(
-                "No tiene permiso para configurar el envio automatico."
+                "No tiene permiso para configurar el envío automático."
             )
 
         central = BudgetAutoSendConfigurationService.load()
@@ -108,20 +108,20 @@ class BudgetAutoSendConfigurationPage(QWidget):
         if central is None:
             estado = "habilitado" if self.enabled_check.isChecked() else "deshabilitado"
             self.status.setText(
-                "Sin configuracion central. Hoy manda la configuracion del puesto: "
+                "Sin configuración central. Hoy manda la configuración del puesto: "
                 f"{estado}."
             )
         else:
             estado = "habilitado" if central else "deshabilitado"
             self.status.setText(
-                f"Configuracion central: envio automatico {estado}. "
+                f"Configuración central: envío automático {estado}. "
                 "Se aplica a todos los puestos."
             )
 
     def _save(self) -> None:
         if not self._allowed():
             QMessageBox.warning(
-                self, "Envio automatico de presupuestos", "No tiene permiso para esta accion."
+                self, "Envío automático de presupuestos", "No tiene permiso para esta acción."
             )
             return
         previous = BudgetAutoSendConfigurationService.load()
@@ -135,22 +135,23 @@ class BudgetAutoSendConfigurationPage(QWidget):
             record_ref="envio automatico de presupuestos",
             old_value={"habilitado": previous},
             new_value={"habilitado": actual},
-            observation="Envio automatico de presupuestos al emitir una orden.",
+            observation="Envío automático de presupuestos al emitir una orden.",
         )
         self.refresh()
         QMessageBox.information(
             self,
-            "Envio automatico de presupuestos",
-            "La configuracion se guardo para todos los puestos.",
+            "Envío automático de presupuestos",
+            "La configuración se guardó para todos los puestos.",
         )
 
     def _clear(self) -> None:
         if not self._allowed():
             QMessageBox.warning(
-                self, "Envio automatico de presupuestos", "No tiene permiso para esta accion."
+                self, "Envío automático de presupuestos", "No tiene permiso para esta acción."
             )
             return
-        if BudgetAutoSendConfigurationService.load() is None:
+        previous = BudgetAutoSendConfigurationService.load()
+        if previous is None:
             self.refresh()
             return
         BudgetAutoSendConfigurationService.clear()
@@ -159,15 +160,15 @@ class BudgetAutoSendConfigurationPage(QWidget):
             module="Sistema",
             action="configurar",
             record_ref="envio automatico de presupuestos",
-            old_value={"habilitado": True},
+            old_value={"habilitado": previous},
             new_value={"habilitado": None},
-            observation="Se quito la configuracion central; vuelve a mandar el puesto.",
+            observation="Se quitó la configuración central; vuelve a mandar el puesto.",
         )
         self.refresh()
         QMessageBox.information(
             self,
-            "Envio automatico de presupuestos",
-            "Se quito la configuracion central. Vuelve a mandar la configuracion del puesto.",
+            "Envío automático de presupuestos",
+            "Se quitó la configuración central. Vuelve a mandar la configuración del puesto.",
         )
 
 

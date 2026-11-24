@@ -122,6 +122,52 @@ def test_la_pantalla_de_parametros_guarda_el_flag_central(db, monkeypatch):
     assert BudgetAutoSendConfigurationService.load() is None
 
 
+def test_quitar_la_configuracion_central_audita_el_valor_que_tenia(db, monkeypatch):
+    """Al volver a la configuracion del puesto, la auditoria registra el valor
+    central que se borra, sea habilitado o deshabilitado."""
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    from app.models.audit import AuditLog
+    from app.services.budget_auto_send_configuration_service import (
+        BudgetAutoSendConfigurationService,
+    )
+    from app.ui.budget_auto_send_configuration import (
+        BudgetAutoSendConfigurationPage,
+    )
+
+    app = QApplication.instance() or QApplication([])
+
+    class _SilentBox:
+        @staticmethod
+        def information(*_args, **_kwargs):
+            return None
+
+        @staticmethod
+        def warning(*_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        "app.ui.budget_auto_send_configuration.QMessageBox", _SilentBox
+    )
+    usuario = _admin("admin_706_clear_audit")
+    BudgetAutoSendConfigurationService.save(False)
+    page = BudgetAutoSendConfigurationPage(
+        user=usuario, current_user=usuario.username
+    )
+    page.findChild(QPushButton, "budgetAutoSendClearButton").click()
+    app.processEvents()
+
+    assert BudgetAutoSendConfigurationService.load() is None
+    registro = (
+        AuditLog.select()
+        .where(AuditLog.record_ref == "envio automatico de presupuestos")
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
+    assert registro.old_value == {"habilitado": False}
+    assert registro.new_value == {"habilitado": None}
+
+
 def test_la_pantalla_esta_en_parametros(db):
     from PyQt5.QtWidgets import QApplication, QTabWidget
 
