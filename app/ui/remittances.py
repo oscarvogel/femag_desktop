@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QDateEdit,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -1103,7 +1104,7 @@ class RemittancesPage(QWidget):
         self._generate_f150_after_emit(emitted)
 
     def _generate_f150_after_emit(self, remittance: Remittance) -> None:
-        """Genera el F150 del remito recien emitido, sin preguntar.
+        """Genera el F150 del remito emitido en la ubicacion elegida.
 
         Cargar el remito con sus datos y que el F150 aparezca es el flujo normal.
         Si falta un dato del formato no se cae la emision: el remito queda
@@ -1113,13 +1114,35 @@ class RemittancesPage(QWidget):
         if not remittance.physical_point_of_sale or not remittance.physical_number:
             return
         identity = f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+        # Aviso antes de pedir la ruta: si falta un dato (por ejemplo la
+        # localidad DGR del chofer) se dice que falta y donde se corrige, en
+        # lugar de abrir el dialogo de guardado y fallar despues (#946).
+        issues = F150BatchService(self.current_user).validation_issues(remittance)
+        if issues:
+            QMessageBox.warning(
+                self,
+                "F150 pendiente",
+                F150BatchService.pending_message(identity, issues),
+            )
+            return
         file_name = f"F150-{remittance.physical_point_of_sale}-{remittance.physical_number}.txt"
-        output = self.f150_output_dir / file_name
+        suggested = (self.f150_output_dir / file_name).resolve()
+        selected, _ = QFileDialog.getSaveFileName(
+            self, "Guardar archivo F150", str(suggested), "Archivo TXT (*.txt)"
+        )
+        if not selected:
+            QMessageBox.information(
+                self,
+                "F150 pendiente",
+                f"El remito {identity} sigue emitido. El F150 quedo pendiente; "
+                "puede generarlo desde la pantalla de F150.",
+            )
+            return
+        output = Path(selected).resolve()
+        if output.suffix.lower() != ".txt":
+            output = output.with_suffix(".TXT")
         try:
             batch = F150BatchService(self.current_user).generate([remittance], output)
-        except FileExistsError:
-            # Ya se habia generado. No es un problema para el operador.
-            return
         except Exception as exc:
             QMessageBox.warning(
                 self,

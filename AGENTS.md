@@ -14,6 +14,13 @@ Este archivo define como deben trabajar Codex y otros agentes en FEMAG Desktop. 
 - No borrar codigo, pantallas, modelos, migraciones, scripts o datos demo sin justificarlo en el issue y en el PR.
 - Preferir soluciones simples, explicitas y faciles de validar.
 
+## Skills de trabajo obligatorias
+
+- Antes de abordar cambios en FEMAG, leer y aplicar `clean-ddd-hexagonal` de `https://github.com/ccheney/robust-skills`, instalada para Codex. Revisar limites entre presentacion, casos de uso, dominio y adaptadores; mantener decisiones de negocio fuera de la UI y dependencias hacia el dominio.
+- Aplicar sus criterios proporcionalmente al issue y a la arquitectura existente: no introducir capas, CQRS, Event Sourcing ni refactors ajenos al alcance sin necesidad concreta.
+- Usar `find-skills` de `https://github.com/vercel-labs/skills` para buscar skills adicionales cuando la tarea lo necesite. Leer la skill elegida antes de aplicarla.
+- Las skills complementan este workflow: no reemplazan diagnostico de causa, pruebas de regresion, validacion funcional ni trazabilidad de issues y PRs.
+
 ## Loop base de trabajo
 
 Antes de iniciar cualquier tarea, el agente debe auditar el estado real del repositorio.

@@ -139,9 +139,9 @@ def test_issue_action_offers_f150_after_emit(db, tmp_path, monkeypatch):
     assert [row.id for row in generated] == [remittance.id]
 
 
-def test_emitir_genera_el_f150_sin_preguntar(db, tmp_path, monkeypatch):
-    """Cargar el remito y que el F150 aparezca es el flujo normal."""
-    from PyQt5.QtWidgets import QApplication, QMessageBox
+def test_emitir_guarda_f150_en_destino_elegido(db, tmp_path, monkeypatch):
+    """El operador elige la ruta sin una confirmacion previa adicional."""
+    from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
     from app.services.f150_batch_service import F150BatchService
     from app.services.remittance_service import RemittanceService
@@ -160,18 +160,19 @@ def test_emitir_genera_el_f150_sin_preguntar(db, tmp_path, monkeypatch):
         QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2])
     )
 
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: (str(tmp_path / "elegido" / "rentas.txt"), ""))
     page._generate_f150_after_emit(remittance)
 
     assert asked == [], "no debe preguntar al operador"
     assert warnings == []
-    expected = tmp_path / "F150-0001-00001068.txt"
+    expected = tmp_path / "elegido" / "rentas.txt"
     assert expected.exists()
     assert F150BatchService.is_included(remittance) is True
 
 
 def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
     """Si falta un dato del formato, el remito queda emitido y pendiente."""
-    from PyQt5.QtWidgets import QApplication, QMessageBox
+    from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
     from app.services.f150_batch_service import F150BatchService
     from app.services.remittance_service import RemittanceService
@@ -192,11 +193,21 @@ def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
         QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2])
     )
 
+    asked_paths = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *_a, **_k: (asked_paths.append(True) or str(tmp_path / "elegido" / "rentas.txt"), ""),
+    )
     page._generate_f150_after_emit(remittance)
 
     assert len(warnings) == 1
-    assert "no se genero" in warnings[0]
+    # Desde #946 el aviso sale **antes** de pedir donde guardar: el operador
+    # sabe que falta sin haber elegido una carpeta.
+    assert asked_paths == []
+    assert "todavia no se puede generar su F150" in warnings[0]
     assert "transportista: falta domicilio" in warnings[0]
+    assert "Maestros" in warnings[0]
     assert list(tmp_path.glob("F150-*")) == []
     # El remito sigue emitido y pendiente: se genera desde la pantalla de F150.
     assert F150BatchService.is_included(remittance) is False
@@ -204,7 +215,7 @@ def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
 
 
 def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatch):
-    from PyQt5.QtWidgets import QApplication, QMessageBox
+    from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
     from app.services.f150_batch_service import F150BatchService
     from app.services.remittance_service import RemittanceService
@@ -221,6 +232,11 @@ def test_offer_f150_saves_file_named_by_physical_number(db, tmp_path, monkeypatc
         QMessageBox, "warning", lambda *_args, **_kwargs: warnings.append(_args[2])
     )
 
+    def save_suggested(_parent, _title, suggested, _filter):
+        assert suggested == str((tmp_path / "F150-0001-00001068.txt").resolve())
+        return suggested, ""
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", save_suggested)
     page._generate_f150_after_emit(remittance)
 
     assert warnings == []
@@ -1291,3 +1307,43 @@ def test_manual_dialog_product_rows_have_autocomplete(db):
     assert combo.completer() is not None
     assert combo.completer().filterMode() == Qt.MatchContains
     assert combo.completer().caseSensitivity() == Qt.CaseInsensitive
+
+
+def test_cancelar_guardado_f150_conserva_emision_sin_lote(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
+    from app.services.f150_batch_service import F150BatchService
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    remittance = RemittanceService("ui_f150_cancel").issue(_f150_ready_draft("ui_f150_cancel"))
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(current_user="ui_f150_cancel", f150_output_dir=tmp_path)
+    messages = []
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(QMessageBox, "information", lambda *_a, **_k: messages.append(_a[2]))
+    page._generate_f150_after_emit(remittance)
+    assert not list(tmp_path.iterdir())
+    assert not F150BatchService.is_included(remittance)
+    assert remittance.status == remittance.STATUS_ISSUED
+    assert "pendiente" in messages[-1].lower()
+
+
+def test_f150_destino_existente_informa_error_y_conserva_archivo(db, tmp_path, monkeypatch):
+    from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
+    from app.services.f150_batch_service import F150BatchService
+    from app.services.remittance_service import RemittanceService
+    from app.ui.remittances import RemittancesPage
+
+    remittance = RemittanceService("ui_f150_exists").issue(_f150_ready_draft("ui_f150_exists"))
+    app = QApplication.instance() or QApplication([])
+    page = RemittancesPage(current_user="ui_f150_exists", f150_output_dir=tmp_path)
+    target = tmp_path / "existente.txt"
+    target.write_bytes(b"contenido anterior")
+    warnings = []
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: (str(target), ""))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_a, **_k: warnings.append(_a[2]))
+    page._generate_f150_after_emit(remittance)
+    assert target.read_bytes() == b"contenido anterior"
+    assert not F150BatchService.is_included(remittance)
+    assert remittance.status == remittance.STATUS_ISSUED
+    assert "ya existe" in warnings[0]

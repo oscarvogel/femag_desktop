@@ -44,6 +44,17 @@ def client_address_type_label(address_type: str) -> str:
     return CLIENT_ADDRESS_TYPE_LABELS.get(address_type, address_type)
 
 
+def effective_f150_address(fiscal_address: str | None, address: str | None) -> str:
+    """Domicilio que va al F150: el fiscal (Rentas) y, si falta, el actual.
+
+    Es la misma regla que #792 fijo para los clientes: el domicilio fiscal es
+    el que se presenta, y el domicilio comun queda como respaldo para no
+    romper los choferes y transportistas que todavia no lo tienen cargado
+    (#946).
+    """
+    return (fiscal_address or "").strip() or (address or "").strip()
+
+
 def client_address_has_fiscal_function(address_type: str) -> bool:
     return address_type in {CLIENT_ADDRESS_TYPE_FISCAL, CLIENT_ADDRESS_TYPE_SHARED}
 
@@ -244,12 +255,22 @@ class Carrier(BaseModel):
     #: Domicilio del transportista. El F150 lo exige en el campo 13 de la
     #: cabecera C y ``transporte.dbf`` lo trae en ``DOMICILIO``.
     address = CharField(null=True)
+    #: Domicilio fiscal del transportista: el que figura en Rentas. Es el que
+    #: va al F150; ``address`` queda como respaldo cuando este no esta
+    #: cargado (#946). Nullable: los choferes y transportistas importados no
+    #: lo traen y no se inventa nada.
+    fiscal_address = CharField(null=True)
     active = BooleanField(default=True)
     source_system = CharField(null=True)
     source_id = CharField(null=True)
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_carriers", null=True)
+
+    @property
+    def f150_address(self) -> str:
+        """Domicilio que va al F150: el fiscal (Rentas) o, si falta, el actual."""
+        return effective_f150_address(self.fiscal_address, self.address)
 
 
 class Truck(BaseModel):
@@ -279,6 +300,10 @@ class Driver(BaseModel):
     #: ``chofer.dbf`` lo trae en ``DOMICILIO``. Los choferes cargados a mano
     #: tambien lo necesitan.
     address = CharField(null=True)
+    #: Domicilio fiscal del chofer: el que figura en Rentas. Es el que va al
+    #: F150; ``address`` queda como respaldo cuando este no esta cargado
+    #: (#946). Nullable: no se inventa ningun dato.
+    fiscal_address = CharField(null=True)
     active = BooleanField(default=True)
     available = BooleanField(default=True)
     source_system = CharField(null=True)
@@ -286,6 +311,11 @@ class Driver(BaseModel):
     imported_at = DateTimeField(null=True)
     updated_from_source_at = DateTimeField(null=True)
     last_import_batch = ForeignKeyField(ImportBatch, backref="imported_drivers", null=True)
+
+    @property
+    def f150_address(self) -> str:
+        """Domicilio que va al F150: el fiscal (Rentas) o, si falta, el actual."""
+        return effective_f150_address(self.fiscal_address, self.address)
 
 
 class PalletType(BaseModel):
