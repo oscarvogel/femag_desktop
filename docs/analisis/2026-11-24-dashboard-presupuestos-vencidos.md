@@ -303,4 +303,3 @@ FROM clientaccountmovement
 WHERE movement_type = 'budget_manual' AND is_reversal = 0;
 ```
 
-
