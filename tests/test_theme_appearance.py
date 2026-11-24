@@ -15,11 +15,13 @@ import pytest
 #: SHA256 del QSS claro con la ruta del asset neutralizada. Si cambia, alguien
 #: toco un color de `glass_v2.py` a proposito y hay que actualizarlo a mano.
 #:
-#: Ultimo cambio: #694 agrego las reglas de `#sidebarSearch` y
-#: `#sidebarSearchEmpty`. El diff de `glass_v2.py` en ese PR fue de 33 linezas
-#: agregadas y 0 borradas: el claro no cambio, se le sumo el buscador del menu.
+#: Ultimo cambio: #965 agrego las reglas `QLabel[uiRole="kpi"]` y
+#: `QLabel[uiRole="notice"]` (tarjetas y avisos de Cuenta corriente
+#: productores). El diff de `glass_v2.py` en ese PR fue de 20 lineas agregadas
+#: y 0 borradas: el claro no cambio, se le sumaron esas dos reglas.
+#: Antes: #694 (buscador del menu lateral, 33 agregadas y 0 borradas).
 LIGHT_STYLESHEET_SHA256 = (
-    "a53cb116afe956746996c1521811e1a4cd40cae4d90f84d5aa7133df3e42eb16"
+    "d8f8d1a25ebf87a2266fa1fdcd9a4cab1273e3ec5dd3a9e0cbd73adde5aa8e05"
 )
 
 _URL_RE = re.compile(r'url\("[^"]*"\)')
