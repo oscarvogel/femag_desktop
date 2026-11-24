@@ -47,7 +47,12 @@ from app.models.production import (
 )
 from app.models.stock import StockMovement
 from app.models.stock_count import StockCount, StockCountLine
-from app.models.suppliers import Supplier, SupplierLegacyCode
+from app.models.suppliers import (
+    Supplier,
+    SupplierDocument,
+    SupplierDocumentExclusion,
+    SupplierLegacyCode,
+)
 
 
 ALL_MODELS = [
@@ -112,6 +117,8 @@ ALL_MODELS = [
     StockCountLine,
     Supplier,
     SupplierLegacyCode,
+    SupplierDocument,
+    SupplierDocumentExclusion,
 ]
 from app.models.sync import (
     SyncConflict,
