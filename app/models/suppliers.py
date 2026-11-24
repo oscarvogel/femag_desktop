@@ -5,6 +5,7 @@ from peewee import (
     DateTimeField,
     DecimalField,
     ForeignKeyField,
+    IntegerField,
     TextField,
 )
 
@@ -177,3 +178,115 @@ class SupplierDocumentExclusion(BaseModel):
     class Meta:
         table_name = "supplier_document_exclusion"
         indexes = ((("reason",), False),)
+
+
+class SupplierPayment(BaseModel):
+    """Pago a un proveedor/colono, registrado en FEMAG Desktop (#940).
+
+    El legacy descontaba el ``SALDO`` del documento a mano y no dejaba rastro.
+    Aca el pago es un registro propio, con su numero de orden, su autor y la
+    imputacion explicita a los documentos que cancela
+    (:class:`SupplierPaymentAllocation`).
+
+    Un pago no se borra ni se edita: se **anula**, y la anulacion genera los
+    movimientos contrarios de ese pago y de ningun otro.
+    """
+
+    METHOD_CASH = "efectivo"
+    METHOD_TRANSFER = "transferencia"
+    METHOD_CHECK = "cheque"
+    METHOD_OTHER = "otros"
+    METHODS = (METHOD_CASH, METHOD_TRANSFER, METHOD_CHECK, METHOD_OTHER)
+
+    STATUS_ACTIVE = "activo"
+    STATUS_ANNULLED = "anulado"
+    STATUSES = (STATUS_ACTIVE, STATUS_ANNULLED)
+
+    number = CharField(max_length=20, unique=True)
+    # Evita duplicar el pago ante un doble clic o un reintento (como #867).
+    idempotency_key = CharField(max_length=64, null=True, unique=True)
+    supplier = ForeignKeyField(Supplier, backref="payments")
+    payment_date = DateField()
+    amount = DecimalField(max_digits=14, decimal_places=2)
+    currency = CharField(max_length=8, default="ARS")
+    method = CharField(max_length=32)
+    reference = CharField(max_length=120, null=True)
+    observations = TextField(null=True)
+    created_by = CharField(max_length=80)
+    status = CharField(max_length=16, default=STATUS_ACTIVE)
+    annulled_at = DateTimeField(null=True)
+    annulled_by = CharField(max_length=80, null=True)
+    annulment_reason = TextField(null=True)
+
+    class Meta:
+        table_name = "supplier_payment"
+        indexes = ((("supplier", "payment_date"), False),)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE
+
+
+class SupplierPaymentAllocation(BaseModel):
+    """Parte de un pago imputada a un documento concreto (#940).
+
+    Un pago puede cancelar varios documentos, y un documento puede cancelarse
+    con varios pagos parciales. Lo que queda pendiente de un documento es su
+    saldo importado menos las imputaciones de los pagos **activos**.
+    """
+
+    payment = ForeignKeyField(
+        SupplierPayment, backref="allocations", on_delete="CASCADE"
+    )
+    document = ForeignKeyField(SupplierDocument, backref="allocations")
+    amount = DecimalField(max_digits=14, decimal_places=2)
+    sequence = IntegerField(default=1)
+
+    class Meta:
+        table_name = "supplier_payment_allocation"
+        indexes = ((("payment", "document"), True),)
+
+
+class SupplierAccountMovement(BaseModel):
+    """Libro de movimientos de la cuenta corriente de proveedores (#940).
+
+    Convencion de signo: **positivo es lo que la empresa le debe al
+    proveedor**. Un ticket de materia prima suma; un pagare (anticipo que el
+    productor le debe a la empresa) resta; un pago resta; la anulacion de un
+    pago vuelve a sumar.
+
+    El libro arranca con un ``opening_balance`` por documento importado: es el
+    saldo que el legacy tenia pendiente al momento del corte. Lo que el legacy
+    ya habia descontado **no** se reconstruye como pagos, porque no hay dato de
+    que pago cancelo que documento: queda dentro de ese saldo inicial.
+
+    ``source_ref`` es unico: cada hecho genera su movimiento una sola vez.
+    """
+
+    TYPE_OPENING_BALANCE = "opening_balance"
+    TYPE_PAYMENT = "payment"
+    TYPE_PAYMENT_REVERSAL = "payment_reversal"
+    TYPES = (TYPE_OPENING_BALANCE, TYPE_PAYMENT, TYPE_PAYMENT_REVERSAL)
+
+    supplier = ForeignKeyField(Supplier, backref="account_movements")
+    document = ForeignKeyField(
+        SupplierDocument, backref="account_movements", null=True
+    )
+    payment = ForeignKeyField(
+        SupplierPayment, backref="account_movements", null=True
+    )
+    movement_type = CharField(max_length=32)
+    amount = DecimalField(max_digits=14, decimal_places=2)
+    currency = CharField(max_length=8, default="ARS")
+    movement_date = DateField()
+    description = CharField(max_length=200)
+    observations = TextField()
+    source_ref = CharField(max_length=180, unique=True)
+    is_reversal = BooleanField(default=False)
+    reverses = ForeignKeyField("self", backref="reversal_movements", null=True)
+    created_by = CharField(max_length=80)
+
+    class Meta:
+        table_name = "supplier_account_movement"
+        # `document` ya tiene el indice que genera su clave foranea.
+        indexes = ((("supplier", "movement_date"), False),)
