@@ -164,11 +164,18 @@ class SupplierImportService:
         # con otra ficha. Se recalcula la busqueda por nombre normalizado para
         # no dejar dos personas con el mismo nombre normalizado.
         if supplier.normalized_name != normalized:
+            # Una identidad cargada a mano (CUIT/DNI o verificada en el ABM,
+            # #963) manda sobre la heuristica por nombre: no se fusiona ni se
+            # le cambia la clave.
+            if supplier.identity_verified or supplier.tax_id:
+                return
             other = Supplier.get_or_none(
                 (Supplier.normalized_name == normalized)
                 & (Supplier.id != supplier.id)
             )
             if other is not None:
+                if other.identity_verified or other.tax_id:
+                    return
                 self._merge(supplier, other, ficha)
                 report.merged += 1
                 report.updated = max(report.updated - 1, 0)
@@ -179,10 +186,29 @@ class SupplierImportService:
 
     @staticmethod
     def _merge(survivor: Supplier, absorbed: Supplier, ficha: SupplierLegacyCode) -> None:
-        """Fusiona dos personas en una sola, conservando las dos fichas."""
-        for otra in list(absorbed.legacy_code_rows):
-            otra.supplier = survivor
-            otra.save()
-        absorbed.delete_instance(recursive=True)
-        ficha.supplier = survivor
-        ficha.save()
+        """Fusiona dos personas en una sola, conservando las dos fichas.
+
+        Todo lo que cuelga del absorbido (fichas, documentos, pagos y
+        movimientos del libro) pasa al que queda **antes** de eliminarlo: antes
+        se borraba en cascada y con el se iban sus documentos y pagos (#963).
+        """
+        from app.models.suppliers import (
+            SupplierAccountMovement,
+            SupplierDocument,
+            SupplierPayment,
+        )
+
+        database = Supplier._meta.database
+        with database.atomic():
+            for model in (
+                SupplierLegacyCode,
+                SupplierDocument,
+                SupplierPayment,
+                SupplierAccountMovement,
+            ):
+                model.update(supplier=survivor).where(
+                    model.supplier == absorbed
+                ).execute()
+            absorbed.delete_instance()
+            ficha.supplier = survivor
+            ficha.save()

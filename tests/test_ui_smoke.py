@@ -112,6 +112,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
         "Transportistas",
         "Choferes",
         "Camiones",
+        "Productores",
     ]
     assert [child.route_key for child in masters.children] == [
         "clients",
@@ -123,6 +124,7 @@ def test_sidebar_spec_groups_operations_and_masters(db):
         "carriers",
         "drivers",
         "trucks",
+        "suppliers",
     ]
 
 

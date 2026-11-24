@@ -32,6 +32,7 @@ REAL_MODULES = {
     "Choferes": "drivers",
     "Transportistas": "carriers",
     "Camiones": "trucks",
+    "Productores": "suppliers",
     "Envío de lista de precios": "price_list_send",
     "Tipos de pallets": "pallet_types",
     "Pallets / tipos de pallet": "pallet_types",
