@@ -106,6 +106,7 @@ from app.services.whatsapp_contact_service import prefill_cliente, prefill_vende
 from app.ui.connection_dialog import ConnectionDialog
 from app.ui.customer_ledger import CustomerLedgerPage
 from app.ui.supplier_ledger import SupplierLedgerPage
+from app.ui.supplier_master import build_supplier_master_page
 from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
@@ -599,6 +600,12 @@ class FemagDesktopWindow(QMainWindow):
         self.setCentralWidget(root)
         self._add_page("dashboard", self._dashboard_page())
         self._add_master_pages()
+        self._add_page(
+            "suppliers",
+            build_supplier_master_page(
+                user=self.user, current_user=self.shell.username, parent=self
+            ),
+        )
         self._add_page("load_orders", self._load_order_page())
         self._add_page("customer_ledger", self._customer_ledger_page())
         self._add_page("legacy_dbf_import", self._legacy_dbf_import_page())
