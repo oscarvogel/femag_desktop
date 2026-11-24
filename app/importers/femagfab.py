@@ -99,6 +99,48 @@ class LegacyReceipt:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class LegacySupplier:
+    """Ficha del maestro de proveedores del legacy (`proveedo`).
+
+    El legacy identifica al productor con un codigo de cuatro caracteres, sin
+    DNI ni CUIT. La fila `CODIGO = '0000'` (nombre `"."`) no es una persona: es
+    el bucket donde el legacy guarda los saldos iniciales de caja.
+    """
+
+    code: str
+    name: str
+    locality: str
+    phone: str
+
+    @property
+    def is_placeholder(self) -> bool:
+        """True para la ficha `0000` / `"."`, que no es un productor.
+
+        El codigo `0000` es el bucket donde el legacy guarda los saldos
+        iniciales de caja: no es una persona.
+        """
+        return self.code.strip() == "0000" or self.name.strip() == "."
+
+    @property
+    def has_name(self) -> bool:
+        """False cuando la ficha no trae nombre utilizable."""
+        return bool(self.name.strip())
+
+    def payload(self) -> dict:
+        return {
+            "code": self.code,
+            "name": self.name,
+            "locality": self.locality,
+            "phone": self.phone,
+        }
+
+    @property
+    def source_hash(self) -> str:
+        raw = json.dumps(self.payload(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 class FemagFabSource:
     """Consulta femagfab exclusivamente con sentencias SELECT."""
 
@@ -120,6 +162,36 @@ class FemagFabSource:
 
     def source_key(self, comp: str) -> str:
         return f"{self.instance}:{self.database}:movi:{comp}"
+
+    def supplier_source_key(self, code: str) -> str:
+        return f"{self.instance}:{self.database}:proveedo:{code}"
+
+    def document_source_key(self, kind: str, code: str) -> str:
+        return f"{self.instance}:{self.database}:{kind}:{code}"
+
+    def fetch_suppliers(self) -> list[LegacySupplier]:
+        """Trae el maestro de proveedores (`proveedo`) completo."""
+        sql = """
+            SELECT CODIGO code, NOMBRE name, COALESCE(LOCALIDAD, '') locality,
+                   COALESCE(TELEFONO, '') phone
+              FROM proveedo
+             ORDER BY CODIGO
+        """
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                return [
+                    LegacySupplier(
+                        code=str(row["code"] or "").strip(),
+                        name=str(row["name"] or "").strip(),
+                        locality=str(row["locality"] or "").strip(),
+                        phone=str(row["phone"] or "").strip(),
+                    )
+                    for row in cur.fetchall()
+                ]
+        finally:
+            conn.close()
 
     def _connect(self):
         if not self.configured:
