@@ -44,13 +44,16 @@ def test_issue_443_dashboard_collection_snapshot_uses_due_dates_and_real_ledger_
     snapshot = DashboardService().collection_snapshot(today=today)
 
     assert snapshot["overdue_amount"] == 1000
-    assert snapshot["overdue_count"] == 1
+    assert snapshot["overdue_clients"] == 1
     assert snapshot["due_today_amount"] == 500
-    assert snapshot["due_today_count"] == 1
+    assert snapshot["due_today_clients"] == 1
     assert snapshot["next_7_amount"] == 700
-    assert snapshot["next_7_count"] == 1
-    assert snapshot["next_30_amount"] == 1600
-    assert snapshot["next_30_count"] == 2
+    assert snapshot["next_7_clients"] == 1
+    # La ventana de 30 dias no puede superar la deuda real del cliente: de los
+    # 1600 de documentos quedan 1400 cobrables (el saldo real es 2900 y ya se
+    # consumieron 1000 vencidos + 500 de hoy).
+    assert snapshot["next_30_amount"] == 1400
+    assert snapshot["next_30_clients"] == 1
 
     # El saldo real usa toda la cuenta corriente, incluyendo el pago general.
     assert snapshot["debtor_balance"] == 2900
@@ -71,14 +74,15 @@ def test_issue_443_view_spec_exposes_collection_cards(db):
     cards = {card.title: card for card in spec.collection_cards}
 
     assert set(cards) == {
-        "Presupuestos vencidos",
+        "Deuda vencida",
         "Vence hoy",
         "Próximos 7 días",
         "Próximos 30 días",
         "Saldo deudor clientes",
     }
-    assert cards["Presupuestos vencidos"].amount == 1250
-    assert cards["Presupuestos vencidos"].count == 1
+    assert cards["Deuda vencida"].amount == 1250
+    assert cards["Deuda vencida"].count == 1
+    assert cards["Deuda vencida"].unit == "cliente"
     assert cards["Saldo deudor clientes"].amount == 1250
     assert cards["Saldo deudor clientes"].route_key == "customer_ledger"
 
