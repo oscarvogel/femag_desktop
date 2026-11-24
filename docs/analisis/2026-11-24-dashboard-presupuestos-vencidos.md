@@ -302,4 +302,3 @@ SELECT COUNT(*) AS movs, SUM(due_date < CURDATE()) AS ya_vencidos,
 FROM clientaccountmovement
 WHERE movement_type = 'budget_manual' AND is_reversal = 0;
 ```
-
