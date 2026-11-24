@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.config.settings import load_settings
 from app.models.audit import AuditLog
 from app.models.budgets import Budget
 from app.models.load_orders import LoadOrder
@@ -67,14 +66,19 @@ ESTADOS_YA_ENVIADOS = frozenset({"queued", "accepted", "delivered", "read"})
 def autoenvio_habilitado(override: bool | None = None) -> bool:
     """Si el envio automatico de presupuestos esta encendido (#706).
 
-    Se lee en el momento de la llamada (``FEMAG_PRESUPUESTOS_AUTOENVIO``).
-    Apagado por defecto: el comportamiento de emitir una orden no cambia hasta
-    que el administrador lo habilite en el puesto.
+    La decision es **central** (``AppParameter``, pantalla ``Parametros``): no
+    se configura puesto por puesto. El ``.env`` queda como respaldo para
+    demo/tests. Apagado por defecto: el comportamiento de emitir una orden no
+    cambia hasta que un administrador lo habilite.
     """
     if override is not None:
         return bool(override)
+    from app.services.budget_auto_send_configuration_service import (
+        BudgetAutoSendConfigurationService,
+    )
+
     try:
-        return bool(load_settings().presupuestos_autoenvio)
+        return BudgetAutoSendConfigurationService.habilitado()
     except Exception:  # noqa: BLE001 - sin config legible sigue el comportamiento de hoy
         return False
 

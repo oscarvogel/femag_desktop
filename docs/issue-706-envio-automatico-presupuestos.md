@@ -30,14 +30,19 @@
 
 ## Activacion
 
-El envio automatico esta **apagado por defecto**:
+El envio automatico esta **apagado por defecto** y se habilita **una sola vez
+para todo el sistema**, no puesto por puesto:
 
-```dotenv
-FEMAG_PRESUPUESTOS_AUTOENVIO=1
+```text
+Parametros > Presupuestos > Enviar los presupuestos automaticamente
 ```
 
-Sin esa variable (o con `0`/`false`) emitir una orden se comporta exactamente
-como antes de este cambio.
+La decision se guarda en `AppParameter` (`presupuestos.autoenvio`) y la
+comparten todos los puestos. Queda auditada en `Sistema / configurar`.
+
+El `.env` del puesto queda solo como respaldo para demo/tests:
+`FEMAG_PRESUPUESTOS_AUTOENVIO=1`. Si hay valor central, manda el central. Si
+no hay valor central, se lee el `.env`; si tampoco esta, queda apagado.
 
 El destino de WhatsApp sigue la regla de #923: con `FEMAG_WHATSAPP_DEDICADO`
 apagado se usa `phone` y solo si clasifica como celular; encendido, manda

@@ -432,4 +432,10 @@ def test_el_cableado_esta_en_la_emision_compartida():
 
     servicio = Path("app/services/budget_auto_send_service.py").read_text(encoding="utf-8")
     assert "def autoenvio_habilitado" in servicio
-    assert "presupuestos_autoenvio" in servicio
+    assert "BudgetAutoSendConfigurationService" in servicio
+
+    configuracion = Path(
+        "app/services/budget_auto_send_configuration_service.py"
+    ).read_text(encoding="utf-8")
+    assert "presupuestos_autoenvio" in configuracion
+    assert "FEMAG_PRESUPUESTOS_AUTOENVIO" in configuracion
