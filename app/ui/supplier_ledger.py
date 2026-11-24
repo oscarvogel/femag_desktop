@@ -12,8 +12,9 @@ from datetime import date
 from decimal import Decimal
 
 from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QColor
+from PyQt5.QtGui import QColor, QCursor
 from PyQt5.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -39,6 +40,11 @@ from app.models.suppliers import SupplierDocument, SupplierPayment
 from app.reports.supplier_position_export import (
     export_supplier_position_pdf,
     export_supplier_position_xlsx,
+)
+from app.services.supplier_femagfab_sync_service import (
+    FemagFabSupplierSyncService,
+    SupplierSyncError,
+    can_import_from_femagfab,
 )
 from app.services.supplier_ledger_service import (
     AllocationRequest,
@@ -182,6 +188,10 @@ class SupplierLedgerPage(QWidget):
         self.export_pdf_button = QPushButton("Exportar PDF")
         self.export_pdf_button.setObjectName("supplierLedgerExportPdf")
         self.export_pdf_button.clicked.connect(self.export_pdf)
+        self.import_button = QPushButton("Importar desde femagfab")
+        self.import_button.setObjectName("supplierLedgerImportFemagfab")
+        self.import_button.clicked.connect(self.import_from_femagfab)
+        header.addWidget(self.import_button, 0, Qt.AlignTop)
         header.addWidget(self.export_excel_button, 0, Qt.AlignTop)
         header.addWidget(self.export_pdf_button, 0, Qt.AlignTop)
         root.addLayout(header)
@@ -361,8 +371,8 @@ class SupplierLedgerPage(QWidget):
         self.suppliers_label.setText(f"Productores: {len(result.rows)}")
         if result.imported_documents == 0:
             self.exclusion_label.setText(
-                "No hay documentos importados de productores. Importe el maestro y los "
-                "documentos de femagfab para ver la posición."
+                "No hay documentos importados de productores. Use «Importar desde "
+                "femagfab» para traer el maestro y los documentos con saldo."
             )
         else:
             self.exclusion_label.setText(
@@ -510,6 +520,15 @@ class SupplierLedgerPage(QWidget):
         else:
             self.annul_button.setToolTip("Seleccione un pago activo en la pestaña Pagos.")
 
+        can_import = can_import_from_femagfab(self.user)
+        self.import_button.setEnabled(can_import)
+        self.import_button.setToolTip(
+            "Trae el maestro de productores, los tickets y pagarés con saldo y abre el "
+            "libro. Se puede repetir: lo ya importado no se duplica."
+            if can_import
+            else "Solo un usuario con permiso de importación puede traer datos de femagfab."
+        )
+
         has_rows = bool(self._result.rows)
         self.export_excel_button.setEnabled(has_rows)
         self.export_pdf_button.setEnabled(has_rows)
@@ -584,6 +603,45 @@ class SupplierLedgerPage(QWidget):
         self.refresh()
         self.detail_tabs.setCurrentIndex(1)
         return annulled
+
+    # ------------------------------------------------------------ importar
+    def _make_sync_service(self) -> FemagFabSupplierSyncService:
+        return FemagFabSupplierSyncService()
+
+    def _confirm_import(self) -> bool:
+        answer = QMessageBox.question(
+            self,
+            "Importar desde femagfab",
+            "Se van a traer de femagfab el maestro de productores y los tickets y "
+            "pagarés con saldo, y se abrirá el libro con su saldo inicial.\n\n"
+            "femagfab solo se lee. Lo que ya estaba importado no se duplica.\n\n"
+            "¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
+    def import_from_femagfab(self):
+        if not can_import_from_femagfab(self.user):
+            QMessageBox.warning(
+                self, "Importar desde femagfab", "No tiene permiso para importar productores."
+            )
+            return None
+        if not self._confirm_import():
+            return None
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        try:
+            result = self._make_sync_service().run(user=self.user)
+        except (SupplierSyncError, PermissionError) as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "No se pudo importar", str(exc))
+            return None
+        QApplication.restoreOverrideCursor()
+        self.refresh()
+        QMessageBox.information(
+            self, "Importación terminada", "\n".join(result.summary_lines())
+        )
+        return result
 
     # ------------------------------------------------------------ exportar
     def _ask_destination(self, suffix: str, label: str) -> str | None:
