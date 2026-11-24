@@ -21,6 +21,7 @@ REAL_MODULES = {
     "Contraste de producción": "production_contrast",
     "Inventario inicial": "stock_initial_inventory",
     "Conteo físico": "stock_count",
+    "Cuenta corriente productores": "supplier_ledger",
     "Cuenta corriente": "customer_ledger",
     "Clientes": "clients",
     "Vendedores": "salespeople",

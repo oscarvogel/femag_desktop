@@ -328,6 +328,7 @@ def test_production_menu_group_exposes_receipt_import_route(db):
         "Contraste de producción",
         "Inventario inicial",
         "Conteo físico",
+        "Cuenta corriente productores",
     ]
     child = produccion.children[0]
     assert child.route_key == "raw_material_receipts"

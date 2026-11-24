@@ -38,6 +38,9 @@ from app.services.permission_service import PermissionService
 
 PAYMENT_SEQUENCE_NAME = "supplier_payment_order"
 AUDIT_MODULE = "Cuenta corriente proveedores"
+# Item de menu cuyo permiso gobierna la pantalla y sus acciones (#941).
+MENU_SECTION = "Producción"
+MENU_TITLE = "Cuenta corriente productores"
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -72,6 +75,22 @@ def _sum(query) -> Decimal:
 def opening_sign(document: SupplierDocument) -> int:
     """El ticket es deuda de la empresa (+); el pagare, del productor (-)."""
     return 1 if document.kind == SupplierDocument.KIND_TICKET else -1
+
+
+def _has_menu_permission(user: User | None, action: str) -> bool:
+    if user is None or not getattr(user, "active", False):
+        return False
+    if PermissionService.is_administrator(user):
+        return True
+    return PermissionService().has_permission(user, MENU_SECTION, action, MENU_TITLE)
+
+
+def can_register_payments(user: User | None) -> bool:
+    return _has_menu_permission(user, "crear")
+
+
+def can_annul_payments(user: User | None) -> bool:
+    return _has_menu_permission(user, "anular")
 
 
 class SupplierLedgerService:
@@ -396,10 +415,8 @@ class SupplierLedgerService:
             raise PermissionError(
                 "La anulacion debe realizarse con la sesion del usuario autorizado."
             )
-        # Hasta que la pantalla (#941) publique su permiso propio, anular un
-        # pago a proveedor queda reservado al administrador.
-        if not PermissionService.is_administrator(authorized_by):
-            raise PermissionError("Solo un administrador puede anular pagos a proveedores.")
+        if not can_annul_payments(authorized_by):
+            raise PermissionError("No tiene permiso para anular pagos a productores.")
         reason = (reason or "").strip()
         if not reason:
             raise SupplierLedgerError("Debe indicar el motivo de la anulacion.")

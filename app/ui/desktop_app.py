@@ -105,6 +105,7 @@ from app.services.whatsapp_envio_service import WhatsAppEnvioService
 from app.services.whatsapp_contact_service import prefill_cliente, prefill_vendedor
 from app.ui.connection_dialog import ConnectionDialog
 from app.ui.customer_ledger import CustomerLedgerPage
+from app.ui.supplier_ledger import SupplierLedgerPage
 from app.ui.manual_budget_dialog import ManualBudgetDialog
 from app.ui.collection_due_report import CollectionDueReportDialog
 from app.ui.branding import femag_icon, load_brand_pixmap
@@ -619,6 +620,12 @@ class FemagDesktopWindow(QMainWindow):
             ),
         )
         self._add_page("production_contrast", ProductionContrastPage(parent=self))
+        self._add_page(
+            "supplier_ledger",
+            SupplierLedgerPage(
+                user=self.user, current_username=self.shell.username, parent=self
+            ),
+        )
         self._add_page(
             "stock_initial_inventory",
             StockInitialInventoryPage(current_username=self.shell.username, parent=self),
