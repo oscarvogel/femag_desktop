@@ -122,6 +122,14 @@ def generate(output_dir: Path) -> list[Path]:
     app.processEvents()
     page = window.stack.currentWidget()
     page.setParent(None)
+    # Sin la ventana principal, la pagina no hereda el stylesheet de la app:
+    # se le aplica el mismo, para capturar las tarjetas como se ven de verdad.
+    from app.ui import theme as theme_module
+
+    # Las capturas claras no dependen del tema guardado en el puesto.
+    theme_module.load_theme = lambda *_a, **_k: theme_module.Theme.LIGHT
+    page.refresh()
+    page.setStyleSheet(theme_module.stylesheet_for(theme_module.Theme.LIGHT))
     page.show()
 
     targets = []
@@ -139,6 +147,22 @@ def generate(output_dir: Path) -> list[Path]:
     target = output_dir / "02_pagos_del_productor_1366x768.png"
     _capture(page, target)
     targets.append(target)
+
+    # Tema oscuro: mismo stylesheet invertido y colores de saldo del oscuro.
+    theme_module.load_theme = lambda *_a, **_k: theme_module.Theme.DARK
+    try:
+        page.setStyleSheet(theme_module.stylesheet_for(theme_module.Theme.DARK))
+        page.detail_tabs.setCurrentIndex(0)
+        page.refresh()
+        page.resize(1366, 768)
+        app.processEvents()
+        target = output_dir / "04_cuenta_corriente_productores_oscuro_1366x768.png"
+        _capture(page, target)
+        targets.append(target)
+    finally:
+        theme_module.load_theme = lambda *_a, **_k: theme_module.Theme.LIGHT
+        page.setStyleSheet(theme_module.stylesheet_for(theme_module.Theme.LIGHT))
+        page.refresh()
 
     tickets = page._pending_tickets()
     dialog = SupplierPaymentDialog(page.detail_title.text(), tickets, parent=page)

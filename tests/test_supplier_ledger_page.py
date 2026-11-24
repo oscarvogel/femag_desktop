@@ -341,3 +341,39 @@ def test_el_menu_de_produccion_ofrece_la_pantalla(db):
         for child in (parent.children or [])
     ]
     assert "Cuenta corriente productores" not in titles
+
+
+def test_las_tarjetas_usan_el_tema_y_no_colores_fijos(datos):
+    """Las tarjetas y el aviso toman sus colores del stylesheet global, que el
+    tema oscuro invierte: un color fijo en la pantalla quedaba ilegible."""
+    from app.ui import theme
+    from app.ui.supplier_ledger import SupplierLedgerPage
+
+    _app()
+    admin = _user("admin_tema", "Administrador")
+    page = SupplierLedgerPage(user=admin, current_username=admin.username)
+    for label in (page.payable_label, page.receivable_label, page.net_label, page.suppliers_label):
+        assert label.property("uiRole") == "kpi"
+        assert "background" not in label.styleSheet()
+    assert page.exclusion_label.property("uiRole") == "notice"
+    assert "background" not in page.exclusion_label.styleSheet()
+
+    claro = theme.stylesheet_for(theme.Theme.LIGHT)
+    oscuro = theme.stylesheet_for(theme.Theme.DARK)
+    assert 'QLabel[uiRole="kpi"]' in claro and 'QLabel[uiRole="notice"]' in claro
+    kpi_oscuro = oscuro.split('QLabel[uiRole="kpi"]', 1)[1].split("}", 1)[0]
+    assert "#f8fafc" not in kpi_oscuro and "#232b36" in kpi_oscuro
+
+
+def test_los_colores_del_saldo_cambian_con_el_tema(datos, monkeypatch):
+    from app.ui import theme
+    from app.ui.supplier_ledger import SupplierLedgerPage
+
+    _app()
+    admin = _user("admin_tema_saldo", "Administrador")
+    monkeypatch.setattr(theme, "load_theme", lambda *a, **k: theme.Theme.DARK)
+    page = SupplierLedgerPage(user=admin, current_username=admin.username)
+    assert page.position_table.item(0, 4).foreground().color().name() == "#f07a8c"
+    monkeypatch.setattr(theme, "load_theme", lambda *a, **k: theme.Theme.LIGHT)
+    page.refresh()
+    assert page.position_table.item(0, 4).foreground().color().name() == "#b91c1c"
