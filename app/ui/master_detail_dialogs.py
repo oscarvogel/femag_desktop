@@ -759,7 +759,17 @@ class MasterDetailDialog(QDialog):
                     ("Teléfono", carrier.phone or "Sin teléfono", "carrierDetailPhoneValue"),
                     ("Código", carrier.codigo or "Sin código", "carrierDetailCodeValue"),
                     ("Tipo", carrier.tipo or "Sin tipo", "carrierDetailTypeValue"),
+                    (
+                        "Domicilio fiscal (Rentas)",
+                        carrier.fiscal_address or "Sin domicilio fiscal",
+                        "carrierDetailFiscalAddressValue",
+                    ),
                     ("Domicilio", carrier.address or "Sin domicilio", "carrierDetailAddressValue"),
+                    (
+                        "Domicilio que va al F150",
+                        carrier.f150_address or "Sin domicilio",
+                        "carrierDetailF150AddressValue",
+                    ),
                     (
                         "Localidad DGR",
                         locality.name if locality is not None else None,
@@ -870,7 +880,17 @@ class MasterDetailDialog(QDialog):
                         "driverDetailDocumentValue",
                     ),
                     ("Teléfono", driver.phone or "Sin teléfono", "driverDetailPhoneValue"),
+                    (
+                        "Domicilio fiscal (Rentas)",
+                        driver.fiscal_address or "Sin domicilio fiscal",
+                        "driverDetailFiscalAddressValue",
+                    ),
                     ("Domicilio", driver.address or "Sin domicilio", "driverDetailAddressValue"),
+                    (
+                        "Domicilio que va al F150",
+                        driver.f150_address or "Sin domicilio",
+                        "driverDetailF150AddressValue",
+                    ),
                     (
                         "Localidad DGR",
                         locality.name if locality is not None else None,

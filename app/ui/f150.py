@@ -648,6 +648,22 @@ class F150Page(QWidget):
         if not selected:
             QMessageBox.information(self, "F150", "Seleccione al menos un remito listo.")
             return
+        # Aviso antes de pedir la ruta: el operador ve que falta y donde se
+        # corrige, en lugar de elegir la carpeta y enterarse despues (#946).
+        issues = []
+        for remittance in selected:
+            issues.extend(self.service.validation_issues(remittance))
+        if issues:
+            identity = ", ".join(
+                f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+                for remittance in selected
+            )
+            QMessageBox.warning(
+                self,
+                "F150 pendiente",
+                F150BatchService.pending_message(identity, issues),
+            )
+            return
         suggested = self.output_dir / F150Encoder.suggested_filename(date.today())
         output_path, _selected_filter = QFileDialog.getSaveFileName(
             self,

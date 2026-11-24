@@ -104,6 +104,23 @@ class F150BatchService:
         if not remittances:
             raise F150ValidationError("Debe seleccionar al menos un remito.")
         selected = [Remittance.get_by_id(remittance.id) for remittance in remittances]
+        # Aviso temprano: si al remito le falta un dato (por ejemplo la
+        # localidad DGR del chofer) se dice antes de escribir nada y con el
+        # motivo concreto. Antes el unico aviso era "El F150 cambio antes de
+        # generarse", que parecia un problema de concurrencia y escondia que
+        # el dato nunca estuvo (#946).
+        pending = []
+        for remittance in selected:
+            issues = self.validation_issues(remittance, allow_included=True)
+            if issues:
+                pending.append(
+                    f"{self._display_identity(remittance)} — "
+                    + "; ".join(dict.fromkeys(issues))
+                )
+        if pending:
+            raise F150ValidationError(
+                "Faltan datos para generar el F150: " + " | ".join(pending)
+            )
         documents = [self._to_document(remittance) for remittance in selected]
         content = self.encoder.encode(documents)
 
@@ -435,7 +452,7 @@ class F150BatchService:
                 cuit=self._format_cuit(remittance.carrier_cuit or carrier.cuit or ""),
                 name=remittance.carrier_name or carrier.name,
                 carrier_type=carrier.tipo or "",
-                address=carrier.address or "",
+                address=carrier.f150_address,
                 code=carrier.codigo or "",
                 location=self._dgr_location(carrier.locality),
             ),
@@ -455,7 +472,7 @@ class F150BatchService:
                     driver.cuit or "",
                     remittance.driver_document or driver.document or "",
                 ),
-                address=driver.address or "",
+                address=driver.f150_address,
                 location=self._dgr_location(driver.locality),
             ),
             items=tuple(items),
@@ -504,10 +521,15 @@ class F150BatchService:
                 issues.append("transportista: falta tipo")
             if not (carrier.codigo or "").strip():
                 issues.append("transportista: falta código")
-            if not (carrier.address or "").strip():
-                issues.append("transportista: falta domicilio")
+            if not carrier.f150_address.strip():
+                issues.append(
+                    "transportista: falta domicilio fiscal (Rentas) y no hay "
+                    f"domicilio de respaldo — {carrier.name}"
+                )
             issues.extend(
-                F150BatchService._locality_issues(carrier.locality, section="transportista")
+                F150BatchService._locality_issues(
+                    carrier.locality, section="transportista", name=carrier.name
+                )
             )
         truck = remittance.truck
         if truck is not None:
@@ -517,10 +539,15 @@ class F150BatchService:
                 issues.append("camión: falta tipo de acoplado")
         driver = remittance.driver
         if driver is not None:
-            if not (driver.address or "").strip():
-                issues.append("chofer: falta domicilio")
+            if not driver.f150_address.strip():
+                issues.append(
+                    "chofer: falta domicilio fiscal (Rentas) y no hay domicilio "
+                    f"de respaldo — {driver.name}"
+                )
             issues.extend(
-                F150BatchService._locality_issues(driver.locality, section="chofer")
+                F150BatchService._locality_issues(
+                    driver.locality, section="chofer", name=driver.name
+                )
             )
         for row in remittance.items:
             product = row.product
@@ -536,9 +563,27 @@ class F150BatchService:
         return issues
 
     @staticmethod
-    def _locality_issues(locality, *, section: str) -> list[str]:
+    def pending_message(identity: str, issues: list[str]) -> str:
+        """Mensaje unico para los dos lugares desde donde se genera el F150.
+
+        El operador tiene que saber **que** falta, **de quien** y **donde** se
+        corrige, antes de elegir donde guardar el TXT (#946).
+        """
+        lines = "\n".join(f"- {issue}" for issue in dict.fromkeys(issues))
+        return (
+            f"El remito {identity} todavia no se puede generar su F150:\n\n"
+            f"{lines}\n\n"
+            "El remito queda emitido. Corregi estos datos y volve a generar el "
+            "F150: los del chofer y del transportista se cambian en Maestros "
+            "(Choferes / Transportistas, boton Editar) y los del destino con el "
+            "boton Corregir datos DGR de la pantalla F150."
+        )
+
+    @staticmethod
+    def _locality_issues(locality, *, section: str, name: str | None = None) -> list[str]:
+        suffix = f" — {name}" if name else ""
         if locality is None:
-            return [f"{section}: falta localidad DGR"]
+            return [f"{section}: falta localidad DGR{suffix}"]
         missing = []
         if locality.dgr_code is None:
             missing.append("localidad")
@@ -549,12 +594,24 @@ class F150BatchService:
         if locality.country is None:
             missing.append("país")
         if missing:
-            return [f"{section}: faltan códigos DGR ({', '.join(missing)})"]
+            return [f"{section}: faltan códigos DGR ({', '.join(missing)}){suffix}"]
         return []
 
     @staticmethod
     def _identity(remittance: Remittance) -> str:
         return f"{remittance.physical_point_of_sale or '----'}-{remittance.physical_number or '--------'}"
+
+    @staticmethod
+    def _display_identity(remittance: Remittance) -> str:
+        """Identidad del remito como aparece en el archivo F150.
+
+        El punto de venta y el numero van con ceros a la izquierda, como los
+        escribe el encoder, para que el mensaje del error y el TXT hablen del
+        mismo remito (#946).
+        """
+        point_of_sale = str(remittance.physical_point_of_sale or "").strip()
+        number = str(remittance.physical_number or "").strip()
+        return f"{point_of_sale.zfill(4)}-{number.zfill(8)}"
 
     @staticmethod
     def _origin_location() -> F150Location:

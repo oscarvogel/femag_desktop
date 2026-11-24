@@ -9,7 +9,7 @@ from app.services.f150_dgr_service import F150DgrCorrectionService
 
 
 def create_locality_combo(
-    *, object_name: str, current_id: int | None = None
+    *, object_name: str, current_id: int | None = None, include_empty: bool = False
 ) -> QComboBox:
     combo = QComboBox()
     combo.setObjectName(object_name)
@@ -18,6 +18,10 @@ def create_locality_combo(
     combo.lineEdit().setPlaceholderText(
         "Buscar localidad DGR por nombre, codigo o provincia"
     )
+    if include_empty:
+        # Sin localidad elegida: el combo arranca vacio y no inventa una
+        # localidad por ser el primero de la lista (#946).
+        combo.addItem("", None)
     for locality in F150DgrCorrectionService.localities():
         combo.addItem(F150DgrCorrectionService.locality_label(locality), locality.id)
     completer = combo.completer()

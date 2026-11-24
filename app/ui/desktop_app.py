@@ -2023,7 +2023,7 @@ class FemagDesktopWindow(QMainWindow):
         collection_cards = QGridLayout()
         collection_cards.setHorizontalSpacing(10)
         preset_by_title = {
-            "Presupuestos vencidos": "overdue",
+            "Deuda vencida": "overdue",
             "Vence hoy": "today",
             "Próximos 7 días": "next_7",
             "Próximos 30 días": "next_30",
@@ -2033,19 +2033,22 @@ class FemagDesktopWindow(QMainWindow):
             return f"$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
         for index, card in enumerate(spec.collection_cards):
+            unit = card.unit if card.count == 1 else card.unit_plural
             button = QPushButton(
-                f"{card.title}\n{_money(card.amount)}\n{card.count} "
-                f"{'cliente' if card.title == 'Saldo deudor clientes' and card.count == 1 else ('clientes' if card.title == 'Saldo deudor clientes' else ('presupuesto' if card.count == 1 else 'presupuestos'))}"
+                f"{card.title}\n{_money(card.amount)}\n{card.count} {unit}"
             )
+            if card.tooltip:
+                button.setToolTip(card.tooltip)
             button.setObjectName(
                 {
-                    "Presupuestos vencidos": "dashboardOverdueBudgetsCard",
+                    "Deuda vencida": "dashboardOverdueBudgetsCard",
                     "Vence hoy": "dashboardDueTodayCard",
                     "Próximos 7 días": "dashboardNext7Card",
                     "Próximos 30 días": "dashboardNext30Card",
                     "Saldo deudor clientes": "dashboardDebtorBalanceCard",
                 }[card.title]
             )
+
             button.setMinimumHeight(92)
             button.setCursor(Qt.PointingHandCursor)
             if card.route_key == "customer_ledger":
@@ -2072,7 +2075,7 @@ class FemagDesktopWindow(QMainWindow):
             heading = QLabel(title)
             heading.setObjectName("dashboardPanelTitle")
             panel_layout.addWidget(heading)
-            caption = QLabel("Vista rápida · últimos 5 registros")
+            caption = QLabel("Vista rápida · últimos 5 documentos (importe del documento)")
             caption.setObjectName("dashboardPanelCaption")
             panel_layout.addWidget(caption)
 
