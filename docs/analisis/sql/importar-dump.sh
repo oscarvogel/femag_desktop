@@ -25,14 +25,14 @@ echo "errores SQL en la pasada 1: $(grep -c '^ERROR' /tmp/import_p1.log)"
 echo "--- ALTER de las columnas que el DDL del dump no tiene ---"
 docker exec -i "$CONTAINER" mariadb -uroot -proot <<'SQL'
 USE femag_desktop;
-ALTER TABLE auditlog ADD COLUMN user_id int NULL;
-ALTER TABLE budget ADD COLUMN salesperson_id int NULL;
-ALTER TABLE carrier ADD COLUMN fiscal_address varchar(255) NULL;
-ALTER TABLE client ADD COLUMN whatsapp_phone varchar(255) NULL;
-ALTER TABLE driver ADD COLUMN fiscal_address varchar(255) NULL;
-ALTER TABLE loadorderdestination ADD COLUMN salesperson_id int NULL;
-ALTER TABLE managerialsummarydelivery ADD COLUMN provider_status varchar(255) NULL;
-ALTER TABLE salesperson ADD COLUMN whatsapp_phone varchar(255) NULL;
+ALTER TABLE auditlog ADD COLUMN IF NOT EXISTS user_id int NULL;
+ALTER TABLE budget ADD COLUMN IF NOT EXISTS salesperson_id int NULL;
+ALTER TABLE carrier ADD COLUMN IF NOT EXISTS fiscal_address varchar(255) NULL;
+ALTER TABLE client ADD COLUMN IF NOT EXISTS whatsapp_phone varchar(255) NULL;
+ALTER TABLE driver ADD COLUMN IF NOT EXISTS fiscal_address varchar(255) NULL;
+ALTER TABLE loadorderdestination ADD COLUMN IF NOT EXISTS salesperson_id int NULL;
+ALTER TABLE managerialsummarydelivery ADD COLUMN IF NOT EXISTS provider_status varchar(255) NULL;
+ALTER TABLE salesperson ADD COLUMN IF NOT EXISTS whatsapp_phone varchar(255) NULL;
 SQL
 
 echo "--- pasada 2: import completo ---"
