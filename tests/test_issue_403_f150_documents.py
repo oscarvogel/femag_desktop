@@ -88,6 +88,14 @@ def test_generate_rejects_driver_without_usable_document(db, tmp_path):
 
 
 def test_generate_rejects_malformed_driver_cuit_without_document(db, tmp_path):
-    remittance = _issued_remittance(driver_cuit="ABC", driver_document="")
+    remittance = _issued_remittance()
+    # El maestro se invalido despues de emitir: la generacion tiene que
+    # seguir rechazando el dato malformado.
+    driver = remittance.driver
+    driver.cuit = "ABC"
+    driver.document = ""
+    driver.save()
+    remittance.driver_document = ""
+    remittance.save()
     with pytest.raises(F150ValidationError, match="falta CUIT o documento"):
         F150BatchService("admin").generate([remittance], tmp_path / "f150-403.TXT")

@@ -27,7 +27,8 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.f150_encoder import F150ValidationError
-from app.services.remittance_service import RemittanceService
+from app.services.remittance_service import RemittanceIssueBlocked, RemittanceService
+from tests.conftest import _issue_historical
 
 DGR_ROWS = {
     "paises": [{"IDPAIS": 200, "NOMBRE": "ARGENTINA", "ABR": "ARG"}],
@@ -57,6 +58,7 @@ def _escenario(
     driver_fiscal_address=None,
     with_driver_locality=True,
     with_carrier_locality=True,
+    issue=True,
 ):
     DgrReferenceImporter().import_rows(DGR_ROWS)
     AppParameter.create(key="f150.origin", value=json.dumps({"locality_code": "2426"}))
@@ -92,7 +94,7 @@ def _escenario(
         remittance_date=date(2026, 11, 23),
         items=[{"product": product, "quantity": Decimal("500")}],
     )
-    return service.issue(remittance)
+    return service.issue(remittance) if issue else remittance
 
 
 def _header(output):
@@ -219,28 +221,32 @@ def test_validacion_no_bloquea_con_domicilio_fiscal_sin_respaldo(db):
 
 def test_validacion_bloquea_sin_localidad_y_nombra_al_chofer(db):
     """El error tiene que decir de quien es, no solo que algo falta."""
-    remittance = _escenario(
+    draft = _escenario(
         db,
         carrier_address=DOMICILIO_RESPALDO_TRANSPORTE,
         driver_address=DOMICILIO_RESPALDO_CHOFER,
         with_driver_locality=False,
+        issue=False,
     )
-    issues = F150BatchService.validation_issues(remittance)
+    with pytest.raises(RemittanceIssueBlocked) as error:
+        RemittanceService("admin").issue(draft)
     assert any(
         issue.startswith("chofer: falta localidad DGR")
         and "GIMENEZ JORGE ARIEL" in issue
-        for issue in issues
+        for issue in error.value.issues
     )
 
 
 def test_generacion_avisa_que_faltan_datos_antes_de_escribir(db, tmp_path):
     """No se abre el dialogo de guardado ni se escribe un TXT incompleto."""
-    remittance = _escenario(
+    draft = _escenario(
         db,
         carrier_address=DOMICILIO_RESPALDO_TRANSPORTE,
         driver_address=DOMICILIO_RESPALDO_CHOFER,
         with_driver_locality=False,
+        issue=False,
     )
+    remittance = _issue_historical(draft)
     output = tmp_path / "f150-946.TXT"
     with pytest.raises(F150ValidationError) as error:
         F150BatchService("admin").generate([remittance], output)

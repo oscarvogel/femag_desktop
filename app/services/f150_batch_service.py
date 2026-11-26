@@ -30,6 +30,7 @@ from app.services.f150_encoder import (
     F150ValidationError,
     F150Vehicle,
 )
+from app.services.pricing import price_for_client_list
 
 
 F150_ORIGIN_PARAMETER = "f150.origin"
@@ -481,13 +482,25 @@ class F150BatchService:
 
     @staticmethod
     def validation_issues(
-        remittance: Remittance, *, allow_included: bool = False
+        remittance: Remittance,
+        *,
+        allow_included: bool = False,
+        require_issued: bool = True,
     ) -> list[str]:
+        """Datos que el contrato del F150 necesita para este remito.
+
+        ``require_issued=False`` es el preflight que usa ``RemittanceService.issue``
+        antes de consumir el talonario: valida los mismos datos efectivos, pero
+        omite lo que recien existe despues de emitir (estado emitido y numeracion
+        fisica). El precio de un renglon sin congelar se resuelve con la lista del
+        cliente, que es exactamente lo que congela la emision.
+        """
         issues = []
-        if remittance.status != Remittance.STATUS_ISSUED:
-            issues.append("debe estar emitido")
-        if not remittance.physical_point_of_sale or not remittance.physical_number:
-            issues.append("falta numeracion fisica")
+        if require_issued:
+            if remittance.status != Remittance.STATUS_ISSUED:
+                issues.append("debe estar emitido")
+            if not remittance.physical_point_of_sale or not remittance.physical_number:
+                issues.append("falta numeracion fisica")
         if not remittance.client_cuit:
             issues.append("falta CUIT del cliente")
         if remittance.carrier_id is None or not remittance.carrier_cuit:
@@ -555,7 +568,13 @@ class F150BatchService:
                 issues.append(f"detalle: {product.name} sin rubros DGR")
             if not (product.unidad_dgr or "").strip():
                 issues.append(f"detalle: {product.name} sin unidad DGR")
-            if row.unit_price is None or row.unit_price <= 0:
+            unit_price = row.unit_price
+            if unit_price is None and not require_issued:
+                # El preflight de un borrador resuelve el mismo precio que la
+                # emision va a congelar desde la lista del cliente. Un remito
+                # ya emitido, en cambio, tiene que traer su precio congelado.
+                unit_price = price_for_client_list(product, remittance.client)
+            if unit_price is None or unit_price <= 0:
                 issues.append(
                     f"detalle: {product.name} sin precio de operacion "
                     "(el remito tiene que estar emitido con el precio cargado)"

@@ -9,7 +9,8 @@ from app.models.dgr import DgrLocality
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
 from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService, F150ValidationError
-from app.services.remittance_service import RemittanceService
+from app.services.remittance_service import RemittanceIssueBlocked, RemittanceService
+from tests.conftest import _issue_historical
 
 
 DGR_ROWS = {
@@ -26,7 +27,7 @@ DGR_ROWS = {
 }
 
 
-def _coded_setup(**overrides):
+def _coded_setup(*, issue=True, **overrides):
     DgrReferenceImporter().import_rows(DGR_ROWS)
     AppParameter.create(key="f150.origin", value=json.dumps({"locality_code": "2426"}))
     locality = DgrLocality.get(DgrLocality.code == "2457")
@@ -68,7 +69,13 @@ def _coded_setup(**overrides):
         remittance_date=date(2026, 9, 7),
         items=[{"product": product, "quantity": Decimal("10")}],
     )
-    return service.issue(remittance)
+    return service.issue(remittance) if issue else remittance
+
+
+def _blocked(draft):
+    with pytest.raises(RemittanceIssueBlocked) as error:
+        RemittanceService("admin").issue(draft)
+    return error.value.issues
 
 
 def test_complete_remittance_has_no_issues_and_generates(db, tmp_path):
@@ -87,28 +94,30 @@ def test_missing_origin_parameter_blocks(db):
 
 
 def test_missing_destination_locality_blocks(db):
-    remittance = _coded_setup(address_without_locality=True)
-    issues = F150BatchService.validation_issues(remittance)
+    draft = _coded_setup(issue=False, address_without_locality=True)
+    issues = _blocked(draft)
     assert "destino: falta localidad DGR" in issues
 
 
 def test_missing_carrier_codes_block(db):
-    remittance = _coded_setup(carrier_without_codigo=True, carrier_without_tipo=True)
-    issues = F150BatchService.validation_issues(remittance)
+    draft = _coded_setup(
+        issue=False, carrier_without_codigo=True, carrier_without_tipo=True
+    )
+    issues = _blocked(draft)
     assert "transportista: falta tipo" in issues
     assert "transportista: falta código" in issues
 
 
 def test_missing_truck_types_block(db):
-    remittance = _coded_setup(truck_without_types=True)
-    issues = F150BatchService.validation_issues(remittance)
+    draft = _coded_setup(issue=False, truck_without_types=True)
+    issues = _blocked(draft)
     assert "camión: falta tipo de chasis" in issues
     assert "camión: falta tipo de acoplado" in issues
 
 
 def test_missing_product_codes_block(db):
-    remittance = _coded_setup(product_without_codes=True)
-    issues = F150BatchService.validation_issues(remittance)
+    draft = _coded_setup(issue=False, product_without_codes=True)
+    issues = _blocked(draft)
     assert any("sin rubros DGR" in issue for issue in issues)
     assert any("sin unidad DGR" in issue for issue in issues)
 
@@ -131,11 +140,13 @@ def test_demo_like_remittance_without_codes_is_rejected(db, tmp_path):
         remittance_date=date(2026, 9, 7),
         items=[{"product": product, "quantity": Decimal("500")}],
     )
-    issued = service.issue(remittance)
-    issues = F150BatchService.validation_issues(issued)
+    # #975: la emision se bloquea con todos los faltantes juntos.
+    issues = _blocked(remittance)
     assert "falta origen DGR (parámetro f150.origin)" in issues
     assert "destino: falta localidad DGR" in issues
     assert "transportista: falta tipo" in issues
     assert "camión: falta tipo de chasis" in issues
+    # La generacion tambien rechaza un remito historico con esos datos.
+    historical = _issue_historical(remittance)
     with pytest.raises(F150ValidationError):
-        F150BatchService("admin").generate([issued], tmp_path / "f150-405.TXT")
+        F150BatchService("admin").generate([historical], tmp_path / "f150-405.TXT")

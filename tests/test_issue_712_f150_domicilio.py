@@ -20,7 +20,8 @@ from app.models.system import AppParameter
 from app.services.f150_batch_service import F150BatchService
 from app.services.f150_encoder import F150ValidationError
 from app.services.master_service import MasterService
-from app.services.remittance_service import RemittanceService
+from app.services.remittance_service import RemittanceIssueBlocked, RemittanceService
+from tests.conftest import _issue_historical
 
 
 DGR_ROWS = {
@@ -42,7 +43,7 @@ DOMICILIO_TRANSPORTE = "LOTE 105 B\u00ba OTTO BAHR"
 DOMICILIO_CHOFER = "SAN FRANCISCO DE PAULA 907"
 
 
-def _escenario(db, *, carrier_address, driver_address):
+def _escenario(db, *, carrier_address, driver_address, issue=True):
     DgrReferenceImporter().import_rows(DGR_ROWS)
     AppParameter.create(key="f150.origin", value=json.dumps({"locality_code": "2426"}))
     locality = DgrLocality.get(DgrLocality.code == "2457")
@@ -75,7 +76,7 @@ def _escenario(db, *, carrier_address, driver_address):
         remittance_date=date(2026, 10, 16),
         items=[{"product": product, "quantity": Decimal("500")}],
     )
-    return service.issue(remittance)
+    return service.issue(remittance) if issue else remittance
 
 
 def test_import_captures_domicilio_de_transporte_y_chofer(db):
@@ -118,8 +119,10 @@ def test_generacion_escribe_domicilio_en_campo_13_y_31(db, tmp_path):
 
 
 def test_validacion_reporta_falta_de_domicilio(db):
-    remittance = _escenario(db, carrier_address=None, driver_address=None)
-    issues = F150BatchService.validation_issues(remittance)
+    draft = _escenario(db, carrier_address=None, driver_address=None, issue=False)
+    with pytest.raises(RemittanceIssueBlocked) as error:
+        RemittanceService("admin").issue(draft)
+    issues = error.value.issues
     # Desde #946 el mensaje dice que falta el domicilio fiscal (Rentas) y que
     # tampoco hay un domicilio de respaldo, y nombra al registro.
     assert any(issue.startswith("transportista: falta domicilio") for issue in issues)
@@ -127,8 +130,9 @@ def test_validacion_reporta_falta_de_domicilio(db):
 
 
 def test_generacion_bloquea_sin_domicilio(db, tmp_path):
-    """Decision del operador: bloquear con mensaje claro, no generar incompleto."""
-    remittance = _escenario(db, carrier_address=None, driver_address=None)
+    """Un remito historico sin domicilio tampoco se genera incompleto."""
+    draft = _escenario(db, carrier_address=None, driver_address=None, issue=False)
+    remittance = _issue_historical(draft)
     with pytest.raises(F150ValidationError) as error:
         F150BatchService("admin").generate([remittance], tmp_path / "f150-712.TXT")
     message = str(error.value)
@@ -156,7 +160,14 @@ def test_domicilio_cargado_a_mano_habilita_la_generacion(db, tmp_path):
     assert F150BatchService.validation_issues(remittance) == []
 
 
-def test_remito_emitido_no_se_derrama_por_exigir_domicilio(db):
-    """Exigir el domicilio es al generar el F150, no al emitir el remito."""
-    remittance = _escenario(db, carrier_address=None, driver_address=None)
-    assert remittance.status == Remittance.STATUS_ISSUED
+def test_emision_bloqueada_por_falta_de_domicilio_conserva_borrador(db):
+    """#975: el domicilio del F150 se exige al emitir, no despues."""
+    draft = _escenario(db, carrier_address=None, driver_address=None, issue=False)
+    with pytest.raises(RemittanceIssueBlocked):
+        RemittanceService("admin").issue(draft)
+    current = Remittance.get_by_id(draft.id)
+    assert current.status == Remittance.STATUS_DRAFT
+    assert current.carrier.address is None
+    assert current.driver.address is None
+    assert current.physical_point_of_sale == "0001"
+    assert current.physical_number == "00000712"

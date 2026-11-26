@@ -7,11 +7,71 @@ from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, 
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.models.system import NumberSequence
 from app.services.audit_service import AuditService
-from app.services.dgr_validation import (
-    destination_address_issues,
-    snapshot_destination_issues,
-)
+from app.services.f150_batch_service import F150BatchService
 from app.services.pricing import as_money, price_for_client_list
+
+
+class RemittanceIssueBlocked(ValueError):
+    """La emision quedo bloqueada por datos obligatorios del F150.
+
+    El remito sigue siendo un borrador editable: no se consumio numeracion,
+    no se creo lote/archivo F150 y no se registro la auditoria de emision.
+    """
+
+    def __init__(self, identity: str, issues: list[str]):
+        self.identity = identity
+        self.issues = list(dict.fromkeys(issues))
+        super().__init__(self.operator_message())
+
+    def operator_message(self) -> str:
+        lines = "\n".join(f"- {issue}" for issue in self.issues)
+        return (
+            "Faltan o son inválidos datos obligatorios para generar el "
+            "formulario F150.\n\n"
+            f"Remito {self.identity}:\n{lines}\n\n"
+            f"{self._correction_guidance()}\n\n"
+            "El remito permanece guardado como borrador y puede seguir "
+            "modificándose. Corrija los datos indicados y vuelva a intentar la "
+            "emisión. No se ha consumido ningún número del talonario."
+        )
+
+    def _correction_guidance(self) -> str:
+        text = " ".join(self.issues).casefold()
+        entries = []
+        if "cliente" in text or "destino" in text:
+            entries.append(
+                "Cliente/destino: Maestros → Clientes (domicilio y localidad "
+                "DGR) o el botón Corregir datos DGR de la pantalla F150."
+            )
+        if "transportista" in text:
+            entries.append(
+                "Transportista: Maestros → Transportistas (tipo, código, "
+                "domicilio fiscal y localidad DGR)."
+            )
+        if "chofer" in text:
+            entries.append(
+                "Chofer: Maestros → Choferes (CUIT/documento, domicilio fiscal "
+                "y localidad DGR)."
+            )
+        if "camión" in text or "camion" in text:
+            entries.append(
+                "Camión/acoplado: Maestros → Transporte (patente, tipo de "
+                "chasis y tipo de acoplado)."
+            )
+        if "detalle:" in text or "no tiene detalle" in text or "producto" in text:
+            entries.append(
+                "Producto: Maestros → Productos (clasificación y unidad DGR, "
+                "precio) o el botón Corregir datos DGR de la pantalla F150."
+            )
+        if "origen dgr" in text:
+            entries.append(
+                "Origen DGR: Configuración del F150 (localidad de origen)."
+            )
+        if "numeracion" in text or "numeración" in text or "numero de remito" in text:
+            entries.append("Numeración: Talonarios / número del formulario.")
+        if not entries:
+            return "Revise los datos del remito y de los maestros."
+        return "Dónde corregir:\n" + "\n".join(f"- {entry}" for entry in entries)
 
 
 class RemittanceSeriesService:
@@ -522,43 +582,70 @@ class RemittanceService:
             )
         return remittance
 
+    @staticmethod
+    def _issue_identity(remittance: Remittance) -> str:
+        if remittance.physical_point_of_sale and remittance.physical_number:
+            return f"{remittance.physical_point_of_sale}-{remittance.physical_number}"
+        return remittance.remittance_number
+
+    @staticmethod
+    def _refresh_issue_snapshots(remittance: Remittance) -> None:
+        """Actualiza en memoria los snapshots que el F150 usa al emitir.
+
+        Solo corre sobre borradores. Un dato corregido en el maestro tiene que
+        poder usarse al reintentar la emision; los remitos ya emitidos nunca
+        pasan por aca. Los precios de los renglones no se tocan: se congelan
+        aparte con la regla de #683.
+        """
+        client = remittance.client
+        if client is not None:
+            remittance.client_name = client.name
+            remittance.client_cuit = client.cuit
+            remittance.client_iva_condition = client.iva_condition
+        address = remittance.delivery_address
+        if address is not None:
+            remittance.delivery_address_text = address.address
+            remittance.delivery_city = address.city
+            remittance.delivery_province = address.province
+        carrier = remittance.carrier
+        if carrier is not None:
+            remittance.carrier_name = carrier.name
+            remittance.carrier_cuit = carrier.cuit
+        truck = remittance.truck
+        if truck is not None:
+            remittance.truck_domain = truck.domain
+            if remittance.trailer_domain is None:
+                remittance.trailer_domain = RemittanceService._normalize_trailer_domain(
+                    truck.trailer_domain
+                )
+        driver = remittance.driver
+        if driver is not None:
+            remittance.driver_name = driver.name
+            remittance.driver_document = RemittanceService._driver_snapshot_document(driver)
+
     def issue(self, remittance: Remittance) -> Remittance:
         remittance = Remittance.get_by_id(remittance.id)
         if remittance.status != Remittance.STATUS_DRAFT:
             raise ValueError("Solo se pueden emitir remitos en borrador.")
-        if not remittance.items.exists():
-            raise ValueError("El remito no tiene productos.")
-        if not remittance.client_cuit:
-            raise ValueError("El cliente debe tener CUIT antes de emitir el remito.")
-        if remittance.carrier_id is None or not remittance.carrier_cuit:
-            raise ValueError("Debe asignar un transportista con CUIT antes de emitir el remito.")
-        if remittance.truck_id is None or not remittance.truck_domain:
-            raise ValueError("Debe asignar un camión antes de emitir el remito.")
-        if remittance.driver_id is None:
-            raise ValueError("Debe asignar un chofer antes de emitir el remito.")
-        if not (remittance.driver.cuit or remittance.driver_document):
-            raise ValueError("El chofer debe tener CUIT o documento antes de emitir el remito.")
-        address_issues = destination_address_issues(
-            remittance.delivery_address, section="destino", require_locality=False
-        )
-        if address_issues:
-            raise ValueError(
-                "No se puede emitir el remito: " + "; ".join(address_issues)
-            )
-        # El snapshot se refresca desde el domicilio maestro elegido. Asi un
-        # remito nuevo hereda la calle/ciudad/provincia reales y no queda con
-        # el valor viejo de una edicion anterior del maestro. Solo aplica al
-        # emitir: los remitos ya emitidos no se tocan.
-        remittance.delivery_address_text = remittance.delivery_address.address
-        remittance.delivery_city = remittance.delivery_address.city
-        remittance.delivery_province = remittance.delivery_address.province
-        snapshot_issues = snapshot_destination_issues(remittance, section="destino")
-        if snapshot_issues:
-            raise ValueError(
-                "No se puede emitir el remito: " + "; ".join(snapshot_issues)
-            )
-        old_snapshot = self._snapshot(remittance)
+        # Guardar NO es emitir. El preflight del F150 corre dentro de la misma
+        # transaccion que la emision: si falta un dato, se revierte tambien el
+        # precio congelado y nunca se reserva un numero del talonario.
         with database_proxy.atomic():
+            # Releer dentro de la transaccion: si otro puesto lo emitio en el
+            # medio, no se valida ni se reserva numeracion sobre un estado viejo.
+            remittance = Remittance.get_by_id(remittance.id)
+            if remittance.status != Remittance.STATUS_DRAFT:
+                raise ValueError("Solo se pueden emitir remitos en borrador.")
+            old_snapshot = self._snapshot(remittance)
+            self._refresh_issue_snapshots(remittance)
+            self._freeze_item_prices(remittance)
+            issues = F150BatchService.validation_issues(
+                remittance, require_issued=False
+            )
+            if issues:
+                raise RemittanceIssueBlocked(
+                    self._issue_identity(remittance), issues
+                )
             if not remittance.physical_point_of_sale or not remittance.physical_number:
                 series = remittance.series or RemittanceSeriesService.default()
                 if series is None:
@@ -579,7 +666,6 @@ class RemittanceService:
             remittance.status = Remittance.STATUS_ISSUED
             remittance.issued_by = self.current_user
             remittance.updated_by = self.current_user
-            self._freeze_item_prices(remittance)
             remittance.save()
             self.audit_service.record(
                 user=self.current_user,
