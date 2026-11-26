@@ -26,6 +26,7 @@ from app.services.f150_batch_service import F150BatchService
 from app.services.load_order_service import LoadOrderService
 from app.services.pricing import price_for_client_list
 from app.services.remittance_service import (
+    RemittanceEditConflict,
     RemittanceIssueBlocked,
     RemittanceSeriesService,
     RemittanceService,
@@ -383,7 +384,9 @@ def test_issued_remittance_stays_non_editable(db):
     service = RemittanceService("admin")
     issued = service.issue(_draft(service, data, number="00000982"))
 
-    with pytest.raises(ValueError, match="borrador"):
+    with pytest.raises(
+        RemittanceEditConflict, match="fue emitido desde otro puesto"
+    ):
         service.update_draft(issued, observations="no deberia poder")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from peewee import prefetch
 from PyQt5.QtCore import QDate, QUrl, Qt
 from PyQt5.QtGui import QDesktopServices, QDoubleValidator
 from PyQt5.QtWidgets import (
@@ -32,13 +33,15 @@ from PyQt5.QtWidgets import (
 
 from app.models.load_orders import LoadOrder
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
-from app.models.remittances import Remittance, RemittanceSeries
+from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.services.f150_batch_service import F150BatchService
 from app.services.money import ZERO_MONEY, money_sum, quantize_money
 from app.services.pricing import price_for_client_list
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import (
     RemittanceAlreadyIssued,
+    RemittanceChangedElsewhere,
+    RemittanceEditConflict,
     RemittanceIssueBlocked,
     RemittanceSeriesService,
     RemittanceService,
@@ -67,6 +70,7 @@ class RemittanceDialog(QDialog):
         super().__init__(parent)
         self.current_user = current_user
         self.remittance = remittance
+        self._loaded_version: tuple | None = None
         self.setWindowTitle("Remito")
         self.resize(1080, 720)
         self.setMinimumSize(920, 650)
@@ -641,6 +645,7 @@ class RemittanceDialog(QDialog):
         self.driver_combo.setEnabled(editable)
         self.items.setEnabled(editable)
         self._refresh_number_availability()
+        self._loaded_version = RemittanceService.edit_version(r)
 
     def _payload_items(self) -> list[dict]:
         payload = []
@@ -726,6 +731,7 @@ class RemittanceDialog(QDialog):
             else:
                 self.remittance = service.update_draft(
                     self.remittance,
+                    expected_version=self._loaded_version,
                     client=client,
                     delivery_address=address,
                     items=items,
@@ -739,6 +745,9 @@ class RemittanceDialog(QDialog):
                     physical_point_of_sale=point,
                     physical_number=number,
                 )
+        except RemittanceEditConflict as exc:
+            QMessageBox.warning(self, "Remito no guardado", str(exc))
+            return
         except Exception as exc:
             QMessageBox.warning(self, "Remito", str(exc))
             return
@@ -1025,7 +1034,13 @@ class RemittancesPage(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        rows = list(Remittance.select().order_by(Remittance.id.desc()))
+        query = Remittance.select().order_by(Remittance.id.desc())
+        rows = prefetch(query, RemittanceItem.select())
+        versions = {
+            row.id: RemittanceService.edit_version(row)
+            for row in rows
+            if row.status == Remittance.STATUS_DRAFT
+        }
         self.table.setRowCount(len(rows))
         for row, remittance in enumerate(rows):
             physical = ""
@@ -1044,6 +1059,7 @@ class RemittancesPage(QWidget):
                 item = QTableWidgetItem(str(value))
                 if col == 0:
                     item.setData(Qt.UserRole, remittance.id)
+                    item.setData(Qt.UserRole + 1, versions.get(remittance.id))
                 self.table.setItem(row, col, item)
 
     def _selected(self) -> Remittance | None:
@@ -1052,6 +1068,13 @@ class RemittancesPage(QWidget):
             return None
         item = self.table.item(row, 0)
         return Remittance.get_by_id(item.data(Qt.UserRole)) if item else None
+
+    def _selected_version(self) -> tuple | None:
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        item = self.table.item(row, 0)
+        return item.data(Qt.UserRole + 1) if item else None
 
     def _new(self) -> None:
         if RemittanceDialog(current_user=self.current_user, parent=self).exec_() == QDialog.Accepted:
@@ -1095,12 +1118,24 @@ class RemittancesPage(QWidget):
         if remittance is None:
             QMessageBox.information(self, "Remitos", "Seleccione un remito.")
             return
+        expected_version = self._selected_version()
         try:
-            emitted = RemittanceService(self.current_user).issue(remittance)
+            emitted = RemittanceService(self.current_user).issue(
+                remittance, expected_version=expected_version
+            )
+        except RemittanceChangedElsewhere as exc:
+            QMessageBox.warning(self, "Remito desactualizado", str(exc))
+            self.refresh()
+            return
         except RemittanceAlreadyIssued as exc:
+            title = (
+                "Remito ya emitido"
+                if exc.status == Remittance.STATUS_ISSUED
+                else "Remito no disponible"
+            )
             QMessageBox.information(
                 self,
-                "Remito ya emitido",
+                title,
                 str(exc),
             )
             self.refresh()
