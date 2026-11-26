@@ -49,9 +49,9 @@ def test_manual_remittance_rejects_address_from_other_client(db):
 def test_issue_assigns_next_configured_number_and_locks_editing(db):
     from app.models.remittances import Remittance, RemittanceSeries
     from app.services.remittance_service import RemittanceSeriesService, RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     service = RemittanceService(current_user="admin")
     series = RemittanceSeriesService("admin").save(
         name="Talonario principal",
@@ -85,9 +85,9 @@ def test_issue_assigns_next_configured_number_and_locks_editing(db):
 
 def test_issue_without_number_and_series_requires_manual_number(db):
     from app.services.remittance_service import RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     # Sin datos de transporte, `issue()` corta antes y el error seria el de
     # transporte, no el del numero manual que este test quiere comprobar.
     remittance = RemittanceService("admin").create_manual(
@@ -128,9 +128,9 @@ def test_skip_series_number_requires_reason_and_is_audited(db):
 def test_two_drafts_consume_consecutive_numbers_only_when_issued(db):
     from app.models.remittances import RemittanceSeries
     from app.services.remittance_service import RemittanceSeriesService, RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     RemittanceSeriesService("admin").save(
         name="Talonario consecutivo",
         point_of_sale="0001",
@@ -161,9 +161,9 @@ def test_two_drafts_consume_consecutive_numbers_only_when_issued(db):
 
 def test_series_end_blocks_next_issue_after_last_available_number(db):
     from app.services.remittance_service import RemittanceSeriesService, RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     RemittanceSeriesService("admin").save(
         name="Talonario corto",
         point_of_sale="0004",
@@ -295,9 +295,9 @@ def test_annul_requires_reason_and_records_state(db):
 
 def test_issue_requires_transport_data_needed_by_f150(db):
     from app.services.remittance_service import RemittanceSeriesService, RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     service = RemittanceService("admin")
     remittance = service.create_manual(
         client=data["client"],
@@ -391,9 +391,9 @@ def test_manual_number_must_be_unique_on_update_but_self_is_allowed(db):
 def test_issue_with_manual_number_keeps_it_without_series(db):
     from app.models.remittances import Remittance
     from app.services.remittance_service import RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     service = RemittanceService("admin")
     remittance = service.create_manual(
         client=data["client"],

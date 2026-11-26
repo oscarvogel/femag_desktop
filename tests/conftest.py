@@ -115,6 +115,81 @@ def _multi_client_data():
     return data
 
 
+def _f150_ready_master_data():
+    """Maestros sinteticos completos para emitir y generar el F150.
+
+    ``_master_data`` se mantiene minimo porque lo usan muchos circuitos que no
+    tocan el F150. Este helper agrega solo los datos que exige el contrato DGR,
+    sin cambiar los valores que otros tests ya verifican.
+    """
+    from app.models.dgr import DgrCountry, DgrLocality, DgrProvince
+    from app.models.system import AppParameter
+
+    data = _master_data()
+    country = DgrCountry.create(legacy_id=9999, name="ARGENTINA", abbr="ARG")
+    DgrProvince.create(code=99, name="MISIONES")
+    locality = DgrLocality.create(
+        code="9999",
+        name="Posadas",
+        dgr_id=9999,
+        dgr_code=9999,
+        department_code=9999,
+        province_code=99,
+        country=country,
+    )
+    AppParameter.get_or_create(
+        key="f150.origin", defaults={"value": '{"locality_code": "9999"}'}
+    )
+
+    address = data["address"]
+    address.locality = locality
+    address.save()
+
+    carrier = data["carrier"]
+    carrier.codigo = "0001"
+    carrier.tipo = "DIR"
+    carrier.locality = locality
+    carrier.address = "Ruta 12"
+    carrier.save()
+
+    truck = data["truck"]
+    truck.chassis_type = "1"
+    truck.trailer_type = "1"
+    truck.save()
+
+    driver = data["driver"]
+    driver.locality = locality
+    driver.address = "Posadas"
+    driver.save()
+
+    product = data["product"]
+    product.rh1 = "2"
+    product.rh2 = "2"
+    product.rh3 = "19"
+    product.rh4 = "0"
+    product.unidad_dgr = "kg"
+    product.precio_neto_base = 100.0
+    product.save()
+    return data
+
+
+def _issue_historical(remittance):
+    """Marca un borrador como emitido sin el preflight del F150 (#975).
+
+    Los tests de generacion necesitan remitos ya emitidos con datos que hoy
+    bloquearian la emision: representan comprobantes historicos o maestros que
+    se invalidaron despues de emitir. La generacion del F150 tiene que seguir
+    bloqueandolos.
+    """
+    from app.models.remittances import Remittance
+
+    remittance.status = Remittance.STATUS_ISSUED
+    remittance.issued_by = "historico"
+    remittance.updated_by = "historico"
+    remittance.save()
+    return remittance
+
+
 def _valid_order_payload(data):
     return {
         "client": data["client"],

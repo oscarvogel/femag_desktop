@@ -111,9 +111,9 @@ def test_issue_action_offers_f150_after_emit(db, tmp_path, monkeypatch):
     from app.models.remittances import Remittance
     from app.services.remittance_service import RemittanceService
     from app.ui import remittances as remittances_ui
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     remittance = RemittanceService("ui_issue_f150").create_manual(
         client=data["client"],
         delivery_address=data["address"],
@@ -171,18 +171,20 @@ def test_emitir_guarda_f150_en_destino_elegido(db, tmp_path, monkeypatch):
 
 
 def test_f150_pendiente_no_cae_la_emision(db, tmp_path, monkeypatch):
-    """Si falta un dato del formato, el remito queda emitido y pendiente."""
+    """Si un dato cambia despues de emitir, el remito sigue emitido y pendiente."""
     from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
     from app.services.f150_batch_service import F150BatchService
     from app.services.remittance_service import RemittanceService
     from app.ui.remittances import RemittancesPage
 
-    # Sin domicilio del transportista el F150 no se puede generar.
-    draft = _f150_ready_draft("ui_f150_pending")
-    draft.carrier.address = None
-    draft.carrier.save()
-    remittance = RemittanceService("ui_f150_pending").issue(draft)
+    # La emision exige los datos completos (#975). El caso de este test es el
+    # dato que se invalida despues: el remito ya emitido no se revierte.
+    remittance = RemittanceService("ui_f150_pending").issue(
+        _f150_ready_draft("ui_f150_pending")
+    )
+    remittance.carrier.address = None
+    remittance.carrier.save()
     app = QApplication.instance() or QApplication([])
     page = RemittancesPage(
         current_user="ui_f150_pending", output_dir=tmp_path, f150_output_dir=tmp_path
@@ -1177,9 +1179,9 @@ def test_preprinted_pdf_only_requires_issued_remittance(db, tmp_path):
 
     from app.services.remittance_print_service import RemittancePrintService
     from app.services.remittance_service import RemittanceService
-    from tests.conftest import _master_data
+    from tests.conftest import _f150_ready_master_data
 
-    data = _master_data()
+    data = _f150_ready_master_data()
     service = RemittanceService(current_user="ui_remittances")
     remittance = service.create_manual(
         client=data["client"],

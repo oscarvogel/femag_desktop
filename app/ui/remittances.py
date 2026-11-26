@@ -37,7 +37,11 @@ from app.services.f150_batch_service import F150BatchService
 from app.services.money import ZERO_MONEY, money_sum, quantize_money
 from app.services.pricing import price_for_client_list
 from app.services.remittance_print_service import RemittancePrintService
-from app.services.remittance_service import RemittanceSeriesService, RemittanceService
+from app.services.remittance_service import (
+    RemittanceIssueBlocked,
+    RemittanceSeriesService,
+    RemittanceService,
+)
 from app.ui.audit_reason_dialog import AuditReasonDialog
 from app.ui.combo_autocomplete import (
     SEARCH_COLUMNS_ROLE,
@@ -1092,6 +1096,14 @@ class RemittancesPage(QWidget):
             return
         try:
             emitted = RemittanceService(self.current_user).issue(remittance)
+        except RemittanceIssueBlocked as exc:
+            QMessageBox.warning(
+                self,
+                "No se puede emitir el remito",
+                exc.operator_message(),
+            )
+            self.refresh()
+            return
         except Exception as exc:
             QMessageBox.warning(self, "Emitir remito", str(exc))
             return
@@ -1106,10 +1118,12 @@ class RemittancesPage(QWidget):
     def _generate_f150_after_emit(self, remittance: Remittance) -> None:
         """Genera el F150 del remito emitido en la ubicacion elegida.
 
-        Cargar el remito con sus datos y que el F150 aparezca es el flujo normal.
-        Si falta un dato del formato no se cae la emision: el remito queda
-        pendiente y aparece en la pantalla de F150 con el motivo, para
-        generarlo mas tarde una vez completados los datos.
+        La emision ya valido los datos obligatorios del F150 (#975). Aca solo
+        quedan los casos posteriores a la emision: cancelar el selector de
+        archivo o fallar la escritura. En esos casos el remito sigue emitido y
+        el F150 queda pendiente y recuperable desde la pantalla de F150 (#931).
+        Si un dato se invalido entre la emision y este punto, tambien se avisa
+        sin revertir el remito.
         """
         if not remittance.physical_point_of_sale or not remittance.physical_number:
             return

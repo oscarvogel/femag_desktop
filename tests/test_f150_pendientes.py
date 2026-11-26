@@ -1,8 +1,10 @@
-"""Al emitir, el F150 sale solo; si falta un dato, el remito queda pendiente.
+"""Al emitir, el F150 sale solo; si un dato se invalida despues, queda pendiente.
 
-La pantalla de F150 es donde el operador termina esos remitos, asi que tiene
-que mostrar de entrada cuantos son listos y cuantos quedaron parados, sin que
-tenga que revisar fila por fila.
+Desde #975 la emision exige todos los datos del F150. Un remito ya emitido
+puede quedar pendiente si el maestro cambia o si se cancela el guardado: la
+pantalla de F150 es donde el operador termina esos remitos, asi que tiene que
+mostrar de entrada cuantos son listos y cuantos quedaron parados, sin que tenga
+que revisar fila por fila.
 """
 
 import json
@@ -88,7 +90,11 @@ _PAGES: list = []
 
 def test_resumen_avisa_cuantos_pendientes(db, tmp_path):
     _emitir(db, "Cliente Listo", "9001", cuit="30-63634545-4")
-    _emitir(db, "Cliente Pendiente", "9002", carrier_address=None, cuit="30-63634545-5")
+    pendiente = _emitir(db, "Cliente Pendiente", "9002", cuit="30-63634545-5")
+    # El remito se emitio completo; el maestro se invalida despues. Es el caso
+    # recuperable que sigue mostrando la pantalla de F150 (#931/#975).
+    pendiente.carrier.address = None
+    pendiente.carrier.save()
     page = _page(db, tmp_path)
     text = page.pending_summary
     assert "1 listo" in text
