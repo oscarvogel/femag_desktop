@@ -42,18 +42,18 @@ class RemittanceIssueBlocked(ValueError):
         entries = []
         if "cliente" in text or "destino" in text:
             entries.append(
-                "Cliente/destino: Maestros → Clientes (domicilio y localidad "
-                "DGR) o el botón Corregir datos DGR de la pantalla F150."
+                "Cliente/destino: Maestros → Clientes (CUIT, nombre, domicilio y "
+                "localidad DGR) o el botón Corregir datos DGR de la pantalla F150."
             )
         if "transportista" in text:
             entries.append(
-                "Transportista: Maestros → Transportistas (tipo, código, "
-                "domicilio fiscal y localidad DGR)."
+                "Transportista: Maestros → Transportistas (CUIT, nombre, tipo, "
+                "código, domicilio fiscal y localidad DGR)."
             )
         if "chofer" in text:
             entries.append(
-                "Chofer: Maestros → Choferes (CUIT/documento, domicilio fiscal "
-                "y localidad DGR)."
+                "Chofer: Maestros → Choferes (CUIT/documento, nombre, domicilio "
+                "fiscal y localidad DGR)."
             )
         if "camión" in text or "camion" in text:
             entries.append(
