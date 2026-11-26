@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from peewee import MySQLDatabase
+
 from app.config.database import database_proxy
 from app.models.load_orders import LoadOrder, LoadOrderDestination
 from app.models.masters import Carrier, Client, ClientAddress, Driver, Product, Truck
@@ -72,6 +74,27 @@ class RemittanceIssueBlocked(ValueError):
         if not entries:
             return "Revise los datos del remito y de los maestros."
         return "Dónde corregir:\n" + "\n".join(f"- {entry}" for entry in entries)
+
+
+class RemittanceAlreadyIssued(ValueError):
+    """Otro puesto ya emitio o cambio de estado el remito antes de este intento.
+
+    Es la salida del segundo operador cuando dos puestos intentan emitir el
+    mismo borrador: el primero gana el bloqueo, emite y consume un solo numero;
+    el segundo espera, relee el estado real y recibe este mensaje sin efectos.
+    """
+
+    def __init__(self, identity: str, status: str | None):
+        self.identity = identity
+        self.status = status
+        if status == Remittance.STATUS_ISSUED:
+            detail = "ya fue emitido por otro puesto"
+        else:
+            detail = f"ya no está en borrador (estado actual: {status or 'desconocido'})"
+        super().__init__(
+            f"El remito {identity} {detail}. "
+            "Actualice la lista para ver el estado actual y vuelva a intentar."
+        )
 
 
 class RemittanceSeriesService:
@@ -211,7 +234,16 @@ class RemittanceSeriesService:
 
     def allocate(self, series: RemittanceSeries) -> tuple[str, str]:
         for _attempt in range(5):
-            current = RemittanceSeries.get_by_id(series.id)
+            query = RemittanceSeries.select().where(
+                RemittanceSeries.id == series.id
+            )
+            if isinstance(database_proxy.obj, MySQLDatabase):
+                # MySQL/MariaDB usan REPEATABLE READ: una lectura normal puede
+                # seguir viendo el next_number viejo aunque otro puesto ya lo
+                # haya incrementado. El locking read espera y trae el valor
+                # vigente, evitando el falso "no se pudo reservar" y los huecos.
+                query = query.for_update()
+            current = query.get()
             self._ensure_available(current)
             number = current.next_number
             updated = (
@@ -623,19 +655,39 @@ class RemittanceService:
             remittance.driver_name = driver.name
             remittance.driver_document = RemittanceService._driver_snapshot_document(driver)
 
+    @staticmethod
+    def _lock_for_issue(remittance_id: int) -> Remittance:
+        """Bloquea la fila del remito hasta que termine esta transaccion.
+
+        MySQL/MariaDB soportan ``SELECT ... FOR UPDATE``. El segundo puesto que
+        intenta emitir el mismo borrador queda esperando; cuando el primero
+        confirma o revierte, relee el estado real en vez de trabajar sobre una
+        copia vieja. SQLite (demo) no soporta ``FOR UPDATE``: se usa la lectura
+        normal y la serializacion de escritura propia del motor.
+        """
+        query = Remittance.select().where(Remittance.id == remittance_id)
+        if isinstance(database_proxy.obj, MySQLDatabase):
+            query = query.for_update()
+        return query.get()
+
     def issue(self, remittance: Remittance) -> Remittance:
         remittance = Remittance.get_by_id(remittance.id)
         if remittance.status != Remittance.STATUS_DRAFT:
-            raise ValueError("Solo se pueden emitir remitos en borrador.")
+            raise RemittanceAlreadyIssued(
+                self._issue_identity(remittance), remittance.status
+            )
         # Guardar NO es emitir. El preflight del F150 corre dentro de la misma
         # transaccion que la emision: si falta un dato, se revierte tambien el
         # precio congelado y nunca se reserva un numero del talonario.
         with database_proxy.atomic():
-            # Releer dentro de la transaccion: si otro puesto lo emitio en el
-            # medio, no se valida ni se reserva numeracion sobre un estado viejo.
-            remittance = Remittance.get_by_id(remittance.id)
+            # El lock se toma antes de cualquier lectura o escritura de negocio.
+            # El segundo puesto espera aca; al liberarse, revalida el estado real
+            # y no reserva numeracion sobre un borrador que ya fue emitido.
+            remittance = self._lock_for_issue(remittance.id)
             if remittance.status != Remittance.STATUS_DRAFT:
-                raise ValueError("Solo se pueden emitir remitos en borrador.")
+                raise RemittanceAlreadyIssued(
+                    self._issue_identity(remittance), remittance.status
+                )
             old_snapshot = self._snapshot(remittance)
             self._refresh_issue_snapshots(remittance)
             self._freeze_item_prices(remittance)
