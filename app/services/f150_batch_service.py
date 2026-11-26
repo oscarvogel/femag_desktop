@@ -17,6 +17,7 @@ from app.models.system import AppParameter, NumberSequence
 from app.services.audit_service import AuditService
 from app.services.dgr_validation import (
     destination_address_issues,
+    is_missing_dgr_text,
     snapshot_destination_issues,
 )
 from app.services.f150_encoder import (
@@ -481,6 +482,27 @@ class F150BatchService:
         )
 
     @staticmethod
+    def _required_text_missing(value, *, strict: bool, strip: bool = False) -> bool:
+        """True si un campo obligatorio no tiene un valor utilizable.
+
+        En preflight (``strict``) se usa el criterio compartido de DGR: vacio,
+        solo espacios/tabulaciones/saltos de linea, o el relleno historico
+        "Sin especificar". En modo emitido se conserva la regla anterior para no
+        alterar la generacion de documentos historicos.
+        """
+        if strict:
+            return is_missing_dgr_text(value)
+        text = "" if value is None else str(value)
+        return not text.strip() if strip else not text
+
+    @staticmethod
+    def _cuit_format_valid(value) -> bool:
+        """CUIT con 11 digitos, aceptando los separadores habituales."""
+        text = "" if value is None else str(value).strip()
+        compact = re.sub(r"[\s.\-]", "", text)
+        return compact.isdigit() and len(compact) == 11
+
+    @staticmethod
     def validation_issues(
         remittance: Remittance,
         *,
@@ -494,18 +516,39 @@ class F150BatchService:
         omite lo que recien existe despues de emitir (estado emitido y numeracion
         fisica). El precio de un renglon sin congelar se resuelve con la lista del
         cliente, que es exactamente lo que congela la emision.
+
+        En preflight tambien se rechazan campos obligatorios vacios, compuestos
+        solo por espacios/tabulaciones/saltos o con el relleno historico
+        "Sin especificar", y se exige un CUIT de 11 digitos. En modo emitido se
+        conserva la regla anterior para no alterar documentos historicos.
         """
         issues = []
+        strict = not require_issued
         if require_issued:
             if remittance.status != Remittance.STATUS_ISSUED:
                 issues.append("debe estar emitido")
             if not remittance.physical_point_of_sale or not remittance.physical_number:
                 issues.append("falta numeracion fisica")
-        if not remittance.client_cuit:
+        if strict:
+            if is_missing_dgr_text(remittance.client_cuit):
+                issues.append("falta CUIT del cliente")
+            elif not F150BatchService._cuit_format_valid(remittance.client_cuit):
+                issues.append("CUIT del cliente inválido (se esperan 11 dígitos)")
+            if is_missing_dgr_text(remittance.client_name):
+                issues.append("falta nombre del cliente")
+        elif not remittance.client_cuit:
             issues.append("falta CUIT del cliente")
-        if remittance.carrier_id is None or not remittance.carrier_cuit:
+        if remittance.carrier_id is None or F150BatchService._required_text_missing(
+            remittance.carrier_cuit, strict=strict
+        ):
             issues.append("falta transportista con CUIT")
-        if remittance.truck_id is None or not remittance.truck_domain:
+        elif strict and not F150BatchService._cuit_format_valid(
+            remittance.carrier_cuit
+        ):
+            issues.append("CUIT del transportista inválido (se esperan 11 dígitos)")
+        if remittance.truck_id is None or F150BatchService._required_text_missing(
+            remittance.truck_domain, strict=strict
+        ):
             issues.append("falta camion")
         if remittance.driver_id is None:
             issues.append("falta chofer")
@@ -519,7 +562,9 @@ class F150BatchService:
         if not allow_included and F150BatchService.is_included(remittance):
             issues.append("ya fue incluido en un lote F150")
         origin = F150BatchService._origin_location()
-        if not origin.locality_code.strip():
+        if F150BatchService._required_text_missing(
+            origin.locality_code, strict=strict, strip=True
+        ):
             issues.append("falta origen DGR (parámetro f150.origin)")
         address = remittance.delivery_address
         issues.extend(
@@ -530,15 +575,25 @@ class F150BatchService:
         issues.extend(snapshot_destination_issues(remittance, section="destino"))
         carrier = remittance.carrier
         if carrier is not None:
-            if not (carrier.tipo or "").strip():
+            if F150BatchService._required_text_missing(
+                carrier.tipo, strict=strict, strip=True
+            ):
                 issues.append("transportista: falta tipo")
-            if not (carrier.codigo or "").strip():
+            if F150BatchService._required_text_missing(
+                carrier.codigo, strict=strict, strip=True
+            ):
                 issues.append("transportista: falta código")
-            if not carrier.f150_address.strip():
+            if F150BatchService._required_text_missing(
+                carrier.f150_address, strict=strict, strip=True
+            ):
                 issues.append(
                     "transportista: falta domicilio fiscal (Rentas) y no hay "
                     f"domicilio de respaldo — {carrier.name}"
                 )
+            if strict and is_missing_dgr_text(
+                remittance.carrier_name or carrier.name
+            ):
+                issues.append("transportista: falta nombre")
             issues.extend(
                 F150BatchService._locality_issues(
                     carrier.locality, section="transportista", name=carrier.name
@@ -546,17 +601,25 @@ class F150BatchService:
             )
         truck = remittance.truck
         if truck is not None:
-            if not (truck.chassis_type or "").strip():
+            if F150BatchService._required_text_missing(
+                truck.chassis_type, strict=strict, strip=True
+            ):
                 issues.append("camión: falta tipo de chasis")
-            if truck.trailer_domain and not (truck.trailer_type or "").strip():
+            if truck.trailer_domain and F150BatchService._required_text_missing(
+                truck.trailer_type, strict=strict, strip=True
+            ):
                 issues.append("camión: falta tipo de acoplado")
         driver = remittance.driver
         if driver is not None:
-            if not driver.f150_address.strip():
+            if F150BatchService._required_text_missing(
+                driver.f150_address, strict=strict, strip=True
+            ):
                 issues.append(
                     "chofer: falta domicilio fiscal (Rentas) y no hay domicilio "
                     f"de respaldo — {driver.name}"
                 )
+            if strict and is_missing_dgr_text(remittance.driver_name or driver.name):
+                issues.append("chofer: falta nombre")
             issues.extend(
                 F150BatchService._locality_issues(
                     driver.locality, section="chofer", name=driver.name
@@ -564,9 +627,16 @@ class F150BatchService:
             )
         for row in remittance.items:
             product = row.product
-            if not all([product.rh1, product.rh2, product.rh3, product.rh4]):
+            rubros = (product.rh1, product.rh2, product.rh3, product.rh4)
+            if strict:
+                missing_rubros = any(is_missing_dgr_text(value) for value in rubros)
+            else:
+                missing_rubros = not all(rubros)
+            if missing_rubros:
                 issues.append(f"detalle: {product.name} sin rubros DGR")
-            if not (product.unidad_dgr or "").strip():
+            if F150BatchService._required_text_missing(
+                product.unidad_dgr, strict=strict, strip=True
+            ):
                 issues.append(f"detalle: {product.name} sin unidad DGR")
             unit_price = row.unit_price
             if unit_price is None and not require_issued:
