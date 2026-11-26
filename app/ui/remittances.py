@@ -38,6 +38,7 @@ from app.services.money import ZERO_MONEY, money_sum, quantize_money
 from app.services.pricing import price_for_client_list
 from app.services.remittance_print_service import RemittancePrintService
 from app.services.remittance_service import (
+    RemittanceAlreadyIssued,
     RemittanceIssueBlocked,
     RemittanceSeriesService,
     RemittanceService,
@@ -1096,6 +1097,14 @@ class RemittancesPage(QWidget):
             return
         try:
             emitted = RemittanceService(self.current_user).issue(remittance)
+        except RemittanceAlreadyIssued as exc:
+            QMessageBox.information(
+                self,
+                "Remito ya emitido",
+                str(exc),
+            )
+            self.refresh()
+            return
         except RemittanceIssueBlocked as exc:
             QMessageBox.warning(
                 self,
