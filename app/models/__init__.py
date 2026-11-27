@@ -34,6 +34,7 @@ from app.models.load_orders import (
 from app.models.remittances import Remittance, RemittanceItem, RemittanceSeries
 from app.models.dgr import DgrCountry, DgrLocality, DgrProvince
 from app.models.f150 import F150Batch, F150BatchRemittance
+from app.models.exchange_rates import ExchangeRate
 from app.models.notifications import AvisoLectura
 from app.models.security import MenuItem, Permission, User, UserProfile
 from app.models.whatsapp import WhatsAppEnvio
@@ -103,6 +104,7 @@ ALL_MODELS = [
     RemittanceItem,
     F150Batch,
     F150BatchRemittance,
+    ExchangeRate,
     AppParameter,
     NumberSequence,
     BackupLog,
