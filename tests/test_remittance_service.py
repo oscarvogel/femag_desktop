@@ -48,7 +48,11 @@ def test_manual_remittance_rejects_address_from_other_client(db):
 
 def test_issue_assigns_next_configured_number_and_locks_editing(db):
     from app.models.remittances import Remittance, RemittanceSeries
-    from app.services.remittance_service import RemittanceSeriesService, RemittanceService
+    from app.services.remittance_service import (
+        RemittanceEditConflict,
+        RemittanceSeriesService,
+        RemittanceService,
+    )
     from tests.conftest import _f150_ready_master_data
 
     data = _f150_ready_master_data()
@@ -79,7 +83,7 @@ def test_issue_assigns_next_configured_number_and_locks_editing(db):
     assert emitted.physical_number == "00010678"
     assert emitted.issued_by == "admin"
     assert RemittanceSeries.get_by_id(series.id).next_number == 10679
-    with pytest.raises(ValueError, match="Solo se pueden editar"):
+    with pytest.raises(RemittanceEditConflict, match="fue emitido desde otro puesto"):
         service.update_draft(emitted, observations="No permitido")
 
 

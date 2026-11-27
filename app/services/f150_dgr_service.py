@@ -29,6 +29,7 @@ from app.services.dgr_validation import (
 )
 from app.services.f150_batch_service import F150BatchService
 from app.services.permission_service import PermissionService
+from app.services.remittance_service import RemittanceService
 
 
 @dataclass(frozen=True)
@@ -140,7 +141,6 @@ class F150DgrCorrectionService:
             raise ValueError("; ".join(issues))
 
         updates = self._normalize_product_updates(remittance, product_updates)
-        old_address = self._address_snapshot(delivery)
         old_products = {
             update.product_id: self._product_snapshot(
                 Product.get_by_id(update.product_id)
@@ -151,6 +151,13 @@ class F150DgrCorrectionService:
         snapshot_updated = False
         snapshot_skipped_reason = None
         with database_proxy.atomic():
+            remittance = RemittanceService.lock_remittance(remittance.id)
+            delivery = remittance.delivery_address
+            if delivery is None:
+                raise ValueError(
+                    "El remito no tiene un domicilio de entrega asociado."
+                )
+            old_address = self._address_snapshot(delivery)
             ClientService(self.current_user, self.audit_service).update_address(
                 delivery,
                 client=remittance.client,

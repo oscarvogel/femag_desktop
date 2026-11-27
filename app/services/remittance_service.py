@@ -97,6 +97,48 @@ class RemittanceAlreadyIssued(ValueError):
         )
 
 
+class RemittanceEditConflict(ValueError):
+    """El remito cambio de estado o fue editado mientras se guardaba.
+
+    La ventana de edicion puede haber quedado abierta mientras otro puesto
+    emitia o modificaba el mismo borrador. El guardado se rechaza completo para
+    no pisar snapshots, renglones ni datos de un remito ya emitido.
+    """
+
+    def __init__(self, status: str | None):
+        self.status = status
+        if status == Remittance.STATUS_ISSUED:
+            message = (
+                "Este remito fue emitido desde otro puesto mientras usted lo estaba "
+                "editando. No es posible guardar las modificaciones. Actualice la "
+                "información para consultar el remito emitido."
+            )
+        elif status == Remittance.STATUS_ANNULLED:
+            message = (
+                "Este remito fue anulado desde otro puesto mientras usted lo estaba "
+                "editando. No es posible guardar las modificaciones. Actualice la "
+                "información para consultar el remito."
+            )
+        else:
+            message = (
+                "Este remito fue modificado desde otro puesto mientras usted lo estaba "
+                "editando. No es posible guardar las modificaciones. Actualice la "
+                "información para consultar el remito actualizado."
+            )
+        super().__init__(message)
+
+
+class RemittanceChangedElsewhere(ValueError):
+    """La pantalla del operador quedo desactualizada antes de emitir."""
+
+    def __init__(self):
+        super().__init__(
+            "Este remito fue modificado desde otro puesto desde que se actualizó "
+            "la lista. No es posible emitirlo con los datos que está viendo. "
+            "Actualice la información para consultar el remito actualizado."
+        )
+
+
 class RemittanceSeriesService:
     def __init__(self, current_user: str, audit_service: AuditService | None = None):
         self.current_user = current_user
@@ -530,89 +572,172 @@ class RemittanceService:
             source_order=order,
         )
 
-    def update_draft(self, remittance: Remittance, **changes) -> Remittance:
-        remittance = Remittance.get_by_id(remittance.id)
-        if remittance.status != Remittance.STATUS_DRAFT:
-            raise ValueError("Solo se pueden editar remitos en borrador.")
-        old_snapshot = self._snapshot(remittance)
-        items = changes.pop("items", None)
-        # El cliente se resuelve antes que los renglones porque el precio de
-        # cada uno sale de la lista de precios de ese cliente.
-        client = changes.pop("client", remittance.client)
-        delivery_address = changes.pop("delivery_address", remittance.delivery_address)
-        self._validate_header(client, delivery_address)
-        normalized_items = self._normalize_items(items, client) if items is not None else None
+    @staticmethod
+    def _decimal_version(value) -> str | None:
+        if value is None:
+            return None
+        return format(Decimal(str(value)).normalize(), "f")
 
-        if "physical_point_of_sale" in changes or "physical_number" in changes:
-            point = self._normalize_physical_number(
-                changes.pop("physical_point_of_sale", remittance.physical_point_of_sale), size=4
-            )
-            number = self._normalize_physical_number(
-                changes.pop("physical_number", remittance.physical_number), size=8
-            )
-            if bool(point) != bool(number):
-                raise ValueError("Punto de venta y numero fisico deben cargarse juntos.")
-            self._ensure_physical_unique(point, number, exclude_id=remittance.id)
-            remittance.physical_point_of_sale = point
-            remittance.physical_number = number
+    @staticmethod
+    def edit_version(remittance: Remittance) -> tuple:
+        """Huella determinista del estado editable de un remito.
 
-        remittance.client = client
-        remittance.delivery_address = delivery_address
-        remittance.client_name = client.name
-        remittance.client_cuit = client.cuit
-        remittance.client_iva_condition = client.iva_condition
-        remittance.delivery_address_text = delivery_address.address
-        remittance.delivery_city = delivery_address.city
-        remittance.delivery_province = delivery_address.province
-
-        if "series" in changes:
-            remittance.series = changes["series"]
-
-        for field in ("date", "document_reference", "observations"):
-            if field in changes:
-                setattr(remittance, field, changes[field])
-        for relation, snapshot_fields in (
-            ("carrier", ("carrier_name", "carrier_cuit")),
-            ("truck", ("truck_domain", "trailer_domain")),
-            ("driver", ("driver_name", "driver_document")),
-        ):
-            if relation not in changes:
-                continue
-            value = changes[relation]
-            setattr(remittance, relation, value)
-            if relation == "carrier":
-                remittance.carrier_name = value.name if value else None
-                remittance.carrier_cuit = value.cuit if value else None
-            elif relation == "truck":
-                remittance.truck_domain = value.domain if value else None
-                remittance.trailer_domain = (
-                    self._normalize_trailer_domain(value.trailer_domain) if value else None
+        Se usa para detectar ediciones concurrentes sin agregar una columna de
+        version: incluye cabecera, snapshots y renglones. Dos remitos con los
+        mismos datos producen la misma huella; cualquier cambio relevante la
+        cambia.
+        """
+        items = tuple(
+            sorted(
+                (
+                    item.product_id,
+                    RemittanceService._decimal_version(item.quantity),
+                    RemittanceService._decimal_version(item.unit_price),
+                    item.unit,
+                    item.printed_description,
+                    item.lot,
+                    item.production_date.isoformat() if item.production_date else None,
+                    item.observations,
                 )
-            elif relation == "driver":
-                remittance.driver_name = value.name if value else None
-                remittance.driver_document = self._driver_snapshot_document(value)
+                for item in remittance.items
+            )
+        )
+        return (
+            remittance.status,
+            remittance.client_id,
+            remittance.delivery_address_id,
+            remittance.carrier_id,
+            remittance.truck_id,
+            remittance.driver_id,
+            remittance.source_order_id,
+            remittance.series_id,
+            remittance.date.isoformat() if remittance.date else None,
+            remittance.physical_point_of_sale,
+            remittance.physical_number,
+            remittance.document_reference,
+            remittance.observations,
+            remittance.trailer_domain,
+            remittance.client_name,
+            remittance.client_cuit,
+            remittance.client_iva_condition,
+            remittance.delivery_address_text,
+            remittance.delivery_city,
+            remittance.delivery_province,
+            remittance.carrier_name,
+            remittance.carrier_cuit,
+            remittance.truck_domain,
+            remittance.driver_name,
+            remittance.driver_document,
+            items,
+        )
 
-        if "trailer_domain" in changes:
-            # El override manual del acoplado gana sobre el del camion. Un
-            # vacio explicito no borra: conserva el del camion o el actual.
-            override = self._normalize_trailer_domain(changes["trailer_domain"])
-            if override is not None:
-                remittance.trailer_domain = override
-
-        remittance.updated_by = self.current_user
+    def update_draft(
+        self,
+        remittance: Remittance,
+        *,
+        expected_version: tuple | None = None,
+        **changes,
+    ) -> Remittance:
+        if expected_version is None:
+            expected_version = self.edit_version(remittance)
         with database_proxy.atomic():
-            remittance.save()
+            current = self.lock_remittance(remittance.id)
+            self._assert_update_allowed(current, expected_version)
+            old_snapshot = self._snapshot(current)
+            items = changes.pop("items", None)
+            # El cliente se resuelve antes que los renglones porque el precio de
+            # cada uno sale de la lista de precios de ese cliente.
+            client = changes.pop("client", current.client)
+            delivery_address = changes.pop(
+                "delivery_address", current.delivery_address
+            )
+            self._validate_header(client, delivery_address)
+            normalized_items = (
+                self._normalize_items(items, client) if items is not None else None
+            )
+
+            if "physical_point_of_sale" in changes or "physical_number" in changes:
+                point = self._normalize_physical_number(
+                    changes.pop(
+                        "physical_point_of_sale", current.physical_point_of_sale
+                    ),
+                    size=4,
+                )
+                number = self._normalize_physical_number(
+                    changes.pop("physical_number", current.physical_number),
+                    size=8,
+                )
+                if bool(point) != bool(number):
+                    raise ValueError(
+                        "Punto de venta y numero fisico deben cargarse juntos."
+                    )
+                self._ensure_physical_unique(point, number, exclude_id=current.id)
+                current.physical_point_of_sale = point
+                current.physical_number = number
+
+            current.client = client
+            current.delivery_address = delivery_address
+            current.client_name = client.name
+            current.client_cuit = client.cuit
+            current.client_iva_condition = client.iva_condition
+            current.delivery_address_text = delivery_address.address
+            current.delivery_city = delivery_address.city
+            current.delivery_province = delivery_address.province
+
+            if "series" in changes:
+                current.series = changes["series"]
+
+            for field in ("date", "document_reference", "observations"):
+                if field in changes:
+                    setattr(current, field, changes[field])
+            for relation in ("carrier", "truck", "driver"):
+                if relation not in changes:
+                    continue
+                value = changes[relation]
+                setattr(current, relation, value)
+                if relation == "carrier":
+                    current.carrier_name = value.name if value else None
+                    current.carrier_cuit = value.cuit if value else None
+                elif relation == "truck":
+                    current.truck_domain = value.domain if value else None
+                    current.trailer_domain = (
+                        self._normalize_trailer_domain(value.trailer_domain)
+                        if value
+                        else None
+                    )
+                elif relation == "driver":
+                    current.driver_name = value.name if value else None
+                    current.driver_document = self._driver_snapshot_document(value)
+
+            if "trailer_domain" in changes:
+                # El override manual del acoplado gana sobre el del camion. Un
+                # vacio explicito no borra: conserva el del camion o el actual.
+                override = self._normalize_trailer_domain(changes["trailer_domain"])
+                if override is not None:
+                    current.trailer_domain = override
+
+            current.updated_by = self.current_user
+            current.save()
             if normalized_items is not None:
-                self._replace_items(remittance, normalized_items)
+                self._replace_items(current, normalized_items)
             self.audit_service.record(
                 user=self.current_user,
                 module="Remitos",
                 action="modificar",
-                record_ref=f"Remittance:{remittance.id}",
+                record_ref=f"Remittance:{current.id}",
                 old_value=old_snapshot,
-                new_value=self._snapshot(remittance),
+                new_value=self._snapshot(current),
             )
-        return remittance
+        return current
+
+    @classmethod
+    def _assert_update_allowed(
+        cls, remittance: Remittance, expected_version: tuple
+    ) -> None:
+        if remittance.status != Remittance.STATUS_DRAFT:
+            raise RemittanceEditConflict(remittance.status)
+        if cls.edit_version(remittance) != expected_version:
+            raise RemittanceEditConflict(remittance.status)
 
     @staticmethod
     def _issue_identity(remittance: Remittance) -> str:
@@ -656,21 +781,26 @@ class RemittanceService:
             remittance.driver_document = RemittanceService._driver_snapshot_document(driver)
 
     @staticmethod
-    def _lock_for_issue(remittance_id: int) -> Remittance:
+    def lock_remittance(remittance_id: int) -> Remittance:
         """Bloquea la fila del remito hasta que termine esta transaccion.
 
         MySQL/MariaDB soportan ``SELECT ... FOR UPDATE``. El segundo puesto que
-        intenta emitir el mismo borrador queda esperando; cuando el primero
-        confirma o revierte, relee el estado real en vez de trabajar sobre una
-        copia vieja. SQLite (demo) no soporta ``FOR UPDATE``: se usa la lectura
-        normal y la serializacion de escritura propia del motor.
+        intenta emitir o editar el mismo borrador queda esperando; cuando el
+        primero confirma o revierte, relee el estado real en vez de trabajar
+        sobre una copia vieja. SQLite (demo) no soporta ``FOR UPDATE``: se usa la
+        lectura normal y la serializacion de escritura propia del motor.
         """
         query = Remittance.select().where(Remittance.id == remittance_id)
         if isinstance(database_proxy.obj, MySQLDatabase):
             query = query.for_update()
         return query.get()
 
-    def issue(self, remittance: Remittance) -> Remittance:
+    def issue(
+        self,
+        remittance: Remittance,
+        *,
+        expected_version: tuple | None = None,
+    ) -> Remittance:
         remittance = Remittance.get_by_id(remittance.id)
         if remittance.status != Remittance.STATUS_DRAFT:
             raise RemittanceAlreadyIssued(
@@ -683,11 +813,16 @@ class RemittanceService:
             # El lock se toma antes de cualquier lectura o escritura de negocio.
             # El segundo puesto espera aca; al liberarse, revalida el estado real
             # y no reserva numeracion sobre un borrador que ya fue emitido.
-            remittance = self._lock_for_issue(remittance.id)
+            remittance = self.lock_remittance(remittance.id)
             if remittance.status != Remittance.STATUS_DRAFT:
                 raise RemittanceAlreadyIssued(
                     self._issue_identity(remittance), remittance.status
                 )
+            if (
+                expected_version is not None
+                and self.edit_version(remittance) != expected_version
+            ):
+                raise RemittanceChangedElsewhere()
             old_snapshot = self._snapshot(remittance)
             self._refresh_issue_snapshots(remittance)
             self._freeze_item_prices(remittance)
@@ -730,26 +865,27 @@ class RemittanceService:
         return remittance
 
     def annul(self, remittance: Remittance, *, reason: str) -> Remittance:
-        remittance = Remittance.get_by_id(remittance.id)
-        if remittance.status == Remittance.STATUS_ANNULLED:
-            return remittance
         if not reason or not reason.strip():
             raise ValueError("Debe indicar el motivo de anulacion.")
-        old_snapshot = self._snapshot(remittance)
-        remittance.status = Remittance.STATUS_ANNULLED
-        remittance.annulled_by = self.current_user
-        remittance.annulment_reason = reason.strip()
-        remittance.updated_by = self.current_user
-        remittance.save()
-        self.audit_service.record(
-            user=self.current_user,
-            module="Remitos",
-            action="anular",
-            record_ref=f"Remittance:{remittance.id}",
-            old_value=old_snapshot,
-            new_value=self._snapshot(remittance),
-            observation=reason.strip(),
-        )
+        with database_proxy.atomic():
+            remittance = self.lock_remittance(remittance.id)
+            if remittance.status == Remittance.STATUS_ANNULLED:
+                return remittance
+            old_snapshot = self._snapshot(remittance)
+            remittance.status = Remittance.STATUS_ANNULLED
+            remittance.annulled_by = self.current_user
+            remittance.annulment_reason = reason.strip()
+            remittance.updated_by = self.current_user
+            remittance.save()
+            self.audit_service.record(
+                user=self.current_user,
+                module="Remitos",
+                action="anular",
+                record_ref=f"Remittance:{remittance.id}",
+                old_value=old_snapshot,
+                new_value=self._snapshot(remittance),
+                observation=reason.strip(),
+            )
         return remittance
 
     @staticmethod
