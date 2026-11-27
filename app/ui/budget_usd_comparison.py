@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
 )
 
@@ -32,6 +33,8 @@ from app.reports.budget_usd_comparison import (
     TYPE_LABELS,
     BudgetUsdComparisonService,
     BudgetUsdFilters,
+    monthly_evolution,
+    type_comparison,
 )
 from app.reports.budget_usd_comparison_export import export_budget_usd_comparison_xlsx
 
@@ -52,6 +55,13 @@ def _usd(value) -> str:
     if value is None:
         return "-"
     return f"USD {_number(value, 2)}"
+
+
+def _percent(value) -> str:
+    if value is None:
+        return "-"
+    prefix = "+" if float(value) > 0 else ""
+    return f"{prefix}{_number(value, 1)}%"
 
 
 def _status_label(value: str) -> str:
@@ -175,6 +185,45 @@ class BudgetUsdComparisonDialog(QDialog):
             summary.addWidget(widget, 1, column)
         root.addLayout(summary)
 
+        self.evolution_table = QTableWidget(0, 7)
+        self.evolution_table.setObjectName("budgetUsdEvolutionTable")
+        self.evolution_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.evolution_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.evolution_table.setAlternatingRowColors(True)
+        self.evolution_table.verticalHeader().setVisible(False)
+        self.evolution_table.setHorizontalHeaderLabels(
+            (
+                "Mes",
+                "Presupuestos",
+                "Total ARS",
+                "Total USD",
+                "Var ARS",
+                "Var USD",
+                "Cobertura",
+            )
+        )
+        self.evolution_table.horizontalHeader().setStretchLastSection(True)
+
+        self.comparison_table = QTableWidget(0, 8)
+        self.comparison_table.setObjectName("budgetUsdComparisonTable")
+        self.comparison_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.comparison_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.comparison_table.setAlternatingRowColors(True)
+        self.comparison_table.verticalHeader().setVisible(False)
+        self.comparison_table.setHorizontalHeaderLabels(
+            (
+                "Tipo",
+                "Presupuestos",
+                "Total ARS",
+                "Total USD",
+                "Cotizacion ponderada",
+                "Cobertura",
+                "Dif. USD vs blue",
+                "Dif. % vs blue",
+            )
+        )
+        self.comparison_table.horizontalHeader().setStretchLastSection(True)
+
         self.table = QTableWidget(0, 13)
         self.table.setObjectName("budgetUsdTable")
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -199,7 +248,13 @@ class BudgetUsdComparisonDialog(QDialog):
             )
         )
         self.table.horizontalHeader().setStretchLastSection(True)
-        root.addWidget(self.table, 1)
+
+        tabs = QTabWidget()
+        tabs.setObjectName("budgetUsdTabs")
+        tabs.addTab(self.evolution_table, "Evolucion mensual ARS/USD")
+        tabs.addTab(self.comparison_table, "Comparativo por tipo")
+        tabs.addTab(self.table, "Detalle por presupuesto")
+        root.addWidget(tabs, 1)
 
         actions = QHBoxLayout()
         refresh = QPushButton("Actualizar")
@@ -238,8 +293,13 @@ class BudgetUsdComparisonDialog(QDialog):
         )
 
     def refresh(self) -> None:
+        filters = self._filters()
         try:
-            result = self.service.compare(self._filters())
+            results = self.service.compare_all(filters)
+            result = next(
+                (item for item in results if item.rate_type == filters.rate_type),
+                results[0],
+            )
         except Exception as exc:  # noqa: BLE001 - error amable en UI
             QMessageBox.warning(self, "Comparacion USD", f"No se pudo calcular:\n{exc}")
             return
@@ -255,6 +315,8 @@ class BudgetUsdComparisonDialog(QDialog):
             f"{_number(summary.coverage_percent, 1)}% "
             f"({summary.covered_budgets}/{summary.total_budgets})"
         )
+        self._fill_evolution(result)
+        self._fill_comparison(results)
         self.table.setRowCount(len(result.rows))
         for index, row in enumerate(result.rows):
             values = (
@@ -286,6 +348,50 @@ class BudgetUsdComparisonDialog(QDialog):
                     item.setForeground(Qt.red)
                 self.table.setItem(index, column, item)
         self.table.resizeColumnsToContents()
+
+    def _fill_evolution(self, result) -> None:
+        months = monthly_evolution(result.rows)
+        self.evolution_table.setRowCount(len(months))
+        for index, month in enumerate(months):
+            values = (
+                month.label,
+                str(month.budgets),
+                _money(month.total_ars),
+                _usd(month.total_usd),
+                _percent(month.variation_ars),
+                _percent(month.variation_usd),
+                f"{_number(month.coverage_percent, 1)}%",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column > 0:
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.evolution_table.setItem(index, column, item)
+        self.evolution_table.resizeColumnsToContents()
+
+    def _fill_comparison(self, results) -> None:
+        rows = type_comparison(results, base_type="blue")
+        self.comparison_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            no_data = row.covered_budgets == 0
+            values = (
+                TYPE_LABELS.get(row.rate_type, row.rate_type),
+                str(row.budgets),
+                _money(row.total_ars),
+                "-" if no_data else _usd(row.total_usd),
+                "-" if no_data else _number(row.weighted_rate, 6),
+                f"{_number(row.coverage_percent, 1)}%",
+                "-"
+                if no_data or row.difference_usd is None
+                else _usd(row.difference_usd),
+                "-" if no_data else _percent(row.difference_percent),
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column > 0:
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.comparison_table.setItem(index, column, item)
+        self.comparison_table.resizeColumnsToContents()
 
     def _export(self) -> None:
         filters = self._filters()

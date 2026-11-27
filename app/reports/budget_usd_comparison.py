@@ -15,6 +15,7 @@ import bisect
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP, localcontext
+from typing import Sequence
 
 from app.models.budgets import Budget, BudgetItem
 from app.models.exchange_rates import ExchangeRate
@@ -145,6 +146,37 @@ class BudgetUsdSummary:
     @property
     def covered_budgets(self) -> int:
         return self.exact_budgets + self.prior_budgets
+
+
+@dataclass(frozen=True)
+class BudgetUsdMonth:
+    month: str
+    label: str
+    budgets: int
+    total_ars: Decimal
+    total_usd: Decimal
+    coverage_percent: Decimal
+    exact_budgets: int
+    prior_budgets: int
+    missing_budgets: int
+    previous_total_ars: Decimal | None
+    previous_total_usd: Decimal | None
+    variation_ars: Decimal | None
+    variation_usd: Decimal | None
+
+
+@dataclass(frozen=True)
+class BudgetUsdTypeComparison:
+    rate_type: str
+    source: str | None
+    budgets: int
+    total_ars: Decimal
+    total_usd: Decimal
+    weighted_rate: Decimal | None
+    coverage_percent: Decimal
+    covered_budgets: int
+    difference_usd: Decimal | None
+    difference_percent: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -391,3 +423,107 @@ class BudgetUsdComparisonService:
             weighted_rate=weighted_rate,
             coverage_percent=coverage_percent,
         )
+
+def _variation(current: Decimal, previous: Decimal | None) -> Decimal | None:
+    if previous is None or previous == 0:
+        return None if current else Decimal("0.00")
+    with localcontext() as context:
+        context.prec = 28
+        return ((current - previous) / abs(previous) * Decimal("100")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
+
+def monthly_evolution(rows: Sequence[BudgetUsdRow]) -> tuple[BudgetUsdMonth, ...]:
+    """Agrupa la comparacion por mes y calcula variacion contra el mes previo."""
+    grouped: dict[str, list[BudgetUsdRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.issue_date.strftime("%Y-%m"), []).append(row)
+
+    result: list[BudgetUsdMonth] = []
+    previous_ars: Decimal | None = None
+    previous_usd: Decimal | None = None
+    for month in sorted(grouped):
+        month_rows = grouped[month]
+        total_ars = quantize_money(
+            sum((row.total_ars for row in month_rows), Decimal("0"))
+        )
+        total_usd = quantize_money(
+            sum(
+                (row.total_usd for row in month_rows if row.total_usd is not None),
+                Decimal("0"),
+            )
+        )
+        converted_ars = quantize_money(
+            sum(
+                (row.total_ars for row in month_rows if row.total_usd is not None),
+                Decimal("0"),
+            )
+        )
+        exact = sum(1 for row in month_rows if row.coverage == COVERAGE_EXACT)
+        prior = sum(1 for row in month_rows if row.coverage == COVERAGE_PRIOR)
+        missing = sum(1 for row in month_rows if row.coverage == COVERAGE_MISSING)
+        coverage = Decimal("0.00")
+        if total_ars > 0:
+            with localcontext() as context:
+                context.prec = 28
+                coverage = (converted_ars / total_ars * Decimal("100")).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+        result.append(
+            BudgetUsdMonth(
+                month=month,
+                label=f"{month[5:]}/{month[:4]}",
+                budgets=len(month_rows),
+                total_ars=total_ars,
+                total_usd=total_usd,
+                coverage_percent=coverage,
+                exact_budgets=exact,
+                prior_budgets=prior,
+                missing_budgets=missing,
+                previous_total_ars=previous_ars,
+                previous_total_usd=previous_usd,
+                variation_ars=_variation(total_ars, previous_ars),
+                variation_usd=_variation(total_usd, previous_usd),
+            )
+        )
+        previous_ars = total_ars
+        previous_usd = total_usd
+    return tuple(result)
+
+
+def type_comparison(
+    results: Sequence[BudgetUsdComparisonResult],
+    *,
+    base_type: str = "blue",
+) -> tuple[BudgetUsdTypeComparison, ...]:
+    """Compara el total USD de cada tipo contra el tipo base."""
+    base = next((item for item in results if item.rate_type == base_type), None)
+    base_usd = base.summary.total_usd if base is not None else None
+    result: list[BudgetUsdTypeComparison] = []
+    for item in results:
+        difference = None
+        difference_percent = None
+        if base_usd is not None and item.summary.total_usd is not None:
+            difference = quantize_money(item.summary.total_usd - base_usd)
+            if base_usd > 0:
+                with localcontext() as context:
+                    context.prec = 28
+                    difference_percent = (
+                        difference / base_usd * Decimal("100")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        result.append(
+            BudgetUsdTypeComparison(
+                rate_type=item.rate_type,
+                source=item.source,
+                budgets=item.summary.total_budgets,
+                total_ars=item.summary.total_ars,
+                total_usd=item.summary.total_usd,
+                weighted_rate=item.summary.weighted_rate,
+                coverage_percent=item.summary.coverage_percent,
+                covered_budgets=item.summary.covered_budgets,
+                difference_usd=difference,
+                difference_percent=difference_percent,
+            )
+        )
+    return tuple(result)

@@ -394,6 +394,7 @@ class ManagerialDashboardPage(QWidget):
             from app.reports.budget_usd_comparison import (
                 BudgetUsdComparisonService,
                 BudgetUsdFilters,
+                monthly_evolution,
             )
 
             service = BudgetUsdComparisonService()
@@ -421,11 +422,23 @@ class ManagerialDashboardPage(QWidget):
             return
 
         summary = result.summary
-        self.budget_usd_value.setText(f"USD {_number(summary.total_usd, 2)}")
+        self.budget_usd_value.setText(
+            f"ARS {_money(summary.total_ars)} · USD {_number(summary.total_usd, 2)}"
+        )
+        months = monthly_evolution(result.rows)
+        variation = ""
+        if months:
+            current = months[-1]
+            variation = (
+                f" · Var. {current.label}: "
+                f"ARS {_variation_short(current.total_ars, current.variation_ars)}"
+                f" / USD {_variation_short(current.total_usd, current.variation_usd)}"
+            )
         self.budget_usd_detail.setText(
             f"{_number(summary.coverage_percent, 1)}% de cobertura "
             f"({summary.covered_budgets}/{summary.total_budgets} presupuestos) · "
             f"blue / ArgentinaDatos / venta · {first:%d/%m/%Y} a {last:%d/%m/%Y}"
+            f"{variation}"
         )
 
     def refresh(self) -> None:

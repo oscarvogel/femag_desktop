@@ -35,6 +35,8 @@ Abre una ventana con:
 - incluir anulados;
 - permitir cotizacion anterior;
 - resumen de ARS, USD, cotizacion promedio ponderada y cobertura;
+- evolucion mensual en ARS y USD, con variacion contra el mes anterior;
+- comparativo por tipo contra `blue` (diferencia USD y %);
 - detalle por presupuesto.
 
 Tambien se puede exportar un Excel con **todos los tipos** desde el mismo
@@ -45,13 +47,15 @@ dialogo.
 Hojas:
 
 1. `Resumen`: una fila por tipo con totales y cobertura.
-2. `Oficial`, `Blue`, `MEP`, `CCL`, `Mayorista`, `Tarjeta`, `Banco Nacion`:
+2. `Evolucion_mensual`: ARS y USD por mes, variacion ARS/USD contra el mes anterior y cobertura.
+3. `Comparativo_tipos`: total USD de cada tipo y diferencia contra `blue`.
+4. `Oficial`, `Blue`, `MEP`, `CCL`, `Mayorista`, `Tarjeta`, `Banco Nacion`:
    detalle por presupuesto.
-3. `Productos`: detalle por item de presupuesto con cantidad, precio unitario
+5. `Productos`: detalle por item de presupuesto con cantidad, precio unitario
    ARS, cotizacion, precio unitario USD y total USD. Permite comparar productos
    y cantidades equivalentes.
-4. `Sin_cotizacion`: presupuestos que no pudieron convertirse.
-5. `Criterio`: rango, fuente, punta, formula y regla de faltantes.
+6. `Sin_cotizacion`: presupuestos que no pudieron convertirse.
+7. `Criterio`: rango, fuente, punta, formula y regla de faltantes.
 
 Columnas del detalle: fecha, numero, cliente, estado, origen, total ARS,
 cotizacion, fecha efectiva, fuente, version, fallback, cobertura, total USD y

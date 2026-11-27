@@ -18,9 +18,13 @@ from app.reports.budget_usd_comparison import (
     SIDE_LABELS,
     TYPE_LABELS,
     BudgetUsdComparisonResult,
+    monthly_evolution,
+    type_comparison,
 )
 
 SUMMARY_SHEET = "Resumen"
+EVOLUTION_SHEET = "Evolucion_mensual"
+COMPARISON_SHEET = "Comparativo_tipos"
 MISSING_SHEET = "Sin_cotizacion"
 PRODUCTS_SHEET = "Productos"
 CRITERIA_SHEET = "Criterio"
@@ -112,6 +116,75 @@ def export_budget_usd_comparison_xlsx(
             for result in items
         ),
         widths=(10, 18, 16, 10, 12, 12, 12, 10, 10, 14, 12, 16, 16, 18, 16, 22),
+    )
+
+    evolution_rows = []
+    for result in items:
+        for month in monthly_evolution(result.rows):
+            evolution_rows.append(
+                (
+                    result.rate_type,
+                    month.label,
+                    month.budgets,
+                    _float(month.total_ars),
+                    _float(month.total_usd),
+                    _float(month.variation_ars),
+                    _float(month.variation_usd),
+                    _float(month.coverage_percent),
+                    month.exact_budgets,
+                    month.prior_budgets,
+                    month.missing_budgets,
+                )
+            )
+    evolution = workbook.create_sheet(EVOLUTION_SHEET)
+    _write_table(
+        evolution,
+        (
+            "Tipo",
+            "Mes",
+            "Presupuestos",
+            "Total ARS",
+            "Total USD",
+            "Var ARS %",
+            "Var USD %",
+            "Cobertura %",
+            "Exactas",
+            "Anteriores",
+            "Sin cotizacion",
+        ),
+        evolution_rows,
+        widths=(10, 10, 12, 16, 16, 12, 12, 12, 10, 12, 14),
+    )
+
+    comparison = workbook.create_sheet(COMPARISON_SHEET)
+    _write_table(
+        comparison,
+        (
+            "Tipo",
+            "Fuente",
+            "Presupuestos",
+            "Total ARS",
+            "Total USD",
+            "Cotizacion ponderada",
+            "Cobertura %",
+            "Diferencia USD vs blue",
+            "Diferencia % vs blue",
+        ),
+        (
+            (
+                item.rate_type,
+                SOURCE_LABELS.get(item.source or "any", item.source or "Cualquiera"),
+                item.budgets,
+                _float(item.total_ars),
+                _float(item.total_usd),
+                _float(item.weighted_rate),
+                _float(item.coverage_percent),
+                _float(item.difference_usd),
+                _float(item.difference_percent),
+            )
+            for item in type_comparison(items, base_type="blue")
+        ),
+        widths=(10, 16, 12, 16, 16, 18, 12, 22, 22),
     )
 
     missing_rows = []
