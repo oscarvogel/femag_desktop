@@ -18,6 +18,7 @@ from app.reports.budget_usd_comparison import (
     BudgetUsdFilters,
 )
 from app.reports.budget_usd_comparison_export import export_budget_usd_comparison_xlsx
+from app.reports.budget_usd_comparison_html import export_budget_usd_comparison_html
 from app.services.exchange_rate_service import ExchangeRateService
 
 D_BEFORE = date(2026, 11, 1)
@@ -222,6 +223,22 @@ def test_compare_all_and_export_workbook(db, tmp_path):
     assert "Criterio" in workbook.sheetnames
     assert workbook["Blue"].max_row == 2  # encabezado + un presupuesto
     assert workbook["Resumen"].max_row == 3  # encabezado + dos tipos
+
+
+def test_export_html_contains_charts_and_tables(db, tmp_path):
+    client = _client()
+    _budget(client, D1, 1, 1100)
+    _rates()
+    service = BudgetUsdComparisonService()
+    results = service.compare_all(_filters(), rate_types=("oficial", "blue"))
+    path = export_budget_usd_comparison_html(results, tmp_path / "comparacion.html")
+    text = path.read_text(encoding="utf-8")
+
+    assert "<svg" in text
+    assert "Evolucion mensual" in text
+    assert "Comparativo por tipo" in text
+    assert "PRES-000001" in text
+    assert "USD" in text
 
 
 def test_monthly_evolution_calculates_variations(db):
