@@ -157,6 +157,14 @@ class ManagerialDashboardPage(QWidget):
         repurchase.setToolTip("Compara cliente x artículo entre dos períodos equivalentes por kilos")
         repurchase.clicked.connect(self._open_repurchase)
         header.addWidget(repurchase)
+
+        budget_usd = QPushButton("Comparación USD")
+        budget_usd.setObjectName("managerialBudgetUsdButton")
+        budget_usd.setToolTip(
+            "Convierte los presupuestos a USD por tipo de dólar, con fecha efectiva y cobertura"
+        )
+        budget_usd.clicked.connect(self._open_budget_usd)
+        header.addWidget(budget_usd)
         root.addLayout(header)
 
         self.policy_label = QLabel()
@@ -185,6 +193,7 @@ class ManagerialDashboardPage(QWidget):
         ):
             kpis.addWidget(card, index // 3, index % 3)
         root.addLayout(kpis)
+        self._add_budget_usd_card(root)
 
         detail_grid = QGridLayout()
         self.monthly_table = self._table(
@@ -223,6 +232,34 @@ class ManagerialDashboardPage(QWidget):
         self.clients_table.setToolTip("Doble clic en un cliente para ver qué productos compró en el período")
         self.products_table.cellDoubleClicked.connect(self._open_product_buyers)
         self.clients_table.cellDoubleClicked.connect(self._open_client_products)
+
+    def _add_budget_usd_card(self, root: QVBoxLayout) -> None:
+        frame = QFrame()
+        frame.setObjectName("managerialBudgetUsdCard")
+        frame.setFrameShape(QFrame.StyledPanel)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 10)
+        text = QVBoxLayout()
+        title = QLabel("Presupuestos convertidos a USD (blue)")
+        title.setObjectName("managerialBudgetUsdTitle")
+        title.setStyleSheet("font-weight: 600;")
+        self.budget_usd_value = QLabel("-")
+        self.budget_usd_value.setObjectName("managerialBudgetUsdValue")
+        self.budget_usd_value.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.budget_usd_detail = QLabel(
+            "Historico de presupuestos activos; abre el detalle por tipo y fuente."
+        )
+        self.budget_usd_detail.setObjectName("managerialBudgetUsdDetail")
+        self.budget_usd_detail.setWordWrap(True)
+        text.addWidget(title)
+        text.addWidget(self.budget_usd_value)
+        text.addWidget(self.budget_usd_detail)
+        layout.addLayout(text, 1)
+        open_button = QPushButton("Abrir comparacion USD")
+        open_button.setObjectName("managerialBudgetUsdOpen")
+        open_button.clicked.connect(self._open_budget_usd)
+        layout.addWidget(open_button)
+        root.addWidget(frame)
 
     @staticmethod
     def _section(title: str, child: QWidget) -> QWidget:
@@ -287,6 +324,11 @@ class ManagerialDashboardPage(QWidget):
         dialog = ManagerialRepurchaseDialog(service=self.service, current=self.selected_period(), parent=self)
         dialog.exec_()
 
+    def _open_budget_usd(self) -> None:
+        from app.ui.budget_usd_comparison import BudgetUsdComparisonDialog
+
+        BudgetUsdComparisonDialog(parent=self).exec_()
+
     def _open_product_buyers(self, row: int, _column: int) -> None:
         """Drill-down pedido por Dante: a quién se le vendió el producto en el rango."""
         item = self.products_table.item(row, 0)
@@ -347,6 +389,45 @@ class ManagerialDashboardPage(QWidget):
             f"Exportado:\n{out}\n\nHojas: {', '.join(ALL_SHEETS)}\nPeríodo: {period.describe_range()}",
         )
 
+    def _refresh_budget_usd_card(self) -> None:
+        try:
+            from app.reports.budget_usd_comparison import (
+                BudgetUsdComparisonService,
+                BudgetUsdFilters,
+            )
+
+            service = BudgetUsdComparisonService()
+            first, last = service.budget_date_range()
+            if first is None or last is None:
+                self.budget_usd_value.setText("Sin presupuestos")
+                self.budget_usd_detail.setText(
+                    "No hay presupuestos activos para comparar."
+                )
+                return
+            result = service.compare(
+                BudgetUsdFilters(
+                    start_date=first,
+                    end_date=last,
+                    rate_type="blue",
+                    source="argentinadatos",
+                    side="sell",
+                )
+            )
+        except Exception:  # noqa: BLE001 - el dashboard no debe romperse por esto
+            self.budget_usd_value.setText("-")
+            self.budget_usd_detail.setText(
+                "No se pudo calcular la comparacion USD."
+            )
+            return
+
+        summary = result.summary
+        self.budget_usd_value.setText(f"USD {_number(summary.total_usd, 2)}")
+        self.budget_usd_detail.setText(
+            f"{_number(summary.coverage_percent, 1)}% de cobertura "
+            f"({summary.covered_budgets}/{summary.total_budgets} presupuestos) · "
+            f"blue / ArgentinaDatos / venta · {first:%d/%m/%Y} a {last:%d/%m/%Y}"
+        )
+
     def refresh(self) -> None:
         snapshot = self.service.snapshot(self.selected_period())
         compared = snapshot.previous_period.describe_range()
@@ -383,6 +464,7 @@ class ManagerialDashboardPage(QWidget):
                 compared,
             ),
         )
+        self._refresh_budget_usd_card()
 
         self._fill_table(
             self.monthly_table,
