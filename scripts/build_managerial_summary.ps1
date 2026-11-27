@@ -66,6 +66,12 @@ try {
     Invoke-Native -Command $OutputExe `
         -Arguments @("--help") `
         -FailureMessage "El ejecutable se genero pero no pudo iniciar."
+    Invoke-Native -Command $OutputExe `
+        -Arguments @("--update-rates", "--help") `
+        -FailureMessage "El comando --update-rates no esta disponible en el ejecutable."
+    Invoke-Native -Command $OutputExe `
+        -Arguments @("--import-rates", "--help") `
+        -FailureMessage "El comando --import-rates no esta disponible en el ejecutable."
 
     $file = Get-Item -LiteralPath $OutputExe
     Write-Host ""
@@ -78,6 +84,8 @@ try {
     Write-Host "  .\FEMAG_Managerial_Summary.exe --health-check"
     Write-Host "  .\FEMAG_Managerial_Summary.exe --send-now"
     Write-Host "  .\FEMAG_Managerial_Summary.exe --daily"
+    Write-Host "  .\FEMAG_Managerial_Summary.exe --update-rates --json"
+    Write-Host "  .\FEMAG_Managerial_Summary.exe --import-rates --budgets --dry-run --types oficial"
 } finally {
     Pop-Location
 }
