@@ -111,6 +111,10 @@ efectiva confiable o son redundantes.
 
 ## Job
 
+El job tambien esta disponible dentro del EXE gerencial para servidores sin
+Python: ver `docs/MANAGERIAL_EXE_COTIZACIONES.md` (`--update-rates`,
+`--import-rates`).
+
 Comando manual:
 
 ```bash
