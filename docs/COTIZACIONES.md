@@ -209,5 +209,5 @@ No se genera instalador ni se despliega en produccion en esta etapa.
 - Las series `oficial` de DolarAPI/ArgentinaDatos y `bna` pueden diferir; se
   conservan separadas por fuente/tipo.
 - La recuperacion cubre 7 dias por defecto; la importacion historica masiva es
-  #970.
+  #970. Ver `docs/COTIZACIONES_HISTORICAS.md`.
 - No hay cotizaciones intradiarias: la fecha efectiva es diaria.

@@ -214,6 +214,21 @@ class ExchangeRateProvider(Protocol):
     ) -> ProviderOutcome: ...
 
 
+class HistoricalSeriesProvider(Protocol):
+    """Proveedor que puede entregar una serie historica completa."""
+
+    name: str
+
+    def fetch_series(
+        self,
+        *,
+        base_currency: str,
+        rate_type: str,
+        start_date: date,
+        end_date: date,
+    ) -> ProviderOutcome: ...
+
+
 def _decimal_rate(value: Any, label: str) -> Decimal:
     if isinstance(value, bool) or value is None:
         raise ProviderPayloadError(f"{label} no informado.")
@@ -703,6 +718,118 @@ class ArgentinaDatosProvider:
             provider=self.name,
             rates=tuple(rates.values()),
             errors=tuple(errors),
+            warnings=tuple(warnings),
+        )
+
+    def fetch_series(
+        self,
+        *,
+        base_currency: str,
+        rate_type: str,
+        start_date: date,
+        end_date: date,
+    ) -> ProviderOutcome:
+        """Baja una serie completa y la filtra localmente por rango.
+
+        ArgentinaDatos publica el historico completo por tipo en un solo
+        endpoint. Es preferible a una solicitud por fecha: el backfill hace una
+        consulta por tipo, no una por cada dia.
+        """
+        base = str(base_currency or "").strip().upper()
+        if base == "USD":
+            casa = ARGENTINADATOS_CASAS.get(rate_type)
+            if casa is None:
+                return ProviderOutcome(
+                    provider=self.name,
+                    errors=(f"Tipo de dolar no soportado: {rate_type!r}.",),
+                )
+            url = f"{self.base_url}/v1/cotizaciones/dolares/{casa}"
+        elif base == "BRL":
+            if rate_type != "oficial":
+                return ProviderOutcome(
+                    provider=self.name,
+                    errors=("BRL solo tiene tipo 'oficial' en ArgentinaDatos.",),
+                )
+            casa = "oficial"
+            url = f"{self.base_url}/v1/cotizaciones/brl"
+        else:
+            return ProviderOutcome(
+                provider=self.name,
+                errors=(f"Moneda no soportada: {base!r}.",),
+            )
+
+        try:
+            payload = self.client.get_json(url)
+        except ProviderError as exc:
+            return ProviderOutcome(
+                provider=self.name,
+                errors=(f"ArgentinaDatos {base}/{rate_type}: {exc}",),
+            )
+        if not isinstance(payload, list):
+            return ProviderOutcome(
+                provider=self.name,
+                errors=(
+                    f"ArgentinaDatos {base}/{rate_type}: respuesta inesperada.",
+                ),
+            )
+
+        rates: dict[date, ProviderRate] = {}
+        warnings: list[str] = []
+        invalid = ignored = duplicates = 0
+        fetched_at = datetime.now(timezone.utc)
+        label = f"ArgentinaDatos {base}/{rate_type}"
+        for item in payload:
+            if not isinstance(item, Mapping):
+                invalid += 1
+                continue
+            item_currency = str(item.get("moneda") or base).strip().upper()
+            item_casa = str(item.get("casa") or "").strip().lower()
+            if item_currency != base or item_casa != casa:
+                ignored += 1
+                continue
+            amounts = _parse_buy_sell(item, label=label, warnings=warnings)
+            if amounts is None:
+                invalid += 1
+                continue
+            try:
+                effective = _parse_iso_date(item.get("fecha"), f"{label} fecha")
+            except ProviderPayloadError as exc:
+                warnings.append(str(exc))
+                invalid += 1
+                continue
+            if effective < start_date or effective > end_date:
+                continue
+            if effective in rates:
+                duplicates += 1
+                continue
+            buy, sell = amounts
+            rates[effective] = ProviderRate(
+                base_currency=base,
+                quote_currency="ARS",
+                effective_date=effective,
+                rate_type=rate_type,
+                source=self.name,
+                buy_rate=buy,
+                sell_rate=sell,
+                origin=ExchangeRate.ORIGIN_HISTORICAL_IMPORT,
+                fetched_at=fetched_at,
+            )
+
+        if invalid:
+            warnings.append(
+                f"{label}: {invalid} filas invalidas descartadas."
+            )
+        if ignored:
+            warnings.append(
+                f"{label}: {ignored} filas de otra moneda/casa ignoradas."
+            )
+        if duplicates:
+            warnings.append(
+                f"{label}: {duplicates} fechas duplicadas en la serie."
+            )
+        return ProviderOutcome(
+            provider=self.name,
+            rates=tuple(rates.values()),
             warnings=tuple(warnings),
         )
 
