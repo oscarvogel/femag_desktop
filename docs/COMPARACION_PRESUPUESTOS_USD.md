@@ -39,8 +39,19 @@ Abre una ventana con:
 - comparativo por tipo contra `blue` (diferencia USD y %);
 - detalle por presupuesto.
 
-Tambien se puede exportar un Excel con **todos los tipos** desde el mismo
-dialogo.
+Tambien se puede exportar un Excel con **todos los tipos** o un **HTML
+autocontenido con graficos** desde el mismo dialogo.
+
+El HTML incluye:
+
+- grafico de barras de presupuestos ARS por mes;
+- grafico de barras de presupuestos USD por mes;
+- grafico horizontal de total USD por tipo;
+- tablas de evolucion, comparativo, resumen y detalle;
+- faltantes.
+
+Es un archivo `.html` con CSS y SVG embebidos: no necesita Internet ni
+dependencias para abrirse.
 
 ## Excel
 

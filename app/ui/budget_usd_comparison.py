@@ -37,6 +37,7 @@ from app.reports.budget_usd_comparison import (
     type_comparison,
 )
 from app.reports.budget_usd_comparison_export import export_budget_usd_comparison_xlsx
+from app.reports.budget_usd_comparison_html import export_budget_usd_comparison_html
 
 
 def _money(value) -> str:
@@ -251,9 +252,9 @@ class BudgetUsdComparisonDialog(QDialog):
 
         tabs = QTabWidget()
         tabs.setObjectName("budgetUsdTabs")
-        tabs.addTab(self.evolution_table, "Evolucion mensual ARS/USD")
-        tabs.addTab(self.comparison_table, "Comparativo por tipo")
-        tabs.addTab(self.table, "Detalle por presupuesto")
+        tabs.addTab(self.evolution_table, "Evolucion ARS/USD")
+        tabs.addTab(self.comparison_table, "Tipos vs blue")
+        tabs.addTab(self.table, "Detalle")
         root.addWidget(tabs, 1)
 
         actions = QHBoxLayout()
@@ -263,10 +264,14 @@ class BudgetUsdComparisonDialog(QDialog):
         export = QPushButton("Exportar Excel (todos los tipos)")
         export.setObjectName("budgetUsdExportButton")
         export.clicked.connect(self._export)
+        export_html = QPushButton("Exportar HTML con graficos")
+        export_html.setObjectName("budgetUsdExportHtmlButton")
+        export_html.clicked.connect(self._export_html)
         close = QPushButton("Cerrar")
         close.clicked.connect(self.accept)
         actions.addWidget(refresh)
         actions.addWidget(export)
+        actions.addWidget(export_html)
         actions.addStretch(1)
         actions.addWidget(close)
         root.addLayout(actions)
@@ -392,6 +397,32 @@ class BudgetUsdComparisonDialog(QDialog):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.comparison_table.setItem(index, column, item)
         self.comparison_table.resizeColumnsToContents()
+
+    def _export_html(self) -> None:
+        filters = self._filters()
+        default_name = (
+            f"comparacion_presupuestos_usd_"
+            f"{filters.start_date:%Y%m%d}_{filters.end_date:%Y%m%d}.html"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar comparacion USD a HTML",
+            default_name,
+            "HTML (*.html)",
+        )
+        if not path:
+            return
+        try:
+            results = self.service.compare_all(filters)
+            out = export_budget_usd_comparison_html(results, Path(path))
+        except Exception as exc:  # noqa: BLE001 - error amable en UI
+            QMessageBox.warning(self, "Exportar comparacion USD", f"No se pudo exportar:\n{exc}")
+            return
+        QMessageBox.information(
+            self,
+            "Exportar comparacion USD",
+            f"Exportado:\n{out}\n\nIncluye graficos de evolucion mensual y comparativo por tipo.",
+        )
 
     def _export(self) -> None:
         filters = self._filters()
