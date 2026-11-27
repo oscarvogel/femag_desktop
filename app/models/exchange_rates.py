@@ -23,11 +23,13 @@ class ExchangeRate(BaseModel):
     ORIGIN_API = "api"
     ORIGIN_HISTORICAL_IMPORT = "historical_import"
     ORIGIN_MANUAL = "manual"
+    ORIGIN_SCRAPE = "scrape"
     ORIGIN_OTHER = "other"
     ORIGINS = (
         ORIGIN_API,
         ORIGIN_HISTORICAL_IMPORT,
         ORIGIN_MANUAL,
+        ORIGIN_SCRAPE,
         ORIGIN_OTHER,
     )
 
