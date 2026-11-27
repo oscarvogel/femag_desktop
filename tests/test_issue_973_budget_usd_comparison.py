@@ -213,6 +213,8 @@ def test_compare_all_and_export_workbook(db, tmp_path):
 
     workbook = load_workbook(path)
     assert "Resumen" in workbook.sheetnames
+    assert "Evolucion_mensual" in workbook.sheetnames
+    assert "Comparativo_tipos" in workbook.sheetnames
     assert "Oficial" in workbook.sheetnames
     assert "Blue" in workbook.sheetnames
     assert "Productos" in workbook.sheetnames
@@ -220,6 +222,62 @@ def test_compare_all_and_export_workbook(db, tmp_path):
     assert "Criterio" in workbook.sheetnames
     assert workbook["Blue"].max_row == 2  # encabezado + un presupuesto
     assert workbook["Resumen"].max_row == 3  # encabezado + dos tipos
+
+
+def test_monthly_evolution_calculates_variations(db):
+    from app.reports.budget_usd_comparison import monthly_evolution
+
+    october = date(2026, 10, 15)
+    client = _client()
+    _budget(client, october, 1, 1100)
+    _budget(client, D2, 2, 2200)
+    ExchangeRateService("admin").register(
+        base_currency="USD",
+        quote_currency="ARS",
+        effective_date=october,
+        rate_type="blue",
+        buy_rate="1100",
+        sell_rate="1100",
+        source="argentinadatos",
+    )
+    _rates()
+
+    result = BudgetUsdComparisonService().compare(
+        _filters(start_date=date(2026, 10, 1))
+    )
+    months = monthly_evolution(result.rows)
+
+    assert [month.label for month in months] == ["10/2026", "11/2026"]
+    assert months[0].total_usd == Decimal("1.00")
+    assert months[1].total_usd == Decimal("1.91")
+    assert months[0].variation_usd is None
+    assert months[1].variation_usd == Decimal("91.00")
+    assert months[1].variation_ars == Decimal("100.00")
+
+
+def test_monthly_evolution_and_type_comparison(db):
+    from app.reports.budget_usd_comparison import monthly_evolution, type_comparison
+
+    client = _client()
+    _budget(client, D1, 1, 1100)
+    _budget(client, D2, 2, 2300)
+    _rates()
+    service = BudgetUsdComparisonService()
+    results = service.compare_all(_filters(), rate_types=("oficial", "blue"))
+    blue = next(item for item in results if item.rate_type == "blue")
+
+    months = monthly_evolution(blue.rows)
+    comparison = type_comparison(results, base_type="blue")
+
+    assert len(months) == 1
+    assert months[0].month == "2026-11"
+    assert months[0].budgets == 2
+    assert months[0].total_usd == Decimal("3.00")
+    assert months[0].variation_usd is None
+    assert len(comparison) == 2
+    by_type = {item.rate_type: item for item in comparison}
+    assert by_type["blue"].difference_usd == Decimal("0.00")
+    assert by_type["oficial"].difference_usd == Decimal("-3.00")
 
 
 def test_dialog_shows_summary_without_writing(db):
@@ -235,6 +293,8 @@ def test_dialog_shows_summary_without_writing(db):
     dialog = BudgetUsdComparisonDialog()
     try:
         assert dialog.table.rowCount() == 2
+        assert dialog.evolution_table.rowCount() == 1
+        assert dialog.comparison_table.rowCount() == 7
         assert dialog.total_usd_label.text().startswith("USD")
         assert dialog.table.item(1, 10).text() == "Anterior"
     finally:
