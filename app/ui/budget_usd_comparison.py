@@ -252,9 +252,9 @@ class BudgetUsdComparisonDialog(QDialog):
 
         tabs = QTabWidget()
         tabs.setObjectName("budgetUsdTabs")
-        tabs.addTab(self.evolution_table, "Evolucion mensual ARS/USD")
-        tabs.addTab(self.comparison_table, "Comparativo por tipo")
-        tabs.addTab(self.table, "Detalle por presupuesto")
+        tabs.addTab(self.evolution_table, "Evolucion ARS/USD")
+        tabs.addTab(self.comparison_table, "Tipos vs blue")
+        tabs.addTab(self.table, "Detalle")
         root.addWidget(tabs, 1)
 
         actions = QHBoxLayout()
