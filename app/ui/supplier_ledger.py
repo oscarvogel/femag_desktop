@@ -56,12 +56,22 @@ from app.services.supplier_position_service import (
 from app.ui.combo_autocomplete import SearchableComboBox
 from app.ui.supplier_payment_dialog import METHOD_LABELS, SupplierPaymentDialog, format_money
 
-PAYABLE_COLOR = QColor("#b91c1c")
-RECEIVABLE_COLOR = QColor("#15803d")
-KPI_STYLE = (
-    "font-weight:700;background:#f8fafc;border:1px solid #e2e8f0;"
-    "border-radius:8px;padding:8px 12px;"
-)
+# Rojo: la empresa le debe al productor. Verde: el productor le debe a la
+# empresa. En oscuro se usan los mismos tonos que ``theme.DARK_OVERRIDES``
+# asigna a esos colores, para que se lean sobre fondo oscuro.
+_BALANCE_COLORS = {
+    False: (QColor("#b91c1c"), QColor("#15803d")),
+    True: (QColor("#f07a8c"), QColor("#5fbf7a")),
+}
+
+
+def _is_dark_theme() -> bool:
+    try:
+        from app.ui.theme import Theme, load_theme
+
+        return load_theme() is Theme.DARK
+    except Exception:  # noqa: BLE001 - sin preferencia legible queda el claro
+        return False
 
 
 class _SortableItem(QTableWidgetItem):
@@ -83,7 +93,8 @@ def _money_item(value: Decimal, *, colored: bool = False) -> QTableWidgetItem:
     item = _SortableItem(format_money(value), Decimal(value))
     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
     if colored and value != 0:
-        item.setForeground(PAYABLE_COLOR if value > 0 else RECEIVABLE_COLOR)
+        payable, receivable = _BALANCE_COLORS[_is_dark_theme()]
+        item.setForeground(payable if value > 0 else receivable)
     return item
 
 
@@ -199,7 +210,7 @@ class SupplierLedgerPage(QWidget):
         self.date_to = QDateEdit(calendarPopup=True)
         for widget in (self.date_from, self.date_to):
             widget.setDisplayFormat("dd/MM/yyyy")
-            widget.setMinimumWidth(110)
+            widget.setMinimumWidth(150)
             widget.setEnabled(False)
         self.date_from.setDate(QDate(QDate.currentDate().year(), 1, 1))
         self.date_to.setDate(QDate.currentDate())
@@ -235,7 +246,9 @@ class SupplierLedgerPage(QWidget):
         self.net_label = QLabel()
         self.suppliers_label = QLabel()
         for label in (self.payable_label, self.receivable_label, self.net_label, self.suppliers_label):
-            label.setStyleSheet(KPI_STYLE)
+            # El estilo de la tarjeta esta en el stylesheet global
+            # (``glass_v2``): asi el tema oscuro lo invierte.
+            label.setProperty("uiRole", "kpi")
             kpis.addWidget(label)
         kpis.addStretch(1)
         root.addLayout(kpis)
@@ -243,10 +256,7 @@ class SupplierLedgerPage(QWidget):
         self.exclusion_label = QLabel()
         self.exclusion_label.setObjectName("supplierLedgerExclusions")
         self.exclusion_label.setWordWrap(True)
-        self.exclusion_label.setStyleSheet(
-            "color:#92400e;background:#fffbeb;border:1px solid #fde68a;"
-            "border-radius:6px;padding:6px 10px;"
-        )
+        self.exclusion_label.setProperty("uiRole", "notice")
         root.addWidget(self.exclusion_label)
 
         splitter = QSplitter(Qt.Vertical)

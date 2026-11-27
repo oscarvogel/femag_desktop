@@ -191,16 +191,16 @@ class SupplierDetailDialog(QDialog):
                 self.codes_table.setItem(row, column, QTableWidgetItem(value))
         layout.addWidget(self.codes_table, 1)
         if len(fichas) > 1 and not supplier.identity_verified:
-            warning = QLabel(
+            # Es un aviso fijo de la ficha, no feedback de una accion: por eso
+            # es un QLabel con el rol "notice" del tema y no un FormFeedback.
+            unified_notice = QLabel(
                 "Estas fichas se unieron porque tienen el mismo nombre. Confirme con el "
                 "CUIT/DNI que son la misma persona y marque la identidad como verificada."
             )
-            warning.setWordWrap(True)
-            warning.setStyleSheet(
-                "color:#92400e;background:#fffbeb;border:1px solid #fde68a;"
-                "border-radius:6px;padding:6px 10px;"
-            )
-            layout.addWidget(warning)
+            unified_notice.setObjectName("supplierDetailUnifiedNotice")
+            unified_notice.setWordWrap(True)
+            unified_notice.setProperty("uiRole", "notice")
+            layout.addWidget(unified_notice)
         footer = QHBoxLayout()
         footer.addStretch(1)
         close = _action_button("closeSupplierDetailButton", "Cerrar", secondary=True)

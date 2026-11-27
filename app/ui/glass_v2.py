@@ -1058,5 +1058,25 @@ def glass_v2_stylesheet(theme: Theme = Theme.LIGHT) -> str:
         padding: 8px 7px;
         font-weight: 700;
     }}
+
+    /* Cuenta corriente productores y maestro de productores: tarjetas de
+       totales y avisos. Los colores viven aca (y no en un setStyleSheet de la
+       pantalla) para que el tema oscuro los invierta con DARK_OVERRIDES. */
+    QLabel[uiRole="kpi"] {{
+        font-weight: 700;
+        color: #172033;
+        background-color: #f8fafc;
+        border: 1px solid #d9e1ec;
+        border-radius: 8px;
+        padding: 8px 12px;
+    }}
+
+    QLabel[uiRole="notice"] {{
+        color: #a55c16;
+        background-color: #fff7d6;
+        border: 1px solid #f6c453;
+        border-radius: 6px;
+        padding: 6px 10px;
+    }}
     """
     return qss if theme is Theme.LIGHT else apply_dark_overrides(qss)
