@@ -272,6 +272,9 @@ class ManagerialSnapshotPublisher:
                     "label": TYPE_LABELS.get(item.rate_type, item.rate_type),
                     "budgets": item.budgets,
                     "covered_budgets": item.covered_budgets,
+                    "exact_budgets": item.exact_budgets,
+                    "prior_budgets": item.prior_budgets,
+                    "missing_budgets": item.missing_budgets,
                     "comparable_budgets": item.comparable_budgets,
                     "total_usd": round(float(item.total_usd), 2),
                     "comparable_total_usd": round(

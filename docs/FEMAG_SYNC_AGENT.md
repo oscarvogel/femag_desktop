@@ -31,6 +31,7 @@ python -m app.jobs.sync_agent --sync
 python -m app.jobs.sync_agent --snapshot
 python -m app.jobs.sync_agent --managerial
 python -m app.jobs.sync_agent --rates
+python -m app.jobs.sync_agent --backfill-bna --from-date 2026-09-01 --to-date 2026-11-28
 python -m app.jobs.sync_agent --status
 python -m app.jobs.sync_agent --init-schema
 ```
@@ -53,6 +54,24 @@ python -m app.jobs.sync_agent --init-schema
 gerencial. `--rates` fuerza la actualización de cotizaciones y sale. `--status`
 muestra outbox, inbox, cursores y conflictos. `--init-schema` crea las tablas de
 sync.
+
+## Backfill historico de BNA
+
+La actualización diaria solo completa BNA de los últimos 7 días. Para un rango
+histórico de presupuestos, ejecutar una vez:
+
+```powershell
+& "C:\FEMAG\sync\FEMAG Sync Agent.exe" --backfill-bna `
+    --from-date 2026-09-01 --to-date 2026-11-28
+```
+
+El comando consulta BNA día por día, registra las cotizaciones faltantes y
+devuelve un JSON con creadas, sin cambios, fallidas y advertencias. Después hay
+que republicar el snapshot gerencial:
+
+```powershell
+& "C:\FEMAG\sync\FEMAG Sync Agent.exe" --managerial
+```
 
 ## Instalación en fábrica (EXE + tarea programada)
 
