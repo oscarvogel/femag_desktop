@@ -298,8 +298,11 @@ actual vs. anterior y acciones de impresión/exportación.
   de cotización y cobertura. Solo viajan agregados: no se publican clientes ni
   números de presupuesto.
 - El bloque usa por defecto Blue, cualquier fuente, punta venta y cotización
-  anterior permitida. Si falta el bloque (snapshots viejos o sin presupuestos),
-  el tablero simplemente no muestra la sección de presupuestos.
+  anterior permitida. La diferencia contra Blue se calcula solo sobre los
+  presupuestos con cotización en ambos tipos; la pantalla muestra presupuestos
+  comparables y cobertura para no comparar universos distintos.
+- Si falta el bloque (snapshots viejos o sin presupuestos), el tablero
+  simplemente no muestra la sección de presupuestos.
 - `/gerencia/vendedores` resume facturación, toneladas, clientes, recompra y
   participación por vendedor, usando el mismo selector de período. Se alimenta
   del snapshot de recompra y no publica datos nuevos desde la fábrica.

@@ -18,6 +18,11 @@ USD = total ARS / cotizacion (ARS por 1 USD)
   `Anterior` con su fecha efectiva, fuente y version.
 - Si no hay ninguna, el presupuesto queda `Sin cotizacion`, no se convierte a
   cero y se excluye del total USD, informando la cobertura.
+- En el comparativo por tipo, la diferencia contra `blue` se calcula **solo
+  sobre los presupuestos con cotizacion en ambos tipos**. Asi un tipo con
+  cobertura parcial no parece mas barato por tener menos presupuestos
+  convertidos. El detalle informa presupuestos comparables y total USD
+  comparable.
 - Los presupuestos anulados se excluyen por defecto; hay un check para
   incluirlos.
 
@@ -63,7 +68,7 @@ Hojas:
 
 1. `Resumen`: una fila por tipo con totales y cobertura.
 2. `Evolucion_mensual`: ARS y USD por mes, variacion ARS/USD contra el mes anterior y cobertura.
-3. `Comparativo_tipos`: total USD de cada tipo y diferencia contra `blue`.
+3. `Comparativo_tipos`: total USD de cada tipo, total USD comparable, presupuestos comparables y diferencia contra `blue` sobre los mismos presupuestos.
 4. `Oficial`, `Blue`, `MEP`, `CCL`, `Mayorista`, `Tarjeta`, `Banco Nacion`:
    detalle por presupuesto.
 5. `Productos`: detalle por item de presupuesto con cantidad, precio unitario

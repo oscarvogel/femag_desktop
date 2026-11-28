@@ -126,11 +126,13 @@ def _budget_usd_view(block) -> dict:
     for item in types:
         total_usd = float(item.get("total_usd") or 0)
         covered = int(item.get("covered_budgets") or 0)
+        comparable = int(item.get("comparable_budgets") or 0)
+        comparable_total = float(item.get("comparable_total_usd") or 0)
         difference = item.get("difference_usd")
         if item.get("rate_type") == "blue":
             difference_text = "Base"
             difference_direction = "flat"
-        elif difference is None:
+        elif difference is None or not comparable:
             difference_text = "—"
             difference_direction = "flat"
         else:
@@ -149,6 +151,13 @@ def _budget_usd_view(block) -> dict:
                 "budgets": _integer(item.get("budgets") or 0),
                 "total_usd": _usd_compact(total_usd) if covered else "—",
                 "total_usd_full": _usd_full(total_usd) if covered else "—",
+                "comparable_budgets": _integer(comparable),
+                "comparable_total_usd": (
+                    _usd_compact(comparable_total) if comparable else "—"
+                ),
+                "comparable_coverage": (
+                    f"{_number(item.get('comparable_coverage_percent'), 1)}%"
+                ),
                 "bar": round(total_usd / max_type_usd * 100, 1) if max_type_usd else 0,
                 "coverage": f"{_number(item.get('coverage_percent'), 1)}%",
                 "coverage_direction": _coverage_direction(

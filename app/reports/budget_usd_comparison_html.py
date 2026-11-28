@@ -246,8 +246,10 @@ def _comparison_rows(comparisons) -> list[tuple]:
             _esc(TYPE_LABELS.get(item.rate_type, item.rate_type)),
             str(item.budgets),
             _usd(item.total_usd) if item.covered_budgets else "-",
+            _usd(item.comparable_total_usd) if item.comparable_budgets else "-",
             _num(item.weighted_rate, 6) if item.covered_budgets else "-",
             _coverage_badge(item.coverage_percent),
+            str(item.comparable_budgets),
             _usd(item.difference_usd) if item.difference_usd is not None else "-",
             _pct(item.difference_percent) if item.difference_percent is not None else "-",
         )
@@ -353,8 +355,10 @@ def export_budget_usd_comparison_html(
     ars_values = [float(item.total_ars) for item in months]
     usd_values = [float(item.total_usd) for item in months]
     comparison_labels = [TYPE_LABELS.get(item.rate_type, item.rate_type) for item in comparisons]
-    comparison_values = [float(item.total_usd) for item in comparisons]
-    comparison_coverages = [float(item.coverage_percent) for item in comparisons]
+    comparison_values = [float(item.comparable_total_usd) for item in comparisons]
+    comparison_coverages = [
+        float(item.comparable_coverage_percent) for item in comparisons
+    ]
     missing = _missing_rows(items)
     logo = _logo_data_uri()
 
@@ -523,8 +527,9 @@ details .table-wrap {{ border:0; border-top:1px solid var(--slate-100); border-r
 
   <section id="tipos">
     <div class="section-head"><div><h2>Comparativo por tipo</h2><p>Mismo universo de presupuestos, distinto criterio de cotizacion.</p></div></div>
-    {_hline_chart(comparison_labels, comparison_values, comparison_coverages, title="Total USD por tipo de cotizacion", formatter=_usd)}
-    {_table(("Tipo", "Presupuestos", "Total USD", "Cotizacion ponderada", "Cobertura", "Dif. USD vs blue", "Dif. % vs blue"), _comparison_rows(comparisons))}
+    {_hline_chart(comparison_labels, comparison_values, comparison_coverages, title="Total USD comparable por tipo de cotizacion", formatter=_usd)}
+    {_table(("Tipo", "Presupuestos", "Total USD", "Total USD comp.", "Cotizacion ponderada", "Cobertura", "Comparables", "Dif. USD vs blue", "Dif. % vs blue"), _comparison_rows(comparisons))}
+    <p class="note">El total USD solo incluye los presupuestos con cotizacion del tipo. El total comp. y la diferencia contra blue usan los presupuestos con cotizacion en ambos tipos; la cobertura indica que parte del total ARS pudo convertirse.</p>
   </section>
 
   <section id="detalle">

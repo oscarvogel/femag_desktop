@@ -175,6 +175,10 @@ class BudgetUsdTypeComparison:
     weighted_rate: Decimal | None
     coverage_percent: Decimal
     covered_budgets: int
+    comparable_budgets: int
+    comparable_total_usd: Decimal
+    comparable_base_usd: Decimal
+    comparable_coverage_percent: Decimal
     difference_usd: Decimal | None
     difference_percent: Decimal | None
 
@@ -504,20 +508,63 @@ def type_comparison(
     *,
     base_type: str = "blue",
 ) -> tuple[BudgetUsdTypeComparison, ...]:
-    """Compara el total USD de cada tipo contra el tipo base."""
+    """Compara cada tipo contra el base sobre los mismos presupuestos.
+
+    La diferencia se calcula solo sobre presupuestos con cotizacion en ambos
+    tipos. Asi un tipo con cobertura parcial no parece mas barato solo porque
+    tiene menos presupuestos convertidos.
+    """
     base = next((item for item in results if item.rate_type == base_type), None)
-    base_usd = base.summary.total_usd if base is not None else None
+    total_ars = quantize_money(
+        sum((row.total_ars for row in base.rows), Decimal("0"))
+        if base is not None
+        else Decimal("0")
+    )
+    base_rows = (
+        {row.budget_id: row for row in base.rows if row.total_usd is not None}
+        if base is not None
+        else {}
+    )
     result: list[BudgetUsdTypeComparison] = []
     for item in results:
+        item_rows = {
+            row.budget_id: row for row in item.rows if row.total_usd is not None
+        }
+        common_ids = set(base_rows) & set(item_rows)
+        comparable_total = quantize_money(
+            sum(
+                (item_rows[budget_id].total_usd for budget_id in common_ids),
+                Decimal("0"),
+            )
+        )
+        comparable_base = quantize_money(
+            sum(
+                (base_rows[budget_id].total_usd for budget_id in common_ids),
+                Decimal("0"),
+            )
+        )
+        comparable_ars = quantize_money(
+            sum(
+                (base_rows[budget_id].total_ars for budget_id in common_ids),
+                Decimal("0"),
+            )
+        )
+        comparable_coverage = Decimal("0.00")
+        if total_ars > 0:
+            with localcontext() as context:
+                context.prec = 28
+                comparable_coverage = (
+                    comparable_ars / total_ars * Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         difference = None
         difference_percent = None
-        if base_usd is not None and item.summary.total_usd is not None:
-            difference = quantize_money(item.summary.total_usd - base_usd)
-            if base_usd > 0:
+        if common_ids:
+            difference = quantize_money(comparable_total - comparable_base)
+            if comparable_base > 0:
                 with localcontext() as context:
                     context.prec = 28
                     difference_percent = (
-                        difference / base_usd * Decimal("100")
+                        difference / comparable_base * Decimal("100")
                     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         result.append(
             BudgetUsdTypeComparison(
@@ -529,6 +576,10 @@ def type_comparison(
                 weighted_rate=item.summary.weighted_rate,
                 coverage_percent=item.summary.coverage_percent,
                 covered_budgets=item.summary.covered_budgets,
+                comparable_budgets=len(common_ids),
+                comparable_total_usd=comparable_total,
+                comparable_base_usd=comparable_base,
+                comparable_coverage_percent=comparable_coverage,
                 difference_usd=difference,
                 difference_percent=difference_percent,
             )
