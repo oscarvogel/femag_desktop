@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from app.config.database import initialize_runtime_database
@@ -29,6 +30,12 @@ from app.services.exchange_rate_update_service import (
     run_daily_update,
     should_run_daily,
 )
+from app.services.exchange_rate_providers import (
+    BNA_RATE_TYPE,
+    BnaProvider,
+    UrllibHttpClient,
+)
+from app.services.exchange_rate_service import ExchangeRateService
 from app.services.managerial_repurchase_publisher import (
     ManagerialRepurchasePublisher,
 )
@@ -238,6 +245,70 @@ def run_rates() -> int:
             database.close()
 
 
+def run_backfill_bna(start: date, end: date) -> int:
+    """Completa BNA historico dia por dia para un rango de fechas."""
+    database = initialize_runtime_database()
+    database.connect(reuse_if_open=True)
+    try:
+        validate_sync_schema(database)
+        provider = BnaProvider(
+            UrllibHttpClient(),
+            lookback_days=max(1, (end - start).days + 1),
+        )
+        outcome = provider.fetch_series(
+            base_currency="USD",
+            rate_type=BNA_RATE_TYPE,
+            start_date=start,
+            end_date=end,
+        )
+        service = ExchangeRateService("sistema")
+        created = unchanged = failed = 0
+        errors = list(outcome.errors)
+        for rate in outcome.rates:
+            try:
+                registration = service.register(
+                    base_currency=rate.base_currency,
+                    quote_currency=rate.quote_currency,
+                    effective_date=rate.effective_date,
+                    rate_type=rate.rate_type,
+                    buy_rate=rate.buy_rate,
+                    sell_rate=rate.sell_rate,
+                    source=rate.source,
+                    origin=rate.origin,
+                    fetched_at=rate.fetched_at,
+                    created_by="sistema",
+                )
+            except Exception as exc:  # noqa: BLE001 - seguir con las demas fechas
+                failed += 1
+                errors.append(f"{rate.effective_date.isoformat()}: {exc}")
+            else:
+                if registration.created:
+                    created += 1
+                else:
+                    unchanged += 1
+        print(
+            json.dumps(
+                {
+                    "provider": provider.name,
+                    "from": start.isoformat(),
+                    "to": end.isoformat(),
+                    "fetched": len(outcome.rates),
+                    "created": created,
+                    "unchanged": unchanged,
+                    "failed": failed,
+                    "errors": errors[:20],
+                    "warnings": list(outcome.warnings[:20]),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if not errors else 1
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
 def run_status() -> int:
     database = initialize_runtime_database()
     database.connect(reuse_if_open=True)
@@ -267,6 +338,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Actualizar cotizaciones y salir",
     )
+    parser.add_argument(
+        "--backfill-bna",
+        action="store_true",
+        help="Importar BNA historico para un rango y salir",
+    )
+    parser.add_argument(
+        "--from-date",
+        type=date.fromisoformat,
+        help="Fecha desde para --backfill-bna (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--to-date",
+        type=date.fromisoformat,
+        help="Fecha hasta para --backfill-bna (YYYY-MM-DD)",
+    )
     parser.add_argument("--status", action="store_true", help="Mostrar estado local de sync")
     parser.add_argument(
         "--init-schema",
@@ -281,6 +367,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_init_schema()
         if args.status:
             return run_status()
+        if args.backfill_bna:
+            if args.from_date is None or args.to_date is None:
+                print(
+                    "ERROR: indique --from-date y --to-date para --backfill-bna.",
+                    file=sys.stderr,
+                )
+                return 2
+            return run_backfill_bna(args.from_date, args.to_date)
         if args.rates:
             return run_rates()
         if args.managerial:

@@ -630,3 +630,42 @@ def test_live_dolarapi_and_bna_http():
     )
     assert not outcome.errors, outcome.errors
     assert outcome.rates or outcome.warnings
+
+
+def test_bna_fetch_series_collects_each_date_in_range():
+    html_25 = _bna_html([["Dolar U.S.A", "1580,0000", "1630,0000", "25/11/2026"]])
+    html_26 = _bna_html([["Dolar U.S.A", "1575,0000", "1625,0000", "26/11/2026"]])
+    html_27 = _bna_html([["Dolar U.S.A", "1570,0000", "1620,0000", "27/11/2026"]])
+    client = FakeHttpClient(
+        text_payloads={
+            BNA_URL_25: html_25,
+            BNA_URL_26: html_26,
+            BNA_URL_27: html_27,
+        }
+    )
+
+    outcome = _bna(client).fetch_series(
+        base_currency="USD",
+        rate_type="bna",
+        start_date=PREVIOUS,
+        end_date=TODAY,
+    )
+
+    assert [rate.effective_date for rate in outcome.rates] == [
+        PREVIOUS,
+        DAY,
+        TODAY,
+    ]
+    assert outcome.errors == ()
+
+
+def test_bna_fetch_series_rejects_other_rate_types():
+    outcome = _bna(FakeHttpClient()).fetch_series(
+        base_currency="USD",
+        rate_type="blue",
+        start_date=PREVIOUS,
+        end_date=TODAY,
+    )
+
+    assert outcome.rates == ()
+    assert outcome.errors

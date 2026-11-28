@@ -108,3 +108,41 @@ def test_sync_agent_updates_rates_once_per_day(monkeypatch, capsys):
     assert sync_agent.run_sync() == 0
     assert calls == ["rates"]
     assert '"rates"' in capsys.readouterr().out
+
+
+def test_sync_agent_routes_backfill_bna(monkeypatch):
+    from datetime import date
+
+    from app.jobs import sync_agent
+
+    called = []
+    monkeypatch.setattr(sync_agent, "_load_config", lambda: None)
+    monkeypatch.setattr(sync_agent, "_configure_logging", lambda: None)
+    monkeypatch.setattr(
+        sync_agent,
+        "run_backfill_bna",
+        lambda start, end: called.append((start, end)) or 0,
+    )
+
+    assert (
+        sync_agent.main(
+            [
+                "--backfill-bna",
+                "--from-date",
+                "2026-09-01",
+                "--to-date",
+                "2026-09-30",
+            ]
+        )
+        == 0
+    )
+    assert called == [(date(2026, 9, 1), date(2026, 9, 30))]
+
+
+def test_sync_agent_backfill_bna_requires_dates(monkeypatch):
+    from app.jobs import sync_agent
+
+    monkeypatch.setattr(sync_agent, "_load_config", lambda: None)
+    monkeypatch.setattr(sync_agent, "_configure_logging", lambda: None)
+
+    assert sync_agent.main(["--backfill-bna"]) == 2
