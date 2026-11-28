@@ -25,6 +25,10 @@ from app.config.schema import (
     ensure_sync_schema,
     validate_sync_schema,
 )
+from app.services.exchange_rate_update_service import (
+    run_daily_update,
+    should_run_daily,
+)
 from app.services.managerial_repurchase_publisher import (
     ManagerialRepurchasePublisher,
 )
@@ -128,6 +132,14 @@ def run_sync(limit: int | None = None) -> int:
         inbound = SyncEventConsumer(client).pull_and_apply()
         publisher = SyncOrderPublisher(limit=limit)
         snapshot = publisher.publish_snapshot(client)
+        rates = None
+        try:
+            if should_run_daily():
+                rates = run_daily_update()
+        except Exception as exc:
+            logger.warning(
+                "No se pudieron actualizar las cotizaciones: %s", exc
+            )
         managerial = None
         managerial_publisher = ManagerialSnapshotPublisher()
         if managerial_publisher.should_publish():
@@ -167,6 +179,7 @@ def run_sync(limit: int | None = None) -> int:
                 {
                     "inbound": inbound,
                     "snapshot": snapshot,
+                    "rates": rates.as_dict() if rates is not None else None,
                     "managerial": managerial,
                     "repurchase": repurchase,
                     "managerial_history": managerial_history,
@@ -212,6 +225,19 @@ def run_managerial() -> int:
             database.close()
 
 
+def run_rates() -> int:
+    database = initialize_runtime_database()
+    database.connect(reuse_if_open=True)
+    try:
+        validate_sync_schema(database)
+        result = run_daily_update(use_lock=True)
+        print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
+        return 0 if not result.errors else 1
+    finally:
+        if not database.is_closed():
+            database.close()
+
+
 def run_status() -> int:
     database = initialize_runtime_database()
     database.connect(reuse_if_open=True)
@@ -236,6 +262,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Publicar solo el snapshot gerencial",
     )
+    parser.add_argument(
+        "--rates",
+        action="store_true",
+        help="Actualizar cotizaciones y salir",
+    )
     parser.add_argument("--status", action="store_true", help="Mostrar estado local de sync")
     parser.add_argument(
         "--init-schema",
@@ -250,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_init_schema()
         if args.status:
             return run_status()
+        if args.rates:
+            return run_rates()
         if args.managerial:
             return run_managerial()
         if args.sync:

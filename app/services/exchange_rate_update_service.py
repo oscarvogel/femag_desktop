@@ -53,6 +53,8 @@ STATUS_DRY_RUN = "dry_run"
 
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 31
+DAILY_UPDATE_HOUR_ART = 19
+DAILY_RETRY_MINUTES = 30
 DEFAULT_LOCK_STALE_SECONDS = 2 * 60 * 60
 MAX_SERIALIZED_ITEMS = 20
 
@@ -579,3 +581,75 @@ class ExchangeRateUpdateService:
             row = AppParameter.get(AppParameter.key == key)
         row.value = value
         row.save(only=[AppParameter.value])
+
+
+def _parameter_datetime(key: str) -> datetime | None:
+    """Lee una marca de tiempo guardada en ``AppParameter`` sin romper el job."""
+    try:
+        row = AppParameter.get_or_none(AppParameter.key == key)
+    except Exception:  # noqa: BLE001 - tabla ausente o base no preparada
+        return None
+    if row is None or not row.value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(row.value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def should_run_daily(*, now: datetime | None = None) -> bool:
+    """Indica si corresponde actualizar cotizaciones en esta corrida.
+
+    La actualizacion corre todos los dias despues de las 19:00 de Argentina.
+    Si el servidor estuvo apagado, el primer sync posterior la recupera. Los
+    intentos fallidos se reintentan cada 30 minutos para no golpear las APIs
+    cada 5 minutos.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    last_attempt = _parameter_datetime(LAST_ATTEMPT_AT_KEY)
+    if last_attempt is not None:
+        elapsed = (current - last_attempt).total_seconds()
+        if elapsed < DAILY_RETRY_MINUTES * 60:
+            return False
+    last_success = _parameter_datetime(LAST_SUCCESS_AT_KEY)
+    if last_success is None:
+        return True
+    current_art = current.astimezone(ZONA_AR)
+    success_art = last_success.astimezone(ZONA_AR)
+    if (
+        success_art.date() < current_art.date()
+        and current_art.hour >= DAILY_UPDATE_HOUR_ART
+    ):
+        return True
+    return (current - last_success).total_seconds() >= 24 * 3600
+
+
+def run_daily_update(
+    *,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    use_lock: bool = True,
+    now: datetime | None = None,
+) -> ExchangeRateUpdateResult:
+    """Ejecuta la actualizacion diaria con la conexion ya abierta."""
+    client = UrllibHttpClient()
+    lookback = max(0, min(int(lookback_days), MAX_LOOKBACK_DAYS))
+    service = ExchangeRateUpdateService(
+        http_client=client,
+        providers=[
+            DolarApiProvider(client),
+            BnaProvider(client, lookback_days=lookback),
+        ],
+        history_providers=[ArgentinaDatosProvider(client)],
+    )
+    today = now.astimezone(ZONA_AR).date() if now is not None else None
+    return service.run(
+        today=today,
+        lookback_days=lookback,
+        use_lock=use_lock,
+    )

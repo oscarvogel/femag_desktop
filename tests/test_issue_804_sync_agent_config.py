@@ -32,3 +32,79 @@ def test_sync_agent_fails_if_configured_env_file_is_missing(monkeypatch, tmp_pat
 
     with pytest.raises(SystemExit):
         _load_config()
+
+
+def test_sync_agent_routes_rates_command(monkeypatch):
+    from app.jobs import sync_agent
+
+    called = []
+    monkeypatch.setattr(sync_agent, "_load_config", lambda: None)
+    monkeypatch.setattr(sync_agent, "_configure_logging", lambda: None)
+    monkeypatch.setattr(
+        sync_agent, "run_rates", lambda: called.append(True) or 0
+    )
+
+    assert sync_agent.main(["--rates"]) == 0
+    assert called == [True]
+
+
+def test_sync_agent_updates_rates_once_per_day(monkeypatch, capsys):
+    from app.jobs import sync_agent
+
+    calls = []
+
+    class _FakeDatabase:
+        def connect(self, **kwargs):
+            return None
+
+        def is_closed(self):
+            return False
+
+        def close(self):
+            return None
+
+    class _FakePublisher:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def pull_and_apply(self):
+            return {}
+
+        def publish_snapshot(self, client):
+            return {"skipped": False}
+
+        def should_publish(self):
+            return False
+
+        def should_publish_history(self):
+            return False
+
+        def publish(self, client):
+            return {}
+
+        def publish_history(self, client):
+            return {}
+
+    class _FakeResult:
+        errors = ()
+
+        def as_dict(self):
+            return {"status": "ok", "registered": 7}
+
+    monkeypatch.setattr(sync_agent, "initialize_runtime_database", lambda: _FakeDatabase())
+    monkeypatch.setattr(sync_agent, "validate_sync_schema", lambda database: None)
+    monkeypatch.setattr(sync_agent, "_client_from_env", lambda: object())
+    monkeypatch.setattr(sync_agent, "SyncEventConsumer", _FakePublisher)
+    monkeypatch.setattr(sync_agent, "SyncOrderPublisher", _FakePublisher)
+    monkeypatch.setattr(sync_agent, "ManagerialSnapshotPublisher", _FakePublisher)
+    monkeypatch.setattr(sync_agent, "ManagerialRepurchasePublisher", _FakePublisher)
+    monkeypatch.setattr(sync_agent, "should_run_daily", lambda: True)
+    monkeypatch.setattr(
+        sync_agent,
+        "run_daily_update",
+        lambda: calls.append("rates") or _FakeResult(),
+    )
+
+    assert sync_agent.run_sync() == 0
+    assert calls == ["rates"]
+    assert '"rates"' in capsys.readouterr().out

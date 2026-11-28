@@ -29,6 +29,8 @@ listado de procesos). Se lee del entorno.
 ```bash
 python -m app.jobs.sync_agent --sync
 python -m app.jobs.sync_agent --snapshot
+python -m app.jobs.sync_agent --managerial
+python -m app.jobs.sync_agent --rates
 python -m app.jobs.sync_agent --status
 python -m app.jobs.sync_agent --init-schema
 ```
@@ -41,9 +43,16 @@ python -m app.jobs.sync_agent --init-schema
 3. Deja rastro en `SyncInbox` y auditoría.
 4. Confirma el ACK a la nube.
 5. Publica el snapshot actualizado de fábrica.
+6. Una vez por día, después de las 19:00 de Argentina, actualiza las
+   cotizaciones (DolarAPI + BNA + faltantes recientes) antes de publicar los
+   snapshots gerenciales. Si el servidor estuvo apagado, la primera corrida
+   posterior recupera la actualización. Un fallo de red se reintenta cada 30
+   minutos y no bloquea el snapshot.
 
-`--snapshot` publica solo el snapshot. `--status` muestra outbox, inbox,
-cursores y conflictos. `--init-schema` crea las tablas de sync.
+`--snapshot` publica solo el snapshot. `--managerial` publica solo el snapshot
+gerencial. `--rates` fuerza la actualización de cotizaciones y sale. `--status`
+muestra outbox, inbox, cursores y conflictos. `--init-schema` crea las tablas de
+sync.
 
 ## Instalación en fábrica (EXE + tarea programada)
 
