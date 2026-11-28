@@ -301,6 +301,9 @@ actual vs. anterior y acciones de impresión/exportación.
   anterior permitida. La diferencia contra Blue se calcula solo sobre los
   presupuestos con cotización en ambos tipos; la pantalla muestra presupuestos
   comparables y cobertura para no comparar universos distintos.
+- La evolución mensual es de **presupuestos**, no de facturación despachada. El
+  mes en curso se marca `parcial` y se compara contra el mismo tramo del mes
+  anterior.
 - Si falta el bloque (snapshots viejos o sin presupuestos), el tablero
   simplemente no muestra la sección de presupuestos.
 - `/gerencia/vendedores` resume facturación, toneladas, clientes, recompra y

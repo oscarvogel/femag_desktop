@@ -228,7 +228,7 @@ def _table(headers: Sequence[str], rows: Iterable[Sequence], *, css="") -> str:
 def _month_rows(months) -> list[tuple]:
     return [
         (
-            _esc(item.label),
+            _esc(item.label + (" (parcial)" if item.partial else "")),
             str(item.budgets),
             _money(item.total_ars),
             _usd(item.total_usd),
@@ -517,7 +517,7 @@ details .table-wrap {{ border:0; border-top:1px solid var(--slate-100); border-r
   </div>
 
   <section id="evolucion">
-    <div class="section-head"><div><h2>Evolucion mensual</h2><p>Presupuestos convertidos a su fecha, con variacion contra el mes anterior.</p></div></div>
+    <div class="section-head"><div><h2>Evolucion mensual</h2><p>Presupuestos convertidos a su fecha. El mes en curso se compara contra el mismo tramo del mes anterior.</p></div></div>
     <div class="chart-grid">
       {_bar_chart(month_labels, ars_values, title="Presupuestos en ARS por mes", subtitle="Importe original, sin conversion.", color="#293e86", formatter=_money)}
       {_bar_chart(month_labels, usd_values, title="Presupuestos en USD por mes", subtitle="Conversion con la cotizacion de cada presupuesto.", color="#3558a8", formatter=_usd)}

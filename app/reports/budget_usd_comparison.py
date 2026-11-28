@@ -12,8 +12,9 @@ queda sin cotizacion y no se convierte a cero.
 from __future__ import annotations
 
 import bisect
+import calendar
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 from typing import Sequence
 
@@ -163,6 +164,7 @@ class BudgetUsdMonth:
     previous_total_usd: Decimal | None
     variation_ars: Decimal | None
     variation_usd: Decimal | None
+    partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -445,12 +447,22 @@ def _variation(current: Decimal, previous: Decimal | None) -> Decimal | None:
         )
 
 
-def monthly_evolution(rows: Sequence[BudgetUsdRow]) -> tuple[BudgetUsdMonth, ...]:
-    """Agrupa la comparacion por mes y calcula variacion contra el mes previo."""
+def monthly_evolution(
+    rows: Sequence[BudgetUsdRow], *, as_of: date | None = None
+) -> tuple[BudgetUsdMonth, ...]:
+    """Agrupa la comparacion por mes y calcula variacion contra el mes previo.
+
+    Si ``as_of`` cae dentro del mes en curso, ese mes se marca ``partial`` y se
+    compara contra el mismo tramo del mes anterior, no contra el mes completo.
+    Asi el mes en curso no parece caer solo porque todavia no termino.
+    """
     grouped: dict[str, list[BudgetUsdRow]] = {}
     for row in rows:
         grouped.setdefault(row.issue_date.strftime("%Y-%m"), []).append(row)
 
+    cutoff = as_of or date.today()
+    current_month = cutoff.strftime("%Y-%m")
+    current_last_day = calendar.monthrange(cutoff.year, cutoff.month)[1]
     result: list[BudgetUsdMonth] = []
     previous_ars: Decimal | None = None
     previous_usd: Decimal | None = None
@@ -481,6 +493,32 @@ def monthly_evolution(rows: Sequence[BudgetUsdRow]) -> tuple[BudgetUsdMonth, ...
                 coverage = (converted_ars / total_ars * Decimal("100")).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
+        partial = month == current_month and cutoff.day < current_last_day
+        comparison_ars = previous_ars
+        comparison_usd = previous_usd
+        if partial:
+            year, month_number = (int(part) for part in month.split("-"))
+            previous_month = (date(year, month_number, 1) - timedelta(days=1)).strftime(
+                "%Y-%m"
+            )
+            same_tramo = [
+                row
+                for row in grouped.get(previous_month, [])
+                if row.issue_date.day <= cutoff.day
+            ]
+            comparison_ars = quantize_money(
+                sum((row.total_ars for row in same_tramo), Decimal("0"))
+            )
+            comparison_usd = quantize_money(
+                sum(
+                    (
+                        row.total_usd
+                        for row in same_tramo
+                        if row.total_usd is not None
+                    ),
+                    Decimal("0"),
+                )
+            )
         result.append(
             BudgetUsdMonth(
                 month=month,
@@ -492,10 +530,11 @@ def monthly_evolution(rows: Sequence[BudgetUsdRow]) -> tuple[BudgetUsdMonth, ...
                 exact_budgets=exact,
                 prior_budgets=prior,
                 missing_budgets=missing,
-                previous_total_ars=previous_ars,
-                previous_total_usd=previous_usd,
-                variation_ars=_variation(total_ars, previous_ars),
-                variation_usd=_variation(total_usd, previous_usd),
+                previous_total_ars=comparison_ars,
+                previous_total_usd=comparison_usd,
+                variation_ars=_variation(total_ars, comparison_ars),
+                variation_usd=_variation(total_usd, comparison_usd),
+                partial=partial,
             )
         )
         previous_ars = total_ars

@@ -385,7 +385,7 @@ class BudgetUsdComparisonDialog(QDialog):
         self.evolution_table.setRowCount(len(months))
         for index, month in enumerate(months):
             values = (
-                month.label,
+                month.label + (" (parcial)" if month.partial else ""),
                 str(month.budgets),
                 _money(month.total_ars),
                 _usd(month.total_usd),

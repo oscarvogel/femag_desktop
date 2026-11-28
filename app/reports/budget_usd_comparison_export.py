@@ -125,6 +125,7 @@ def export_budget_usd_comparison_xlsx(
                 (
                     result.rate_type,
                     month.label,
+                    "Si" if month.partial else "No",
                     month.budgets,
                     _float(month.total_ars),
                     _float(month.total_usd),
@@ -142,6 +143,7 @@ def export_budget_usd_comparison_xlsx(
         (
             "Tipo",
             "Mes",
+            "Parcial",
             "Presupuestos",
             "Total ARS",
             "Total USD",
@@ -153,7 +155,7 @@ def export_budget_usd_comparison_xlsx(
             "Sin cotizacion",
         ),
         evolution_rows,
-        widths=(10, 10, 12, 16, 16, 12, 12, 12, 10, 12, 14),
+        widths=(10, 10, 8, 12, 16, 16, 12, 12, 12, 10, 12, 14),
     )
 
     comparison = workbook.create_sheet(COMPARISON_SHEET)
