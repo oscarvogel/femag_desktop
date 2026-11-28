@@ -39,8 +39,9 @@ Abre una ventana con:
 - comparativo por tipo contra `blue` (diferencia USD y %);
 - detalle por presupuesto.
 
-Tambien se puede exportar un Excel con **todos los tipos** o un **HTML
-autocontenido con graficos** desde el mismo dialogo.
+Tambien se puede exportar un Excel con **todos los tipos** y generar un
+**HTML autocontenido con graficos** para abrirlo directamente en el navegador
+o guardarlo como archivo, desde el mismo dialogo.
 
 El HTML incluye:
 
@@ -51,7 +52,10 @@ El HTML incluye:
 - faltantes.
 
 Es un archivo `.html` con CSS y SVG embebidos: no necesita Internet ni
-dependencias para abrirse.
+dependencias para abrirse. El boton **Ver informe en el navegador** genera el
+archivo en la carpeta temporal de FEMAG y lo abre automaticamente, sin pedir
+ruta ni guardado manual. **Guardar HTML** conserva la opcion de elegir donde
+guardarlo.
 
 ## Excel
 

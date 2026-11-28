@@ -344,3 +344,55 @@ def test_dashboard_has_budget_usd_access(db):
     finally:
         page.close()
         app.processEvents()
+
+
+def test_open_html_report_generates_and_opens_in_browser(db, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from PyQt5.QtWidgets import QApplication, QPushButton
+
+    client = _client()
+    _budget(client, D1, 1, 1100)
+    _rates()
+    app = QApplication.instance() or QApplication([])
+    from app.ui import budget_usd_comparison as ui_module
+
+    target = tmp_path / "comparacion.html"
+    opened: list[Path] = []
+
+    def _fake_open(path):
+        opened.append(path)
+        return True
+
+    monkeypatch.setattr(ui_module, "_html_report_path", lambda filters: target)
+    monkeypatch.setattr(ui_module, "_open_in_browser", _fake_open)
+
+    dialog = ui_module.BudgetUsdComparisonDialog()
+    try:
+        button = dialog.findChild(QPushButton, "budgetUsdOpenHtmlButton")
+        assert button is not None
+        assert "navegador" in button.text().lower()
+        dialog._open_html()
+    finally:
+        dialog.close()
+        app.processEvents()
+
+    assert target.exists()
+    assert opened == [target]
+    assert "Evolucion mensual" in target.read_text(encoding="utf-8")
+
+
+def test_html_report_path_is_unique_and_in_temp(monkeypatch, tmp_path):
+    import tempfile
+
+    from app.ui import budget_usd_comparison as ui_module
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    filters = _filters()
+    first = ui_module._html_report_path(filters)
+    second = ui_module._html_report_path(filters)
+
+    assert first.parent == tmp_path / "FEMAG" / "informes"
+    assert first.parent.is_dir()
+    assert first.suffix == ".html"
+    assert first != second
