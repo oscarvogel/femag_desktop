@@ -177,6 +177,9 @@ class BudgetUsdTypeComparison:
     weighted_rate: Decimal | None
     coverage_percent: Decimal
     covered_budgets: int
+    exact_budgets: int
+    prior_budgets: int
+    missing_budgets: int
     comparable_budgets: int
     comparable_total_usd: Decimal
     comparable_base_usd: Decimal
@@ -615,6 +618,9 @@ def type_comparison(
                 weighted_rate=item.summary.weighted_rate,
                 coverage_percent=item.summary.coverage_percent,
                 covered_budgets=item.summary.covered_budgets,
+                exact_budgets=item.summary.exact_budgets,
+                prior_budgets=item.summary.prior_budgets,
+                missing_budgets=item.summary.missing_budgets,
                 comparable_budgets=len(common_ids),
                 comparable_total_usd=comparable_total,
                 comparable_base_usd=comparable_base,

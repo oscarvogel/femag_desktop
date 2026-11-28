@@ -507,7 +507,37 @@ class BnaProvider:
                 continue
             if earliest <= gap.effective_date <= today:
                 dates.add(gap.effective_date)
+        return self._collect_dates(dates, earliest=earliest, latest=today)
 
+    def fetch_series(
+        self,
+        *,
+        base_currency: str,
+        rate_type: str,
+        start_date: date,
+        end_date: date,
+    ) -> ProviderOutcome:
+        """Baja BNA dia por dia para completar un rango historico."""
+        base = str(base_currency or "").strip().upper()
+        if base != "USD" or rate_type != BNA_RATE_TYPE:
+            return ProviderOutcome(
+                provider=self.name,
+                errors=(f"BNA no soporta {base}/{rate_type}.",),
+            )
+        if end_date < start_date:
+            return ProviderOutcome(
+                provider=self.name,
+                errors=("Rango BNA invalido.",),
+            )
+        dates = {
+            start_date + timedelta(days=offset)
+            for offset in range((end_date - start_date).days + 1)
+        }
+        return self._collect_dates(dates, earliest=start_date, latest=end_date)
+
+    def _collect_dates(
+        self, dates: set[date], *, earliest: date, latest: date
+    ) -> ProviderOutcome:
         rates: dict[tuple[str, date], ProviderRate] = {}
         errors: list[str] = []
         warnings: list[str] = []
@@ -530,7 +560,7 @@ class BnaProvider:
             found_exact = False
             for row in rows:
                 row_date = row["date"]
-                if row_date > requested or row_date > today:
+                if row_date > requested or row_date > latest:
                     continue
                 if row_date < earliest:
                     continue

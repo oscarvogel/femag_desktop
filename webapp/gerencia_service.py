@@ -150,7 +150,10 @@ def _budget_usd_view(block) -> dict:
                 "rate_type": str(item.get("rate_type") or ""),
                 "label": str(item.get("label") or ""),
                 "budgets": _integer(item.get("budgets") or 0),
-                "total_usd": _usd_compact(total_usd) if covered else "—",
+                "exact": _integer(item.get("exact_budgets") or 0),
+                "prior": _integer(item.get("prior_budgets") or 0),
+                "missing": _integer(item.get("missing_budgets") or 0),
+                "total_usd": _usd_compact(total_usd) if covered else "-",
                 "total_usd_full": _usd_full(total_usd) if covered else "—",
                 "comparable_budgets": _integer(comparable),
                 "comparable_total_usd": (

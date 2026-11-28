@@ -751,6 +751,9 @@ def _budget_usd_block():
                 "label": "Blue",
                 "budgets": 436,
                 "covered_budgets": 436,
+                "exact_budgets": 421,
+                "prior_budgets": 15,
+                "missing_budgets": 0,
                 "comparable_budgets": 436,
                 "total_usd": 987_654.32,
                 "comparable_total_usd": 987_654.32,
@@ -765,6 +768,9 @@ def _budget_usd_block():
                 "label": "Oficial",
                 "budgets": 436,
                 "covered_budgets": 436,
+                "exact_budgets": 430,
+                "prior_budgets": 6,
+                "missing_budgets": 0,
                 "comparable_budgets": 436,
                 "total_usd": 812_345.67,
                 "comparable_total_usd": 812_345.67,
@@ -932,6 +938,9 @@ def test_dashboard_view_explains_partial_coverage(db):
             "label": "Blue",
             "budgets": 436,
             "covered_budgets": 436,
+            "exact_budgets": 430,
+            "prior_budgets": 6,
+            "missing_budgets": 0,
             "comparable_budgets": 436,
             "total_usd": 3_100_000,
             "comparable_total_usd": 3_100_000,
@@ -946,6 +955,9 @@ def test_dashboard_view_explains_partial_coverage(db):
             "label": "Banco Nacion",
             "budgets": 436,
             "covered_budgets": 64,
+            "exact_budgets": 50,
+            "prior_budgets": 14,
+            "missing_budgets": 0,
             "comparable_budgets": 64,
             "total_usd": 454_200,
             "comparable_total_usd": 454_200,
@@ -966,6 +978,8 @@ def test_dashboard_view_explains_partial_coverage(db):
     assert bna["coverage"] == "14,7%"
     assert bna["comparable_budgets"] == "64"
     assert bna["comparable_coverage"] == "14,7%"
+    assert bna["exact"] == "50"
+    assert bna["prior"] == "14"
     assert bna["difference"] == "+USD 5,2 mil"
     assert bna["difference_direction"] == "up"
     assert view["budget_usd"]["monthly"][-1]["partial"] is True
@@ -975,6 +989,7 @@ def test_dashboard_view_explains_partial_coverage(db):
     response = client.get("/gerencia")
     assert response.status_code == 200
     assert "14,7% cobertura · 64 comparables".encode() in response.data
+    assert "50 exactas · 14 anteriores".encode() in response.data
     assert "La diferencia contra Blue usa únicamente".encode() in response.data
     assert "no facturación despachada".encode() in response.data
     assert b"parcial" in response.data
