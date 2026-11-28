@@ -171,6 +171,43 @@ def _require_list(value, name: str) -> list:
     return value
 
 
+def _validate_budget_usd(value) -> None:
+    """Valida el bloque opcional de presupuestos sin romper snapshots viejos."""
+    if value is None:
+        return
+    block = _require_mapping(value, "budget_usd")
+    summary = _require_mapping(block.get("summary"), "budget_usd.summary")
+    for key in ("budgets", "total_ars", "total_usd", "coverage_percent"):
+        if summary.get(key) is None:
+            raise ManagerialDashboardError(
+                f"El snapshot no trae budget_usd.summary.{key}."
+            )
+    for item in _require_list(block.get("monthly"), "budget_usd.monthly"):
+        row = _require_mapping(item, "budget_usd.monthly[]")
+        if not row.get("month") or not row.get("label"):
+            raise ManagerialDashboardError(
+                "El snapshot no trae month/label en budget_usd.monthly."
+            )
+    for item in _require_list(block.get("types"), "budget_usd.types"):
+        row = _require_mapping(item, "budget_usd.types[]")
+        if not row.get("rate_type") or not row.get("label"):
+            raise ManagerialDashboardError(
+                "El snapshot no trae rate_type/label en budget_usd.types."
+            )
+    range_value = block.get("range")
+    if range_value is not None:
+        range_map = _require_mapping(range_value, "budget_usd.range")
+        for key in ("start", "end"):
+            try:
+                date.fromisoformat(str(range_map.get(key)))
+            except (TypeError, ValueError) as exc:
+                raise ManagerialDashboardError(
+                    f"Fecha invalida en budget_usd.range.{key}."
+                ) from exc
+    if block.get("criteria") is not None:
+        _require_mapping(block.get("criteria"), "budget_usd.criteria")
+
+
 class ManagerialDashboardService:
     @staticmethod
     def apply_snapshot(snapshot: dict) -> dict:
@@ -209,6 +246,7 @@ class ManagerialDashboardService:
         _require_list(snapshot.get("monthly_evolution"), "monthly_evolution")
         _require_list(snapshot.get("top_clients"), "top_clients")
         _require_list(snapshot.get("top_products"), "top_products")
+        _validate_budget_usd(snapshot.get("budget_usd"))
 
         saved = save_snapshot_projection(
             SyncProjection.RESOURCE_MANAGERIAL, snapshot, generated_at

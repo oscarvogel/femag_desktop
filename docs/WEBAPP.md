@@ -292,6 +292,14 @@ actual vs. anterior y acciones de impresión/exportación.
 - El tablero muestra 5 KPIs, el puente de variación de volumen, la comparativa
   por producto y la radiografía de cartera; el detalle cliente por cliente está
   en `/gerencia/recompra`.
+- Cuando la fábrica tiene presupuestos y cotizaciones importados, el mismo
+  snapshot incluye un bloque opcional `budget_usd` con el histórico de
+  presupuestos activos: totales ARS/USD, evolución mensual, total USD por tipo
+  de cotización y cobertura. Solo viajan agregados: no se publican clientes ni
+  números de presupuesto.
+- El bloque usa por defecto Blue, cualquier fuente, punta venta y cotización
+  anterior permitida. Si falta el bloque (snapshots viejos o sin presupuestos),
+  el tablero simplemente no muestra la sección de presupuestos.
 - `/gerencia/vendedores` resume facturación, toneladas, clientes, recompra y
   participación por vendedor, usando el mismo selector de período. Se alimenta
   del snapshot de recompra y no publica datos nuevos desde la fábrica.

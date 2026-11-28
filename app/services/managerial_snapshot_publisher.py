@@ -6,16 +6,31 @@ Solo viajan agregados del mes, no ordenes, clientes ni cuentas corrientes.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import date, datetime, timezone
 from time import time
 from uuid import uuid4
 
 from app.models.sync import SyncCursor
+from app.reports.budget_usd_comparison import (
+    RATE_SIDE_SELL,
+    SOURCE_LABELS,
+    SIDE_LABELS,
+    TYPE_LABELS,
+    BudgetUsdComparisonService,
+    BudgetUsdFilters,
+    monthly_evolution,
+    type_comparison,
+)
 from app.reports.managerial_dashboard import (
     ManagerialDashboardService,
     ReportPeriod,
 )
 from app.services.sync_service import SyncService
+
+logger = logging.getLogger(__name__)
+
+_UNSET = object()
 
 MONTH_SHORT = (
     "",
@@ -81,6 +96,10 @@ def _top_row(row: dict, *, by_tonnes: bool = False) -> dict:
     }
 
 
+def _optional_number(value) -> float | None:
+    return None if value is None else round(float(value), 2)
+
+
 class ManagerialSnapshotPublisher:
     def __init__(
         self,
@@ -124,7 +143,7 @@ class ManagerialSnapshotPublisher:
             now=now,
         )
 
-    def build(self, *, as_of: date | None = None) -> dict:
+    def build(self, *, as_of: date | None = None, budget_usd=_UNSET) -> dict:
         today = as_of or date.today()
         period = ReportPeriod(today.replace(day=1), today, "Este mes")
         snapshot = self.dashboard_service.snapshot(period)
@@ -169,6 +188,107 @@ class ManagerialSnapshotPublisher:
                 _top_row(row, by_tonnes=True)
                 for row in snapshot.top_products[:5]
             ],
+            "budget_usd": (
+                self._budget_usd_block() if budget_usd is _UNSET else budget_usd
+            ),
+        }
+
+    def _budget_usd_block(self) -> dict | None:
+        """Agregados del histórico de presupuestos, sin datos comerciales."""
+        try:
+            service = BudgetUsdComparisonService()
+            first, last = service.budget_date_range()
+            if first is None or last is None:
+                return None
+            filters = BudgetUsdFilters(
+                start_date=first,
+                end_date=last,
+                rate_type="blue",
+                source=None,
+                side=RATE_SIDE_SELL,
+                include_annulled=False,
+                allow_prior=True,
+            )
+            results = service.compare_all(filters, include_items=False)
+        except Exception as exc:  # noqa: BLE001 - el snapshot no debe fallar
+            logger.warning("No se pudo calcular el bloque budget_usd: %s", exc)
+            return None
+
+        blue = next(
+            (item for item in results if item.rate_type == "blue"), results[0]
+        )
+        months = monthly_evolution(blue.rows)
+        comparisons = type_comparison(results, base_type="blue")
+        summary = blue.summary
+        return {
+            "range": {"start": first.isoformat(), "end": last.isoformat()},
+            "criteria": {
+                "rate_type": blue.rate_type,
+                "rate_label": TYPE_LABELS.get(blue.rate_type, blue.rate_type),
+                "source": blue.source,
+                "source_label": SOURCE_LABELS.get(
+                    blue.source or "any", blue.source or "Cualquiera"
+                ),
+                "side": blue.filters.side,
+                "side_label": SIDE_LABELS.get(
+                    blue.filters.side, blue.filters.side
+                ),
+                "include_annulled": blue.filters.include_annulled,
+                "allow_prior": blue.filters.allow_prior,
+            },
+            "summary": {
+                "budgets": summary.total_budgets,
+                "exact_budgets": summary.exact_budgets,
+                "prior_budgets": summary.prior_budgets,
+                "missing_budgets": summary.missing_budgets,
+                "total_ars": round(float(summary.total_ars), 2),
+                "total_usd": round(float(summary.total_usd), 2),
+                "uncovered_ars": round(float(summary.uncovered_ars), 2),
+                "weighted_rate": _optional_number(summary.weighted_rate),
+                "coverage_percent": round(float(summary.coverage_percent), 2),
+            },
+            "monthly": [
+                {
+                    "month": item.month,
+                    "label": (
+                        f"{MONTH_SHORT[int(item.month[5:])]} "
+                        f"{item.month[:4]}"
+                    ),
+                    "budgets": item.budgets,
+                    "total_ars": round(float(item.total_ars), 2),
+                    "total_usd": round(float(item.total_usd), 2),
+                    "coverage_percent": round(
+                        float(item.coverage_percent), 2
+                    ),
+                    "variation_ars": _optional_number(item.variation_ars),
+                    "variation_usd": _optional_number(item.variation_usd),
+                }
+                for item in months
+            ],
+            "types": [
+                {
+                    "rate_type": item.rate_type,
+                    "label": TYPE_LABELS.get(item.rate_type, item.rate_type),
+                    "budgets": item.budgets,
+                    "covered_budgets": item.covered_budgets,
+                    "total_usd": round(float(item.total_usd), 2),
+                    "weighted_rate": _optional_number(item.weighted_rate),
+                    "coverage_percent": round(
+                        float(item.coverage_percent), 2
+                    ),
+                    "difference_usd": (
+                        None
+                        if item.covered_budgets == 0
+                        else _optional_number(item.difference_usd)
+                    ),
+                    "difference_percent": (
+                        None
+                        if item.covered_budgets == 0
+                        else _optional_number(item.difference_percent)
+                    ),
+                }
+                for item in comparisons
+            ],
         }
 
     def build_history(
@@ -177,12 +297,13 @@ class ManagerialSnapshotPublisher:
         """Cortes mensuales cerrados, del más viejo al mes en curso."""
         total = max(1, int(months or self.history_months))
         today = as_of or date.today()
+        budget_usd = self._budget_usd_block()
         snapshots = []
         for offset in range(total - 1, 0, -1):
             year, month = _shift_month(today.year, today.month, -offset)
             end = date(year, month, calendar.monthrange(year, month)[1])
-            snapshots.append(self.build(as_of=end))
-        snapshots.append(self.build(as_of=today))
+            snapshots.append(self.build(as_of=end, budget_usd=budget_usd))
+        snapshots.append(self.build(as_of=today, budget_usd=budget_usd))
         return snapshots
 
     def publish(self, client, *, as_of: date | None = None) -> dict:

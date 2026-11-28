@@ -10,6 +10,7 @@ from app.models.sync import SyncProjection
 from app.utils.datetime_utils import as_datetime
 from webapp.managerial_dashboard_service import (
     ManagerialDashboardService,
+    _integer,
     _money_compact,
     _money_full,
     _month_name,
@@ -48,6 +49,136 @@ def _month_label(period: dict) -> str:
 
 def _price_tn(value: float) -> str:
     return f"$ {_number(float(value or 0) / 1_000_000, 3)} M"
+
+
+def _usd_compact(value) -> str:
+    amount = float(value or 0)
+    if abs(amount) >= 1_000_000:
+        return f"USD {_number(amount / 1_000_000, 1)} M"
+    if abs(amount) >= 1_000:
+        return f"USD {_number(amount / 1_000, 1)} mil"
+    return f"USD {_number(amount, 0)}"
+
+
+def _usd_full(value) -> str:
+    return f"USD {_number(value, 2)}"
+
+
+def _coverage_direction(value) -> str:
+    amount = float(value or 0)
+    if amount >= 99.9:
+        return "up"
+    if amount >= 80:
+        return "flat"
+    return "down"
+
+
+def _budget_usd_view(block) -> dict:
+    """Formatea el bloque budget_usd del snapshot para el dashboard web."""
+    if not isinstance(block, dict):
+        return {"available": False}
+    summary = block.get("summary") or {}
+    criteria = block.get("criteria") or {}
+    ranges = block.get("range") or {}
+    months = [item for item in block.get("monthly") or [] if isinstance(item, dict)]
+    types = [item for item in block.get("types") or [] if isinstance(item, dict)]
+    max_ars = max([float(item.get("total_ars") or 0) for item in months] or [0])
+    max_usd = max([float(item.get("total_usd") or 0) for item in months] or [0])
+    max_type_usd = max([float(item.get("total_usd") or 0) for item in types] or [0])
+    rate = summary.get("weighted_rate")
+    coverage = summary.get("coverage_percent")
+    criteria_parts = [
+        str(criteria.get("rate_label") or "Blue"),
+        str(criteria.get("source_label") or "Cualquiera"),
+        str(criteria.get("side_label") or "Venta"),
+    ]
+    monthly_rows = []
+    for item in months:
+        ars = float(item.get("total_ars") or 0)
+        usd = float(item.get("total_usd") or 0)
+        ars_delta, ars_direction = _variation(item.get("variation_ars"))
+        usd_delta, usd_direction = _variation(item.get("variation_usd"))
+        if item.get("variation_ars") is None:
+            ars_delta = "—"
+        if item.get("variation_usd") is None:
+            usd_delta = "—"
+        monthly_rows.append(
+            {
+                "label": str(item.get("label") or ""),
+                "budgets": _integer(item.get("budgets") or 0),
+                "total_ars": _money_compact(ars),
+                "total_ars_full": _money_full(ars),
+                "total_usd": _usd_compact(usd),
+                "total_usd_full": _usd_full(usd),
+                "coverage": f"{_number(item.get('coverage_percent'), 1)}%",
+                "coverage_direction": _coverage_direction(
+                    item.get("coverage_percent")
+                ),
+                "ars_bar": round(ars / max_ars * 100, 1) if max_ars else 0,
+                "usd_bar": round(usd / max_usd * 100, 1) if max_usd else 0,
+                "ars_delta": ars_delta,
+                "ars_direction": ars_direction,
+                "usd_delta": usd_delta,
+                "usd_direction": usd_direction,
+            }
+        )
+    type_rows = []
+    for item in types:
+        total_usd = float(item.get("total_usd") or 0)
+        covered = int(item.get("covered_budgets") or 0)
+        difference = item.get("difference_usd")
+        if item.get("rate_type") == "blue":
+            difference_text = "Base"
+            difference_direction = "flat"
+        elif difference is None:
+            difference_text = "—"
+            difference_direction = "flat"
+        else:
+            difference_text = _signed(float(difference), _usd_compact)
+            if float(difference) > 0:
+                difference_direction = "up"
+            elif float(difference) < 0:
+                difference_direction = "down"
+            else:
+                difference_direction = "flat"
+        weight = item.get("weighted_rate")
+        type_rows.append(
+            {
+                "rate_type": str(item.get("rate_type") or ""),
+                "label": str(item.get("label") or ""),
+                "budgets": _integer(item.get("budgets") or 0),
+                "total_usd": _usd_compact(total_usd) if covered else "—",
+                "total_usd_full": _usd_full(total_usd) if covered else "—",
+                "bar": round(total_usd / max_type_usd * 100, 1) if max_type_usd else 0,
+                "coverage": f"{_number(item.get('coverage_percent'), 1)}%",
+                "coverage_direction": _coverage_direction(
+                    item.get("coverage_percent")
+                ),
+                "weighted_rate": f"$ {_number(weight, 2)}" if weight else "—",
+                "difference": difference_text,
+                "difference_direction": difference_direction,
+            }
+        )
+    return {
+        "available": True,
+        "range_label": f"{_date(ranges.get('start'))} – {_date(ranges.get('end'))}",
+        "criteria_label": " · ".join(criteria_parts),
+        "summary": {
+            "budgets": _integer(summary.get("budgets") or 0),
+            "total_ars": _money_compact(summary.get("total_ars")),
+            "total_ars_full": _money_full(summary.get("total_ars")),
+            "total_usd": _usd_compact(summary.get("total_usd")),
+            "total_usd_full": _usd_full(summary.get("total_usd")),
+            "coverage": f"{_number(coverage, 1)}%",
+            "coverage_direction": _coverage_direction(coverage),
+            "weighted_rate": f"$ {_number(rate, 2)}" if rate else "—",
+            "exact": int(summary.get("exact_budgets") or 0),
+            "prior": int(summary.get("prior_budgets") or 0),
+            "missing": int(summary.get("missing_budgets") or 0),
+        },
+        "monthly": monthly_rows,
+        "types": type_rows,
+    }
 
 
 def _waterfall_svg(items: list[dict]) -> str:
@@ -393,6 +524,7 @@ class GerenciaService:
             "empty": False,
             "has_repurchase": has_repurchase,
             "diagnosis": diagnosis,
+            "budget_usd": _budget_usd_view(payload.get("budget_usd")),
             "current_label": labels["current_label"],
             "previous_label": labels["previous_label"],
             "current_short": labels["current_short"],

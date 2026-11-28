@@ -86,8 +86,18 @@ observacion.
 - Exportacion Excel con resumen y una hoja por tipo.
 - Dialogo y acceso desde el dashboard.
 
+## Dashboard web
+
+El snapshot gerencial de la fabrica incluye un bloque opcional `budget_usd` con
+los mismos agregados del informe: rango analizado, totales ARS/USD, cobertura,
+evolucion mensual y total USD por tipo contra `blue`. Se muestra en `/gerencia`
+como **Presupuestos en dolares**.
+
+Solo viajan agregados: no se publican clientes ni numeros de presupuesto. Si el
+bloque no esta presente (snapshot viejo o fabrica sin presupuestos/rates), la
+seccion no se renderiza.
+
 ## Pendiente
 
-- #974: indicadores gerenciales mas amplios en ARS/USD.
-- Pantalla web del dashboard gerencial: por ahora el acceso es la app de
-  escritorio.
+- Deploy de la webapp con el bloque `budget_usd`.
+- Validacion en fabrica del dashboard web y del informe HTML.
