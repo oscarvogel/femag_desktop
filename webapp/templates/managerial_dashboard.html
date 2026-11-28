@@ -55,6 +55,87 @@
   </article>
 </section>
 
+{% if dashboard.budget_usd.available %}
+<section class="card budget-section" id="presupuestos-usd" aria-label="Presupuestos en dólares">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Presupuestos en dólares ({{ dashboard.budget_usd.range_label }})</h2>
+      <p class="card-subtitle">Comparación informativa del histórico de presupuestos activos · {{ dashboard.budget_usd.criteria_label }}</p>
+    </div>
+    <span class="kpi-pill {{ dashboard.budget_usd.summary.coverage_direction }}">Cobertura {{ dashboard.budget_usd.summary.coverage }}</span>
+  </div>
+  <div class="budget-stats">
+    <div class="budget-stat"><span>Presupuestos</span><strong>{{ dashboard.budget_usd.summary.budgets }}</strong><small>histórico analizado</small></div>
+    <div class="budget-stat"><span>Total ARS</span><strong>{{ dashboard.budget_usd.summary.total_ars }}</strong><small>{{ dashboard.budget_usd.summary.total_ars_full }}</small></div>
+    <div class="budget-stat"><span>Total USD</span><strong>{{ dashboard.budget_usd.summary.total_usd }}</strong><small>{{ dashboard.budget_usd.summary.total_usd_full }}</small></div>
+    <div class="budget-stat"><span>Cotización ponderada</span><strong>{{ dashboard.budget_usd.summary.weighted_rate }}</strong><small>{{ dashboard.budget_usd.summary.exact }} exactas · {{ dashboard.budget_usd.summary.prior }} anteriores · {{ dashboard.budget_usd.summary.missing }} faltantes</small></div>
+  </div>
+  <div class="budget-grid">
+    <div class="budget-block">
+      <h3>Presupuestos en pesos por mes</h3>
+      <p>Importe original, sin conversión.</p>
+      <div class="budget-months">
+        {% for row in dashboard.budget_usd.monthly %}
+        <div class="budget-month" title="{{ row.label }}: {{ row.total_ars_full }} · {{ row.budgets }} presupuestos">
+          {% if dashboard.budget_usd.monthly|length <= 6 %}<em>{{ row.total_ars }}</em>{% endif %}
+          <i style="height:{{ row.ars_bar if row.ars_bar >= 3 else 3 }}%"></i>
+          <b>{{ row.label }}</b>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="budget-block">
+      <h3>Presupuestos en dólares por mes</h3>
+      <p>Conversión con la cotización de cada presupuesto.</p>
+      <div class="budget-months">
+        {% for row in dashboard.budget_usd.monthly %}
+        <div class="budget-month" title="{{ row.label }}: {{ row.total_usd_full }} · cobertura {{ row.coverage }}">
+          {% if dashboard.budget_usd.monthly|length <= 6 %}<em>{{ row.total_usd }}</em>{% endif %}
+          <i style="height:{{ row.usd_bar if row.usd_bar >= 3 else 3 }}%"></i>
+          <b>{{ row.label }}</b>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="budget-grid">
+    <div class="budget-block">
+      <h3>Total USD por tipo de cotización</h3>
+      <p>Contra el tipo base Blue.</p>
+      {% for row in dashboard.budget_usd.types %}
+      <div class="budget-type">
+        <span class="name">{{ row.label }}</span>
+        <div class="track"><i style="width:{{ row.bar }}%"></i></div>
+        <span class="value">{{ row.total_usd }}</span>
+      </div>
+      <div class="budget-type-meta"><span>{{ row.budgets }} presupuestos · {{ row.coverage }}</span><span class="{{ row.difference_direction }}">{{ row.difference }} vs. Blue</span></div>
+      {% endfor %}
+    </div>
+    <div class="budget-block">
+      <h3>Evolución mensual</h3>
+      <p>Variación contra el mes anterior.</p>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Mes</th><th class="num">Presup.</th><th class="num">ARS</th><th class="num">USD</th><th class="num">Cob.</th></tr></thead>
+          <tbody>
+            {% for row in dashboard.budget_usd.monthly %}
+            <tr>
+              <td><span class="primary-cell">{{ row.label }}</span><span class="cell-sub">{{ row.ars_delta }} ARS · {{ row.usd_delta }} USD</span></td>
+              <td class="num">{{ row.budgets }}</td>
+              <td class="num">{{ row.total_ars }}</td>
+              <td class="num"><strong>{{ row.total_usd }}</strong></td>
+              <td class="num"><span class="badge-var {{ row.coverage_direction }}">{{ row.coverage }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <p class="budget-note">Criterio: USD = ARS / cotización. Los presupuestos sin cotización no se convierten a cero: se informan como faltantes. Solo se publican agregados, sin clientes ni números de presupuesto.</p>
+</section>
+{% endif %}
+
 <section class="charts-row">
   <article class="card">
     <div class="card-header">

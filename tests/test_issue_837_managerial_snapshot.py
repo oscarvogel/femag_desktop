@@ -5,9 +5,12 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import uuid4
 
+from app.models.budgets import Budget
+from app.models.masters import Client
 from app.models.sync import SyncCursor, SyncProjection
 from app.reports.managerial_dashboard import ReportPeriod
 from app.services.auth_service import AuthService
+from app.services.exchange_rate_service import ExchangeRateService
 from app.services.managerial_snapshot_publisher import (
     ManagerialSnapshotPublisher,
 )
@@ -692,3 +695,245 @@ def test_repurchase_route_filters_by_period(db):
     assert response.status_code == 200
     assert b"01/10/2026" in response.data
     assert b'value="2026-10-01" selected' in response.data
+
+
+def _budget_usd_block():
+    return {
+        "range": {"start": "2026-09-14", "end": "2026-10-30"},
+        "criteria": {
+            "rate_type": "blue",
+            "rate_label": "Blue",
+            "source": None,
+            "source_label": "Cualquiera",
+            "side": "sell",
+            "side_label": "Venta",
+            "include_annulled": False,
+            "allow_prior": True,
+        },
+        "summary": {
+            "budgets": 436,
+            "exact_budgets": 421,
+            "prior_budgets": 15,
+            "missing_budgets": 0,
+            "total_ars": 1_234_567_890,
+            "total_usd": 987_654.32,
+            "uncovered_ars": 0,
+            "weighted_rate": 1250.5,
+            "coverage_percent": 100.0,
+        },
+        "monthly": [
+            {
+                "month": "2026-09",
+                "label": "Sep 2026",
+                "budgets": 200,
+                "total_ars": 600_000_000,
+                "total_usd": 480_000,
+                "coverage_percent": 100.0,
+                "variation_ars": None,
+                "variation_usd": None,
+            },
+            {
+                "month": "2026-10",
+                "label": "Oct 2026",
+                "budgets": 236,
+                "total_ars": 634_567_890,
+                "total_usd": 507_654.32,
+                "coverage_percent": 100.0,
+                "variation_ars": 5.76,
+                "variation_usd": 5.76,
+            },
+        ],
+        "types": [
+            {
+                "rate_type": "blue",
+                "label": "Blue",
+                "budgets": 436,
+                "covered_budgets": 436,
+                "total_usd": 987_654.32,
+                "weighted_rate": 1250.5,
+                "coverage_percent": 100.0,
+                "difference_usd": 0,
+                "difference_percent": 0,
+            },
+            {
+                "rate_type": "oficial",
+                "label": "Oficial",
+                "budgets": 436,
+                "covered_budgets": 436,
+                "total_usd": 812_345.67,
+                "weighted_rate": 1519.75,
+                "coverage_percent": 100.0,
+                "difference_usd": -175_308.65,
+                "difference_percent": -17.75,
+            },
+        ],
+    }
+
+
+def test_publisher_includes_budget_usd_aggregates_without_commercial_rows(db):
+    client = Client.create(
+        name="Cliente USD", cuit="30-70000967-1", iva_condition="RI"
+    )
+    Budget.create(
+        budget_number=1,
+        client=client,
+        origin=Budget.ORIGIN_MANUAL,
+        issue_date=date(2026, 9, 15),
+        total_amount=1100,
+    )
+    Budget.create(
+        budget_number=2,
+        client=client,
+        origin=Budget.ORIGIN_MANUAL,
+        issue_date=date(2026, 10, 15),
+        total_amount=2200,
+    )
+    rates = ExchangeRateService("admin")
+    rates.register(
+        base_currency="USD",
+        quote_currency="ARS",
+        effective_date=date(2026, 9, 15),
+        rate_type="blue",
+        buy_rate="1000",
+        sell_rate="1100",
+        source="argentinadatos",
+    )
+    rates.register(
+        base_currency="USD",
+        quote_currency="ARS",
+        effective_date=date(2026, 10, 15),
+        rate_type="blue",
+        buy_rate="1000",
+        sell_rate="1100",
+        source="argentinadatos",
+    )
+    publisher = ManagerialSnapshotPublisher(
+        dashboard_service=_Dashboard(), min_interval_minutes=0
+    )
+
+    snapshot = publisher.build(as_of=date(2026, 10, 30))
+    block = snapshot["budget_usd"]
+
+    assert block["summary"]["budgets"] == 2
+    assert block["summary"]["total_ars"] == 3300.0
+    assert block["summary"]["total_usd"] == 3.0
+    assert block["summary"]["coverage_percent"] == 100.0
+    assert block["summary"]["weighted_rate"] == 1100.0
+    assert [month["label"] for month in block["monthly"]] == [
+        "Sep 2026",
+        "Oct 2026",
+    ]
+    assert block["monthly"][1]["variation_usd"] == 100.0
+    assert len(block["types"]) == 7
+    blue = next(item for item in block["types"] if item["rate_type"] == "blue")
+    assert blue["total_usd"] == 3.0
+    assert blue["difference_usd"] == 0.0
+    assert next(
+        item for item in block["types"] if item["rate_type"] == "oficial"
+    )["difference_usd"] is None
+    assert "Cliente USD" not in str(block)
+    assert "PRES-" not in str(block)
+    assert "rows" not in block
+
+
+def test_publisher_builds_budget_block_once_for_history(db, monkeypatch):
+    publisher = ManagerialSnapshotPublisher(
+        dashboard_service=_Dashboard(),
+        history_months=4,
+        min_interval_minutes=0,
+    )
+    calls = []
+
+    def fake_block():
+        calls.append(1)
+        return {"range": {}, "summary": {}, "monthly": [], "types": []}
+
+    monkeypatch.setattr(publisher, "_budget_usd_block", fake_block)
+
+    snapshots = publisher.build_history(months=4, as_of=date(2026, 10, 30))
+
+    assert len(snapshots) == 4
+    assert len(calls) == 1
+    assert all(item["budget_usd"] is snapshots[0]["budget_usd"] for item in snapshots)
+
+
+def test_managerial_api_stores_budget_usd_block(db, monkeypatch):
+    snapshot = _snapshot()
+    snapshot["budget_usd"] = _budget_usd_block()
+    client = _app(monkeypatch).test_client()
+
+    response = client.post(
+        "/api/sync/v1/snapshots/managerial",
+        json=snapshot,
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 200
+    projection = SyncProjection.get(
+        (SyncProjection.resource_type == SyncProjection.RESOURCE_MANAGERIAL)
+        & (SyncProjection.resource_uid == "latest")
+    )
+    assert projection.payload["budget_usd"]["summary"]["budgets"] == 436
+    assert projection.payload["budget_usd"]["monthly"][0]["label"] == "Sep 2026"
+
+
+def test_managerial_api_rejects_invalid_budget_usd_block(db, monkeypatch):
+    snapshot = _snapshot()
+    snapshot["budget_usd"] = {"summary": {"budgets": 1}}
+    client = _app(monkeypatch).test_client()
+
+    response = client.post(
+        "/api/sync/v1/snapshots/managerial",
+        json=snapshot,
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_dashboard_view_includes_budget_usd(db):
+    snapshot = _snapshot()
+    snapshot["budget_usd"] = _budget_usd_block()
+    ManagerialDashboardService.apply_snapshot(snapshot)
+
+    view = GerenciaService.dashboard_view()
+    budget = view["budget_usd"]
+
+    assert budget["available"] is True
+    assert budget["summary"]["budgets"] == "436"
+    assert budget["summary"]["total_ars"] == "$ 1.234,6 M"
+    assert budget["summary"]["total_usd"] == "USD 987,7 mil"
+    assert budget["summary"]["coverage"] == "100,0%"
+    assert budget["summary"]["weighted_rate"] == "$ 1.250,50"
+    assert budget["monthly"][1]["label"] == "Oct 2026"
+    assert budget["monthly"][1]["ars_delta"] == "+5,8%"
+    assert budget["types"][0]["label"] == "Blue"
+    assert budget["types"][1]["difference_direction"] == "down"
+
+
+def test_dashboard_renders_budget_usd_section(db):
+    snapshot = _snapshot()
+    snapshot["budget_usd"] = _budget_usd_block()
+    ManagerialDashboardService.apply_snapshot(snapshot)
+    ManagerialRepurchaseService.apply_snapshot(_repurchase_snapshot())
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia")
+
+    assert response.status_code == 200
+    assert "Presupuestos en dólares".encode() in response.data
+    assert b"USD 987,7 mil" in response.data
+    assert "Total USD por tipo de cotización".encode() in response.data
+    assert "Cobertura 100,0%".encode() in response.data
+
+
+def test_dashboard_omits_budget_usd_without_block(db):
+    ManagerialDashboardService.apply_snapshot(_snapshot())
+    client = _app().test_client()
+    _login(client)
+
+    response = client.get("/gerencia")
+
+    assert response.status_code == 200
+    assert "Presupuestos en dólares".encode() not in response.data

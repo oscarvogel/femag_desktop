@@ -208,7 +208,9 @@ class BudgetUsdComparisonService:
         )
         return (dates[0], dates[-1]) if dates else (None, None)
 
-    def compare(self, filters: BudgetUsdFilters) -> BudgetUsdComparisonResult:
+    def compare(
+        self, filters: BudgetUsdFilters, *, include_items: bool = True
+    ) -> BudgetUsdComparisonResult:
         budgets = list(self._budgets(filters))
         rates = self._rates(filters)
         rate_dates = sorted(rates)
@@ -275,7 +277,7 @@ class BudgetUsdComparisonService:
         summary = self._summary(rows)
         row_by_id = {row.budget_id: row for row in rows}
         items: list[BudgetUsdItemRow] = []
-        if row_by_id:
+        if include_items and row_by_id:
             item_query = (
                 BudgetItem.select(BudgetItem, Product)
                 .join(Product)
@@ -322,7 +324,11 @@ class BudgetUsdComparisonService:
         )
 
     def compare_all(
-        self, filters: BudgetUsdFilters, *, rate_types=None
+        self,
+        filters: BudgetUsdFilters,
+        *,
+        rate_types=None,
+        include_items: bool = True,
     ) -> tuple[BudgetUsdComparisonResult, ...]:
         types = tuple(rate_types or RATE_TYPES)
         return tuple(
@@ -335,7 +341,8 @@ class BudgetUsdComparisonService:
                     side=filters.side,
                     include_annulled=filters.include_annulled,
                     allow_prior=filters.allow_prior,
-                )
+                ),
+                include_items=include_items,
             )
             for rate_type in types
         )
