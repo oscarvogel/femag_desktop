@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import tempfile
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
-from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtCore import QDate, QUrl, Qt
+from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -38,6 +41,23 @@ from app.reports.budget_usd_comparison import (
 )
 from app.reports.budget_usd_comparison_export import export_budget_usd_comparison_xlsx
 from app.reports.budget_usd_comparison_html import export_budget_usd_comparison_html
+
+
+def _html_report_path(filters: BudgetUsdFilters) -> Path:
+    """Ruta temporal unica para abrir el informe en el navegador sin dialogos."""
+    directory = Path(tempfile.gettempdir()) / "FEMAG" / "informes"
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name = (
+        f"comparacion_presupuestos_usd_"
+        f"{filters.start_date:%Y%m%d}_{filters.end_date:%Y%m%d}_{stamp}_"
+        f"{uuid4().hex[:8]}.html"
+    )
+    return directory / name
+
+
+def _open_in_browser(path: Path) -> bool:
+    return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
 
 
 def _money(value) -> str:
@@ -264,14 +284,18 @@ class BudgetUsdComparisonDialog(QDialog):
         export = QPushButton("Exportar Excel (todos los tipos)")
         export.setObjectName("budgetUsdExportButton")
         export.clicked.connect(self._export)
-        export_html = QPushButton("Exportar HTML con graficos")
-        export_html.setObjectName("budgetUsdExportHtmlButton")
-        export_html.clicked.connect(self._export_html)
+        open_html = QPushButton("Ver informe en el navegador")
+        open_html.setObjectName("budgetUsdOpenHtmlButton")
+        open_html.clicked.connect(self._open_html)
+        save_html = QPushButton("Guardar HTML")
+        save_html.setObjectName("budgetUsdExportHtmlButton")
+        save_html.clicked.connect(self._export_html)
         close = QPushButton("Cerrar")
         close.clicked.connect(self.accept)
         actions.addWidget(refresh)
         actions.addWidget(export)
-        actions.addWidget(export_html)
+        actions.addWidget(open_html)
+        actions.addWidget(save_html)
         actions.addStretch(1)
         actions.addWidget(close)
         root.addLayout(actions)
@@ -397,6 +421,25 @@ class BudgetUsdComparisonDialog(QDialog):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.comparison_table.setItem(index, column, item)
         self.comparison_table.resizeColumnsToContents()
+
+    def _open_html(self) -> None:
+        filters = self._filters()
+        try:
+            results = self.service.compare_all(filters)
+            out = export_budget_usd_comparison_html(results, _html_report_path(filters))
+        except Exception as exc:  # noqa: BLE001 - error amable en UI
+            QMessageBox.warning(
+                self,
+                "Informe en el navegador",
+                f"No se pudo generar el informe:\n{exc}",
+            )
+            return
+        if not _open_in_browser(out):
+            QMessageBox.warning(
+                self,
+                "Informe en el navegador",
+                f"El informe se genero pero no se pudo abrir el navegador:\n{out}",
+            )
 
     def _export_html(self) -> None:
         filters = self._filters()
