@@ -3,6 +3,11 @@
 El `FEMAG_Managerial_Summary.exe` ahora conserva el reporte gerencial y suma
 los comandos operativos de cotizaciones. No requiere Python en el servidor.
 
+> El agente `FEMAG Sync Agent` ya actualiza las cotizaciones una vez por día
+> después de las 19:00 ART dentro de `--sync`. Estos comandos quedan para
+> backfill histórico, importaciones manuales y diagnóstico; no hace falta una
+> tarea diaria separada.
+
 ## Comandos
 
 ```powershell

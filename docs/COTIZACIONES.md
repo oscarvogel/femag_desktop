@@ -115,6 +115,11 @@ El job tambien esta disponible dentro del EXE gerencial para servidores sin
 Python: ver `docs/MANAGERIAL_EXE_COTIZACIONES.md` (`--update-rates`,
 `--import-rates`).
 
+El agente `FEMAG Sync Agent` ejecuta esta actualizacion una vez por dia
+(despues de las 19:00 ART) dentro de `--sync`. La tarea separada con
+`FEMAG_Managerial_Summary.exe --update-rates` queda para diagnostico o
+backfill manual.
+
 Comando manual:
 
 ```bash

@@ -346,3 +346,25 @@ def test_unexpected_provider_exception_is_contained(db, tmp_path):
     )
     assert result.status == STATUS_ERROR
     assert any("bug inesperado" in message for message in result.errors)
+
+
+def test_should_run_daily_bootstraps_and_waits_for_next_evening(db):
+    from app.services.exchange_rate_update_service import should_run_daily
+
+    evening = datetime(2026, 11, 28, 22, 0, tzinfo=timezone.utc)  # 19:00 ART
+    assert should_run_daily(now=evening) is True
+    AppParameter.create(key=LAST_SUCCESS_AT_KEY, value=evening.isoformat())
+    assert should_run_daily(now=evening + timedelta(minutes=5)) is False
+    next_morning = datetime(2026, 11, 29, 10, 0, tzinfo=timezone.utc)
+    assert should_run_daily(now=next_morning) is False
+    next_evening = datetime(2026, 11, 29, 22, 30, tzinfo=timezone.utc)
+    assert should_run_daily(now=next_evening) is True
+
+
+def test_should_run_daily_retries_a_failed_attempt_after_30_minutes(db):
+    from app.services.exchange_rate_update_service import should_run_daily
+
+    attempt = datetime(2026, 11, 28, 22, 0, tzinfo=timezone.utc)
+    AppParameter.create(key=LAST_ATTEMPT_AT_KEY, value=attempt.isoformat())
+    assert should_run_daily(now=attempt + timedelta(minutes=10)) is False
+    assert should_run_daily(now=attempt + timedelta(minutes=31)) is True
