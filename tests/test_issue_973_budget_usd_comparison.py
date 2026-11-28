@@ -436,3 +436,45 @@ def test_html_report_path_is_unique_and_in_temp(monkeypatch, tmp_path):
     assert first.parent.is_dir()
     assert first.suffix == ".html"
     assert first != second
+
+
+def test_partial_month_compares_against_same_tramo(db):
+    from app.reports.budget_usd_comparison import monthly_evolution
+
+    client = _client()
+    _budget(client, date(2026, 10, 10), 1, 1000)
+    _budget(client, date(2026, 10, 25), 2, 2000)
+    _budget(client, D1, 3, 1100)
+    rates = ExchangeRateService("admin")
+    for effective in (date(2026, 10, 10), date(2026, 10, 25)):
+        rates.register(
+            base_currency="USD",
+            quote_currency="ARS",
+            effective_date=effective,
+            rate_type="blue",
+            buy_rate="1000",
+            sell_rate="1000",
+            source="argentinadatos",
+        )
+    rates.register(
+        base_currency="USD",
+        quote_currency="ARS",
+        effective_date=D1,
+        rate_type="blue",
+        buy_rate="1100",
+        sell_rate="1100",
+        source="argentinadatos",
+    )
+    result = BudgetUsdComparisonService().compare(
+        _filters(start_date=date(2026, 10, 1), end_date=D1)
+    )
+    months = monthly_evolution(result.rows, as_of=D1)
+
+    october, november = months
+    assert october.total_usd == Decimal("3.00")
+    assert november.total_usd == Decimal("1.00")
+    assert november.partial is True
+    assert november.previous_total_usd == Decimal("1.00")
+    assert november.previous_total_ars == Decimal("1000.00")
+    assert november.variation_usd == Decimal("0.00")
+    assert november.variation_ars == Decimal("10.00")

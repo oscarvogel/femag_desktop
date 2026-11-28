@@ -26,31 +26,31 @@
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Facturación Despachada</span><span class="kpi-pill {{ dashboard.kpis.sales.direction }}">{{ dashboard.kpis.sales.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.sales.value }}</div>
-    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.sales.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.sales.diff }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }} (mismo tramo): <strong>{{ dashboard.kpis.sales.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.sales.diff }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.sales.meter if dashboard.kpis.sales.meter <= 100 else 100 }}%;background:var(--navy-800)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Volumen Despachado</span><span class="kpi-pill {{ dashboard.kpis.tonnes.direction }}">{{ dashboard.kpis.tonnes.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.tonnes.value }}</div>
-    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.tonnes.diff }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }} (mismo tramo): <strong>{{ dashboard.kpis.tonnes.previous }}</strong></span><span>Dif: <strong>{{ dashboard.kpis.tonnes.diff }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.tonnes.meter if dashboard.kpis.tonnes.meter <= 100 else 100 }}%;background:var(--blue-600)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Clientes Compradores</span><span class="kpi-pill {{ dashboard.kpis.buyers.direction }}">{{ dashboard.kpis.buyers.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.buyers.value }}</div>
-    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.buyers.previous }}</strong></span><span>Retención: <strong>{{ dashboard.kpis.buyers.retention }}%</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }} (mismo tramo): <strong>{{ dashboard.kpis.buyers.previous }}</strong></span><span>Retención: <strong>{{ dashboard.kpis.buyers.retention }}%</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.buyers.meter if dashboard.kpis.buyers.meter <= 100 else 100 }}%;background:var(--amber-500)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Órdenes Emitidas / Cerr.</span><span class="kpi-pill {{ dashboard.kpis.orders.direction }}">{{ dashboard.kpis.orders.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.orders.value }}</div>
-    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.orders.previous }}</strong></span><span>Promedio: <strong>{{ dashboard.kpis.orders.average }} TN/carga</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }} (mismo tramo): <strong>{{ dashboard.kpis.orders.previous }}</strong></span><span>Promedio: <strong>{{ dashboard.kpis.orders.average }} TN/carga</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.orders.meter if dashboard.kpis.orders.meter <= 100 else 100 }}%;background:var(--emerald-600)"></span></div>
   </article>
   <article class="kpi-card">
     <div class="kpi-top"><span class="kpi-title">Precio Promedio / TN</span><span class="kpi-pill {{ dashboard.kpis.price.direction }}">{{ dashboard.kpis.price.delta }}</span></div>
     <div class="kpi-main">{{ dashboard.kpis.price.value }}</div>
-    <div class="kpi-sub"><span>{{ dashboard.previous_short }}: <strong>{{ dashboard.kpis.price.previous }}</strong></span><span>Ticket: <strong>{{ dashboard.kpis.price.ticket }}</strong></span></div>
+    <div class="kpi-sub"><span>{{ dashboard.previous_short }} (mismo tramo): <strong>{{ dashboard.kpis.price.previous }}</strong></span><span>Ticket: <strong>{{ dashboard.kpis.price.ticket }}</strong></span></div>
     <div class="kpi-meter"><span style="width:{{ dashboard.kpis.price.meter if dashboard.kpis.price.meter <= 100 else 100 }}%;background:var(--navy-700)"></span></div>
   </article>
 </section>
@@ -113,15 +113,15 @@
       <p class="budget-type-note">El total USD solo incluye presupuestos con cotización de ese tipo. La diferencia contra Blue usa únicamente los presupuestos con cotización en ambos tipos.</p>
     </div>
     <div class="budget-block">
-      <h3>Evolución mensual</h3>
-      <p>Variación contra el mes anterior.</p>
+      <h3>Evolución mensual de presupuestos</h3>
+      <p>Presupuestos emitidos, no facturación despachada. El mes en curso se compara contra el mismo tramo del mes anterior.</p>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead><tr><th>Mes</th><th class="num">Presup.</th><th class="num">ARS</th><th class="num">USD</th><th class="num">Cob.</th></tr></thead>
           <tbody>
             {% for row in dashboard.budget_usd.monthly %}
             <tr>
-              <td><span class="primary-cell">{{ row.label }}</span><span class="cell-sub">{{ row.ars_delta }} ARS · {{ row.usd_delta }} USD</span></td>
+              <td><span class="primary-cell">{{ row.label }}</span>{% if row.partial %} <span class="badge-var flat">parcial</span>{% endif %}<span class="cell-sub">{{ row.ars_delta }} ARS · {{ row.usd_delta }} USD</span></td>
               <td class="num">{{ row.budgets }}</td>
               <td class="num">{{ row.total_ars }}</td>
               <td class="num"><strong>{{ row.total_usd }}</strong></td>

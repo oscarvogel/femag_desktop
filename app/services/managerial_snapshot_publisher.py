@@ -262,6 +262,7 @@ class ManagerialSnapshotPublisher:
                     ),
                     "variation_ars": _optional_number(item.variation_ars),
                     "variation_usd": _optional_number(item.variation_usd),
+                    "partial": bool(item.partial),
                 }
                 for item in months
             ],

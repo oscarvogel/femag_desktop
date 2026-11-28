@@ -731,6 +731,7 @@ def _budget_usd_block():
                 "coverage_percent": 100.0,
                 "variation_ars": None,
                 "variation_usd": None,
+                "partial": False,
             },
             {
                 "month": "2026-10",
@@ -741,6 +742,7 @@ def _budget_usd_block():
                 "coverage_percent": 100.0,
                 "variation_ars": 5.76,
                 "variation_usd": 5.76,
+                "partial": False,
             },
         ],
         "types": [
@@ -954,6 +956,7 @@ def test_dashboard_view_explains_partial_coverage(db):
             "difference_percent": 1.16,
         },
     ]
+    block["monthly"][-1]["partial"] = True
     snapshot["budget_usd"] = block
     ManagerialDashboardService.apply_snapshot(snapshot)
 
@@ -965,6 +968,7 @@ def test_dashboard_view_explains_partial_coverage(db):
     assert bna["comparable_coverage"] == "14,7%"
     assert bna["difference"] == "+USD 5,2 mil"
     assert bna["difference_direction"] == "up"
+    assert view["budget_usd"]["monthly"][-1]["partial"] is True
 
     client = _app().test_client()
     _login(client)
@@ -972,6 +976,8 @@ def test_dashboard_view_explains_partial_coverage(db):
     assert response.status_code == 200
     assert "14,7% cobertura · 64 comparables".encode() in response.data
     assert "La diferencia contra Blue usa únicamente".encode() in response.data
+    assert "no facturación despachada".encode() in response.data
+    assert b"parcial" in response.data
 
 
 def test_dashboard_renders_budget_usd_section(db):

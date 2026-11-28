@@ -105,6 +105,7 @@ def _budget_usd_view(block) -> dict:
         monthly_rows.append(
             {
                 "label": str(item.get("label") or ""),
+                "partial": bool(item.get("partial")),
                 "budgets": _integer(item.get("budgets") or 0),
                 "total_ars": _money_compact(ars),
                 "total_ars_full": _money_full(ars),

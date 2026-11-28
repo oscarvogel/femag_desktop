@@ -23,6 +23,9 @@ USD = total ARS / cotizacion (ARS por 1 USD)
   cobertura parcial no parece mas barato por tener menos presupuestos
   convertidos. El detalle informa presupuestos comparables y total USD
   comparable.
+- El mes en curso se marca `parcial` y se compara contra el **mismo tramo** del
+  mes anterior, no contra el mes completo. Evita que el mes sin terminar
+  parezca una caida.
 - Los presupuestos anulados se excluyen por defecto; hay un check para
   incluirlos.
 
