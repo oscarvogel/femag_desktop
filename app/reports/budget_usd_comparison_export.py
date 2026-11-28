@@ -167,6 +167,9 @@ def export_budget_usd_comparison_xlsx(
             "Total USD",
             "Cotizacion ponderada",
             "Cobertura %",
+            "Comparables",
+            "Cobertura comparable %",
+            "Total USD comparable",
             "Diferencia USD vs blue",
             "Diferencia % vs blue",
         ),
@@ -179,12 +182,15 @@ def export_budget_usd_comparison_xlsx(
                 _float(item.total_usd),
                 _float(item.weighted_rate),
                 _float(item.coverage_percent),
+                item.comparable_budgets,
+                _float(item.comparable_coverage_percent),
+                _float(item.comparable_total_usd),
                 _float(item.difference_usd),
                 _float(item.difference_percent),
             )
             for item in type_comparison(items, base_type="blue")
         ),
-        widths=(10, 16, 12, 16, 16, 18, 12, 22, 22),
+        widths=(10, 16, 12, 16, 16, 18, 12, 12, 20, 20, 22, 22),
     )
 
     missing_rows = []

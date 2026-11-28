@@ -225,7 +225,7 @@ class BudgetUsdComparisonDialog(QDialog):
         )
         self.evolution_table.horizontalHeader().setStretchLastSection(True)
 
-        self.comparison_table = QTableWidget(0, 8)
+        self.comparison_table = QTableWidget(0, 10)
         self.comparison_table.setObjectName("budgetUsdComparisonTable")
         self.comparison_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.comparison_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -237,8 +237,10 @@ class BudgetUsdComparisonDialog(QDialog):
                 "Presupuestos",
                 "Total ARS",
                 "Total USD",
+                "Total USD comp.",
                 "Cotizacion ponderada",
                 "Cobertura",
+                "Comparables",
                 "Dif. USD vs blue",
                 "Dif. % vs blue",
             )
@@ -408,8 +410,13 @@ class BudgetUsdComparisonDialog(QDialog):
                 str(row.budgets),
                 _money(row.total_ars),
                 "-" if no_data else _usd(row.total_usd),
-                "-" if no_data else _number(row.weighted_rate, 6),
-                f"{_number(row.coverage_percent, 1)}%",
+                (
+                    "-"
+                    if not row.comparable_budgets
+                    else _usd(row.comparable_total_usd)
+                ),
+                "-" if no_data else _number(row.weighted_rate, 6),                f"{_number(row.coverage_percent, 1)}%",
+                str(row.comparable_budgets),
                 "-"
                 if no_data or row.difference_usd is None
                 else _usd(row.difference_usd),

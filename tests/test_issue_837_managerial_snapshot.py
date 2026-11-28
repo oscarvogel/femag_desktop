@@ -749,7 +749,10 @@ def _budget_usd_block():
                 "label": "Blue",
                 "budgets": 436,
                 "covered_budgets": 436,
+                "comparable_budgets": 436,
                 "total_usd": 987_654.32,
+                "comparable_total_usd": 987_654.32,
+                "comparable_coverage_percent": 100.0,
                 "weighted_rate": 1250.5,
                 "coverage_percent": 100.0,
                 "difference_usd": 0,
@@ -760,7 +763,10 @@ def _budget_usd_block():
                 "label": "Oficial",
                 "budgets": 436,
                 "covered_budgets": 436,
+                "comparable_budgets": 436,
                 "total_usd": 812_345.67,
+                "comparable_total_usd": 812_345.67,
+                "comparable_coverage_percent": 100.0,
                 "weighted_rate": 1519.75,
                 "coverage_percent": 100.0,
                 "difference_usd": -175_308.65,
@@ -828,9 +834,12 @@ def test_publisher_includes_budget_usd_aggregates_without_commercial_rows(db):
     blue = next(item for item in block["types"] if item["rate_type"] == "blue")
     assert blue["total_usd"] == 3.0
     assert blue["difference_usd"] == 0.0
-    assert next(
+    assert blue["comparable_budgets"] == 2
+    oficial = next(
         item for item in block["types"] if item["rate_type"] == "oficial"
-    )["difference_usd"] is None
+    )
+    assert oficial["difference_usd"] is None
+    assert oficial["comparable_budgets"] == 0
     assert "Cliente USD" not in str(block)
     assert "PRES-" not in str(block)
     assert "rows" not in block
@@ -908,7 +917,61 @@ def test_dashboard_view_includes_budget_usd(db):
     assert budget["monthly"][1]["label"] == "Oct 2026"
     assert budget["monthly"][1]["ars_delta"] == "+5,8%"
     assert budget["types"][0]["label"] == "Blue"
+    assert budget["types"][0]["comparable_budgets"] == "436"
     assert budget["types"][1]["difference_direction"] == "down"
+
+
+def test_dashboard_view_explains_partial_coverage(db):
+    snapshot = _snapshot()
+    block = _budget_usd_block()
+    block["types"] = [
+        {
+            "rate_type": "blue",
+            "label": "Blue",
+            "budgets": 436,
+            "covered_budgets": 436,
+            "comparable_budgets": 436,
+            "total_usd": 3_100_000,
+            "comparable_total_usd": 3_100_000,
+            "comparable_coverage_percent": 100.0,
+            "weighted_rate": 1250.5,
+            "coverage_percent": 100.0,
+            "difference_usd": 0,
+            "difference_percent": 0,
+        },
+        {
+            "rate_type": "bna",
+            "label": "Banco Nacion",
+            "budgets": 436,
+            "covered_budgets": 64,
+            "comparable_budgets": 64,
+            "total_usd": 454_200,
+            "comparable_total_usd": 454_200,
+            "comparable_coverage_percent": 14.7,
+            "weighted_rate": 1240.0,
+            "coverage_percent": 14.7,
+            "difference_usd": 5_200,
+            "difference_percent": 1.16,
+        },
+    ]
+    snapshot["budget_usd"] = block
+    ManagerialDashboardService.apply_snapshot(snapshot)
+
+    view = GerenciaService.dashboard_view()
+    bna = view["budget_usd"]["types"][1]
+
+    assert bna["coverage"] == "14,7%"
+    assert bna["comparable_budgets"] == "64"
+    assert bna["comparable_coverage"] == "14,7%"
+    assert bna["difference"] == "+USD 5,2 mil"
+    assert bna["difference_direction"] == "up"
+
+    client = _app().test_client()
+    _login(client)
+    response = client.get("/gerencia")
+    assert response.status_code == 200
+    assert "14,7% cobertura · 64 comparables".encode() in response.data
+    assert "La diferencia contra Blue usa únicamente".encode() in response.data
 
 
 def test_dashboard_renders_budget_usd_section(db):

@@ -101,15 +101,16 @@
   <div class="budget-grid">
     <div class="budget-block">
       <h3>Total USD por tipo de cotización</h3>
-      <p>Contra el tipo base Blue.</p>
+      <p>La diferencia contra Blue se calcula sobre los mismos presupuestos.</p>
       {% for row in dashboard.budget_usd.types %}
       <div class="budget-type">
         <span class="name">{{ row.label }}</span>
         <div class="track"><i style="width:{{ row.bar }}%"></i></div>
         <span class="value">{{ row.total_usd }}</span>
       </div>
-      <div class="budget-type-meta"><span>{{ row.budgets }} presupuestos · {{ row.coverage }}</span><span class="{{ row.difference_direction }}">{{ row.difference }} vs. Blue</span></div>
+      <div class="budget-type-meta"><span>{{ row.budgets }} presupuestos · {{ row.coverage }} cobertura · {{ row.comparable_budgets }} comparables</span><span class="{{ row.difference_direction }}">{{ row.difference }} vs. Blue</span></div>
       {% endfor %}
+      <p class="budget-type-note">El total USD solo incluye presupuestos con cotización de ese tipo. La diferencia contra Blue usa únicamente los presupuestos con cotización en ambos tipos.</p>
     </div>
     <div class="budget-block">
       <h3>Evolución mensual</h3>

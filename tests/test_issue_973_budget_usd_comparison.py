@@ -294,7 +294,47 @@ def test_monthly_evolution_and_type_comparison(db):
     assert len(comparison) == 2
     by_type = {item.rate_type: item for item in comparison}
     assert by_type["blue"].difference_usd == Decimal("0.00")
-    assert by_type["oficial"].difference_usd == Decimal("-3.00")
+    assert by_type["blue"].comparable_budgets == 2
+    assert by_type["oficial"].difference_usd is None
+    assert by_type["oficial"].comparable_budgets == 0
+
+
+def test_type_comparison_uses_only_budgets_covered_by_both_types(db):
+    from app.reports.budget_usd_comparison import type_comparison
+
+    client = _client()
+    _budget(client, D1, 1, 1100)
+    _budget(client, D2, 2, 2300)
+    _rates()
+    ExchangeRateService("admin").register(
+        base_currency="USD",
+        quote_currency="ARS",
+        effective_date=D1,
+        rate_type="oficial",
+        buy_rate="2000",
+        sell_rate="2200",
+        source="argentinadatos",
+    )
+    service = BudgetUsdComparisonService()
+    results = service.compare_all(
+        _filters(allow_prior=False), rate_types=("oficial", "blue")
+    )
+    by_type = {
+        item.rate_type: item
+        for item in type_comparison(results, base_type="blue")
+    }
+
+    blue = by_type["blue"]
+    oficial = by_type["oficial"]
+    assert blue.total_usd == Decimal("3.00")
+    assert oficial.total_usd == Decimal("0.50")
+    assert blue.comparable_budgets == 2
+    assert oficial.comparable_budgets == 1
+    assert oficial.comparable_total_usd == Decimal("0.50")
+    assert oficial.comparable_base_usd == Decimal("1.00")
+    assert oficial.comparable_coverage_percent == Decimal("32.35")
+    assert oficial.difference_usd == Decimal("-0.50")
+    assert oficial.difference_percent == Decimal("-50.00")
 
 
 def test_dialog_shows_summary_without_writing(db):

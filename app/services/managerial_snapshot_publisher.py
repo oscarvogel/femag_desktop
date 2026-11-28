@@ -271,7 +271,14 @@ class ManagerialSnapshotPublisher:
                     "label": TYPE_LABELS.get(item.rate_type, item.rate_type),
                     "budgets": item.budgets,
                     "covered_budgets": item.covered_budgets,
+                    "comparable_budgets": item.comparable_budgets,
                     "total_usd": round(float(item.total_usd), 2),
+                    "comparable_total_usd": round(
+                        float(item.comparable_total_usd), 2
+                    ),
+                    "comparable_coverage_percent": round(
+                        float(item.comparable_coverage_percent), 2
+                    ),
                     "weighted_rate": _optional_number(item.weighted_rate),
                     "coverage_percent": round(
                         float(item.coverage_percent), 2
